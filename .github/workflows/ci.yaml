@@ -61,9 +61,6 @@ jobs:
             eslint-cache-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml', 'eslint.config.*', '.eslintignore') }}-
             eslint-cache-${{ runner.os }}-
 
-      - name: Build
-        run: nr build
-
       - name: Lint
         run: nr lint:ci
 
