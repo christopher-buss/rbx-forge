@@ -1,10 +1,15 @@
-import { log } from "@clack/prompts";
+import { isWsl } from "src/utils/is-wsl";
 
-export const command = "build";
-export const description = "Build the Rojo project";
+import { run } from "../utils/run";
+
+export const COMMAND = "build";
+export const DESCRIPTION = "Build the Rojo project";
 
 export async function action(): Promise<void> {
-	log.step("Building project...");
-	// TODO: Implement Rojo build
-	log.success("Build complete!");
+	const rojo = isWsl() ? "rojo" : "rojo.exe";
+
+	await run(rojo, ["build", "--output", "game.rbxl"], {
+		spinnerMessage: "Building project...",
+		successMessage: "Build complete!",
+	});
 }

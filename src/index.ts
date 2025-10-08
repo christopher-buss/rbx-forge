@@ -21,7 +21,7 @@ async function main(): Promise<void> {
 	const commands = [buildCmd, initCmd, serveCmd];
 
 	for (const cmd of commands) {
-		program.command(cmd.command).description(cmd.description).action(cmd.action);
+		program.command(cmd.COMMAND).description(cmd.DESCRIPTION).action(cmd.action);
 	}
 
 	await program.parseAsync(process.argv);
