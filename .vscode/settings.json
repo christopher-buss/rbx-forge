@@ -36,5 +36,12 @@
 		"source.fixAll.eslint": "explicit",
 		"source.organizeImports": "never"
 	},
-	"npm.packageManager": "pnpm"
+	"npm.packageManager": "pnpm",
+
+	// Options for GitHub Copilot
+	"github.copilot.chat.commitMessageGeneration.instructions": [
+		{
+			"file": ".github/commit-instructions.md"
+		}
+	]
 }
