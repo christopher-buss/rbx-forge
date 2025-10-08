@@ -4,3 +4,6 @@ packages:
 onlyBuiltDependencies:
   - simple-git-hooks
   - unrs-resolver
+
+publicHoistPattern:
+  - "@typescript/*"

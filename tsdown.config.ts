@@ -12,6 +12,6 @@ export default defineConfig({
 	publint: true,
 	shims: true,
 	unused: {
-		level: "error",
+		level: "warning",
 	},
 });

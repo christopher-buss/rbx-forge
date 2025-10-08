@@ -1,3 +1,6 @@
 {
-	"extends": "@isentinel/tsconfig/typescript"
+	"extends": "@isentinel/tsconfig/typescript",
+	"compilerOptions": {
+		"libReplacement": true
+	}
 }
