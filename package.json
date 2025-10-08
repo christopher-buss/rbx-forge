@@ -1,0 +1,67 @@
+{
+	"name": "rbxts-forge",
+	"version": "0.1.0",
+	"description": "A CLI tool for fully-managed rojo projects.",
+	"keywords": ["rbxts", "roblox", "rojo", "typescript", "cli", "tool"],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/christopher-buss/rbxts-forge.git"
+	},
+	"license": "MIT",
+	"author": "Christopher Buss <christopher.buss@pm.me> (https://github.com/christopher-buss)",
+	"contributors": ["osyrisrblx (https://github.com/osyrisrblx)"],
+	"type": "module",
+	"main": "dist/index.mjs",
+	"types": "dist/index.d.mts",
+	"files": ["dist", "scripts"],
+	"scripts": {
+		"build": "tsdown --clean --dts",
+		"lint": "eslint_d --cache",
+		"lint:ci": "eslint --cache --cache-strategy content",
+		"prepack": "nr build",
+		"prepare": "simple-git-hooks",
+		"prepublishOnly": "nr build",
+		"release": "bumpp",
+		"stub": "tsdown",
+		"typecheck": "tsc --noEmit",
+		"watch": "tsdown --watch --dts"
+	},
+	"simple-git-hooks": {
+		"pre-commit": "pnpm lint-staged"
+	},
+	"lint-staged": {
+		"*": "eslint_d --fix --cache"
+	},
+	"dependencies": {
+		"@clack/prompts": "^0.11.0",
+		"commander": "^14.0.0",
+		"zod": "^4.1.12"
+	},
+	"devDependencies": {
+		"@antfu/ni": "^26.1.0",
+		"@isentinel/eslint-config": "^3.3.0",
+		"@isentinel/tsconfig": "^1.0.0",
+		"@types/node": "^24.7.0",
+		"@typescript-eslint/eslint-plugin": "^8.46.0",
+		"@typescript-eslint/parser": "^8.46.0",
+		"bumpp": "^10.3.1",
+		"eslint": "^9.37.0",
+		"eslint-plugin-n": "^17.23.1",
+		"eslint_d": "^14.3.0",
+		"jiti": "^2.6.1",
+		"lint-staged": "^16.2.3",
+		"publint": "^0.3.14",
+		"simple-git-hooks": "^2.13.1",
+		"tsdown": "^0.15.6",
+		"typescript": "^5.9.2",
+		"typescript-transform-paths": "^3.4.6",
+		"unplugin-unused": "^0.5.3"
+	},
+	"packageManager": "pnpm@10.18.1+sha512.77a884a165cbba2d8d1c19e3b4880eee6d2fcabd0d879121e282196b80042351d5eb3ca0935fa599da1dc51265cc68816ad2bddd2a2de5ea9fdf92adbec7cd34",
+	"engines": {
+		"node": ">=22.16.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

@@ -1,0 +1,6 @@
+packages:
+  - src/*
+
+onlyBuiltDependencies:
+  - simple-git-hooks
+  - unrs-resolver
