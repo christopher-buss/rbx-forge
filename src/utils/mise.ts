@@ -79,21 +79,20 @@ async function addMiseTasks(
 
 	for (const cmd of commands) {
 		const taskName = cmd.COMMAND;
-		const resolvedCommandName = getCommandName(taskName, config);
-		const miseTaskName = resolvedCommandName.replace(/:/g, ".");
+		const resolvedScriptName = getCommandName(taskName, config);
 		const description = cmd.DESCRIPTION;
 
-		const existingTask = existingTasks.get(miseTaskName);
+		const existingTask = existingTasks.get(resolvedScriptName);
 		if (existingTask) {
 			const shouldOverwrite = await confirmTaskOverwrite(existingTask);
 			if (shouldOverwrite) {
-				await addMiseTask(miseTaskName, resolvedCommandName, description);
+				await addMiseTask(resolvedScriptName, taskName, description);
 				added++;
 			} else {
 				skipped++;
 			}
 		} else {
-			await addMiseTask(miseTaskName, resolvedCommandName, description);
+			await addMiseTask(resolvedScriptName, taskName, description);
 			added++;
 		}
 	}

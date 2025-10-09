@@ -111,9 +111,9 @@ async function addScriptsToPackageJson(
 	let skipped = 0;
 
 	for (const scriptName of SCRIPT_NAMES) {
-		const resolvedCommandName = getCommandName(scriptName, config);
-		const scriptCommand = `rbx-forge ${resolvedCommandName}`;
-		const result = await addScriptEntry(packageJson, scriptName, scriptCommand);
+		const resolvedScriptName = getCommandName(scriptName, config);
+		const scriptCommand = `rbx-forge ${scriptName}`;
+		const result = await addScriptEntry(packageJson, resolvedScriptName, scriptCommand);
 
 		if (result === "added") {
 			added++;

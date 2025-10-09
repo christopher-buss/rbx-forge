@@ -59,7 +59,6 @@ pattern:
 - `init`: Initialize a new rbx-forge project (creates config, runs `rojo init`)
 - `build`: Build the Rojo project to an output file
 - `serve`: Start the Rojo development server
-- `test`: Test command for the run utility (development only)
 
 ### Config System
 
@@ -77,8 +76,131 @@ Located in [src/config/](src/config/), uses a multi-layer approach:
 **Current Config Options**:
 
 - `buildOutputPath`: Output path for Rojo builds (default: `"game.rbxl"`)
+- `commandNames`: Custom names for task runner scripts (see Command Chaining
+  below)
+- `projectType`: Project type (`"rbxts"` or `"luau"`)
 
 The `defineConfig()` helper provides type safety for user configs.
+
+### Command Chaining and Hook Pattern
+
+rbx-forge follows the rbxts-build pattern for command chaining, enabling users
+to hook into commands through task runner scripts. This provides a flexible
+extension mechanism without requiring explicit hook infrastructure.
+
+**Architecture**:
+
+1. **CLI commands** always use base names: `rbx-forge build`, `rbx-forge serve`
+2. **Script names** are customizable via `commandNames` config (default:
+   `forge:` prefix)
+3. **Generated scripts** call base CLI commands
+4. **Command chaining** (when implemented) uses `runScript()` utility to respect
+   calling context
+
+**Default Configuration**:
+
+```typescript
+// rbx-forge.config.ts (default values)
+export default defineConfig({
+	commandNames: {
+		build: "forge:build",
+		init: "init",
+		serve: "forge:serve",
+	},
+});
+```
+
+**Generated Scripts (after `rbx-forge init`)**:
+
+```json
+// package.json
+{
+	"scripts": {
+		"forge:build": "rbx-forge build",
+		"forge:serve": "rbx-forge serve"
+	}
+}
+```
+
+```toml
+# .mise.toml
+[tasks."forge:build"]
+description = "Build the Rojo project"
+run = [ "rbx-forge build" ]
+
+[tasks."forge:serve"]
+description = "Start the Rojo development server"
+run = [ "rbx-forge serve" ]
+```
+
+**User Customization Examples**:
+
+Users can intercept and extend commands by modifying generated scripts:
+
+```json
+// Pre/post hooks
+{
+	"scripts": {
+		"forge:build": "echo 'Building...' && rbx-forge build && echo 'Done!'",
+		"forge:serve": "rbx-forge build && rbx-forge serve"
+	}
+}
+```
+
+```toml
+# Mise with environment setup
+[tasks."forge:serve"]
+run = [
+  "npm install",
+  "rbx-forge build",
+  "rbx-forge serve"
+]
+```
+
+**Implementation Details**:
+
+- **Context Detection**
+  ([detect-task-runner.ts](src/utils/detect-task-runner.ts)):
+    - `getCallingTaskRunner()`: Detects if invoked via npm/mise using
+      environment variables (`npm_lifecycle_event`, `MISE_TASK_NAME`)
+    - `detectAvailableTaskRunner()`: Checks for project-level mise tasks
+      (`mise tasks ls --local`) or npm scripts in package.json
+- **Script Execution** ([run-script.ts](src/utils/run-script.ts)):
+    - `runScript(scriptName, config)`: Executes scripts via appropriate task
+      runner
+    - Priority: calling context > auto-detect (mise > npm) > direct CLI
+    - Ensures command chains stay within same task runner
+- **Name Resolution** ([command-names.ts](src/utils/command-names.ts)):
+    - `getCommandName(baseName, config)`: Resolves script names from config
+    - Used during script generation (init command)
+
+**Adding Command Chaining to New Commands**:
+
+When implementing commands that need to call other commands:
+
+```typescript
+import { loadProjectConfig } from "../config";
+import { runScript } from "../utils/run-script";
+
+export async function action(): Promise<void> {
+	const config = await loadProjectConfig();
+
+	// Chain to another command
+	await runScript("build", config); // Uses npm/mise based on context
+	await runScript("serve", config); // User hooks will be executed
+}
+```
+
+This ensures:
+
+- Same task runner used throughout chain (npm → npm, mise → mise)
+- User customizations in scripts are respected
+- Hooks execute in correct order
+- Consistent behavior regardless of invocation method
+
+**Note**: Customizing `commandNames` lets you organize your scripts with
+prefixes (like `forge:build`) while keeping the CLI simple (`rbx-forge build`).
+This provides flexibility for your workflow without changing the core commands.
 
 ### Run Utility
 

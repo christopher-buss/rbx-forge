@@ -23,7 +23,8 @@ import {
 } from "src/utils/package-json";
 
 import { version as packageVersion } from "../../package.json";
-import { updateProjectConfig } from "../config";
+import { loadProjectConfig, updateProjectConfig } from "../config";
+import { getCommandName } from "../utils/command-names";
 import { run, runOutput } from "../utils/run";
 
 export const COMMAND = "init";
@@ -46,7 +47,7 @@ export async function action(): Promise<void> {
 	const { projectType, taskRunners } = await getUserInput();
 
 	await runInitializationTasks(projectType, taskRunners);
-	showNextSteps(taskRunners);
+	await showNextSteps(taskRunners);
 	outro(ansis.green("✨ You're all set!"));
 }
 
@@ -153,7 +154,7 @@ async function getUserInput(): Promise<{
 
 async function runInitializationTasks(
 	projectType: "luau" | "rbxts",
-	taskRunners: Array<"lune" | "mise" | "npm">,
+	taskRunners: Array<TaskRunner>,
 ): Promise<void> {
 	const initTasks = [
 		{ task: checkRojoInstallation, title: "Checking Rojo installation" },
@@ -186,22 +187,23 @@ async function runInitializationTasks(
 	await tasks(initTasks);
 }
 
-function showNextSteps(taskRunners: Array<"lune" | "mise" | "npm">): void {
+async function showNextSteps(taskRunners: Array<TaskRunner>): Promise<void> {
 	const shouldUseMise = taskRunners.includes("mise");
 	const shouldUseNpm = taskRunners.includes("npm");
 
-	const buildName = "forge:build";
-	const serveName = "forge:serve";
+	const config = await loadProjectConfig();
+	const buildScriptName = getCommandName("build", config);
+	const serveScriptName = getCommandName("serve", config);
 
-	let buildCommand = `rbx-forge ${buildName}`;
-	let serveCommand = `rbx-forge ${serveName}`;
+	let buildCommand = "rbx-forge build";
+	let serveCommand = "rbx-forge serve";
 
 	if (shouldUseMise) {
-		buildCommand = "mise run forge.build";
-		serveCommand = "mise run forge.serve";
+		buildCommand = `mise run ${buildScriptName}`;
+		serveCommand = `mise run ${serveScriptName}`;
 	} else if (shouldUseNpm) {
-		buildCommand = "npm run build";
-		serveCommand = "npm run serve";
+		buildCommand = `npm run ${buildScriptName}`;
+		serveCommand = `npm run ${serveScriptName}`;
 	}
 
 	note(
