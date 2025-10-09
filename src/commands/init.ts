@@ -14,10 +14,10 @@ import ansis from "ansis";
 import process from "node:process";
 import type { Config } from "src/config/schema";
 import { updateMiseToml } from "src/utils/mise";
+import { updatePackageJson } from "src/utils/package-json";
 
 import { updateProjectConfig } from "../config";
 import { run, runOutput } from "../utils/run";
-import { updatePackageJson } from "../utils/update-package-json";
 
 export const COMMAND = "init";
 export const DESCRIPTION = "Initialize a new rbx-forge project";

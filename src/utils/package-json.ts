@@ -1,4 +1,4 @@
-import { log } from "@clack/prompts";
+import { cancel, confirm, isCancel, log } from "@clack/prompts";
 
 import ansis from "ansis";
 import { detectCodeFormat } from "magicast";
@@ -24,29 +24,52 @@ export async function updatePackageJson(): Promise<string> {
 		return "";
 	}
 
-	addScriptsToPackageJson(packageJson);
+	const { added, skipped } = await addScriptsToPackageJson(packageJson);
 	await writePackageJson(packageJsonPath, packageJson);
 
-	return `Added scripts to ${ansis.magenta("package.json")}`;
+	if (added === 0) {
+		return "";
+	}
+
+	const message = `Added ${added} script(s) to ${ansis.magenta("package.json")}`;
+	return skipped > 0 ? `${message} (${skipped} skipped)` : message;
 }
 
-function addScriptsToPackageJson(packageJson: PackageJson): void {
+async function addScriptsToPackageJson(
+	packageJson: PackageJson,
+): Promise<{ added: number; skipped: number }> {
 	packageJson.scripts ??= {};
+
+	let added = 0;
+	let skipped = 0;
 
 	for (const scriptName of SCRIPT_NAMES) {
 		const scriptCommand = `rbx-forge ${scriptName}`;
 
 		if (packageJson.scripts[scriptName] !== undefined) {
-			log.warn(
-				ansis.yellow(
-					`Script "${scriptName}" already exists in package.json, overwriting!\n` +
-						`  Original: "${packageJson.scripts[scriptName]}"`,
-				),
-			);
-		}
+			const shouldOverwrite = await confirm({
+				initialValue: false,
+				message: `Script "${scriptName}" already exists. Overwrite?\n  Current: "${packageJson.scripts[scriptName]}"`,
+			});
 
-		packageJson.scripts[scriptName] = scriptCommand;
+			if (isCancel(shouldOverwrite)) {
+				cancel("Operation cancelled");
+				process.exit(0);
+			}
+
+			if (shouldOverwrite) {
+				packageJson.scripts[scriptName] = scriptCommand;
+				added++;
+			} else {
+				skipped++;
+			}
+		} else {
+			packageJson.scripts[scriptName] = scriptCommand;
+			added++;
+		}
 	}
+
+	return { added, skipped };
 }
 
 function getPackageJsonPath(): string {
