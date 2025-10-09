@@ -9,8 +9,29 @@ import { SCRIPT_NAMES } from "src/commands";
 import { loadProjectConfig } from "src/config";
 import { getCommandName } from "src/utils/command-names";
 
-interface PackageJson {
+export interface PackageJson {
+	dependencies?: Record<string, string>;
+	devDependencies?: Record<string, string>;
 	scripts?: Record<string, string>;
+}
+
+export function getPackageJsonPath(): string {
+	return path.join(process.cwd(), "package.json");
+}
+
+export async function readPackageJson(packageJsonPath: string): Promise<null | PackageJson> {
+	try {
+		await fs.access(packageJsonPath);
+		const content = await fs.readFile(packageJsonPath, "utf8");
+		return JSON.parse(content) as PackageJson;
+	} catch {
+		log.warn(
+			ansis.yellow(
+				"No package.json found - skipping script installation. Run npm init first.",
+			),
+		);
+		return null;
+	}
 }
 
 /**
@@ -36,6 +57,15 @@ export async function updatePackageJson(): Promise<string> {
 
 	const message = `Added ${added} script(s) to ${ansis.magenta("package.json")}`;
 	return skipped > 0 ? `${message} (${skipped} skipped)` : message;
+}
+
+export async function writePackageJson(
+	packageJsonPath: string,
+	packageJson: PackageJson,
+): Promise<void> {
+	const format = detectCodeFormat(await fs.readFile(packageJsonPath, "utf8"));
+	const indentation = format.useTabs === true ? "\t" : " ".repeat(format.tabWidth ?? 2);
+	await fs.writeFile(packageJsonPath, `${JSON.stringify(packageJson, undefined, indentation)}\n`);
 }
 
 async function addScriptEntry(
@@ -93,29 +123,4 @@ async function addScriptsToPackageJson(
 	}
 
 	return { added, skipped };
-}
-
-function getPackageJsonPath(): string {
-	return path.join(process.cwd(), "package.json");
-}
-
-async function readPackageJson(packageJsonPath: string): Promise<null | PackageJson> {
-	try {
-		await fs.access(packageJsonPath);
-		const content = await fs.readFile(packageJsonPath, "utf8");
-		return JSON.parse(content) as PackageJson;
-	} catch {
-		log.warn(
-			ansis.yellow(
-				"No package.json found - skipping script installation. Run npm init first.",
-			),
-		);
-		return null;
-	}
-}
-
-async function writePackageJson(packageJsonPath: string, packageJson: PackageJson): Promise<void> {
-	const format = detectCodeFormat(await fs.readFile(packageJsonPath, "utf8"));
-	const indentation = format.useTabs === true ? "\t" : " ".repeat(format.tabWidth ?? 2);
-	await fs.writeFile(packageJsonPath, `${JSON.stringify(packageJson, undefined, indentation)}\n`);
 }

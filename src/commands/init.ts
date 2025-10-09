@@ -1,5 +1,6 @@
 import {
 	cancel,
+	confirm,
 	intro,
 	isCancel,
 	log,
@@ -14,13 +15,22 @@ import ansis from "ansis";
 import process from "node:process";
 import type { Config } from "src/config/schema";
 import { updateMiseToml } from "src/utils/mise";
-import { updatePackageJson } from "src/utils/package-json";
+import {
+	getPackageJsonPath,
+	readPackageJson,
+	updatePackageJson,
+	writePackageJson,
+} from "src/utils/package-json";
 
+import { version as packageVersion } from "../../package.json";
 import { updateProjectConfig } from "../config";
 import { run, runOutput } from "../utils/run";
 
 export const COMMAND = "init";
 export const DESCRIPTION = "Initialize a new rbx-forge project";
+
+const PACKAGE_NAME = "rbx-forge";
+const OPERATION_CANCELLED = "Operation cancelled";
 
 type TaskRunner = "lune" | "mise" | "npm";
 
@@ -38,6 +48,43 @@ export async function action(): Promise<void> {
 	await runInitializationTasks(projectType, taskRunners);
 	showNextSteps(taskRunners);
 	outro(ansis.green("✨ You're all set!"));
+}
+
+async function addRbxForgeToPackageJson(): Promise<void> {
+	const packageJsonPath = getPackageJsonPath();
+	const packageJson = await readPackageJson(packageJsonPath);
+
+	if (!packageJson) {
+		return;
+	}
+
+	// Check if rbx-forge is already installed
+	const hasInDeps = packageJson.dependencies?.[PACKAGE_NAME] !== undefined;
+	const hasInDevelopmentDeps = packageJson.devDependencies?.[PACKAGE_NAME] !== undefined;
+
+	if (hasInDeps || hasInDevelopmentDeps) {
+		return;
+	}
+
+	// Prompt user to add rbx-forge
+	const shouldAddRbxForge = await confirm({
+		initialValue: true,
+		message: `Add ${PACKAGE_NAME} to devDependencies? (recommended)`,
+	});
+
+	if (isCancel(shouldAddRbxForge)) {
+		cancel(OPERATION_CANCELLED);
+		process.exit(0);
+	}
+
+	if (shouldAddRbxForge) {
+		packageJson.devDependencies ??= {};
+		packageJson.devDependencies[PACKAGE_NAME] = `^${packageVersion}`;
+		await writePackageJson(packageJsonPath, packageJson);
+		log.success(
+			`Added ${PACKAGE_NAME}@^${packageVersion} to ${ansis.magenta("devDependencies")}`,
+		);
+	}
 }
 
 async function checkRojoInstallation(): Promise<string> {
@@ -82,7 +129,7 @@ async function getUserInput(): Promise<{
 	});
 
 	if (isCancel(projectType)) {
-		cancel("Operation cancelled");
+		cancel(OPERATION_CANCELLED);
 		process.exit(0);
 	}
 
@@ -97,7 +144,7 @@ async function getUserInput(): Promise<{
 	});
 
 	if (isCancel(taskRunners)) {
-		cancel("Operation cancelled");
+		cancel(OPERATION_CANCELLED);
 		process.exit(0);
 	}
 
@@ -119,6 +166,9 @@ async function runInitializationTasks(
 
 	// Add npm scripts task if npm is selected
 	if (taskRunners.includes("npm")) {
+		// Add rbx-forge to package.json if not already present
+		await addRbxForgeToPackageJson();
+
 		initTasks.push({
 			task: async () => updatePackageJson(),
 			title: "Adding npm scripts to package.json",
