@@ -13,6 +13,9 @@
 	"type": "module",
 	"main": "dist/index.mjs",
 	"types": "dist/index.d.mts",
+	"bin": {
+		"rbx-forge": "dist/index.mjs"
+	},
 	"files": ["dist", "scripts"],
 	"scripts": {
 		"build": "tsdown --clean --dts",

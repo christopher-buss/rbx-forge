@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { log } from "@clack/prompts";
 
 import { Command } from "commander";
