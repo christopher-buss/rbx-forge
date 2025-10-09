@@ -136,16 +136,18 @@ async function runInitializationTasks(
 }
 
 function showNextSteps(taskRunners: Array<"lune" | "mise" | "npm">): void {
-	// Prioritize mise > npm > direct commands
 	const shouldUseMise = taskRunners.includes("mise");
 	const shouldUseNpm = taskRunners.includes("npm");
 
-	let buildCommand = "rbx-forge build";
-	let serveCommand = "rbx-forge serve";
+	const buildName = "forge:build";
+	const serveName = "forge:serve";
+
+	let buildCommand = `rbx-forge ${buildName}`;
+	let serveCommand = `rbx-forge ${serveName}`;
 
 	if (shouldUseMise) {
-		buildCommand = "mise run build";
-		serveCommand = "mise run serve";
+		buildCommand = "mise run forge.build";
+		serveCommand = "mise run forge.serve";
 	} else if (shouldUseNpm) {
 		buildCommand = "npm run build";
 		serveCommand = "npm run serve";

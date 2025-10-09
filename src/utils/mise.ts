@@ -4,6 +4,9 @@ import ansis from "ansis";
 import process from "node:process";
 
 import { COMMANDS, SCRIPT_NAMES } from "../commands";
+import { loadProjectConfig } from "../config";
+import type { Config } from "../config/schema";
+import { getCommandName } from "./command-names";
 import { run, runOutput } from "./run";
 
 interface MiseTask {
@@ -35,10 +38,13 @@ export async function updateMiseToml(): Promise<string> {
 		process.exit(2);
 	}
 
+	const config = await loadProjectConfig();
 	const existingTasks = await getExistingMiseTasks();
-	const scriptableCommands = COMMANDS.filter((cmd) => SCRIPT_NAMES.includes(cmd.COMMAND));
+	const scriptableCommands = COMMANDS.filter((cmd) => {
+		return SCRIPT_NAMES.includes(cmd.COMMAND as (typeof SCRIPT_NAMES)[number]);
+	});
 
-	const { added, skipped } = await addMiseTasks(scriptableCommands, existingTasks);
+	const { added, skipped } = await addMiseTasks(scriptableCommands, existingTasks, config);
 
 	if (added === 0) {
 		return "";
@@ -48,10 +54,14 @@ export async function updateMiseToml(): Promise<string> {
 	return skipped > 0 ? `${message} (${skipped} skipped)` : message;
 }
 
-async function addMiseTask(taskName: string, description: string): Promise<void> {
+async function addMiseTask(
+	miseTaskName: string,
+	commandName: string,
+	description: string,
+): Promise<void> {
 	await run(
 		"mise",
-		["task", "add", taskName, "--description", description, "--", "rbx-forge", taskName],
+		["task", "add", miseTaskName, "--description", description, "--", "rbx-forge", commandName],
 		{
 			shouldShowCommand: false,
 			shouldStreamOutput: false,
@@ -62,25 +72,28 @@ async function addMiseTask(taskName: string, description: string): Promise<void>
 async function addMiseTasks(
 	commands: ReadonlyArray<(typeof COMMANDS)[number]>,
 	existingTasks: Map<string, MiseTask>,
+	config: Config,
 ): Promise<{ added: number; skipped: number }> {
 	let added = 0;
 	let skipped = 0;
 
 	for (const cmd of commands) {
 		const taskName = cmd.COMMAND;
+		const resolvedCommandName = getCommandName(taskName, config);
+		const miseTaskName = resolvedCommandName.replace(/:/g, ".");
 		const description = cmd.DESCRIPTION;
 
-		const existingTask = existingTasks.get(taskName);
+		const existingTask = existingTasks.get(miseTaskName);
 		if (existingTask) {
 			const shouldOverwrite = await confirmTaskOverwrite(existingTask);
 			if (shouldOverwrite) {
-				await addMiseTask(taskName, description);
+				await addMiseTask(miseTaskName, resolvedCommandName, description);
 				added++;
 			} else {
 				skipped++;
 			}
 		} else {
-			await addMiseTask(taskName, description);
+			await addMiseTask(miseTaskName, resolvedCommandName, description);
 			added++;
 		}
 	}

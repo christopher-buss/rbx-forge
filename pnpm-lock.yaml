@@ -78,6 +78,9 @@ importers:
       publint:
         specifier: ^0.3.14
         version: 0.3.14
+      rbx-forge:
+        specifier: workspace:*
+        version: 'link:'
       simple-git-hooks:
         specifier: ^2.13.1
         version: 2.13.1

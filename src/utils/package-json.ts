@@ -6,6 +6,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { SCRIPT_NAMES } from "src/commands";
+import { loadProjectConfig } from "src/config";
+import { getCommandName } from "src/utils/command-names";
 
 interface PackageJson {
 	scripts?: Record<string, string>;
@@ -24,7 +26,8 @@ export async function updatePackageJson(): Promise<string> {
 		return "";
 	}
 
-	const { added, skipped } = await addScriptsToPackageJson(packageJson);
+	const config = await loadProjectConfig();
+	const { added, skipped } = await addScriptsToPackageJson(packageJson, config);
 	await writePackageJson(packageJsonPath, packageJson);
 
 	if (added === 0) {
@@ -35,8 +38,42 @@ export async function updatePackageJson(): Promise<string> {
 	return skipped > 0 ? `${message} (${skipped} skipped)` : message;
 }
 
+async function addScriptEntry(
+	packageJson: PackageJson,
+	scriptName: string,
+	scriptCommand: string,
+): Promise<"added" | "skipped"> {
+	const { scripts } = packageJson;
+	if (!scripts) {
+		return "skipped";
+	}
+
+	if (scripts[scriptName] !== undefined) {
+		const shouldOverwrite = await confirm({
+			initialValue: false,
+			message: `Script "${scriptName}" already exists. Overwrite?\n  Current: "${scripts[scriptName]}"`,
+		});
+
+		if (isCancel(shouldOverwrite)) {
+			cancel("Operation cancelled");
+			process.exit(0);
+		}
+
+		if (shouldOverwrite) {
+			scripts[scriptName] = scriptCommand;
+			return "added";
+		}
+
+		return "skipped";
+	}
+
+	scripts[scriptName] = scriptCommand;
+	return "added";
+}
+
 async function addScriptsToPackageJson(
 	packageJson: PackageJson,
+	config: Awaited<ReturnType<typeof loadProjectConfig>>,
 ): Promise<{ added: number; skipped: number }> {
 	packageJson.scripts ??= {};
 
@@ -44,28 +81,14 @@ async function addScriptsToPackageJson(
 	let skipped = 0;
 
 	for (const scriptName of SCRIPT_NAMES) {
-		const scriptCommand = `rbx-forge ${scriptName}`;
+		const resolvedCommandName = getCommandName(scriptName, config);
+		const scriptCommand = `rbx-forge ${resolvedCommandName}`;
+		const result = await addScriptEntry(packageJson, scriptName, scriptCommand);
 
-		if (packageJson.scripts[scriptName] !== undefined) {
-			const shouldOverwrite = await confirm({
-				initialValue: false,
-				message: `Script "${scriptName}" already exists. Overwrite?\n  Current: "${packageJson.scripts[scriptName]}"`,
-			});
-
-			if (isCancel(shouldOverwrite)) {
-				cancel("Operation cancelled");
-				process.exit(0);
-			}
-
-			if (shouldOverwrite) {
-				packageJson.scripts[scriptName] = scriptCommand;
-				added++;
-			} else {
-				skipped++;
-			}
-		} else {
-			packageJson.scripts[scriptName] = scriptCommand;
+		if (result === "added") {
 			added++;
+		} else {
+			skipped++;
 		}
 	}
 

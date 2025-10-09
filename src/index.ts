@@ -5,6 +5,11 @@ import process from "node:process";
 
 import { version as packageVersion } from "../package.json";
 import { COMMANDS } from "./commands";
+import { loadProjectConfig } from "./config";
+import { getCommandName } from "./utils/command-names";
+
+export { defineConfig } from "./config";
+export type { Config } from "./config/schema";
 
 const program = new Command();
 
@@ -16,8 +21,11 @@ async function main(): Promise<void> {
 		.helpOption("-h, --help", "display help for command")
 		.showHelpAfterError();
 
+	const config = await loadProjectConfig();
+
 	for (const cmd of COMMANDS) {
-		program.command(cmd.COMMAND).description(cmd.DESCRIPTION).action(cmd.action);
+		const commandName = getCommandName(cmd.COMMAND, config);
+		program.command(commandName).description(cmd.DESCRIPTION).action(cmd.action);
 	}
 
 	await program.parseAsync(process.argv);

@@ -58,6 +58,7 @@
 		"jiti": "^2.6.1",
 		"lint-staged": "^16.2.3",
 		"publint": "^0.3.14",
+		"rbx-forge": "workspace:*",
 		"simple-git-hooks": "^2.13.1",
 		"tsdown": "^0.15.6",
 		"typescript": "^5.9.2",
