@@ -13,6 +13,7 @@ import {
 import ansis from "ansis";
 import process from "node:process";
 import type { Config } from "src/config/schema";
+import { updateMiseToml } from "src/utils/mise";
 
 import { updateProjectConfig } from "../config";
 import { run, runOutput } from "../utils/run";
@@ -123,14 +124,32 @@ async function runInitializationTasks(
 		});
 	}
 
+	// Add mise tasks if mise is selected
+	if (taskRunners.includes("mise")) {
+		initTasks.push({
+			task: async () => updateMiseToml(),
+			title: "Adding mise tasks to .mise.toml",
+		});
+	}
+
 	await tasks(initTasks);
 }
 
 function showNextSteps(taskRunners: Array<"lune" | "mise" | "npm">): void {
-	const shouldUseNpmScripts = taskRunners.includes("npm");
+	// Prioritize mise > npm > direct commands
+	const shouldUseMise = taskRunners.includes("mise");
+	const shouldUseNpm = taskRunners.includes("npm");
 
-	const buildCommand = shouldUseNpmScripts ? "npm run build" : "rbx-forge build";
-	const serveCommand = shouldUseNpmScripts ? "npm run serve" : "rbx-forge serve";
+	let buildCommand = "rbx-forge build";
+	let serveCommand = "rbx-forge serve";
+
+	if (shouldUseMise) {
+		buildCommand = "mise run build";
+		serveCommand = "mise run serve";
+	} else if (shouldUseNpm) {
+		buildCommand = "npm run build";
+		serveCommand = "npm run serve";
+	}
 
 	note(
 		"Next steps:\n\n" +

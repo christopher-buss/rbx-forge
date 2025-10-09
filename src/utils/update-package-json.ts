@@ -5,8 +5,7 @@ import { detectCodeFormat } from "magicast";
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-
-import { SCRIPT_NAMES } from "./script-names";
+import { SCRIPT_NAMES } from "src/commands";
 
 interface PackageJson {
 	scripts?: Record<string, string>;
