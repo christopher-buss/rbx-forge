@@ -87,12 +87,13 @@ async function getUserInput(): Promise<{
 	}
 
 	const taskRunners = await multiselect({
-		message: "Pick a task runner.",
+		message: "Pick a task runner (optional).",
 		options: [
 			{ hint: "default", label: "npm", value: "npm" },
 			{ label: "mise", value: "mise" },
 			{ disabled: true, hint: "coming soon", label: "lune", value: "lune" },
 		],
+		required: false,
 	});
 
 	if (isCancel(taskRunners)) {
