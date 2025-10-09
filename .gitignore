@@ -5,3 +5,5 @@ dist
 
 .eslintcache
 .tsconfig-cache.txt
+
+/.claude/state

@@ -11,6 +11,28 @@ file_path=$(echo "$input" | jq -r '.tool_input.file_path // empty')
 # Only process TypeScript files
 [[ "$file_path" =~ \.(ts|tsx)$ ]] || exit 0
 
+# Throttle: only run every 10 seconds to avoid concurrency issues
+state_dir=".claude/state"
+throttle_file="$state_dir/.lint-last-run"
+current_time=$(date +%s)
+
+# Create state directory if it doesn't exist
+mkdir -p "$state_dir"
+
+# Check if we should throttle
+if [[ -f "$throttle_file" ]]; then
+	last_run=$(cat "$throttle_file")
+	time_diff=$((current_time - last_run))
+
+	# Exit early if less than 10 seconds have passed
+	if [[ $time_diff -lt 10 ]]; then
+		exit 0
+	fi
+fi
+
+# Update timestamp
+echo "$current_time" > "$throttle_file"
+
 # Run eslint_d with --fix silently
 eslint_output=$(eslint_d --cache --config ./eslint.config.ts --fix "$file_path" 2>&1 || true)
 

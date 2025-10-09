@@ -1,6 +1,8 @@
 {
 	"extends": "@isentinel/tsconfig/typescript",
 	"compilerOptions": {
-		"libReplacement": true
-	}
+		"libReplacement": true,
+		"exactOptionalPropertyTypes": true
+	},
+	"exclude": ["node_modules", "dist", "out", ".vscode-test"]
 }

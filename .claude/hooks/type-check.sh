@@ -12,7 +12,7 @@ file_path=$(echo "$input" | jq -r '.tool_input.file_path // empty')
 [[ "$file_path" =~ \.(ts|tsx)$ ]] || exit 0
 
 # Cache file at project root
-cache_file=".tsconfig-cache.txt"
+cache_file=".claude/state/.tsconfig-cache.txt"
 
 # Check if tsconfig.json has changed using SHA256 hash
 if [[ -f "tsconfig.json" ]]; then

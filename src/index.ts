@@ -4,9 +4,7 @@ import { Command } from "commander";
 import process from "node:process";
 
 import { version as packageVersion } from "../package.json";
-import * as buildCmd from "./commands/build";
-import * as initCmd from "./commands/init";
-import * as serveCmd from "./commands/serve";
+import { COMMANDS } from "./commands";
 
 const program = new Command();
 
@@ -18,9 +16,7 @@ async function main(): Promise<void> {
 		.helpOption("-h, --help", "display help for command")
 		.showHelpAfterError();
 
-	const commands = [buildCmd, initCmd, serveCmd];
-
-	for (const cmd of commands) {
+	for (const cmd of COMMANDS) {
 		program.command(cmd.COMMAND).description(cmd.DESCRIPTION).action(cmd.action);
 	}
 

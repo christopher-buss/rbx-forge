@@ -118,8 +118,8 @@ function createSpinner(message: string | undefined): Spinner | undefined {
 	return activeSpinner;
 }
 
-async function handleSubprocess(
-	subprocess: ReturnType<typeof execa>,
+async function handleSubprocess<OptionsType extends ExecaOptions>(
+	subprocess: ResultPromise<OptionsType>,
 	activeSpinner: Spinner | undefined,
 	successMessage: string | undefined,
 ): Promise<Awaited<ResultPromise>> {
@@ -129,7 +129,7 @@ async function handleSubprocess(
 			activeSpinner.stop(successMessage);
 		}
 
-		return result;
+		return result as unknown as Awaited<ResultPromise>;
 	} catch (err) {
 		activeSpinner?.stop("Command failed");
 		throw err;

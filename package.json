@@ -15,7 +15,6 @@
 	"types": "dist/index.d.mts",
 	"files": ["dist", "scripts"],
 	"scripts": {
-		"build": "tsdown --clean --dts",
 		"lint": "eslint_d --cache",
 		"lint:ci": "eslint --cache --cache-strategy content",
 		"prepack": "nr build",
@@ -33,12 +32,15 @@
 		"*": "eslint_d --fix --cache"
 	},
 	"dependencies": {
-		"@clack/prompts": "^0.11.0",
+		"@clack/prompts": "^1.0.0-alpha.6",
 		"ansis": "^4.2.0",
+		"arktype": "^2.1.12",
+		"c12": "^3.3.0",
 		"commander": "^14.0.0",
+		"dedent": "^1.7.0",
 		"execa": "^9.6.0",
-		"type-fest": "^5.0.1",
-		"zod": "^4.1.12"
+		"magicast": "^0.3.5",
+		"type-fest": "^5.0.1"
 	},
 	"devDependencies": {
 		"@antfu/ni": "^26.1.0",
