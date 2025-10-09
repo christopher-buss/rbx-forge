@@ -5,9 +5,9 @@ code in this repository.
 
 ## Project Overview
 
-**rbxts-forge** is a CLI tool for fully-managed Rojo projects, designed for
-Roblox TypeScript development. It wraps and manages Rojo (the Roblox project
-management tool) with a simplified, opinionated workflow.
+**rbx-forge** is a CLI tool for fully-managed Rojo projects, designed for Roblox
+TypeScript development. It wraps and manages Rojo (the Roblox project management
+tool) with a simplified, opinionated workflow.
 
 - **Package Manager**: pnpm (v10.18.1+)
 - **Node Version**: >=22.16.0
@@ -56,8 +56,7 @@ pattern:
 
 **Existing Commands**:
 
-- `init`: Initialize a new rbxts-forge project (creates config, runs
-  `rojo init`)
+- `init`: Initialize a new rbx-forge project (creates config, runs `rojo init`)
 - `build`: Build the Rojo project to an output file
 - `serve`: Start the Rojo development server
 - `test`: Test command for the run utility (development only)
@@ -67,7 +66,7 @@ pattern:
 Located in [src/config/](src/config/), uses a multi-layer approach:
 
 - **Loader** ([loader.ts](src/config/loader.ts)): Uses `c12` to load
-  `rbxts-forge.config.ts`
+  `rbx-forge.config.ts`
 - **Schema** ([schema.ts](src/config/schema.ts)): Runtime validation with
   `arktype`
 - **Defaults** ([defaults.ts](src/config/defaults.ts)): Default configuration

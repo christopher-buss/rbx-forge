@@ -10,7 +10,7 @@ const program = new Command();
 
 async function main(): Promise<void> {
 	program
-		.name("rbxts-forge")
+		.name("rbx-forge")
 		.description("A CLI tool for fully-managed rojo projects")
 		.version(packageVersion, "-v, --version", "output the current version")
 		.helpOption("-h, --help", "display help for command")

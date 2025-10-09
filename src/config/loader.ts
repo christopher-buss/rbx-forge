@@ -10,7 +10,7 @@ import { type Config, configSchema } from "./schema";
 export async function loadProjectConfig(): Promise<Config> {
 	const { config: rawConfig } = await loadConfig({
 		defaults,
-		name: "rbxts-forge",
+		name: "rbx-forge",
 	});
 
 	const validated = configSchema(rawConfig);

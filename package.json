@@ -1,11 +1,11 @@
 {
-	"name": "rbxts-forge",
+	"name": "rbx-forge",
 	"version": "0.1.0",
 	"description": "A CLI tool for fully-managed rojo projects.",
 	"keywords": ["rbxts", "roblox", "rojo", "typescript", "cli", "tool"],
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/christopher-buss/rbxts-forge.git"
+		"url": "https://github.com/christopher-buss/rbx-forge.git"
 	},
 	"license": "MIT",
 	"author": "Christopher Buss <christopher.buss@pm.me> (https://github.com/christopher-buss)",
@@ -15,6 +15,7 @@
 	"types": "dist/index.d.mts",
 	"files": ["dist", "scripts"],
 	"scripts": {
+		"build": "tsdown --clean --dts",
 		"lint": "eslint_d --cache",
 		"lint:ci": "eslint --cache --cache-strategy content",
 		"prepack": "nr build",

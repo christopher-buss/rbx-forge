@@ -13,7 +13,7 @@ interface PackageJson {
 }
 
 /**
- * Updates the package.json file with rbxts-forge scripts.
+ * Updates the package.json file with rbx-forge scripts.
  *
  * @returns Success message or empty string if package.json doesn't exist.
  */
@@ -35,7 +35,7 @@ function addScriptsToPackageJson(packageJson: PackageJson): void {
 	packageJson.scripts ??= {};
 
 	for (const scriptName of SCRIPT_NAMES) {
-		const scriptCommand = `rbxts-forge ${scriptName}`;
+		const scriptCommand = `rbx-forge ${scriptName}`;
 
 		if (packageJson.scripts[scriptName] !== undefined) {
 			log.warn(

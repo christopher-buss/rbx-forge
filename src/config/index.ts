@@ -4,12 +4,12 @@ export { createProjectConfig as updateProjectConfig } from "./create";
 export { loadProjectConfig } from "./loader";
 
 /**
- * Define a typed configuration for rbxts-forge.
+ * Define a typed configuration for rbx-forge.
  *
  * @example
  *
  * ```typescript
- * import { defineConfig } from "rbxts-forge";
+ * import { defineConfig } from "rbx-forge";
  *
  * export default defineConfig({
  * 	buildOutputPath: "build/game.rbxl",

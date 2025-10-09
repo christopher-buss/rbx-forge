@@ -19,18 +19,18 @@ import { run, runOutput } from "../utils/run";
 import { updatePackageJson } from "../utils/update-package-json";
 
 export const COMMAND = "init";
-export const DESCRIPTION = "Initialize a new rbxts-forge project";
+export const DESCRIPTION = "Initialize a new rbx-forge project";
 
 type TaskRunner = "lune" | "mise" | "npm";
 
 export async function action(): Promise<void> {
 	if (process.env["NODE_ENV"] === "development") {
-		void run("rm", ["-rf", "rbxts-forge.config.ts"], {
+		void run("rm", ["-rf", "rbx-forge.config.ts"], {
 			shouldShowCommand: false,
 		});
 	}
 
-	intro(ansis.bold("🔨 rbxts-forge init"));
+	intro(ansis.bold("🔨 rbx-forge init"));
 
 	const { projectType, taskRunners } = await getUserInput();
 
@@ -51,7 +51,7 @@ async function checkRojoInstallation(): Promise<string> {
 
 async function createForgeConfig(projectType: "luau" | "rbxts"): Promise<string> {
 	await updateProjectConfig(projectType);
-	return `Config file created at ${ansis.magenta("rbxts-forge.config.ts")}`;
+	return `Config file created at ${ansis.magenta("rbx-forge.config.ts")}`;
 }
 
 async function createRojoProject(): Promise<string> {
@@ -111,7 +111,7 @@ async function runInitializationTasks(
 		{ task: createRojoProject, title: "Creating Rojo project structure" },
 		{
 			task: async () => createForgeConfig(projectType),
-			title: "Creating rbxts-forge config",
+			title: "Creating rbx-forge config",
 		},
 	];
 
@@ -129,8 +129,8 @@ async function runInitializationTasks(
 function showNextSteps(taskRunners: Array<"lune" | "mise" | "npm">): void {
 	const shouldUseNpmScripts = taskRunners.includes("npm");
 
-	const buildCommand = shouldUseNpmScripts ? "npm run build" : "rbxts-forge build";
-	const serveCommand = shouldUseNpmScripts ? "npm run serve" : "rbxts-forge serve";
+	const buildCommand = shouldUseNpmScripts ? "npm run build" : "rbx-forge build";
+	const serveCommand = shouldUseNpmScripts ? "npm run serve" : "rbx-forge serve";
 
 	note(
 		"Next steps:\n\n" +
