@@ -1,8 +1,9 @@
 import * as buildCmd from "./build";
+import * as compileCmd from "./compile";
 import * as initCmd from "./init";
 import * as serveCmd from "./serve";
 
-export const COMMANDS = [initCmd, buildCmd, serveCmd] as const;
+export const COMMANDS = [initCmd, buildCmd, compileCmd, serveCmd] as const;
 
 /** Commands that should not be added as task runner scripts. */
 const EXCLUDED_COMMANDS = ["init"] as const;
@@ -14,10 +15,10 @@ const EXCLUDED_COMMANDS = ["init"] as const;
  */
 export const SCRIPT_NAMES = COMMANDS.map((cmd) => cmd.COMMAND).filter(
 	(name) => !EXCLUDED_COMMANDS.includes(name as never),
-) as unknown as ReadonlyArray<"build" | "serve">;
-
+) as ReadonlyArray<Exclude<(typeof COMMANDS)[number]["COMMAND"], "init">>;
 export type ScriptName = (typeof SCRIPT_NAMES)[number];
 
 export * as buildCmd from "./build";
+export * as compileCmd from "./compile";
 export * as initCmd from "./init";
 export * as serveCmd from "./serve";

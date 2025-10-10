@@ -7,11 +7,14 @@ import process from "node:process";
 
 import { version as packageVersion } from "../package.json";
 import { COMMANDS } from "./commands";
+import { loadProjectConfig } from "./config";
 
 export { defineConfig } from "./config";
 export type { Config } from "./config/schema";
 
 const program = new Command();
+
+const skipLuau = new Set(["compile"]);
 
 async function main(): Promise<void> {
 	program
@@ -21,18 +24,20 @@ async function main(): Promise<void> {
 		.helpOption("-h, --help", "display help for command")
 		.showHelpAfterError();
 
+	const { projectType } = await loadProjectConfig();
+
 	for (const cmd of COMMANDS) {
-		/**
-		 * Wrap action with intro (except for init which has its own).
-		 *
-		 * @param args - Command arguments.
-		 */
-		async function wrappedAction(...args: Array<unknown>): Promise<void> {
+		if (projectType === "luau" && skipLuau.has(cmd.COMMAND)) {
+			continue;
+		}
+
+		/** Wrap action with intro (except for init which has its own). */
+		async function wrappedAction(): Promise<void> {
 			if (cmd.COMMAND !== "init") {
 				intro(ansis.bold(`🔨 rbx-forge ${cmd.COMMAND}`));
 			}
 
-			await cmd.action(...args);
+			await cmd.action();
 		}
 
 		program.command(cmd.COMMAND).description(cmd.DESCRIPTION).action(wrappedAction);
