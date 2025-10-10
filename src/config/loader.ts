@@ -5,9 +5,9 @@ import { loadConfig } from "c12";
 import process from "node:process";
 
 import { defaults } from "./defaults";
-import { type Config, configSchema } from "./schema";
+import { configSchema, type ResolvedConfig } from "./schema";
 
-export async function loadProjectConfig(): Promise<Config> {
+export async function loadProjectConfig(): Promise<ResolvedConfig> {
 	const { config: rawConfig } = await loadConfig({
 		defaults,
 		name: "rbx-forge",
@@ -21,5 +21,5 @@ export async function loadProjectConfig(): Promise<Config> {
 		process.exit(1);
 	}
 
-	return validated;
+	return validated as ResolvedConfig;
 }

@@ -1,6 +1,6 @@
-import type { Config } from "./schema";
+import type { ResolvedConfig } from "./schema";
 
-export const defaults: Config = {
+export const defaults: ResolvedConfig = {
 	buildOutputPath: "game.rbxl",
 	commandNames: {
 		build: "forge:build",
@@ -9,4 +9,8 @@ export const defaults: Config = {
 		serve: "forge:serve",
 	},
 	projectType: "rbxts",
+	rbxts: {
+		args: ["--verbose"],
+		command: "rbxtsc",
+	},
 };

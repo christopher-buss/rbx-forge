@@ -1,4 +1,4 @@
-import type { Config } from "../config/schema";
+import type { Config, ResolvedConfig } from "../config/schema";
 
 type CommandName = keyof NonNullable<Config["commandNames"]>;
 
@@ -25,6 +25,6 @@ type CommandName = keyof NonNullable<Config["commandNames"]>;
  * @param config - The project configuration.
  * @returns The configured script name for task runner integration.
  */
-export function getCommandName(baseName: CommandName, config: Config): string {
-	return config.commandNames?.[baseName] ?? baseName;
+export function getCommandName(baseName: CommandName, config: ResolvedConfig): string {
+	return config.commandNames[baseName];
 }

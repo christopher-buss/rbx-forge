@@ -13,7 +13,7 @@ import {
 
 import ansis from "ansis";
 import process from "node:process";
-import type { Config } from "src/config/schema";
+import type { ResolvedConfig } from "src/config/schema";
 import { updateMiseToml } from "src/utils/mise";
 import {
 	getPackageJsonPath,
@@ -118,7 +118,7 @@ async function createRojoProject(): Promise<string> {
 }
 
 async function getUserInput(): Promise<{
-	projectType: Config["projectType"];
+	projectType: ResolvedConfig["projectType"];
 	taskRunners: Array<TaskRunner>;
 }> {
 	const projectType = await select({
@@ -165,7 +165,6 @@ async function runInitializationTasks(
 		},
 	];
 
-	// Add npm scripts task if npm is selected
 	if (taskRunners.includes("npm")) {
 		// Add rbx-forge to package.json if not already present
 		await addRbxForgeToPackageJson();

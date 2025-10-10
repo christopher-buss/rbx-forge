@@ -13,7 +13,7 @@ export const DESCRIPTION = "Build the Rojo project";
 export async function action(): Promise<void> {
 	const config = await loadProjectConfig();
 	const rojo = isWsl() ? "rojo" : "rojo.exe";
-	const outputPath = config.buildOutputPath ?? "game.rbxl";
+	const outputPath = config.buildOutputPath;
 
 	log.info(ansis.bold("→ Building project"));
 	log.step(`Output: ${ansis.cyan(outputPath)}`);

@@ -12,8 +12,8 @@ export const DESCRIPTION = "Compile TypeScript to Luau";
 export async function action(): Promise<void> {
 	const config = await loadProjectConfig();
 
-	const rbxtsc = "rbxtsc";
-	const rbxtscArgs = config.rbxtscArgs ?? ["--verbose"];
+	const rbxtsc = config.rbxts.command;
+	const rbxtscArgs = config.rbxts.args;
 
 	log.info(ansis.bold("→ Compiling TypeScript"));
 	log.step(`Compiler: ${ansis.cyan(rbxtsc)}`);

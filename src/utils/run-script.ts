@@ -3,7 +3,7 @@ import { log } from "@clack/prompts";
 import ansis from "ansis";
 
 import type { ScriptName } from "../commands";
-import type { Config } from "../config/schema";
+import type { ResolvedConfig } from "../config/schema";
 import { getCommandName } from "./command-names";
 import { detectAvailableTaskRunner, getCallingTaskRunner } from "./detect-task-runner";
 import { run } from "./run";
@@ -47,7 +47,7 @@ import { run } from "./run";
  * @param scriptName - The base script name to run (e.g., "build", "serve").
  * @param config - The project configuration.
  */
-export async function runScript(scriptName: ScriptName, config: Config): Promise<void> {
+export async function runScript(scriptName: ScriptName, config: ResolvedConfig): Promise<void> {
 	const resolvedName = getCommandName(scriptName, config);
 
 	const callingRunner = getCallingTaskRunner();

@@ -5,7 +5,7 @@ import process from "node:process";
 
 import { COMMANDS, SCRIPT_NAMES } from "../commands";
 import { loadProjectConfig } from "../config";
-import type { Config } from "../config/schema";
+import type { ResolvedConfig } from "../config/schema";
 import { getCommandName } from "./command-names";
 import { run, runOutput } from "./run";
 
@@ -72,7 +72,7 @@ async function addMiseTask(
 async function addMiseTasks(
 	commands: ReadonlyArray<(typeof COMMANDS)[number]>,
 	existingTasks: Map<string, MiseTask>,
-	config: Config,
+	config: ResolvedConfig,
 ): Promise<{ added: number; skipped: number }> {
 	let added = 0;
 	let skipped = 0;

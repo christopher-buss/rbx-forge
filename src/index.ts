@@ -31,7 +31,6 @@ async function main(): Promise<void> {
 			continue;
 		}
 
-		/** Wrap action with intro (except for init which has its own). */
 		async function wrappedAction(): Promise<void> {
 			if (cmd.COMMAND !== "init") {
 				intro(ansis.bold(`🔨 rbx-forge ${cmd.COMMAND}`));
