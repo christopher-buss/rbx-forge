@@ -43,5 +43,8 @@
 		{
 			"file": ".github/commit-instructions.md"
 		}
-	]
+	],
+	"debug.javascript.defaultRuntimeExecutable": {
+		"pwa-node": "${workspaceFolder}\\.vscode\\mise-tools\\node"
+	}
 }

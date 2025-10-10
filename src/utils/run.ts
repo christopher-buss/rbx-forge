@@ -4,6 +4,8 @@ import { execa, type Options as ExecaOptions, type ResultPromise } from "execa";
 import type { Except } from "type-fest";
 
 export interface RunOptions extends ExecaOptions {
+	/** Custom spinner instance to use instead of creating a new one. */
+	customSpinner?: Spinner;
 	/**
 	 * Whether to show the command being executed.
 	 *
@@ -23,6 +25,28 @@ export interface RunOptions extends ExecaOptions {
 }
 
 type Spinner = ReturnType<typeof spinner>;
+
+/**
+ * Creates and starts a spinner with the given message.
+ *
+ * @template T - The type of the message, either string or undefined.
+ * @param message - The message to display with the spinner. If undefined, no
+ *   spinner is created.
+ * @returns A started Spinner instance if a message is provided, otherwise
+ *   undefined.
+ */
+export function createSpinner<T extends string | undefined>(
+	message: T,
+): T extends string ? Spinner : undefined;
+export function createSpinner(message: string | undefined): Spinner | undefined {
+	if (message === undefined) {
+		return undefined;
+	}
+
+	const activeSpinner = spinner();
+	activeSpinner.start(message);
+	return activeSpinner;
+}
 
 /**
  * Execute a shell command with pretty output using execa and @clack/prompts.
@@ -55,6 +79,7 @@ export async function run(
 	options: RunOptions = {},
 ): Promise<Awaited<ResultPromise>> {
 	const {
+		customSpinner,
 		shouldShowCommand = true,
 		shouldStreamOutput = true,
 		spinnerMessage,
@@ -66,7 +91,7 @@ export async function run(
 		log.step(`${command} ${args.join(" ")}`);
 	}
 
-	const activeSpinner = createSpinner(spinnerMessage);
+	const activeSpinner = customSpinner ?? createSpinner(spinnerMessage);
 	const subprocess = execa(command, args, {
 		...execaOptions,
 		stderr: shouldStreamOutput ? "inherit" : (execaOptions.stderr ?? "pipe"),
@@ -106,16 +131,6 @@ export async function runOutput(
 
 	const stdout = String(result.stdout);
 	return stdout.trim();
-}
-
-function createSpinner(message: string | undefined): Spinner | undefined {
-	if (message === undefined) {
-		return undefined;
-	}
-
-	const activeSpinner = spinner();
-	activeSpinner.start(message);
-	return activeSpinner;
 }
 
 async function handleSubprocess<OptionsType extends ExecaOptions>(

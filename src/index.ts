@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { log } from "@clack/prompts";
+import { intro, log } from "@clack/prompts";
 
+import ansis from "ansis";
 import { Command } from "commander";
 import process from "node:process";
 
@@ -21,7 +22,20 @@ async function main(): Promise<void> {
 		.showHelpAfterError();
 
 	for (const cmd of COMMANDS) {
-		program.command(cmd.COMMAND).description(cmd.DESCRIPTION).action(cmd.action);
+		/**
+		 * Wrap action with intro (except for init which has its own).
+		 *
+		 * @param args - Command arguments.
+		 */
+		async function wrappedAction(...args: Array<unknown>): Promise<void> {
+			if (cmd.COMMAND !== "init") {
+				intro(ansis.bold(`🔨 rbx-forge ${cmd.COMMAND}`));
+			}
+
+			await cmd.action(...args);
+		}
+
+		program.command(cmd.COMMAND).description(cmd.DESCRIPTION).action(wrappedAction);
 	}
 
 	await program.parseAsync(process.argv);
