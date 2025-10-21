@@ -1,9 +1,17 @@
 import * as buildCmd from "./build";
 import * as compileCmd from "./compile";
 import * as initCmd from "./init";
+import * as openCmd from "./open";
 import * as serveCmd from "./serve";
+import type { Command } from "./types";
 
-export const COMMANDS = [initCmd, buildCmd, compileCmd, serveCmd] as const;
+export const COMMANDS = [
+	initCmd,
+	buildCmd,
+	compileCmd,
+	openCmd,
+	serveCmd,
+] as const satisfies ReadonlyArray<Command | Command<openCmd.OpenOptions>>;
 
 /** Commands that should not be added as task runner scripts. */
 const EXCLUDED_COMMANDS = ["init"] as const;
@@ -21,4 +29,5 @@ export type ScriptName = (typeof SCRIPT_NAMES)[number];
 export * as buildCmd from "./build";
 export * as compileCmd from "./compile";
 export * as initCmd from "./init";
+export * as openCmd from "./open";
 export * as serveCmd from "./serve";

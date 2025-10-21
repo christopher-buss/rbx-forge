@@ -1,6 +1,7 @@
 import { cancel, confirm, isCancel, log } from "@clack/prompts";
 
 import ansis from "ansis";
+import { type } from "arktype";
 import process from "node:process";
 
 import { COMMANDS, SCRIPT_NAMES } from "../commands";
@@ -15,6 +16,16 @@ interface MiseTask {
 	run: Array<string>;
 	source: string;
 }
+
+const miseTasksArraySchema = type([
+	{
+		description: "string",
+		name: "string",
+		run: "string[]",
+		source: "string",
+	},
+	"[]",
+]);
 
 export async function checkMiseInstallation(): Promise<boolean> {
 	try {
@@ -126,8 +137,14 @@ async function confirmTaskOverwrite(existingTask: MiseTask): Promise<boolean> {
 async function getExistingMiseTasks(): Promise<Map<string, MiseTask>> {
 	try {
 		const output = await runOutput("mise", ["tasks", "ls", "--json"]);
-		const tasks = JSON.parse(output) as unknown as Array<MiseTask>;
-		return new Map(tasks.map((task) => [task.name, task]));
+		const parsed = JSON.parse(output);
+		const validated = miseTasksArraySchema(parsed);
+
+		if (validated instanceof type.errors) {
+			return new Map();
+		}
+
+		return new Map(validated.map((task) => [task.name, task]));
 	} catch {
 		return new Map();
 	}

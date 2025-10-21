@@ -7,12 +7,14 @@ export const configSchema = type({
 		"build?": "string",
 		"compile?": "string",
 		"init?": "string",
+		"open?": "string",
 		"serve?": "string",
 	},
 	"projectType": "'rbxts' | 'luau'",
 	"rbxts?": {
 		"args?": "string[]",
 		"command?": "string",
+		"watchOnOpen?": "boolean",
 	},
 });
 

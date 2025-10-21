@@ -5,14 +5,18 @@
 	"keywords": ["rbxts", "roblox", "rojo", "typescript", "cli", "tool"],
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/christopher-buss/rbx-forge.git"
+		"url": "git+https://github.com/christopher-buss/rbx-forge.git"
 	},
 	"license": "MIT",
 	"author": "Christopher Buss <christopher.buss@pm.me> (https://github.com/christopher-buss)",
 	"contributors": ["osyrisrblx (https://github.com/osyrisrblx)"],
 	"type": "module",
-	"main": "dist/index.mjs",
-	"types": "dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs"
+		}
+	},
+	"types": "./dist/index.d.mts",
 	"bin": {
 		"rbx-forge": "dist/index.mjs"
 	},
