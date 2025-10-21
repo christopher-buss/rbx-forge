@@ -31,18 +31,28 @@ async function main(): Promise<void> {
 			continue;
 		}
 
-		async function wrappedAction(): Promise<void> {
-			if (cmd.COMMAND !== "init") {
-				intro(ansis.bold(`🔨 rbx-forge ${cmd.COMMAND}`));
-			}
-
-			await cmd.action();
-		}
-
-		program.command(cmd.COMMAND).description(cmd.DESCRIPTION).action(wrappedAction);
+		registerCommand(cmd);
 	}
 
 	await program.parseAsync(process.argv);
+}
+
+function registerCommand(cmd: (typeof COMMANDS)[number]): void {
+	const command = program.command(cmd.COMMAND).description(cmd.DESCRIPTION);
+
+	if ("options" in cmd) {
+		for (const option of cmd.options) {
+			command.option(option.flags, option.description);
+		}
+	}
+
+	command.action(async (commandOptions: Parameters<typeof cmd.action>[0] | undefined) => {
+		if (cmd.COMMAND !== "init") {
+			intro(ansis.bold(`🔨 rbx-forge ${cmd.COMMAND}`));
+		}
+
+		await cmd.action(commandOptions);
+	});
 }
 
 main().catch((err) => {

@@ -3,8 +3,15 @@ import * as compileCmd from "./compile";
 import * as initCmd from "./init";
 import * as openCmd from "./open";
 import * as serveCmd from "./serve";
+import type { Command } from "./types";
 
-export const COMMANDS = [initCmd, buildCmd, compileCmd, openCmd, serveCmd] as const;
+export const COMMANDS = [
+	initCmd,
+	buildCmd,
+	compileCmd,
+	openCmd,
+	serveCmd,
+] as const satisfies ReadonlyArray<Command | Command<openCmd.OpenOptions>>;
 
 /** Commands that should not be added as task runner scripts. */
 const EXCLUDED_COMMANDS = ["init"] as const;
