@@ -4,5 +4,5 @@
 		"libReplacement": true,
 		"exactOptionalPropertyTypes": true
 	},
-	"exclude": ["node_modules", "dist", "out", ".vscode-test"]
+	"exclude": ["node_modules", "dist", "out", ".vscode-test", "temp"]
 }

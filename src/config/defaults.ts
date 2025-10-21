@@ -8,6 +8,13 @@ export const defaults: ResolvedConfig = {
 		init: "init",
 		open: "forge:open",
 		serve: "forge:serve",
+		watch: "forge:watch",
+	},
+	luau: {
+		watch: {
+			args: [],
+			command: "",
+		},
 	},
 	projectType: "rbxts",
 	rbxts: {
