@@ -14,9 +14,10 @@ import { runOutput } from "./run";
  * @returns The Windows-formatted path.
  */
 export async function getWindowsPath(fsPath: string): Promise<string> {
-	// cSpell:ignore wslpath
+	// cspell:ignore wslpath
 	const result = await runOutput("wslpath", ["-w", fsPath], {
 		shouldShowCommand: false,
 	});
-	return result.trim().replace(/\\/g, "\\\\").replace(/\//g, "\\");
+
+	return result.trim();
 }

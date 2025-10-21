@@ -16,16 +16,27 @@ import { runScript } from "../utils/run-script";
 export const COMMAND = "open";
 export const DESCRIPTION = "Open place file in Roblox Studio";
 
-export async function action(): Promise<void> {
-	const config = await loadProjectConfig();
-	const placeFile = config.buildOutputPath;
+export const options = [
+	{
+		description: "Path to the place file to open (overrides config)",
+		flags: "-p, --place <path>",
+	},
+] as const;
 
-	await ensurePlaceFileExists(placeFile, config);
+export interface OpenOptions {
+	place?: string;
+}
+
+export async function action(commandOptions: OpenOptions = {}): Promise<void> {
+	const config = await loadProjectConfig();
+	const placeFile = commandOptions.place ?? config.buildOutputPath;
+	const isCustomPlace = commandOptions.place !== undefined;
+
+	await ensurePlaceFileExists(placeFile, config, isCustomPlace);
 
 	log.info(ansis.bold("→ Opening in Roblox Studio"));
 	log.step(`File: ${ansis.cyan(placeFile)}`);
 
-	// Open with platform-specific command
 	await runPlatform({
 		darwin: async () => run("open", [placeFile], { shouldShowCommand: false }),
 		linux: async () => {
@@ -36,7 +47,6 @@ export async function action(): Promise<void> {
 				});
 			}
 
-			// Native Linux: use xdg-open
 			return run("xdg-open", [placeFile], { shouldShowCommand: false });
 		},
 		win32: async () => run("cmd.exe", ["/c", "start", placeFile], { shouldShowCommand: false }),
@@ -50,35 +60,50 @@ export async function action(): Promise<void> {
 	// }
 }
 
-async function ensurePlaceFileExists(placeFile: string, config: ResolvedConfig): Promise<void> {
+async function ensurePlaceFileExists(
+	placeFile: string,
+	config: ResolvedConfig,
+	isCustomPlace: boolean,
+): Promise<void> {
 	try {
 		await access(placeFile);
 	} catch {
-		log.error(`Place file not found: ${ansis.cyan(placeFile)}`);
+		await handleMissingPlaceFile(placeFile, config, isCustomPlace);
+	}
+}
 
-		const shouldBuild = await confirm({
-			initialValue: true,
-			message: "Would you like to build the place file now?",
-		});
+async function handleMissingPlaceFile(
+	placeFile: string,
+	config: ResolvedConfig,
+	isCustomPlace: boolean,
+): Promise<void> {
+	log.error(`Place file not found: ${ansis.cyan(placeFile)}`);
 
-		if (isCancel(shouldBuild)) {
-			cancel("Operation cancelled");
-			process.exit(0);
-		}
+	// Don't offer to build custom place files
+	if (isCustomPlace) {
+		process.exit(1);
+	}
 
-		if (!shouldBuild) {
-			process.exit(1);
-		}
+	const shouldBuild = await confirm({
+		initialValue: true,
+		message: "Would you like to build the place file now?",
+	});
 
-		// Run build command
-		await runScript("build", config);
+	if (isCancel(shouldBuild)) {
+		cancel("Operation cancelled");
+		process.exit(0);
+	}
 
-		// Verify file was created
-		try {
-			await access(placeFile);
-		} catch {
-			log.error("Build completed but place file was not created");
-			process.exit(1);
-		}
+	if (!shouldBuild) {
+		process.exit(1);
+	}
+
+	await runScript("build", config);
+
+	try {
+		await access(placeFile);
+	} catch {
+		log.error("Build completed but place file was not created");
+		process.exit(1);
 	}
 }
