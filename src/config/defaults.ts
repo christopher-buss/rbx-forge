@@ -8,6 +8,7 @@ export const defaults: ResolvedConfig = {
 		init: "init",
 		open: "forge:open",
 		serve: "forge:serve",
+		start: "forge:start",
 		watch: "forge:watch",
 	},
 	luau: {
