@@ -21,6 +21,6 @@ export const defaults: ResolvedConfig = {
 	rbxts: {
 		args: ["--verbose"],
 		command: "rbxtsc",
-		watchOnOpen: false,
+		watchOnOpen: true,
 	},
 };

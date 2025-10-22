@@ -54,10 +54,9 @@ export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 
 	log.success("Opened in Roblox Studio");
 
-	// Future: Implement watch functionality
-	// if (config.rbxts.watchOnOpen) {
-	// 	await runScript("serve", config);
-	// }
+	if (config.rbxts.watchOnOpen) {
+		await runScript("watch", config);
+	}
 }
 
 async function ensurePlaceFileExists(
