@@ -18,7 +18,9 @@
 	},
 	"types": "./dist/index.d.mts",
 	"bin": {
-		"rbx-forge": "dist/index.mjs"
+		"rbx-forge": "dist/index.mjs",
+		"forge": "dist/index.mjs",
+		"fge": "dist/index.mjs"
 	},
 	"files": ["dist", "scripts"],
 	"scripts": {

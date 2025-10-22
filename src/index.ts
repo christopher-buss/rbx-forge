@@ -19,6 +19,8 @@ const skipLuau = new Set(["compile"]);
 async function main(): Promise<void> {
 	program
 		.name("rbx-forge")
+		.alias("forge")
+		.alias("fge")
 		.description("A CLI tool for fully-managed rojo projects")
 		.version(packageVersion, "-v, --version", "output the current version")
 		.helpOption("-h, --help", "display help for command")
