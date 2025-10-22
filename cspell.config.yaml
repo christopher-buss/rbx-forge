@@ -4,6 +4,9 @@ version: "0.2"
 language: en
 words:
   - rbxl
+  - rbxm
+  - rbxlx
+  - rbxmx
   - rbxtsc
   - rojo
   - scriptable
