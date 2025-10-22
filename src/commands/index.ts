@@ -5,8 +5,25 @@ import * as openCmd from "./open";
 import * as serveCmd from "./serve";
 import * as startCmd from "./start";
 import * as stopCmd from "./stop";
-import type { Command } from "./types";
 import * as watchCmd from "./watch";
+
+/**
+ * Generic command interface for type-safe command registration.
+ *
+ * @template Options - The type of options this command accepts (void for no
+ *   options).
+ */
+export interface Command<Options = void> {
+	action: Options extends void ? () => Promise<void> : (options: Options) => Promise<void>;
+	// eslint-disable-next-line flawless/naming-convention -- Matches CLI convention
+	COMMAND: string;
+	// eslint-disable-next-line flawless/naming-convention -- Matches CLI convention
+	DESCRIPTION: string;
+	options?: ReadonlyArray<{
+		description: string;
+		flags: string;
+	}>;
+}
 
 export const COMMANDS = [
 	initCmd,
