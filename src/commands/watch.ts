@@ -6,10 +6,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { cleanupLockfile } from "src/utils/cleanup-lock-file";
+import { getRojoCommand } from "src/utils/rojo";
 
 import { loadProjectConfig } from "../config";
 import { LOCKFILE_NAME } from "../constants";
-import { getRojoCommand } from "../utils/get-rojo-command";
 import { runWithTaskLog, type TaskLogResult } from "../utils/run";
 
 export const COMMAND = "watch";

@@ -51,6 +51,7 @@
 		"execa": "^9.6.0",
 		"magicast": "^0.3.5",
 		"package-manager-detector": "^1.5.0",
+		"picomatch": "^4.0.3",
 		"type-fest": "^5.1.0"
 	},
 	"devDependencies": {
@@ -58,6 +59,7 @@
 		"@isentinel/eslint-config": "^3.4.1",
 		"@isentinel/tsconfig": "^1.0.0",
 		"@types/node": "^24.9.1",
+		"@types/picomatch": "^4.0.2",
 		"@typescript-eslint/eslint-plugin": "^8.46.2",
 		"@typescript-eslint/parser": "^8.46.2",
 		"better-typescript-lib": "^2.12.0",

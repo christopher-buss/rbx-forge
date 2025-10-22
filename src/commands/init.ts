@@ -22,11 +22,12 @@ import {
 	updatePackageJson,
 	writePackageJson,
 } from "src/utils/package-json";
+import { checkRojoInstallation } from "src/utils/rojo";
 
 import { name as packageName, version as packageVersion } from "../../package.json";
 import { loadProjectConfig, updateProjectConfig } from "../config";
 import { getCommandName } from "../utils/command-names";
-import { findCommandForPackageManager, run, runOutput } from "../utils/run";
+import { findCommandForPackageManager, run } from "../utils/run";
 
 export const COMMAND = "init";
 export const DESCRIPTION = `Initialize a new ${packageName} project`;
@@ -84,16 +85,6 @@ async function addRbxForgeToPackageJson(): Promise<void> {
 		log.success(
 			`Added ${packageName}@^${packageVersion} to ${ansis.magenta("devDependencies")}`,
 		);
-	}
-}
-
-async function checkRojoInstallation(): Promise<string> {
-	try {
-		const rojoVersion = await runOutput("rojo", ["--version"]);
-		return `Found Rojo ${ansis.cyan(rojoVersion)}`;
-	} catch {
-		cancel(ansis.yellow("⚠ Rojo not found - please install Rojo to use this tool"));
-		process.exit(2);
 	}
 }
 

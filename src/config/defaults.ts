@@ -10,6 +10,7 @@ export const defaults: ResolvedConfig = {
 		serve: "forge:serve",
 		start: "forge:start",
 		stop: "forge:stop",
+		typegen: "forge:typegen",
 		watch: "forge:watch",
 	},
 	luau: {
@@ -25,4 +26,10 @@ export const defaults: ResolvedConfig = {
 		watchOnOpen: true,
 	},
 	suppressNoTaskRunnerWarning: false,
+	typegen: {
+		exclude: ["**/node_modules/**"],
+		include: ["**"],
+		maxDepth: undefined,
+	},
+	typegenOutputPath: "src/services.d.ts",
 };

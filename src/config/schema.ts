@@ -11,6 +11,7 @@ export const configSchema = type({
 		"serve?": "string",
 		"start?": "string",
 		"stop?": "string",
+		"typegen?": "string",
 		"watch?": "string",
 	},
 	"luau?": {
@@ -26,6 +27,12 @@ export const configSchema = type({
 		"watchOnOpen?": "boolean",
 	},
 	"suppressNoTaskRunnerWarning?": "boolean",
+	"typegen?": {
+		"exclude?": "string[]",
+		"include?": "string[]",
+		"maxDepth?": "number | undefined",
+	},
+	"typegenOutputPath?": "string",
 });
 
 export type Config = typeof configSchema.infer;

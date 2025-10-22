@@ -1,4 +1,5 @@
-import { getRojoCommand } from "../utils/get-rojo-command";
+import { getRojoCommand } from "src/utils/rojo";
+
 import { run } from "../utils/run";
 
 export const COMMAND = "serve";

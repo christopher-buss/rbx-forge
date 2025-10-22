@@ -14,7 +14,7 @@ export type { Config } from "./config/schema";
 
 const program = new Command();
 
-const skipLuau = new Set(["compile"]);
+const skipLuau = new Set(["compile", "typegen"]);
 
 async function main(): Promise<void> {
 	program

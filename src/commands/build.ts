@@ -3,10 +3,10 @@ import { log } from "@clack/prompts";
 import ansis from "ansis";
 import { stat } from "node:fs/promises";
 import process from "node:process";
+import { getRojoCommand } from "src/utils/rojo";
 
 import { loadProjectConfig } from "../config";
 import { formatDuration } from "../utils/format-duration";
-import { getRojoCommand } from "../utils/get-rojo-command";
 import { createSpinner, run } from "../utils/run";
 
 export const COMMAND = "build";
