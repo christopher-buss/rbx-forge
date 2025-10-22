@@ -226,6 +226,27 @@ This is critical for Rojo execution:
 
 See [src/commands/build.ts](src/commands/build.ts) for usage example.
 
+## Code Quality Standards
+
+Before marking any task as complete, **ALWAYS** run both quality checks:
+
+1. **Type checking**: `nr typecheck` - Must pass with zero errors
+2. **Linting**: `nr lint` - Must pass with zero errors and warnings
+
+**Important**: The lint command can auto-fix many issues. If you see fixable
+warnings/errors, run `nr lint` to automatically fix them before proceeding.
+
+**Workflow**:
+
+```bash
+# After making changes
+nr typecheck  # Check types
+nr lint       # Fix and check linting (auto-fixes where possible)
+```
+
+Do not mark a task as complete if either check fails. Address all errors and
+warnings before proceeding.
+
 ## Commit Conventions
 
 Follow Conventional Commits format (see

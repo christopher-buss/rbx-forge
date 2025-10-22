@@ -4,6 +4,7 @@ import * as initCmd from "./init";
 import * as openCmd from "./open";
 import * as serveCmd from "./serve";
 import type { Command } from "./types";
+import * as watchCmd from "./watch";
 
 export const COMMANDS = [
 	initCmd,
@@ -11,6 +12,7 @@ export const COMMANDS = [
 	compileCmd,
 	openCmd,
 	serveCmd,
+	watchCmd,
 ] as const satisfies ReadonlyArray<Command | Command<openCmd.OpenOptions>>;
 
 /** Commands that should not be added as task runner scripts. */
@@ -31,3 +33,4 @@ export * as compileCmd from "./compile";
 export * as initCmd from "./init";
 export * as openCmd from "./open";
 export * as serveCmd from "./serve";
+export * as watchCmd from "./watch";

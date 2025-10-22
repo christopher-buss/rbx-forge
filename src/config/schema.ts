@@ -9,6 +9,13 @@ export const configSchema = type({
 		"init?": "string",
 		"open?": "string",
 		"serve?": "string",
+		"watch?": "string",
+	},
+	"luau?": {
+		"watch?": {
+			"args?": "string[]",
+			"command?": "string",
+		},
 	},
 	"projectType": "'rbxts' | 'luau'",
 	"rbxts?": {

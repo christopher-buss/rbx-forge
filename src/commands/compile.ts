@@ -1,10 +1,10 @@
-import { log, taskLog } from "@clack/prompts";
+import { log } from "@clack/prompts";
 
 import ansis from "ansis";
-import { execa } from "execa";
-import { createInterface } from "node:readline";
 
 import { loadProjectConfig } from "../config";
+import { formatDuration } from "../utils/format-duration";
+import { runWithTaskLog } from "../utils/run";
 
 export const COMMAND = "compile";
 export const DESCRIPTION = "Compile TypeScript to Luau";
@@ -22,37 +22,15 @@ export async function action(): Promise<void> {
 	await runCompilation(rbxtsc, rbxtscArgs);
 }
 
-function formatDuration(startTime: number): string {
-	const endTime = performance.now();
-	const duration = ((endTime - startTime) / 1000).toFixed(1);
-	return `${duration}s`;
-}
-
 async function runCompilation(rbxtsc: string, rbxtscArgs: ReadonlyArray<string>): Promise<void> {
 	const startTime = performance.now();
 
-	const taskLogger = taskLog({
-		limit: 12,
-		title: "Compiling TypeScript...",
+	const { subprocess, taskLogger } = runWithTaskLog(rbxtsc, rbxtscArgs, {
+		taskName: "Compiling TypeScript...",
 	});
 
 	try {
-		const subprocess = execa(rbxtsc, rbxtscArgs, {
-			all: true,
-			buffer: false,
-		});
-
-		const rl = createInterface({
-			crlfDelay: Number.POSITIVE_INFINITY,
-			input: subprocess.all,
-		});
-
-		rl.on("line", (line) => {
-			taskLogger.message(line);
-		});
-
 		await subprocess;
-
 		const stats = formatDuration(startTime);
 		taskLogger.success(`Compilation complete (${ansis.dim(stats)})`);
 	} catch (err) {
