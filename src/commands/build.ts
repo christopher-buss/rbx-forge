@@ -4,7 +4,8 @@ import ansis from "ansis";
 import { stat } from "node:fs/promises";
 
 import { loadProjectConfig } from "../config";
-import { isWsl } from "../utils/is-wsl";
+import { formatDuration } from "../utils/format-duration";
+import { getRojoCommand } from "../utils/get-rojo-command";
 import { createSpinner, run } from "../utils/run";
 
 export const COMMAND = "build";
@@ -12,7 +13,7 @@ export const DESCRIPTION = "Build the Rojo project";
 
 export async function action(): Promise<void> {
 	const config = await loadProjectConfig();
-	const rojo = isWsl() ? "rojo" : "rojo.exe";
+	const rojo = getRojoCommand();
 	const outputPath = config.buildOutputPath;
 
 	log.info(ansis.bold("→ Building project"));
@@ -25,8 +26,7 @@ export async function action(): Promise<void> {
 		shouldStreamOutput: false,
 	});
 
-	const endTime = performance.now();
-	const duration = ((endTime - startTime) / 1000).toFixed(1);
+	const duration = formatDuration(startTime);
 
 	let fileSize = "";
 	try {
@@ -37,6 +37,6 @@ export async function action(): Promise<void> {
 		fileSize = "";
 	}
 
-	const stats = [outputPath, fileSize, `${duration}s`].filter(Boolean).join(", ");
+	const stats = [outputPath, fileSize, duration].filter(Boolean).join(", ");
 	spinner.stop(`Build complete (${ansis.dim(stats)})`);
 }

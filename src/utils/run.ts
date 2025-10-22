@@ -1,6 +1,7 @@
-import { log, spinner } from "@clack/prompts";
+import { log, spinner, taskLog } from "@clack/prompts";
 
 import { execa, type Options as ExecaOptions, type ResultPromise } from "execa";
+import { createInterface } from "node:readline";
 import type { Except } from "type-fest";
 
 export interface RunOptions extends ExecaOptions {
@@ -22,6 +23,20 @@ export interface RunOptions extends ExecaOptions {
 	spinnerMessage?: string;
 	/** Message to show on success (uses spinner.stop if spinner is shown). */
 	successMessage?: string;
+}
+
+export interface RunWithTaskLogOptions extends Except<ExecaOptions, "all" | "buffer"> {
+	/** Maximum number of messages to display (default: 12). */
+	messageLimit?: number;
+	/** Display name for the task logger. */
+	taskName: string;
+}
+
+export interface TaskLogResult {
+	/** Subprocess promise. */
+	subprocess: ResultPromise;
+	/** Task logger instance for success/error messages. */
+	taskLogger: ReturnType<typeof taskLog>;
 }
 
 type Spinner = ReturnType<typeof spinner>;
@@ -131,6 +146,75 @@ export async function runOutput(
 
 	const stdout = String(result.stdout);
 	return stdout.trim();
+}
+
+/**
+ * Execute a command with streaming output to a task logger.
+ *
+ * Useful for long-running processes like compilers and watchers that produce
+ * verbose output. Unlike run(), this creates a scrolling task log that shows
+ * the last N lines of output.
+ *
+ * @example
+ *
+ * ```ts
+ * const { subprocess, taskLogger } = await runWithTaskLog(
+ * 	"rbxtsc",
+ * 	["--verbose"],
+ * 	{
+ * 		taskName: "Compiling TypeScript...",
+ * 	},
+ * );
+ *
+ * try {
+ * 	await subprocess;
+ * 	taskLogger.success("Compilation complete");
+ * } catch (err) {
+ * 	taskLogger.error("Compilation failed");
+ * 	throw err;
+ * }
+ * ```
+ *
+ * @param command - The command to execute (e.g., "rbxtsc", "npm").
+ * @param args - Array of arguments to pass to the command.
+ * @param options - Configuration options including task name and message limit.
+ * @returns Object containing the subprocess promise and task logger instance.
+ */
+export function runWithTaskLog(
+	command: string,
+	args: ReadonlyArray<string>,
+	options: RunWithTaskLogOptions,
+): TaskLogResult {
+	const { messageLimit = 12, taskName, ...execaOptions } = options;
+
+	const taskLogger = taskLog({
+		limit: messageLimit,
+		title: taskName,
+	});
+
+	const subprocess = execa(command, args, {
+		...execaOptions,
+		all: true,
+		buffer: false,
+	});
+
+	const rl = createInterface({
+		crlfDelay: Number.POSITIVE_INFINITY,
+		input: subprocess.all,
+	});
+
+	rl.on("line", (line) => {
+		taskLogger.message(line);
+	});
+
+	void subprocess.finally(() => {
+		rl.close();
+	});
+
+	return {
+		subprocess: subprocess as ResultPromise,
+		taskLogger,
+	};
 }
 
 async function handleSubprocess<OptionsType extends ExecaOptions>(

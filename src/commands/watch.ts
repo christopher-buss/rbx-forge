@@ -1,23 +1,19 @@
-import { log, outro, taskLog } from "@clack/prompts";
+import { log, outro } from "@clack/prompts";
 
 import ansis from "ansis";
-import { execa, type ResultPromise } from "execa";
+import { ExecaError, type ResultPromise } from "execa";
 import process from "node:process";
-import { createInterface } from "node:readline";
 
 import { loadProjectConfig } from "../config";
 import { getRojoCommand } from "../utils/get-rojo-command";
+import { runWithTaskLog, type TaskLogResult } from "../utils/run";
 
 export const COMMAND = "watch";
 export const DESCRIPTION = "Watch and rebuild on file changes";
 
-interface ProcessHandle {
+interface ProcessHandle extends TaskLogResult {
 	/** Process name for logging. */
 	name: string;
-	/** Subprocess promise. */
-	subprocess: ResultPromise;
-	/** Task logger for this process. */
-	taskLogger: ReturnType<typeof taskLog>;
 }
 
 interface StartProcessOptions {
@@ -51,29 +47,28 @@ export async function action(): Promise<void> {
 	await runWatchProcesses(rojo, watchCommand, watchArgs, config);
 }
 
-function attachErrorHandler(
-	subprocess: ResultPromise,
-	taskLogger: ReturnType<typeof taskLog>,
-	name: string,
-): ResultPromise {
-	return subprocess.catch((err: unknown) => {
-		if (!isExecaError(err)) {
-			// Re-throw non-execa errors
+function attachErrorHandler(result: TaskLogResult, name: string): TaskLogResult {
+	const wrappedSubprocess = result.subprocess.catch((err: unknown) => {
+		if (!(err instanceof Error)) {
 			throw err;
 		}
 
-		taskLogger.error(`${name} failed with exit code ${err.exitCode ?? "unknown"}`);
-		const stderr = err.stderr ?? "";
-		if (stderr.length > 0) {
-			const lines = stderr.trim().split("\n");
-			for (const line of lines) {
-				taskLogger.error(line);
-			}
+		if (err instanceof ExecaError) {
+			result.taskLogger.error(`${name} failed with exit code ${err.exitCode ?? "unknown"}`);
+
+			logErrorOutput(result.taskLogger, String(err.stderr));
+			logErrorOutput(result.taskLogger, String(err.stdout));
+		} else {
+			result.taskLogger.error(`${name} failed: ${err.message}`);
 		}
 
-		// Re-throw to propagate to Promise.race
 		throw err;
 	}) as ResultPromise;
+
+	return {
+		subprocess: wrappedSubprocess,
+		taskLogger: result.taskLogger,
+	};
 }
 
 function createCleanupHandler(handles: Array<ProcessHandle>) {
@@ -86,19 +81,20 @@ function createCleanupHandler(handles: Array<ProcessHandle>) {
 
 		isCleanupInProgress = true;
 
-		// Show cleanup message
 		log.info(ansis.dim("Stopping watch processes..."));
 
 		for (const handle of handles) {
 			try {
 				handle.subprocess.kill("SIGTERM");
 				handle.taskLogger.success(`${handle.name} stopped`);
-			} catch {
-				// Ignore errors during cleanup
+			} catch (err) {
+				// Process may have already exited or be unresponsive
+				// Log the failure but continue cleanup of other processes
+				const errorMessage = err instanceof Error ? err.message : "Unknown error";
+				handle.taskLogger.error(`Failed to stop ${handle.name}: ${errorMessage}`);
 			}
 		}
 
-		// Show completion message
 		if (exitCode === 0) {
 			outro(ansis.green("Watch stopped successfully"));
 		} else {
@@ -129,7 +125,6 @@ function getWatchConfig(config: Awaited<ReturnType<typeof loadProjectConfig>>): 
 		};
 	}
 
-	// Luau project
 	const luauCommand = config.luau.watch.command;
 	if (!luauCommand) {
 		// cspell:ignore darklua
@@ -148,41 +143,42 @@ function getWatchConfig(config: Awaited<ReturnType<typeof loadProjectConfig>>): 
 	};
 }
 
-function isExecaError(error: unknown): error is Error & {
-	command: string;
-	exitCode?: number;
-	failed: boolean;
-	stderr?: string;
-	stdout?: string;
-} {
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		"exitCode" in error &&
-		"command" in error &&
-		"failed" in error
-	);
+function logErrorOutput(
+	taskLogger: ReturnType<typeof import("@clack/prompts").taskLog>,
+	output: string,
+): void {
+	if (output.length === 0 || output === "undefined") {
+		return;
+	}
+
+	const lines = output.trim().split("\n");
+	for (const line of lines) {
+		taskLogger.error(line);
+	}
 }
 
-function logExecaError(
-	err: Error & { command: string; exitCode?: number; stderr?: string; stdout?: string },
-): void {
-	log.error(`Command failed: ${err.command}`);
+function logProcessError(err: unknown): void {
+	if (err instanceof ExecaError) {
+		log.error(`Command failed: ${err.command}`);
 
-	const stderr = err.stderr ?? "";
-	if (stderr.length > 0) {
-		log.error("stderr:");
-		log.error(stderr);
-	}
+		const stderr = String(err.stderr);
+		if (stderr.length > 0) {
+			log.error("stderr:");
+			log.error(stderr);
+		}
 
-	const stdout = err.stdout ?? "";
-	if (stdout.length > 0) {
-		log.error("stdout:");
-		log.error(stdout);
-	}
+		const stdout = String(err.stdout);
+		if (stdout.length > 0) {
+			log.error("stdout:");
+			log.error(stdout);
+		}
 
-	if (err.exitCode !== undefined) {
-		log.error(`Exit code: ${err.exitCode}`);
+		if (err.exitCode !== undefined) {
+			log.error(`Exit code: ${err.exitCode}`);
+		}
+	} else {
+		const errorMessage = err instanceof Error ? err.message : String(err);
+		log.error(`Watch process failed: ${errorMessage}`);
 	}
 }
 
@@ -195,7 +191,7 @@ async function runWatchProcesses(
 	const handles: Array<ProcessHandle> = [];
 	const cleanup = createCleanupHandler(handles);
 
-	// Handle Ctrl+C gracefully
+	// Handle Ctrl+C
 	process.on("SIGINT", () => {
 		void cleanup(0);
 	});
@@ -213,7 +209,6 @@ async function runWatchProcesses(
 async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<void> {
 	const { cleanup, config, handles, rojo, watchArgs, watchCommand } = options;
 	try {
-		// Start rojo serve
 		const rojoHandle = await startProcess({
 			args: ["serve"],
 			command: rojo,
@@ -221,7 +216,6 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 		});
 		handles.push(rojoHandle);
 
-		// Start watch process
 		const watchHandle = await startProcess({
 			args: watchArgs,
 			command: watchCommand,
@@ -232,18 +226,10 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 		// Wait for either process to exit (fail-fast)
 		await Promise.race(handles.map(async (handle) => handle.subprocess));
 
-		// If we get here, one process exited - this is unexpected in watch mode
 		log.error("A watch process exited unexpectedly");
 		await cleanup(1);
 	} catch (err) {
-		// One of the processes failed - display detailed error info
-		if (isExecaError(err)) {
-			logExecaError(err);
-		} else {
-			const errorMessage = err instanceof Error ? err.message : String(err);
-			log.error(`Watch process failed: ${errorMessage}`);
-		}
-
+		logProcessError(err);
 		await cleanup(1);
 	}
 }
@@ -251,31 +237,14 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 async function startProcess(options: StartProcessOptions): Promise<ProcessHandle> {
 	const { args, command, name } = options;
 
-	const taskLogger = taskLog({
-		limit: 12,
-		title: `${name}...`,
+	const result = runWithTaskLog(command, args, {
+		taskName: `${name}...`,
 	});
 
-	const subprocess = execa(command, args, {
-		all: true,
-		buffer: false,
-	});
-
-	const rl = createInterface({
-		crlfDelay: Number.POSITIVE_INFINITY,
-		input: subprocess.all,
-	});
-
-	rl.on("line", (line) => {
-		taskLogger.message(line);
-	});
-
-	// Wrap subprocess with error handler that logs and re-throws
-	const wrappedSubprocess = attachErrorHandler(subprocess, taskLogger, name);
+	const wrappedResult = attachErrorHandler(result, name);
 
 	return {
+		...wrappedResult,
 		name,
-		subprocess: wrappedSubprocess,
-		taskLogger,
 	};
 }
