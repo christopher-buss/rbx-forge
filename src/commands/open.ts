@@ -9,9 +9,8 @@ import { loadProjectConfig } from "../config";
 import type { ResolvedConfig } from "../config/schema";
 import { getWindowsPath } from "../utils/get-windows-path";
 import { isWsl } from "../utils/is-wsl";
-import { run } from "../utils/run";
+import { run, runScript } from "../utils/run";
 import { runPlatform } from "../utils/run-platform";
-import { runScript } from "../utils/run-script";
 
 export const COMMAND = "open";
 export const DESCRIPTION = "Open place file in Roblox Studio";

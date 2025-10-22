@@ -32,6 +32,9 @@ importers:
       magicast:
         specifier: ^0.3.5
         version: 0.3.5
+      package-manager-detector:
+        specifier: ^1.5.0
+        version: 1.5.0
       type-fest:
         specifier: ^5.0.1
         version: 5.0.1
@@ -2907,8 +2910,8 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
-  package-manager-detector@1.4.0:
-    resolution: {integrity: sha512-rRZ+pR1Usc+ND9M2NkmCvE/LYJS+8ORVV9X0KuNSY/gFsp7RBHJM/ADh9LYq4Vvfq6QkKrW6/weuh8SMEtN5gw==}
+  package-manager-detector@1.5.0:
+    resolution: {integrity: sha512-uBj69dVlYe/+wxj8JOpr97XfsxH/eumMt6HqjNTmJDf/6NO9s+0uxeOneIz3AsPt2m6y9PqzDzd3ATcU17MNfw==}
 
   param-case@3.0.4:
     resolution: {integrity: sha512-RXlj7zCYokReqWpOPH9oYivUzLYZ5vAPIfEmCTNViosC78F8F0H9y7T7gG2M39ymgutxF5gcFEsyZQSph9Bp3A==}
@@ -3571,14 +3574,14 @@ snapshots:
 
   '@antfu/install-pkg@1.1.0':
     dependencies:
-      package-manager-detector: 1.4.0
+      package-manager-detector: 1.5.0
       tinyexec: 1.0.1
 
   '@antfu/ni@26.1.0':
     dependencies:
       ansis: 4.2.0
       fzf: 0.5.2
-      package-manager-detector: 1.4.0
+      package-manager-detector: 1.5.0
       tinyexec: 1.0.1
       tinyglobby: 0.2.15
 
@@ -4954,7 +4957,7 @@ snapshots:
       cac: 6.7.14
       escalade: 3.2.0
       jsonc-parser: 3.3.1
-      package-manager-detector: 1.4.0
+      package-manager-detector: 1.5.0
       semver: 7.7.3
       tinyexec: 1.0.1
       tinyglobby: 0.2.15
@@ -6866,7 +6869,7 @@ snapshots:
       validate-npm-package-license: 3.0.4
       yargs: 18.0.0
 
-  package-manager-detector@1.4.0: {}
+  package-manager-detector@1.5.0: {}
 
   param-case@3.0.4:
     dependencies:
@@ -6978,7 +6981,7 @@ snapshots:
   publint@0.3.14:
     dependencies:
       '@publint/pack': 0.1.2
-      package-manager-detector: 1.4.0
+      package-manager-detector: 1.5.0
       picocolors: 1.1.1
       sade: 1.8.1
 

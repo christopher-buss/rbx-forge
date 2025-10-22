@@ -13,6 +13,7 @@ import {
 
 import ansis from "ansis";
 import process from "node:process";
+import { detect } from "package-manager-detector";
 import type { ResolvedConfig } from "src/config/schema";
 import { updateMiseToml } from "src/utils/mise";
 import {
@@ -22,27 +23,26 @@ import {
 	writePackageJson,
 } from "src/utils/package-json";
 
-import { version as packageVersion } from "../../package.json";
+import { name as packageName, version as packageVersion } from "../../package.json";
 import { loadProjectConfig, updateProjectConfig } from "../config";
 import { getCommandName } from "../utils/command-names";
-import { run, runOutput } from "../utils/run";
+import { findCommandForPackageManager, run, runOutput } from "../utils/run";
 
 export const COMMAND = "init";
-export const DESCRIPTION = "Initialize a new rbx-forge project";
+export const DESCRIPTION = `Initialize a new ${packageName} project`;
 
-const PACKAGE_NAME = "rbx-forge";
 const OPERATION_CANCELLED = "Operation cancelled";
 
 type TaskRunner = "lune" | "mise" | "npm";
 
 export async function action(): Promise<void> {
 	if (process.env["NODE_ENV"] === "development") {
-		void run("rm", ["-rf", "rbx-forge.config.ts"], {
+		void run("rm", ["-rf", `${packageName}.config.ts`], {
 			shouldShowCommand: false,
 		});
 	}
 
-	intro(ansis.bold("🔨 rbx-forge init"));
+	intro(ansis.bold(`🔨 ${packageName} init`));
 
 	const { projectType, taskRunners } = await getUserInput();
 
@@ -59,18 +59,17 @@ async function addRbxForgeToPackageJson(): Promise<void> {
 		return;
 	}
 
-	// Check if rbx-forge is already installed
-	const hasInDeps = packageJson.dependencies?.[PACKAGE_NAME] !== undefined;
-	const hasInDevelopmentDeps = packageJson.devDependencies?.[PACKAGE_NAME] !== undefined;
+	// Check if already installed
+	const hasInDeps = packageJson.dependencies?.[packageName] !== undefined;
+	const hasInDevelopmentDeps = packageJson.devDependencies?.[packageName] !== undefined;
 
 	if (hasInDeps || hasInDevelopmentDeps) {
 		return;
 	}
 
-	// Prompt user to add rbx-forge
 	const shouldAddRbxForge = await confirm({
 		initialValue: true,
-		message: `Add ${PACKAGE_NAME} to devDependencies? (recommended)`,
+		message: `Add ${packageName} to devDependencies? (recommended)`,
 	});
 
 	if (isCancel(shouldAddRbxForge)) {
@@ -80,10 +79,10 @@ async function addRbxForgeToPackageJson(): Promise<void> {
 
 	if (shouldAddRbxForge) {
 		packageJson.devDependencies ??= {};
-		packageJson.devDependencies[PACKAGE_NAME] = `^${packageVersion}`;
+		packageJson.devDependencies[packageName] = `^${packageVersion}`;
 		await writePackageJson(packageJsonPath, packageJson);
 		log.success(
-			`Added ${PACKAGE_NAME}@^${packageVersion} to ${ansis.magenta("devDependencies")}`,
+			`Added ${packageName}@^${packageVersion} to ${ansis.magenta("devDependencies")}`,
 		);
 	}
 }
@@ -100,7 +99,8 @@ async function checkRojoInstallation(): Promise<string> {
 
 async function createForgeConfig(projectType: "luau" | "rbxts"): Promise<string> {
 	await updateProjectConfig(projectType);
-	return `Config file created at ${ansis.magenta("rbx-forge.config.ts")}`;
+	const configFileName = `${packageName}.config.ts`;
+	return `Config file created at ${ansis.magenta(configFileName)}`;
 }
 
 async function createRojoProject(): Promise<string> {
@@ -117,37 +117,45 @@ async function createRojoProject(): Promise<string> {
 	return "Project structure created";
 }
 
+async function getInstallCommand(shouldUseMise: boolean, shouldUseNpm: boolean): Promise<string> {
+	if (shouldUseMise) {
+		return "mise install";
+	}
+
+	if (shouldUseNpm) {
+		const { args, command } = await findCommandForPackageManager("install");
+		return `${command} ${args.join(" ")}`;
+	}
+
+	throw new Error("This should not be called if no task runner is used.");
+}
+
+async function getTaskRunnerCommand(
+	scriptName: string,
+	shouldUseMise: boolean,
+	shouldUseNpm: boolean,
+): Promise<string> {
+	if (shouldUseMise) {
+		return `mise run ${scriptName}`;
+	}
+
+	if (shouldUseNpm) {
+		const { args, command } = await findCommandForPackageManager("run", [scriptName]);
+		return `${command} ${args.join(" ")}`;
+	}
+
+	// Extract base command name (e.g., "forge:build" -> "build")
+	const baseCommand = scriptName.replace(/^forge:/, "");
+	return `${packageName} ${baseCommand}`;
+}
+
 async function getUserInput(): Promise<{
 	projectType: ResolvedConfig["projectType"];
 	taskRunners: Array<TaskRunner>;
 }> {
-	const projectType = await select({
-		message: "Pick a project type.",
-		options: [
-			{ label: "TypeScript", value: "rbxts" },
-			{ label: "Luau", value: "luau" },
-		],
-	});
+	const projectType = await selectProjectType();
 
-	if (isCancel(projectType)) {
-		cancel(OPERATION_CANCELLED);
-		process.exit(0);
-	}
-
-	const taskRunners = await multiselect({
-		message: "Pick a task runner (optional).",
-		options: [
-			{ hint: "default", label: "npm", value: "npm" },
-			{ label: "mise", value: "mise" },
-			{ disabled: true, hint: "coming soon", label: "lune", value: "lune" },
-		],
-		required: false,
-	});
-
-	if (isCancel(taskRunners)) {
-		cancel(OPERATION_CANCELLED);
-		process.exit(0);
-	}
+	const taskRunners = await selectTaskRunners();
 
 	return { projectType, taskRunners };
 }
@@ -161,12 +169,12 @@ async function runInitializationTasks(
 		{ task: createRojoProject, title: "Creating Rojo project structure" },
 		{
 			task: async () => createForgeConfig(projectType),
-			title: "Creating rbx-forge config",
+			title: `Creating ${packageName} config`,
 		},
 	];
 
 	if (taskRunners.includes("npm")) {
-		// Add rbx-forge to package.json if not already present
+		// Add package to package.json if not already present
 		await addRbxForgeToPackageJson();
 
 		initTasks.push({
@@ -186,6 +194,44 @@ async function runInitializationTasks(
 	await tasks(initTasks);
 }
 
+async function selectProjectType(): Promise<ResolvedConfig["projectType"]> {
+	const projectType = await select({
+		message: "Pick a project type.",
+		options: [
+			{ label: "TypeScript", value: "rbxts" },
+			{ label: "Luau", value: "luau" },
+		],
+	});
+
+	if (isCancel(projectType)) {
+		cancel(OPERATION_CANCELLED);
+		process.exit(0);
+	}
+
+	return projectType;
+}
+
+async function selectTaskRunners(): Promise<Array<TaskRunner>> {
+	const { agent } = (await detect()) ?? { agent: "npm" };
+
+	const taskRunners = await multiselect({
+		message: "Pick task runner(s) (optional).",
+		options: [
+			{ hint: "default", label: agent, value: "npm" },
+			{ label: "mise", value: "mise" },
+			{ disabled: true, hint: "coming soon", label: "lune", value: "lune" },
+		],
+		required: false,
+	});
+
+	if (isCancel(taskRunners)) {
+		cancel(OPERATION_CANCELLED);
+		process.exit(0);
+	}
+
+	return taskRunners;
+}
+
 async function showNextSteps(taskRunners: Array<TaskRunner>): Promise<void> {
 	const shouldUseMise = taskRunners.includes("mise");
 	const shouldUseNpm = taskRunners.includes("npm");
@@ -194,22 +240,24 @@ async function showNextSteps(taskRunners: Array<TaskRunner>): Promise<void> {
 	const buildScriptName = getCommandName("build", config);
 	const serveScriptName = getCommandName("serve", config);
 
-	let buildCommand = "rbx-forge build";
-	let serveCommand = "rbx-forge serve";
+	const buildCommand = await getTaskRunnerCommand(buildScriptName, shouldUseMise, shouldUseNpm);
+	const serveCommand = await getTaskRunnerCommand(serveScriptName, shouldUseMise, shouldUseNpm);
 
-	if (shouldUseMise) {
-		buildCommand = `mise run ${buildScriptName}`;
-		serveCommand = `mise run ${serveScriptName}`;
-	} else if (shouldUseNpm) {
-		buildCommand = `npm run ${buildScriptName}`;
-		serveCommand = `npm run ${serveScriptName}`;
+	const steps: Array<string> = [];
+	let step = 1;
+
+	function addStep(stepDescription: string): void {
+		steps.push(`  ${step}. ${stepDescription}`);
+		step++;
 	}
 
-	note(
-		"Next steps:\n\n" +
-			`  1. Run ${ansis.cyan("npm install")} to install dependencies\n` +
-			`  2. Run ${ansis.cyan(buildCommand)} to build your project\n` +
-			`  3. Run ${ansis.cyan(serveCommand)} to start development`,
-		"Next Steps",
-	);
+	if (shouldUseMise || shouldUseNpm) {
+		const installCommand = await getInstallCommand(shouldUseMise, shouldUseNpm);
+		addStep(`Run ${ansis.cyan(installCommand)} to install dependencies`);
+	}
+
+	addStep(`Run ${ansis.cyan(buildCommand)} to build your project`);
+	addStep(`Run ${ansis.cyan(serveCommand)} to start development`);
+
+	note(`Next steps:\n\n${steps.join("\n")}`, "Next Steps");
 }

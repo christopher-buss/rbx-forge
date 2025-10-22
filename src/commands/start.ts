@@ -1,9 +1,9 @@
 import { log } from "@clack/prompts";
 
 import ansis from "ansis";
+import { runScript } from "src/utils/run";
 
 import { loadProjectConfig } from "../config";
-import { runScript } from "../utils/run-script";
 
 export const COMMAND = "start";
 export const DESCRIPTION = "Compile, build, and open in Roblox Studio";

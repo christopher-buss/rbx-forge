@@ -50,6 +50,7 @@
 		"dedent": "^1.7.0",
 		"execa": "^9.6.0",
 		"magicast": "^0.3.5",
+		"package-manager-detector": "^1.5.0",
 		"type-fest": "^5.0.1"
 	},
 	"devDependencies": {
