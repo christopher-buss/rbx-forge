@@ -4,6 +4,7 @@ import * as initCmd from "./init";
 import * as openCmd from "./open";
 import * as serveCmd from "./serve";
 import * as startCmd from "./start";
+import * as stopCmd from "./stop";
 import type { Command } from "./types";
 import * as watchCmd from "./watch";
 
@@ -14,6 +15,7 @@ export const COMMANDS = [
 	openCmd,
 	serveCmd,
 	startCmd,
+	stopCmd,
 	watchCmd,
 ] as const satisfies ReadonlyArray<Command | Command<buildCmd.BuildOptions | openCmd.OpenOptions>>;
 
@@ -36,4 +38,5 @@ export * as initCmd from "./init";
 export * as openCmd from "./open";
 export * as serveCmd from "./serve";
 export * as startCmd from "./start";
+export * as stopCmd from "./stop";
 export * as watchCmd from "./watch";

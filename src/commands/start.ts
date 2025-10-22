@@ -16,6 +16,4 @@ export async function action(): Promise<void> {
 	await runScript("compile", config);
 	await runScript("build", config);
 	await runScript("open", config);
-
-	log.success("Workflow complete - project opened in Roblox Studio");
 }

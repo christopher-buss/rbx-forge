@@ -4,9 +4,10 @@ version: "0.2"
 language: en
 words:
   - rbxl
-  - rbxm
   - rbxlx
+  - rbxm
   - rbxmx
   - rbxtsc
   - rojo
   - scriptable
+  - taskkill
