@@ -51,7 +51,7 @@ function registerCommand(cmd: (typeof COMMANDS)[number]): void {
 			intro(ansis.bold(`🔨 rbx-forge ${cmd.COMMAND}`));
 		}
 
-		await cmd.action(commandOptions);
+		await (cmd.action as (options?: typeof commandOptions) => Promise<void>)(commandOptions);
 	});
 }
 

@@ -9,6 +9,7 @@ export const configSchema = type({
 		"init?": "string",
 		"open?": "string",
 		"serve?": "string",
+		"start?": "string",
 		"watch?": "string",
 	},
 	"luau?": {
