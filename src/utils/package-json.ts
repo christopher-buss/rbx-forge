@@ -7,6 +7,7 @@ import path from "node:path";
 import process from "node:process";
 import { SCRIPT_NAMES } from "src/commands";
 import { loadProjectConfig } from "src/config";
+import { CLI_COMMAND } from "src/constants";
 import { getCommandName } from "src/utils/command-names";
 
 export interface PackageJson {
@@ -112,7 +113,7 @@ async function addScriptsToPackageJson(
 
 	for (const scriptName of SCRIPT_NAMES) {
 		const resolvedScriptName = getCommandName(scriptName, config);
-		const scriptCommand = `rbx-forge ${scriptName}`;
+		const scriptCommand = `${CLI_COMMAND} ${scriptName}`;
 		const result = await addScriptEntry(packageJson, resolvedScriptName, scriptCommand);
 
 		if (result === "added") {

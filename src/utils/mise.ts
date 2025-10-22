@@ -3,6 +3,7 @@ import { cancel, confirm, isCancel, log } from "@clack/prompts";
 import ansis from "ansis";
 import { type } from "arktype";
 import process from "node:process";
+import { CLI_COMMAND } from "src/constants";
 
 import { COMMANDS, SCRIPT_NAMES } from "../commands";
 import { loadProjectConfig } from "../config";
@@ -72,7 +73,7 @@ async function addMiseTask(
 ): Promise<void> {
 	await run(
 		"mise",
-		["task", "add", miseTaskName, "--description", description, "--", "rbx-forge", commandName],
+		["task", "add", miseTaskName, "--description", description, "--", CLI_COMMAND, commandName],
 		{
 			shouldShowCommand: false,
 			shouldStreamOutput: false,

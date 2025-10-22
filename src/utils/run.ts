@@ -2,6 +2,7 @@ import { log, spinner, taskLog } from "@clack/prompts";
 
 import ansis from "ansis";
 import { execa, type Options as ExecaOptions, type ResultPromise } from "execa";
+import process from "node:process";
 import { createInterface } from "node:readline";
 import {
 	type Command,
@@ -11,10 +12,11 @@ import {
 } from "package-manager-detector";
 import type { ScriptName } from "src/commands";
 import type { ResolvedConfig } from "src/config/schema";
+import { CLI_COMMAND } from "src/constants";
 import type { Except } from "type-fest";
 
 import { getCommandName } from "./command-names";
-import { detectAvailableTaskRunner, getCallingTaskRunner } from "./detect-task-runner";
+import { getCallingTaskRunner } from "./detect-task-runner";
 
 export interface RunOptions extends ExecaOptions {
 	/** Custom spinner instance to use instead of creating a new one. */
@@ -230,7 +232,18 @@ export async function runScript(scriptName: ScriptName, config: ResolvedConfig):
 		return;
 	}
 
-	await runWithFallback(scriptName, resolvedName);
+	const hasShownWarning = process.env["RBX_FORGE_NO_TASK_RUNNER_WARNING_SHOWN"] === "1";
+	const shouldSuppressWarning = config.suppressNoTaskRunnerWarning;
+	if (!hasShownWarning && !shouldSuppressWarning) {
+		log.warn(
+			ansis.yellow(
+				"⚠ No task runner detected - running command directly. This may skip user-defined hooks.",
+			),
+		);
+		process.env["RBX_FORGE_NO_TASK_RUNNER_WARNING_SHOWN"] = "1";
+	}
+
+	await run(CLI_COMMAND, [scriptName]);
 }
 
 /**
@@ -317,23 +330,6 @@ async function handleSubprocess<OptionsType extends ExecaOptions>(
 	} catch (err) {
 		activeSpinner?.stop("Command failed");
 		throw err;
-	}
-}
-
-async function runWithFallback(scriptName: ScriptName, resolvedName: string): Promise<void> {
-	const available = await detectAvailableTaskRunner();
-
-	if (available === "mise") {
-		await run("mise", ["run", resolvedName]);
-	} else if (available === "npm") {
-		await runWithPackageManager(resolvedName);
-	} else {
-		log.warn(
-			ansis.yellow(
-				"⚠ No task runner detected - running command directly. This may skip user-defined hooks.",
-			),
-		);
-		await run("rbx-forge", [scriptName]);
 	}
 }
 

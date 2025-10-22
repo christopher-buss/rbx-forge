@@ -2,12 +2,13 @@ import { log } from "@clack/prompts";
 
 import { updateConfig } from "c12/update";
 import dedent from "dedent";
+import { CONFIG_FILE } from "src/constants";
 
 import type { Config } from "./schema";
 
 export async function createProjectConfig(projectType: Config["projectType"]): Promise<void> {
 	await updateConfig({
-		configFile: "rbx-forge.config",
+		configFile: CONFIG_FILE,
 		createExtension: ".ts",
 		cwd: ".",
 		onCreate: ({ configFile: filePath }) => {

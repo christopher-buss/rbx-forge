@@ -25,6 +25,7 @@ export const configSchema = type({
 		"command?": "string",
 		"watchOnOpen?": "boolean",
 	},
+	"suppressNoTaskRunnerWarning?": "boolean",
 });
 
 export type Config = typeof configSchema.infer;
