@@ -6,7 +6,6 @@ import path from "node:path";
 import process from "node:process";
 
 import { loadProjectConfig } from "../config";
-import type { ResolvedConfig } from "../config/schema";
 import { getWindowsPath } from "../utils/get-windows-path";
 import { isWsl } from "../utils/is-wsl";
 import { run, runScript } from "../utils/run";
@@ -31,7 +30,7 @@ export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 	const placeFile = commandOptions.place ?? config.buildOutputPath;
 	const isCustomPlace = commandOptions.place !== undefined;
 
-	await ensurePlaceFileExists(placeFile, config, isCustomPlace);
+	await ensurePlaceFileExists(placeFile, isCustomPlace);
 
 	log.info(ansis.bold("→ Opening in Roblox Studio"));
 	log.step(`File: ${ansis.cyan(placeFile)}`);
@@ -54,27 +53,19 @@ export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 	log.success("Opened in Roblox Studio");
 
 	if (config.rbxts.watchOnOpen) {
-		await runScript("watch", config);
+		await runScript("watch");
 	}
 }
 
-async function ensurePlaceFileExists(
-	placeFile: string,
-	config: ResolvedConfig,
-	isCustomPlace: boolean,
-): Promise<void> {
+async function ensurePlaceFileExists(placeFile: string, isCustomPlace: boolean): Promise<void> {
 	try {
 		await access(placeFile);
 	} catch {
-		await handleMissingPlaceFile(placeFile, config, isCustomPlace);
+		await handleMissingPlaceFile(placeFile, isCustomPlace);
 	}
 }
 
-async function handleMissingPlaceFile(
-	placeFile: string,
-	config: ResolvedConfig,
-	isCustomPlace: boolean,
-): Promise<void> {
+async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean): Promise<void> {
 	log.error(`Place file not found: ${ansis.cyan(placeFile)}`);
 
 	// Don't offer to build custom place files
@@ -96,7 +87,7 @@ async function handleMissingPlaceFile(
 		process.exit(1);
 	}
 
-	await runScript("build", config);
+	await runScript("build");
 
 	try {
 		await access(placeFile);

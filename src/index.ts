@@ -49,6 +49,8 @@ function registerCommand(cmd: (typeof COMMANDS)[number]): void {
 	}
 
 	command.action(async (commandOptions: Parameters<typeof cmd.action>[0] | undefined) => {
+		process.env["RBX_FORGE_CMD"] ??= cmd.COMMAND;
+
 		if (cmd.COMMAND !== "init") {
 			intro(ansis.bold(`🔨 rbx-forge ${cmd.COMMAND}`));
 		}

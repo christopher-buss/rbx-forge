@@ -10,6 +10,7 @@ export const defaults: ResolvedConfig = {
 		serve: "forge:serve",
 		start: "forge:start",
 		stop: "forge:stop",
+		syncback: "forge:syncback",
 		typegen: "forge:typegen",
 		watch: "forge:watch",
 	},
@@ -26,6 +27,10 @@ export const defaults: ResolvedConfig = {
 		watchOnOpen: true,
 	},
 	suppressNoTaskRunnerWarning: false,
+	syncback: {
+		runOnStart: false,
+	},
+	syncbackInputPath: "game.rbxl",
 	typegen: {
 		exclude: ["**/node_modules/**"],
 		include: ["**"],

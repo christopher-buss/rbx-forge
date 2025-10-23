@@ -11,7 +11,7 @@ import {
 	type ResolvedCommand,
 } from "package-manager-detector";
 import type { ScriptName } from "src/commands";
-import type { ResolvedConfig } from "src/config/schema";
+import { loadProjectConfig } from "src/config";
 import { CLI_COMMAND } from "src/constants";
 import type { Except } from "type-fest";
 
@@ -216,19 +216,23 @@ export async function runOutput(
  * ```
  *
  * @param scriptName - The base script name to run (e.g., "build", "serve").
- * @param config - The project configuration.
+ * @param args - Additional arguments to pass to the script.
  */
-export async function runScript(scriptName: ScriptName, config: ResolvedConfig): Promise<void> {
+export async function runScript(
+	scriptName: ScriptName,
+	args: ReadonlyArray<string> = [],
+): Promise<void> {
+	const config = await loadProjectConfig();
 	const resolvedName = getCommandName(scriptName, config);
 	const callingRunner = getCallingTaskRunner();
 
 	if (callingRunner === "mise") {
-		await run("mise", ["run", resolvedName], { shouldShowCommand: false });
+		await run("mise", ["run", resolvedName, ...args], { shouldShowCommand: false });
 		return;
 	}
 
 	if (callingRunner === "npm") {
-		await runWithPackageManager(resolvedName);
+		await runWithPackageManager(resolvedName, args);
 		return;
 	}
 
@@ -243,7 +247,7 @@ export async function runScript(scriptName: ScriptName, config: ResolvedConfig):
 		process.env["RBX_FORGE_NO_TASK_RUNNER_WARNING_SHOWN"] = "1";
 	}
 
-	await run(CLI_COMMAND, [scriptName]);
+	await run(CLI_COMMAND, [scriptName, ...args], { shouldShowCommand: false });
 }
 
 /**
@@ -333,10 +337,13 @@ async function handleSubprocess<OptionsType extends ExecaOptions>(
 	}
 }
 
-async function runWithPackageManager(resolvedName: string): Promise<void> {
+async function runWithPackageManager(
+	resolvedName: string,
+	runArguments: ReadonlyArray<string>,
+): Promise<void> {
 	const { args, command } = await findCommandForPackageManager("run", [resolvedName]);
 
-	await run(command, args, {
+	await run(command, [...args, ...runArguments], {
 		shouldShowCommand: false,
 	});
 }

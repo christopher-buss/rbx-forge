@@ -11,6 +11,7 @@ export const configSchema = type({
 		"serve?": "string",
 		"start?": "string",
 		"stop?": "string",
+		"syncback?": "string",
 		"typegen?": "string",
 		"watch?": "string",
 	},
@@ -27,6 +28,10 @@ export const configSchema = type({
 		"watchOnOpen?": "boolean",
 	},
 	"suppressNoTaskRunnerWarning?": "boolean",
+	"syncback?": {
+		"runOnStart?": "boolean",
+	},
+	"syncbackInputPath?": "string",
 	"typegen?": {
 		"exclude?": "string[]",
 		"include?": "string[]",

@@ -4,11 +4,11 @@ import ansis from "ansis";
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { cleanupLockfile } from "src/utils/cleanup-lock-file";
 
 import { loadProjectConfig } from "../config";
 import { LOCKFILE_NAME, STUDIO_LOCKFILE_SUFFIX } from "../constants";
 import { isWsl } from "../utils/is-wsl";
+import { cleanupLockfile, readLockfilePids } from "../utils/lockfile";
 import { createSpinner, run } from "../utils/run";
 import { runPlatform } from "../utils/run-platform";
 
@@ -22,24 +22,19 @@ export async function action(): Promise<void> {
 	const watchLockFile = path.join(projectPath, LOCKFILE_NAME);
 	const studioLockFile = path.join(projectPath, config.buildOutputPath + STUDIO_LOCKFILE_SUFFIX);
 
-	const stoppedProcesses: Array<string> = [];
 	const spinner = createSpinner("Stopping processes...");
 
-	const didStopWatch = await tryStopProcess(watchLockFile);
-	if (didStopWatch) {
-		stoppedProcesses.push("watch");
-	}
+	const stoppedCount = await tryStopSharedLockProcesses(watchLockFile);
 
-	const didStopStudio = await tryStopProcess(studioLockFile);
-	if (didStopStudio) {
-		stoppedProcesses.push("Roblox Studio");
-	}
+	const didStopStudio = await tryStopStudioProcess(studioLockFile);
 
-	if (stoppedProcesses.length === 0) {
+	const totalStopped = stoppedCount + (didStopStudio ? 1 : 0);
+
+	if (totalStopped === 0) {
 		spinner.stop(ansis.dim("No running processes found"));
 	} else {
-		const processNames = stoppedProcesses.join(" and ");
-		spinner.stop(ansis.green(`Stopped ${processNames}`));
+		const processWord = totalStopped === 1 ? "process" : "processes";
+		spinner.stop(ansis.green(`Stopped ${totalStopped} ${processWord}`));
 	}
 }
 
@@ -59,7 +54,53 @@ async function killProcess(processId: string): Promise<void> {
 	});
 }
 
-async function tryStopProcess(lockFilePath: string): Promise<boolean> {
+/**
+ * Stops all processes listed in the shared lock file.
+ *
+ * @param lockFilePath - Path to the shared lock file.
+ * @returns Number of processes successfully stopped.
+ */
+async function tryStopSharedLockProcesses(lockFilePath: string): Promise<number> {
+	try {
+		const pids = await readLockfilePids();
+		if (pids.length === 0) {
+			return 0;
+		}
+
+		let stoppedCount = 0;
+
+		for (const pid of pids) {
+			try {
+				await killProcess(String(pid));
+				stoppedCount++;
+			} catch (err) {
+				const errorMessage = err instanceof Error ? err.message : String(err);
+				log.warn(`Failed to kill process ${pid}: ${errorMessage}`);
+			}
+		}
+
+		await cleanupLockfile(lockFilePath);
+
+		return stoppedCount;
+	} catch (err) {
+		if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+			return 0;
+		}
+
+		const fileName = path.basename(lockFilePath);
+		const errorMessage = err instanceof Error ? err.message : String(err);
+		log.warn(`Failed to read lockfile ${fileName}: ${errorMessage}`);
+		return 0;
+	}
+}
+
+/**
+ * Stops the Roblox Studio process using its lock file.
+ *
+ * @param lockFilePath - Path to the Studio lock file.
+ * @returns True if Studio was stopped, false otherwise.
+ */
+async function tryStopStudioProcess(lockFilePath: string): Promise<boolean> {
 	try {
 		const lockFileContents = await fs.readFile(lockFilePath, "utf-8");
 		const processId = lockFileContents.split("\n")[0];
@@ -71,23 +112,23 @@ async function tryStopProcess(lockFilePath: string): Promise<boolean> {
 
 		try {
 			await killProcess(processId);
-			await cleanupLockfile(lockFilePath);
 			return true;
 		} catch (err) {
 			const errorMessage = err instanceof Error ? err.message : String(err);
-			log.warn(`Failed to kill process ${processId}: ${errorMessage}`);
-			await cleanupLockfile(lockFilePath);
+			log.warn(`Failed to kill Studio process ${processId}: ${errorMessage}`);
 			return false;
+		} finally {
+			await cleanupLockfile(lockFilePath);
 		}
 	} catch (err) {
-		// Lockfile doesn't exist - this is expected if no process is running
+		// Lockfile doesn't exist - this is expected if Studio is not running
 		if (err instanceof Error && "code" in err && err.code === "ENOENT") {
 			return false;
 		}
 
 		const fileName = path.basename(lockFilePath);
 		const errorMessage = err instanceof Error ? err.message : String(err);
-		log.warn(`Failed to read lockfile ${fileName}: ${errorMessage}`);
+		log.warn(`Failed to read Studio lockfile ${fileName}: ${errorMessage}`);
 		return false;
 	}
 }

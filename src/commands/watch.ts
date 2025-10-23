@@ -2,14 +2,11 @@ import { log, outro } from "@clack/prompts";
 
 import ansis from "ansis";
 import { ExecaError, type ResultPromise } from "execa";
-import fs from "node:fs/promises";
-import path from "node:path";
 import process from "node:process";
-import { cleanupLockfile } from "src/utils/cleanup-lock-file";
 import { getRojoCommand } from "src/utils/rojo";
 
 import { loadProjectConfig } from "../config";
-import { LOCKFILE_NAME } from "../constants";
+import { addPidToLockfile, removePidFromLockfile } from "../utils/lockfile";
 import { runWithTaskLog, type TaskLogResult } from "../utils/run";
 
 export const COMMAND = "watch";
@@ -99,7 +96,7 @@ function createCleanupHandler(handles: Array<ProcessHandle>) {
 			}
 		}
 
-		await cleanupLockfile(path.join(process.cwd(), LOCKFILE_NAME));
+		await removePidFromLockfile(process.pid);
 
 		if (exitCode === 0) {
 			outro(ansis.green("Watch stopped successfully"));
@@ -229,7 +226,7 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 		});
 		handles.push(watchHandle);
 
-		await writeLockfile();
+		await addPidToLockfile(process.pid);
 
 		// Wait for either process to exit (fail-fast)
 		await Promise.race(handles.map(async (handle) => handle.subprocess));
@@ -255,9 +252,4 @@ async function startProcess(options: StartProcessOptions): Promise<ProcessHandle
 		...wrappedResult,
 		name,
 	};
-}
-
-async function writeLockfile(): Promise<void> {
-	const lockFilePath = path.join(process.cwd(), LOCKFILE_NAME);
-	await fs.writeFile(lockFilePath, String(process.pid), "utf-8");
 }

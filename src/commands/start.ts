@@ -13,7 +13,11 @@ export async function action(): Promise<void> {
 
 	log.info(ansis.bold("→ Starting full build workflow"));
 
-	await runScript("compile", config);
-	await runScript("build", config);
-	await runScript("open", config);
+	await runScript("compile");
+	await runScript("build");
+
+	await Promise.all([
+		runScript("open"),
+		config.syncback.runOnStart ? runScript("syncback", ["--watch"]) : Promise.resolve(),
+	]);
 }
