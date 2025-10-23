@@ -1,15 +1,17 @@
-import { cancel, confirm, isCancel, log } from "@clack/prompts";
+import { cancel, confirm, isCancel, log, outro } from "@clack/prompts";
 
 import ansis from "ansis";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import type { ResolvedConfig } from "src/config/schema";
 
 import { loadProjectConfig } from "../config";
 import { getWindowsPath } from "../utils/get-windows-path";
 import { isWsl } from "../utils/is-wsl";
 import { run, runScript } from "../utils/run";
 import { runPlatform } from "../utils/run-platform";
+import { getStudioLockFilePath, watchStudioLockFile } from "../utils/studio-lock-watcher";
 
 export const COMMAND = "open";
 export const DESCRIPTION = "Open place file in Roblox Studio";
@@ -53,7 +55,7 @@ export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 	log.success("Opened in Roblox Studio");
 
 	if (config.rbxts.watchOnOpen) {
-		await runScript("watch");
+		await startWatchOnStudioClose(config);
 	}
 }
 
@@ -95,4 +97,23 @@ async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean)
 		log.error("Build completed but place file was not created");
 		process.exit(1);
 	}
+}
+
+async function startWatchOnStudioClose(config: ResolvedConfig): Promise<void> {
+	const abortController = new AbortController();
+
+	await Promise.race([
+		runScript("watch", [], { cancelSignal: abortController.signal }),
+		watchStudioLockFile(getStudioLockFilePath(config), {
+			onStudioClose: () => {
+				if (process.env["RBX_FORGE_CMD"] === "open") {
+					outro(ansis.green("Roblox Studio closed, stopping watch mode"));
+				} else {
+					log.info("Roblox Studio closed, stopping watch mode");
+				}
+
+				abortController.abort();
+			},
+		}),
+	]);
 }

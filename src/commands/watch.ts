@@ -99,7 +99,11 @@ function createCleanupHandler(handles: Array<ProcessHandle>) {
 		await removePidFromLockfile(process.pid);
 
 		if (exitCode === 0) {
-			outro(ansis.green("Watch stopped successfully"));
+			if (process.env["RBX_FORGE_CMD"] === "watch") {
+				outro(ansis.green("Watch stopped successfully"));
+			} else {
+				log.info(ansis.green("Watch stopped successfully"));
+			}
 		} else {
 			outro(ansis.red("Watch stopped with errors"));
 		}

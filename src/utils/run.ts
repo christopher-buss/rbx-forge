@@ -217,22 +217,24 @@ export async function runOutput(
  *
  * @param scriptName - The base script name to run (e.g., "build", "serve").
  * @param args - Additional arguments to pass to the script.
+ * @param options - Optional run options (e.g., cancelSignal for cancellation).
  */
 export async function runScript(
 	scriptName: ScriptName,
 	args: ReadonlyArray<string> = [],
+	options: RunOptions = {},
 ): Promise<void> {
 	const config = await loadProjectConfig();
 	const resolvedName = getCommandName(scriptName, config);
 	const callingRunner = getCallingTaskRunner();
 
 	if (callingRunner === "mise") {
-		await run("mise", ["run", resolvedName, ...args], { shouldShowCommand: false });
+		await run("mise", ["run", resolvedName, ...args], { shouldShowCommand: false, ...options });
 		return;
 	}
 
 	if (callingRunner === "npm") {
-		await runWithPackageManager(resolvedName, args);
+		await runWithPackageManager(resolvedName, args, options);
 		return;
 	}
 
@@ -247,7 +249,7 @@ export async function runScript(
 		process.env["RBX_FORGE_NO_TASK_RUNNER_WARNING_SHOWN"] = "1";
 	}
 
-	await run(CLI_COMMAND, [scriptName, ...args], { shouldShowCommand: false });
+	await run(CLI_COMMAND, [scriptName, ...args], { shouldShowCommand: false, ...options });
 }
 
 /**
@@ -340,10 +342,12 @@ async function handleSubprocess<OptionsType extends ExecaOptions>(
 async function runWithPackageManager(
 	resolvedName: string,
 	runArguments: ReadonlyArray<string>,
+	options: RunOptions = {},
 ): Promise<void> {
 	const { args, command } = await findCommandForPackageManager("run", [resolvedName]);
 
 	await run(command, [...args, ...runArguments], {
 		shouldShowCommand: false,
+		...options,
 	});
 }

@@ -4,9 +4,10 @@ import ansis from "ansis";
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { getStudioLockFilePath } from "src/utils/studio-lock-watcher";
 
 import { loadProjectConfig } from "../config";
-import { LOCKFILE_NAME, STUDIO_LOCKFILE_SUFFIX } from "../constants";
+import { LOCKFILE_NAME } from "../constants";
 import { isWsl } from "../utils/is-wsl";
 import { cleanupLockfile, readLockfilePids } from "../utils/lockfile";
 import { createSpinner, run } from "../utils/run";
@@ -17,16 +18,12 @@ export const DESCRIPTION = "Stop running watch and Roblox Studio processes";
 
 export async function action(): Promise<void> {
 	const config = await loadProjectConfig();
-	const projectPath = process.cwd();
-
-	const watchLockFile = path.join(projectPath, LOCKFILE_NAME);
-	const studioLockFile = path.join(projectPath, config.buildOutputPath + STUDIO_LOCKFILE_SUFFIX);
 
 	const spinner = createSpinner("Stopping processes...");
 
+	const watchLockFile = path.join(process.cwd(), LOCKFILE_NAME);
 	const stoppedCount = await tryStopSharedLockProcesses(watchLockFile);
-
-	const didStopStudio = await tryStopStudioProcess(studioLockFile);
+	const didStopStudio = await tryStopStudioProcess(getStudioLockFilePath(config));
 
 	const totalStopped = stoppedCount + (didStopStudio ? 1 : 0);
 
