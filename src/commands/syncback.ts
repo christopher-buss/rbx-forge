@@ -47,11 +47,20 @@ export interface SyncbackOptions {
 	watch?: boolean;
 }
 
+interface WatcherEventOptions {
+	commandOptions: SyncbackOptions;
+	onLockfileRemoved: () => void;
+	rojo: string;
+	spinner?: ReturnType<typeof createSpinner>;
+	state: WatchState;
+}
+
 interface WatchState {
 	hasLockfile: boolean;
 	inputPath: string;
 	isProcessing: boolean;
 	lastModified: number;
+	monitoringSpinner?: ReturnType<typeof createSpinner>;
 	studioLockFile: string;
 	watcher: FSWatcher;
 }
@@ -152,11 +161,34 @@ function createChangeHandler(
 			state.isProcessing = true;
 
 			try {
-				await executeSyncback(rojo, state.inputPath, commandOptions);
+				await executeSyncback(rojo, state.inputPath, commandOptions, state);
 			} finally {
 				state.isProcessing = false;
 			}
 		})();
+	};
+}
+
+/**
+ * Create shutdown handler that stops the spinner and cleans up resources.
+ *
+ * @param state - The watch state.
+ * @param spinner - Optional spinner to stop.
+ * @returns The shutdown function.
+ */
+function createShutdownHandler(
+	state: WatchState,
+	spinner?: ReturnType<typeof createSpinner>,
+): () => Promise<void> {
+	return async () => {
+		if (spinner !== undefined) {
+			spinner.stop();
+		}
+
+		state.monitoringSpinner?.stop();
+		log.info("\nStopping syncback watch...");
+		await state.watcher.close();
+		await removePidFromLockfile(process.pid);
 	};
 }
 
@@ -180,7 +212,7 @@ function createUnlinkHandler(
 			await waitForCompletion(state);
 
 			// No syncback in progress, safe to exit
-			log.info("\nStudio lock file removed - stopping syncback watch...");
+			state.monitoringSpinner?.stop("Studio lock file removed - stopping syncback watch...");
 			onLockfileRemoved();
 		})();
 	};
@@ -192,12 +224,17 @@ function createUnlinkHandler(
  * @param rojo - The rojo command to execute.
  * @param inputPath - Path to the input file to syncback from.
  * @param commandOptions - Options including verbosity and color settings.
+ * @param state - Optional watch state to manage monitoring spinner.
  */
 async function executeSyncback(
 	rojo: string,
 	inputPath: string,
 	commandOptions: SyncbackOptions,
+	state?: WatchState,
 ): Promise<void> {
+	// Stop the monitoring spinner if in watch mode
+	state?.monitoringSpinner?.stop();
+
 	log.info(`\n${ansis.dim(new Date().toLocaleTimeString())} - ${inputPath} changed`);
 
 	const startTime = performance.now();
@@ -214,6 +251,11 @@ async function executeSyncback(
 		spinner.stop(`Syncback succeeded (${ansis.dim(duration)})`);
 	} catch {
 		spinner.stop(ansis.red("Syncback failed"));
+	}
+
+	// Restart the monitoring spinner if in watch mode and lock file still exists
+	if (state?.hasLockfile === true) {
+		state.monitoringSpinner = createSpinner("Monitoring for changes...");
 	}
 }
 
@@ -269,23 +311,18 @@ function setupSignalHandlers(shutdown: () => Promise<void>): void {
 /**
  * Setup watcher event handlers for lock file detection and changes.
  *
- * @param state - The watch state.
- * @param rojo - The rojo command.
- * @param commandOptions - Syncback command options.
- * @param onLockfileRemoved - Callback when lock file is removed.
+ * @param watcherOptions - Configuration options for watcher events.
  */
-function setupWatcherEvents(
-	state: WatchState,
-	rojo: string,
-	commandOptions: SyncbackOptions,
-	onLockfileRemoved: () => void,
-): void {
+function setupWatcherEvents(watcherOptions: WatcherEventOptions): void {
+	const { commandOptions, onLockfileRemoved, rojo, spinner, state } = watcherOptions;
+
 	state.watcher.on("add", (filePath) => {
 		if (filePath !== state.studioLockFile) {
 			return;
 		}
 
-		log.info("\nStudio lock file detected - monitoring for changes...");
+		spinner?.stop("Studio lock file detected");
+		state.monitoringSpinner = createSpinner("Monitoring for changes...");
 		state.hasLockfile = true;
 	});
 
@@ -348,17 +385,19 @@ async function watchMode(
 	}
 
 	const state = initializeWatchState(inputPath, studioLockFile);
-
-	async function shutdown(): Promise<void> {
-		log.info("\nStopping syncback watch...");
-		await state.watcher.close();
-		await removePidFromLockfile(process.pid);
-	}
+	const spinner = createSpinner("Waiting for Studio lock file...");
+	const shutdown = createShutdownHandler(state, spinner);
 
 	setupSignalHandlers(shutdown);
 
 	await new Promise<void>((resolve) => {
-		setupWatcherEvents(state, rojo, commandOptions, resolve);
+		setupWatcherEvents({
+			commandOptions,
+			onLockfileRemoved: resolve,
+			rojo,
+			spinner,
+			state,
+		});
 	});
 
 	await shutdown();
