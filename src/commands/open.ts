@@ -9,6 +9,8 @@ import type { ResolvedConfig } from "src/config/schema";
 import { loadProjectConfig } from "../config";
 import { getWindowsPath } from "../utils/get-windows-path";
 import { isWsl } from "../utils/is-wsl";
+import { cleanupLockfile } from "../utils/lockfile";
+import { processManager, setupSignalHandlers } from "../utils/process-manager";
 import { run, runScript } from "../utils/run";
 import { runPlatform } from "../utils/run-platform";
 import { getStudioLockFilePath, watchStudioLockFile } from "../utils/studio-lock-watcher";
@@ -54,7 +56,7 @@ export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 
 	log.success("Opened in Roblox Studio");
 
-	if (config.rbxts.watchOnOpen) {
+	if (config.rbxts.watchOnOpen && process.env["RBX_FORGE_CMD"] === "open") {
 		await startWatchOnStudioClose(config);
 	}
 }
@@ -100,20 +102,35 @@ async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean)
 }
 
 async function startWatchOnStudioClose(config: ResolvedConfig): Promise<void> {
+	setupSignalHandlers();
+
+	// Register cleanup hook to remove Studio lock file on exit
+	const studioLockFilePath = getStudioLockFilePath(config);
+
+	async function cleanupHook(): Promise<void> {
+		await cleanupLockfile(studioLockFilePath);
+	}
+
+	processManager.registerCleanupHook(cleanupHook);
+
 	const abortController = new AbortController();
 
-	await Promise.race([
-		runScript("watch", [], { cancelSignal: abortController.signal }),
-		watchStudioLockFile(getStudioLockFilePath(config), {
-			onStudioClose: () => {
-				if (process.env["RBX_FORGE_CMD"] === "open") {
-					outro(ansis.green("Roblox Studio closed, stopping watch mode"));
-				} else {
-					log.info("Roblox Studio closed, stopping watch mode");
-				}
+	try {
+		await Promise.race([
+			runScript("watch", [], { cancelSignal: abortController.signal }),
+			watchStudioLockFile(studioLockFilePath, {
+				onStudioClose: () => {
+					if (process.env["RBX_FORGE_CMD"] === "open") {
+						outro(ansis.green("Roblox Studio closed, stopping watch mode"));
+					} else {
+						log.info("Roblox Studio closed, stopping watch mode");
+					}
 
-				abortController.abort();
-			},
-		}),
-	]);
+					abortController.abort();
+				},
+			}),
+		]);
+	} finally {
+		processManager.unregisterCleanupHook(cleanupHook);
+	}
 }

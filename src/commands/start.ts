@@ -2,14 +2,22 @@ import { log, outro } from "@clack/prompts";
 
 import ansis from "ansis";
 import process from "node:process";
+import {
+	processManager,
+	setupSignalHandlers as setupProcessManagerHandlers,
+} from "src/utils/process-manager";
 import { runScript } from "src/utils/run";
+import { getStudioLockFilePath, watchStudioLockFile } from "src/utils/studio-lock-watcher";
 
 import { loadProjectConfig } from "../config";
+import { cleanupLockfile, readLockfilePids, removePidFromLockfile } from "../utils/lockfile";
 
 export const COMMAND = "start";
 export const DESCRIPTION = "Compile, build, and open in Roblox Studio with optional syncback";
 
 export async function action(): Promise<void> {
+	setupProcessManagerHandlers();
+
 	const config = await loadProjectConfig();
 
 	log.info(ansis.bold("→ Starting full build workflow"));
@@ -17,19 +25,32 @@ export async function action(): Promise<void> {
 	await runScript("compile");
 	await runScript("build");
 
+	// Register cleanup hook to remove Studio lock file on exit
+	const studioLockFilePath = getStudioLockFilePath(config);
+
+	async function cleanupStudioLockfile(): Promise<void> {
+		await cleanupLockfile(studioLockFilePath);
+	}
+
+	processManager.registerCleanupHook(cleanupStudioLockfile);
+
 	const abortController = new AbortController();
 	setupSignalHandlers(abortController);
 
 	try {
 		await runWorkflow(config, abortController);
+
+		// Workflow completed and cleanup already ran inside runWorkflow
 		outro(ansis.green("✨ Start workflow complete, successfully exited!"));
+		process.exit(0);
 	} catch (err) {
-		if (!isCancellationError(err)) {
+		if (!isCancellationError(err) && !isShutdownError(err)) {
 			throw err;
 		}
 
-		// Cancellation is expected when Studio closes or user presses Ctrl+C
+		// Ctrl+C or expected shutdown - cleanup already ran in runWorkflow
 		outro(ansis.green("✨ Start workflow complete, successfully exited!"));
+		process.exit(0);
 	} finally {
 		cleanupSignalHandlers(abortController);
 	}
@@ -59,6 +80,25 @@ function createSignalHandler(abortController: AbortController): () => void {
 }
 
 /**
+ * Cleanup handler for when Studio closes.
+ *
+ * @param abortController - AbortController to abort running processes.
+ */
+async function handleStudioClose(abortController: AbortController): Promise<void> {
+	log.info("Studio closed - stopping workflow...");
+
+	abortController.abort();
+
+	await processManager.cleanup();
+
+	const lockfilePids = await readLockfilePids();
+
+	for (const pid of lockfilePids) {
+		await removePidFromLockfile(pid);
+	}
+}
+
+/**
  * Check if error is from expected cancellation (abort signal).
  *
  * @param err - The error to check.
@@ -74,23 +114,48 @@ function isCancellationError(err: unknown): boolean {
 }
 
 /**
- * Run the open and syncback workflow concurrently.
+ * Check if error is from shutdown signal.
+ *
+ * @param err - The error to check.
+ * @returns True if error is from shutdown.
+ */
+function isShutdownError(err: unknown): boolean {
+	return err instanceof Error && err.message.includes("Shutdown");
+}
+
+/**
+ * Run the full workflow: open Studio, watch for changes, and optionally run
+ * syncback.
+ *
+ * Exits when either:
+ *
+ * - Studio closes (detected via lock file removal).
+ * - User presses Ctrl+C (handled by ProcessManager).
  *
  * @param config - The project configuration.
- * @param abortController - AbortController to cancel syncback when open exits.
+ * @param abortController - AbortController to cancel syncback when Studio
+ *   closes.
  */
 async function runWorkflow(
 	config: Awaited<ReturnType<typeof loadProjectConfig>>,
 	abortController: AbortController,
 ): Promise<void> {
-	await Promise.all([
-		runScript("open").finally(() => {
-			abortController.abort();
-		}),
-		config.syncback.runOnStart
-			? runScript("syncback", ["--watch"], { cancelSignal: abortController.signal })
-			: Promise.resolve(),
-	]);
+	startBackgroundProcesses(config, abortController);
+
+	const studioWatcher = watchStudioLockFile(getStudioLockFilePath(config), {
+		onStudioClose: async () => handleStudioClose(abortController),
+	});
+
+	try {
+		await studioWatcher;
+		await processManager.cleanup();
+	} catch (err) {
+		if (isShutdownError(err) || isCancellationError(err)) {
+			return;
+		}
+
+		throw err;
+	}
 }
 
 /**
@@ -102,4 +167,42 @@ function setupSignalHandlers(abortController: AbortController): void {
 	const handler = createSignalHandler(abortController);
 	process.on("SIGINT", handler);
 	process.on("SIGTERM", handler);
+}
+
+/**
+ * Start background processes for the workflow.
+ *
+ * @param config - Project configuration.
+ * @param abortController - AbortController for canceling processes.
+ */
+function startBackgroundProcesses(
+	config: Awaited<ReturnType<typeof loadProjectConfig>>,
+	abortController: AbortController,
+): void {
+	// Start child processes in background (will be killed when Studio closes)
+	// Catch their rejections to prevent unhandled promise rejections
+
+	runScript("open", [], { shouldRegisterProcess: true }).catch((err) => {
+		if (!isCancellationError(err)) {
+			log.warn(`Open script failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	});
+	runScript("watch", [], { shouldRegisterProcess: true }).catch((err) => {
+		if (!isCancellationError(err)) {
+			log.warn(`Watch script failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	});
+
+	if (config.syncback.runOnStart) {
+		runScript("syncback", ["--watch"], {
+			cancelSignal: abortController.signal,
+			shouldRegisterProcess: true,
+		}).catch((err) => {
+			if (!isCancellationError(err) && !isShutdownError(err)) {
+				log.warn(
+					`Syncback script failed: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		});
+	}
 }

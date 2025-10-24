@@ -7,6 +7,7 @@ import { getRojoCommand } from "src/utils/rojo";
 
 import { loadProjectConfig } from "../config";
 import { formatDuration } from "../utils/format-duration";
+import { setupSignalHandlers } from "../utils/process-manager";
 import { createSpinner, run } from "../utils/run";
 
 export const COMMAND = "build";
@@ -57,33 +58,26 @@ export async function action(commandOptions: BuildOptions = {}): Promise<void> {
 
 	const outputPath = commandOptions.plugin ?? commandOptions.output ?? config.buildOutputPath;
 	const isPluginOutput = commandOptions.plugin !== undefined;
-
 	const rojoArgs = buildRojoArguments(commandOptions, outputPath, isPluginOutput);
 
 	displayBuildInfo(outputPath, isPluginOutput);
+
+	if (commandOptions.watch === true) {
+		setupSignalHandlers();
+	}
 
 	const startTime = performance.now();
 	const spinner = createSpinner("Building project...");
 
 	await run(rojo, rojoArgs, {
+		shouldRegisterProcess: commandOptions.watch === true,
 		shouldStreamOutput: commandOptions.verbose !== undefined || commandOptions.watch === true,
 	});
 
 	const duration = formatDuration(startTime);
-
-	let fileSize = "";
-	if (!isPluginOutput) {
-		try {
-			const stats = await stat(outputPath);
-			const sizeMb = stats.size / (1024 * 1024);
-			fileSize =
-				sizeMb < 0.1 ? `${(sizeMb * 1024).toFixed(1)} KB` : `${sizeMb.toFixed(1)} MB`;
-		} catch {
-			fileSize = "";
-		}
-	}
-
+	const fileSize = await getFileSize(outputPath, isPluginOutput);
 	const statsDisplay = [outputPath, fileSize, duration].filter(Boolean).join(", ");
+
 	spinner.stop(`Build complete (${ansis.dim(statsDisplay)})`);
 }
 
@@ -127,6 +121,27 @@ function displayBuildInfo(outputPath: string, isPluginOutput: boolean): void {
 
 	const outputDisplay = isPluginOutput ? `plugin: ${outputPath}` : outputPath;
 	log.step(`Output: ${ansis.cyan(outputDisplay)}`);
+}
+
+/**
+ * Get the file size of the output file.
+ *
+ * @param outputPath - Path to the output file.
+ * @param isPluginOutput - Whether the output is a plugin.
+ * @returns Formatted file size string or empty string.
+ */
+async function getFileSize(outputPath: string, isPluginOutput: boolean): Promise<string> {
+	if (isPluginOutput) {
+		return "";
+	}
+
+	try {
+		const stats = await stat(outputPath);
+		const sizeMb = stats.size / (1024 * 1024);
+		return sizeMb < 0.1 ? `${(sizeMb * 1024).toFixed(1)} KB` : `${sizeMb.toFixed(1)} MB`;
+	} catch {
+		return "";
+	}
 }
 
 function validateOptions(buildOptions: BuildOptions): void {

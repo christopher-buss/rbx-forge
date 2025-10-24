@@ -19,6 +19,14 @@ export interface WatchStudioLockFileOptions {
 	onStudioOpen?: () => Promise<void> | void;
 }
 
+interface SetupWatcherEventsOptions {
+	cleanup: () => Promise<void>;
+	options: WatchStudioLockFileOptions;
+	reject: (err: Error) => void;
+	resolve: () => void;
+	watcher: FSWatcher;
+}
+
 /**
  * Helper to construct Studio lock file path from config.
  *
@@ -57,12 +65,11 @@ export async function watchStudioLockFile(
 	studioLockFilePath: string,
 	options: WatchStudioLockFileOptions,
 ): Promise<void> {
-	return new Promise<void>((resolve) => {
+	return new Promise<void>((resolve, reject) => {
 		const watcher = chokidar.watch(studioLockFilePath, { ignoreInitial: true });
 		const cleanup = createCleanupHandler(watcher);
 
-		setupSignalHandlers(cleanup);
-		setupWatcherEvents(watcher, options, cleanup, resolve);
+		setupWatcherEvents({ cleanup, options, reject, resolve, watcher });
 	});
 }
 
@@ -94,6 +101,24 @@ function createCleanupHandler(watcher: FSWatcher): () => Promise<void> {
 }
 
 /**
+ * Create shutdown handler for ProcessManager signals.
+ *
+ * @param cleanup - Cleanup function to call.
+ * @param reject - Reject function for the promise.
+ * @returns Shutdown handler function.
+ */
+function createShutdownHandler(
+	cleanup: () => Promise<void>,
+	reject: (err: Error) => void,
+): () => void {
+	return () => {
+		void cleanup().finally(() => {
+			reject(new Error("Shutdown"));
+		});
+	};
+}
+
+/**
  * Handle watcher errors by logging them.
  *
  * @param error - The error that occurred.
@@ -104,38 +129,14 @@ function handleWatcherError(error: unknown): void {
 }
 
 /**
- * Setup signal handlers for graceful shutdown on SIGINT/SIGTERM.
- *
- * @param cleanup - The cleanup function to call on signal.
- */
-function setupSignalHandlers(cleanup: () => Promise<void>): void {
-	for (const signal of ["SIGINT", "SIGTERM"]) {
-		process.on(signal, () => {
-			void (async () => {
-				try {
-					await cleanup();
-				} finally {
-					process.exit(0);
-				}
-			})();
-		});
-	}
-}
-
-/**
  * Setup watcher event handlers for add, unlink, and error events.
  *
- * @param watcher - The FSWatcher instance.
- * @param options - Configuration options for watcher behavior.
- * @param cleanup - The cleanup function.
- * @param resolve - Promise resolver for when Studio closes.
+ * @param parameters - Configuration object for watcher events.
  */
-function setupWatcherEvents(
-	watcher: FSWatcher,
-	{ onError, onStudioClose, onStudioOpen }: WatchStudioLockFileOptions,
-	cleanup: () => Promise<void>,
-	resolve: () => void,
-): void {
+function setupWatcherEvents(parameters: SetupWatcherEventsOptions): void {
+	const { cleanup, options, reject, resolve, watcher } = parameters;
+	const { onError, onStudioClose, onStudioOpen } = options;
+
 	watcher.on("add", () => {
 		if (onStudioOpen !== undefined) {
 			void (async () => {
@@ -159,4 +160,8 @@ function setupWatcherEvents(
 			handleWatcherError(error);
 		}
 	});
+
+	const shutdownHandler = createShutdownHandler(cleanup, reject);
+	process.once("SIGTERM", shutdownHandler);
+	process.once("SIGINT", shutdownHandler);
 }

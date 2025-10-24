@@ -88,7 +88,6 @@ export async function readLockfilePids(): Promise<Array<number>> {
 export async function removePidFromLockfile(pid: number): Promise<void> {
 	const lockFilePath = getLockfilePath();
 	const existingPids = await readLockfilePids();
-
 	const updatedPids = existingPids.filter((existingPid) => existingPid !== pid);
 
 	// If no PIDs remain, delete the lock file
