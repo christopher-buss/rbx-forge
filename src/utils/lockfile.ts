@@ -35,6 +35,11 @@ export async function cleanupLockfile(lockFilePath: string): Promise<void> {
 			await fs.rm(lockFilePath);
 			return;
 		} catch (err) {
+			const isCleanedUp = err instanceof Error && "code" in err && err.code === "ENOENT";
+			if (isCleanedUp) {
+				return;
+			}
+
 			const isEbusy = err instanceof Error && "code" in err && err.code === "EBUSY";
 			const isLastAttempt = attempt === maxRetries - 1;
 			if (isEbusy && !isLastAttempt) {

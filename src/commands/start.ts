@@ -109,7 +109,9 @@ function isCancellationError(err: unknown): boolean {
 		err instanceof Error &&
 		(err.name === "AbortError" ||
 			err.message.includes("cancel") ||
-			err.message.includes("abort"))
+			err.message.includes("abort") ||
+			("signal" in err && err.signal === "SIGTERM") ||
+			("signal" in err && err.signal === "SIGINT"))
 	);
 }
 
