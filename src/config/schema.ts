@@ -8,6 +8,7 @@ export const configSchema = type({
 		"compile?": "string",
 		"init?": "string",
 		"open?": "string",
+		"restart?": "string",
 		"serve?": "string",
 		"start?": "string",
 		"stop?": "string",

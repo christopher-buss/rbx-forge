@@ -7,6 +7,7 @@ export const defaults: ResolvedConfig = {
 		compile: "forge:compile",
 		init: "init",
 		open: "forge:open",
+		restart: "forge:restart",
 		serve: "forge:serve",
 		start: "forge:start",
 		stop: "forge:stop",

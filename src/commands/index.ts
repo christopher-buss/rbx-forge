@@ -2,6 +2,7 @@ import * as buildCmd from "./build";
 import * as compileCmd from "./compile";
 import * as initCmd from "./init";
 import * as openCmd from "./open";
+import * as restartCmd from "./restart";
 import * as serveCmd from "./serve";
 import * as startCmd from "./start";
 import * as stopCmd from "./stop";
@@ -35,6 +36,7 @@ export const COMMANDS = [
 	serveCmd,
 	startCmd,
 	stopCmd,
+	restartCmd,
 	syncbackCmd,
 	typegenCmd,
 	watchCmd,
@@ -65,6 +67,7 @@ export * as buildCmd from "./build";
 export * as compileCmd from "./compile";
 export * as initCmd from "./init";
 export * as openCmd from "./open";
+export * as restartCmd from "./restart";
 export * as serveCmd from "./serve";
 export * as startCmd from "./start";
 export * as stopCmd from "./stop";
