@@ -20,6 +20,9 @@ importers:
       c12:
         specifier: ^3.3.1
         version: 3.3.1(magicast@0.3.5)
+      chokidar:
+        specifier: ^4.0.3
+        version: 4.0.3
       commander:
         specifier: ^14.0.1
         version: 14.0.1
@@ -35,6 +38,9 @@ importers:
       package-manager-detector:
         specifier: ^1.5.0
         version: 1.5.0
+      picomatch:
+        specifier: ^4.0.3
+        version: 4.0.3
       type-fest:
         specifier: ^5.1.0
         version: 5.1.0
@@ -51,6 +57,9 @@ importers:
       '@types/node':
         specifier: ^24.9.1
         version: 24.9.1
+      '@types/picomatch':
+        specifier: ^4.0.2
+        version: 4.0.2
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.46.2
         version: 8.46.2(@typescript-eslint/parser@8.46.2(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3))(eslint@9.38.0(jiti@2.6.1))(typescript@5.9.3)
@@ -988,6 +997,9 @@ packages:
 
   '@types/node@24.9.1':
     resolution: {integrity: sha512-QoiaXANRkSXK6p0Duvt56W208du4P9Uye9hWLWgGMDTEoKPhuenzNcC4vGUmrNkiOKTlIrBoyNQYNpSwfEZXSg==}
+
+  '@types/picomatch@4.0.2':
+    resolution: {integrity: sha512-qHHxQ+P9PysNEGbALT8f8YOSHW0KJu6l2xU8DYY0fu/EmGxXdVnuTLvFUvBgPJMSqXq29SYHveejeAha+4AYgA==}
 
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
@@ -4444,6 +4456,8 @@ snapshots:
   '@types/node@24.9.1':
     dependencies:
       undici-types: 7.16.0
+
+  '@types/picomatch@4.0.2': {}
 
   '@types/unist@3.0.3': {}
 

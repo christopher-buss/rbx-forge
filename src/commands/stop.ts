@@ -3,43 +3,28 @@ import { log } from "@clack/prompts";
 import ansis from "ansis";
 import fs from "node:fs/promises";
 import path from "node:path";
-import process from "node:process";
-import { cleanupLockfile } from "src/utils/cleanup-lock-file";
+import { getStudioLockFilePath } from "src/utils/studio-lock-watcher";
 
 import { loadProjectConfig } from "../config";
-import { LOCKFILE_NAME, STUDIO_LOCKFILE_SUFFIX } from "../constants";
 import { isWsl } from "../utils/is-wsl";
+import { cleanupLockfile } from "../utils/lockfile";
 import { createSpinner, run } from "../utils/run";
 import { runPlatform } from "../utils/run-platform";
 
 export const COMMAND = "stop";
-export const DESCRIPTION = "Stop running watch and Roblox Studio processes";
+export const DESCRIPTION = "Stop running Roblox Studio processes";
 
 export async function action(): Promise<void> {
 	const config = await loadProjectConfig();
-	const projectPath = process.cwd();
 
-	const watchLockFile = path.join(projectPath, LOCKFILE_NAME);
-	const studioLockFile = path.join(projectPath, config.buildOutputPath + STUDIO_LOCKFILE_SUFFIX);
+	const spinner = createSpinner("Stopping Roblox Studio...");
 
-	const stoppedProcesses: Array<string> = [];
-	const spinner = createSpinner("Stopping processes...");
+	const didStopStudio = await tryStopStudioProcess(getStudioLockFilePath(config));
 
-	const didStopWatch = await tryStopProcess(watchLockFile);
-	if (didStopWatch) {
-		stoppedProcesses.push("watch");
-	}
-
-	const didStopStudio = await tryStopProcess(studioLockFile);
-	if (didStopStudio) {
-		stoppedProcesses.push("Roblox Studio");
-	}
-
-	if (stoppedProcesses.length === 0) {
-		spinner.stop(ansis.dim("No running processes found"));
+	if (!didStopStudio) {
+		spinner.stop(ansis.dim("No running Roblox Studio found"));
 	} else {
-		const processNames = stoppedProcesses.join(" and ");
-		spinner.stop(ansis.green(`Stopped ${processNames}`));
+		spinner.stop(ansis.green("Stopped Roblox Studio"));
 	}
 }
 
@@ -59,7 +44,13 @@ async function killProcess(processId: string): Promise<void> {
 	});
 }
 
-async function tryStopProcess(lockFilePath: string): Promise<boolean> {
+/**
+ * Stops the Roblox Studio process using its lock file.
+ *
+ * @param lockFilePath - Path to the Studio lock file.
+ * @returns True if Studio was stopped, false otherwise.
+ */
+async function tryStopStudioProcess(lockFilePath: string): Promise<boolean> {
 	try {
 		const lockFileContents = await fs.readFile(lockFilePath, "utf-8");
 		const processId = lockFileContents.split("\n")[0];
@@ -71,23 +62,23 @@ async function tryStopProcess(lockFilePath: string): Promise<boolean> {
 
 		try {
 			await killProcess(processId);
-			await cleanupLockfile(lockFilePath);
 			return true;
 		} catch (err) {
 			const errorMessage = err instanceof Error ? err.message : String(err);
-			log.warn(`Failed to kill process ${processId}: ${errorMessage}`);
-			await cleanupLockfile(lockFilePath);
+			log.warn(`Failed to kill Studio process ${processId}: ${errorMessage}`);
 			return false;
+		} finally {
+			await cleanupLockfile(lockFilePath);
 		}
 	} catch (err) {
-		// Lockfile doesn't exist - this is expected if no process is running
+		// Lockfile doesn't exist - this is expected if Studio is not running
 		if (err instanceof Error && "code" in err && err.code === "ENOENT") {
 			return false;
 		}
 
 		const fileName = path.basename(lockFilePath);
 		const errorMessage = err instanceof Error ? err.message : String(err);
-		log.warn(`Failed to read lockfile ${fileName}: ${errorMessage}`);
+		log.warn(`Failed to read Studio lockfile ${fileName}: ${errorMessage}`);
 		return false;
 	}
 }

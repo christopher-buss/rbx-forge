@@ -5,6 +5,8 @@ import * as openCmd from "./open";
 import * as serveCmd from "./serve";
 import * as startCmd from "./start";
 import * as stopCmd from "./stop";
+import * as syncbackCmd from "./syncback";
+import * as typegenCmd from "./typegen";
 import * as watchCmd from "./watch";
 
 /**
@@ -33,8 +35,18 @@ export const COMMANDS = [
 	serveCmd,
 	startCmd,
 	stopCmd,
+	syncbackCmd,
+	typegenCmd,
 	watchCmd,
-] as const satisfies ReadonlyArray<Command | Command<buildCmd.BuildOptions | openCmd.OpenOptions>>;
+] as const satisfies ReadonlyArray<
+	| Command
+	| Command<
+			| buildCmd.BuildOptions
+			| openCmd.OpenOptions
+			| syncbackCmd.SyncbackOptions
+			| typegenCmd.TypegenOptions
+	  >
+>;
 
 /** Commands that should not be added as task runner scripts. */
 const EXCLUDED_COMMANDS = ["init"] as const;
@@ -56,4 +68,6 @@ export * as openCmd from "./open";
 export * as serveCmd from "./serve";
 export * as startCmd from "./start";
 export * as stopCmd from "./stop";
+export * as syncbackCmd from "./syncback";
+export * as typegenCmd from "./typegen";
 export * as watchCmd from "./watch";

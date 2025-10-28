@@ -11,16 +11,26 @@ import {
 	type ResolvedCommand,
 } from "package-manager-detector";
 import type { ScriptName } from "src/commands";
-import type { ResolvedConfig } from "src/config/schema";
+import { loadProjectConfig } from "src/config";
 import { CLI_COMMAND } from "src/constants";
 import type { Except } from "type-fest";
 
 import { getCommandName } from "./command-names";
 import { getCallingTaskRunner } from "./detect-task-runner";
+import { processManager } from "./process-manager";
 
 export interface RunOptions extends ExecaOptions {
 	/** Custom spinner instance to use instead of creating a new one. */
 	customSpinner?: Spinner;
+	/**
+	 * Whether to register process with ProcessManager for automatic cleanup.
+	 *
+	 * When enabled, the process will be gracefully terminated on application
+	 * exit (SIGINT, SIGTERM, etc.) with configurable timeouts.
+	 *
+	 * @default false
+	 */
+	shouldRegisterProcess?: boolean;
 	/**
 	 * Whether to show the command being executed.
 	 *
@@ -42,6 +52,12 @@ export interface RunOptions extends ExecaOptions {
 export interface RunWithTaskLogOptions extends Except<ExecaOptions, "all" | "buffer"> {
 	/** Maximum number of messages to display (default: 12). */
 	messageLimit?: number;
+	/**
+	 * Whether to register process with ProcessManager for automatic cleanup.
+	 *
+	 * @default false
+	 */
+	shouldRegisterProcess?: boolean;
 	/** Display name for the task logger. */
 	taskName: string;
 }
@@ -126,6 +142,7 @@ export async function run(
 ): Promise<Awaited<ResultPromise>> {
 	const {
 		customSpinner,
+		shouldRegisterProcess = false,
 		shouldShowCommand = true,
 		shouldStreamOutput = true,
 		spinnerMessage,
@@ -143,6 +160,10 @@ export async function run(
 		stderr: shouldStreamOutput ? "inherit" : (execaOptions.stderr ?? "pipe"),
 		stdout: shouldStreamOutput ? "inherit" : (execaOptions.stdout ?? "pipe"),
 	});
+
+	if (shouldRegisterProcess) {
+		processManager.register(subprocess);
+	}
 
 	return handleSubprocess(subprocess, activeSpinner, successMessage);
 }
@@ -216,19 +237,25 @@ export async function runOutput(
  * ```
  *
  * @param scriptName - The base script name to run (e.g., "build", "serve").
- * @param config - The project configuration.
+ * @param args - Additional arguments to pass to the script.
+ * @param options - Optional run options (e.g., cancelSignal for cancellation).
  */
-export async function runScript(scriptName: ScriptName, config: ResolvedConfig): Promise<void> {
+export async function runScript(
+	scriptName: ScriptName,
+	args: ReadonlyArray<string> = [],
+	options: RunOptions = {},
+): Promise<void> {
+	const config = await loadProjectConfig();
 	const resolvedName = getCommandName(scriptName, config);
 	const callingRunner = getCallingTaskRunner();
 
 	if (callingRunner === "mise") {
-		await run("mise", ["run", resolvedName], { shouldShowCommand: false });
+		await run("mise", ["run", resolvedName, ...args], { shouldShowCommand: false, ...options });
 		return;
 	}
 
 	if (callingRunner === "npm") {
-		await runWithPackageManager(resolvedName);
+		await runWithPackageManager(resolvedName, args, options);
 		return;
 	}
 
@@ -243,7 +270,7 @@ export async function runScript(scriptName: ScriptName, config: ResolvedConfig):
 		process.env["RBX_FORGE_NO_TASK_RUNNER_WARNING_SHOWN"] = "1";
 	}
 
-	await run(CLI_COMMAND, [scriptName]);
+	await run(CLI_COMMAND, [scriptName, ...args], { shouldShowCommand: false, ...options });
 }
 
 /**
@@ -283,23 +310,17 @@ export function runWithTaskLog(
 	args: ReadonlyArray<string>,
 	options: RunWithTaskLogOptions,
 ): TaskLogResult {
-	const { messageLimit = 12, taskName, ...execaOptions } = options;
+	const { messageLimit = 12, shouldRegisterProcess = false, taskName, ...execaOptions } = options;
 
-	const taskLogger = taskLog({
-		limit: messageLimit,
-		title: taskName,
-	});
+	const taskLogger = taskLog({ limit: messageLimit, title: taskName });
 
-	const subprocess = execa(command, args, {
-		...execaOptions,
-		all: true,
-		buffer: false,
-	});
+	const subprocess = execa(command, args, { ...execaOptions, all: true, buffer: false });
 
-	const rl = createInterface({
-		crlfDelay: Number.POSITIVE_INFINITY,
-		input: subprocess.all,
-	});
+	if (shouldRegisterProcess) {
+		processManager.register(subprocess);
+	}
+
+	const rl = createInterface({ crlfDelay: Number.POSITIVE_INFINITY, input: subprocess.all });
 
 	rl.on("line", (line) => {
 		taskLogger.message(line);
@@ -309,10 +330,7 @@ export function runWithTaskLog(
 		rl.close();
 	});
 
-	return {
-		subprocess: subprocess as ResultPromise,
-		taskLogger,
-	};
+	return { subprocess: subprocess as ResultPromise, taskLogger };
 }
 
 async function handleSubprocess<OptionsType extends ExecaOptions>(
@@ -333,10 +351,15 @@ async function handleSubprocess<OptionsType extends ExecaOptions>(
 	}
 }
 
-async function runWithPackageManager(resolvedName: string): Promise<void> {
+async function runWithPackageManager(
+	resolvedName: string,
+	runArguments: ReadonlyArray<string>,
+	options: RunOptions = {},
+): Promise<void> {
 	const { args, command } = await findCommandForPackageManager("run", [resolvedName]);
 
-	await run(command, args, {
+	await run(command, [...args, ...runArguments], {
 		shouldShowCommand: false,
+		...options,
 	});
 }

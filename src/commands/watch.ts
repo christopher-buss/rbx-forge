@@ -1,15 +1,13 @@
-import { log, outro } from "@clack/prompts";
+import { log } from "@clack/prompts";
 
 import ansis from "ansis";
 import { ExecaError, type ResultPromise } from "execa";
-import fs from "node:fs/promises";
-import path from "node:path";
 import process from "node:process";
-import { cleanupLockfile } from "src/utils/cleanup-lock-file";
+import { getRojoCommand } from "src/utils/rojo";
 
 import { loadProjectConfig } from "../config";
-import { LOCKFILE_NAME } from "../constants";
-import { getRojoCommand } from "../utils/get-rojo-command";
+import { isGracefulShutdown } from "../utils/graceful-shutdown";
+import { setupSignalHandlers } from "../utils/process-manager";
 import { runWithTaskLog, type TaskLogResult } from "../utils/run";
 
 export const COMMAND = "watch";
@@ -32,15 +30,15 @@ interface WatchConfig {
 }
 
 interface WatchProcessOptions {
-	cleanup: (exitCode?: number) => Promise<void>;
 	config: Awaited<ReturnType<typeof loadProjectConfig>>;
-	handles: Array<ProcessHandle>;
 	rojo: string;
 	watchArgs: ReadonlyArray<string>;
 	watchCommand: string;
 }
 
 export async function action(): Promise<void> {
+	setupSignalHandlers();
+
 	const config = await loadProjectConfig();
 	const rojo = getRojoCommand();
 
@@ -54,6 +52,11 @@ export async function action(): Promise<void> {
 function attachErrorHandler(result: TaskLogResult, name: string): TaskLogResult {
 	const wrappedSubprocess = result.subprocess.catch((err: unknown) => {
 		if (!(err instanceof Error)) {
+			throw err;
+		}
+
+		// Don't log errors for graceful shutdowns
+		if (isGracefulShutdown(err)) {
 			throw err;
 		}
 
@@ -72,42 +75,6 @@ function attachErrorHandler(result: TaskLogResult, name: string): TaskLogResult 
 	return {
 		subprocess: wrappedSubprocess,
 		taskLogger: result.taskLogger,
-	};
-}
-
-function createCleanupHandler(handles: Array<ProcessHandle>) {
-	let isCleanupInProgress = false;
-
-	return async (exitCode = 0): Promise<void> => {
-		if (isCleanupInProgress) {
-			return;
-		}
-
-		isCleanupInProgress = true;
-
-		log.info(ansis.dim("Stopping watch processes..."));
-
-		for (const handle of handles) {
-			try {
-				handle.subprocess.kill("SIGTERM");
-				handle.taskLogger.success(`${handle.name} stopped`);
-			} catch (err) {
-				// Process may have already exited or be unresponsive
-				// Log the failure but continue cleanup of other processes
-				const errorMessage = err instanceof Error ? err.message : "Unknown error";
-				handle.taskLogger.error(`Failed to stop ${handle.name}: ${errorMessage}`);
-			}
-		}
-
-		await cleanupLockfile(path.join(process.cwd(), LOCKFILE_NAME));
-
-		if (exitCode === 0) {
-			outro(ansis.green("Watch stopped successfully"));
-		} else {
-			outro(ansis.red("Watch stopped with errors"));
-		}
-
-		process.exit(exitCode);
 	};
 }
 
@@ -147,6 +114,24 @@ function getWatchConfig(config: Awaited<ReturnType<typeof loadProjectConfig>>): 
 		args: config.luau.watch.args,
 		command: luauCommand,
 	};
+}
+
+/**
+ * Handle process exit - either expected (graceful shutdown) or unexpected
+ * error.
+ *
+ * @param err - The error that caused the process to exit.
+ */
+async function handleProcessExit(err: unknown): Promise<void> {
+	// Check if this is a graceful shutdown from ProcessManager
+	if (isGracefulShutdown(err)) {
+		// Graceful shutdown - exit cleanly with code 0
+		process.exit(0);
+	}
+
+	// Actual error (not a signal) - log and exit
+	logProcessError(err);
+	process.exit(1);
 }
 
 function logErrorOutput(
@@ -194,18 +179,8 @@ async function runWatchProcesses(
 	watchArgs: ReadonlyArray<string>,
 	config: Awaited<ReturnType<typeof loadProjectConfig>>,
 ): Promise<void> {
-	const handles: Array<ProcessHandle> = [];
-	const cleanup = createCleanupHandler(handles);
-
-	// Handle Ctrl+C
-	process.on("SIGINT", () => {
-		void cleanup(0);
-	});
-
 	await spawnAndMonitorProcesses({
-		cleanup,
 		config,
-		handles,
 		rojo,
 		watchArgs,
 		watchCommand,
@@ -213,32 +188,28 @@ async function runWatchProcesses(
 }
 
 async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<void> {
-	const { cleanup, config, handles, rojo, watchArgs, watchCommand } = options;
+	const { config, rojo, watchArgs, watchCommand } = options;
+
+	const rojoHandle = await startProcess({
+		args: ["serve"],
+		command: rojo,
+		name: "Rojo Server",
+	});
+
+	const watchHandle = await startProcess({
+		args: watchArgs,
+		command: watchCommand,
+		name: config.projectType === "rbxts" ? "TypeScript Compiler" : "Watch Process",
+	});
+
 	try {
-		const rojoHandle = await startProcess({
-			args: ["serve"],
-			command: rojo,
-			name: "Rojo Server",
-		});
-		handles.push(rojoHandle);
+		await Promise.race([rojoHandle.subprocess, watchHandle.subprocess]);
 
-		const watchHandle = await startProcess({
-			args: watchArgs,
-			command: watchCommand,
-			name: config.projectType === "rbxts" ? "TypeScript Compiler" : "Watch Process",
-		});
-		handles.push(watchHandle);
-
-		await writeLockfile();
-
-		// Wait for either process to exit (fail-fast)
-		await Promise.race(handles.map(async (handle) => handle.subprocess));
-
+		// Process exited unexpectedly
 		log.error("A watch process exited unexpectedly");
-		await cleanup(1);
+		process.exit(1);
 	} catch (err) {
-		logProcessError(err);
-		await cleanup(1);
+		await handleProcessExit(err);
 	}
 }
 
@@ -246,6 +217,7 @@ async function startProcess(options: StartProcessOptions): Promise<ProcessHandle
 	const { args, command, name } = options;
 
 	const result = runWithTaskLog(command, args, {
+		shouldRegisterProcess: true,
 		taskName: `${name}...`,
 	});
 
@@ -255,9 +227,4 @@ async function startProcess(options: StartProcessOptions): Promise<ProcessHandle
 		...wrappedResult,
 		name,
 	};
-}
-
-async function writeLockfile(): Promise<void> {
-	const lockFilePath = path.join(process.cwd(), LOCKFILE_NAME);
-	await fs.writeFile(lockFilePath, String(process.pid), "utf-8");
 }

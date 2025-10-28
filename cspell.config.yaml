@@ -3,6 +3,7 @@
 version: "0.2"
 language: en
 words:
+  - pids
   - rbxl
   - rbxlx
   - rbxm
@@ -10,4 +11,5 @@ words:
   - rbxtsc
   - rojo
   - scriptable
+  - syncback
   - taskkill
