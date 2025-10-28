@@ -104,33 +104,30 @@ async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean)
 async function startWatchOnStudioClose(config: ResolvedConfig): Promise<void> {
 	setupSignalHandlers();
 
-	// Register cleanup hook to remove Studio lock file on exit
 	const studioLockFilePath = getStudioLockFilePath(config);
-
-	async function cleanupHook(): Promise<void> {
-		await cleanupLockfile(studioLockFilePath);
-	}
-
-	processManager.registerCleanupHook(cleanupHook);
-
 	const abortController = new AbortController();
 
 	try {
 		await Promise.race([
-			runScript("watch", [], { cancelSignal: abortController.signal }),
+			runScript("watch", [], {
+				cancelSignal: abortController.signal,
+				shouldRegisterProcess: true,
+			}),
 			watchStudioLockFile(studioLockFilePath, {
-				onStudioClose: () => {
+				onStudioClose: async () => {
 					if (process.env["RBX_FORGE_CMD"] === "open") {
 						outro(ansis.green("Roblox Studio closed, stopping watch mode"));
 					} else {
 						log.info("Roblox Studio closed, stopping watch mode");
 					}
 
+					await processManager.cleanup();
+					await cleanupLockfile(studioLockFilePath);
 					abortController.abort();
 				},
 			}),
 		]);
 	} finally {
-		processManager.unregisterCleanupHook(cleanupHook);
+		// Cleanup complete
 	}
 }

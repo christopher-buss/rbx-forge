@@ -58,7 +58,17 @@ pattern:
 
 - `init`: Initialize a new rbx-forge project (creates config, runs `rojo init`)
 - `build`: Build the Rojo project to an output file
+- `compile`: Compile TypeScript to Luau (rbxts projects only)
 - `serve`: Start the Rojo development server
+- `watch`: Watch and rebuild on file changes (runs TypeScript compiler + Rojo
+  server)
+- `start`: Full workflow - compile, build, open Studio, and optionally run
+  syncback
+- `stop`: Stop running Roblox Studio processes
+- `open`: Open place file in Roblox Studio (can auto-start watch mode)
+- `syncback`: Sync changes from place file back to source (requires UpliftGames
+  Rojo fork)
+- `typegen`: Generate TypeScript types for Roblox services from Rojo sourcemap
 
 ### Config System
 
@@ -225,6 +235,50 @@ This is critical for Rojo execution:
 - Windows: use `"rojo.exe"` command
 
 See [src/commands/build.ts](src/commands/build.ts) for usage example.
+
+### Process Management
+
+[src/utils/process-manager.ts](src/utils/process-manager.ts) provides
+centralized process lifecycle management:
+
+**Purpose**: Track child processes and ensure they're properly terminated during
+application shutdown.
+
+**Usage**:
+
+When spawning long-running processes that should be cleaned up on exit:
+
+```typescript
+import { processManager, setupSignalHandlers } from "../utils/process-manager";
+import { runScript } from "../utils/run";
+
+export async function action(): Promise<void> {
+	setupSignalHandlers(); // Setup global SIGINT/SIGTERM handlers
+
+	// Spawn process with automatic tracking
+	await runScript("watch", [], {
+		shouldRegisterProcess: true, // ProcessManager will track this
+	});
+}
+```
+
+**How it works**:
+
+1. Commands call `setupSignalHandlers()` to install global handlers
+2. Long-running processes are registered with `shouldRegisterProcess: true`
+3. On SIGINT/SIGTERM, ProcessManager kills all tracked processes
+4. Cleanup uses `killProcessTree()` to kill entire process trees
+
+**Studio Lockfile** (separate from ProcessManager):
+
+The `stop` command uses a separate lockfile system to track Roblox Studio:
+
+- Studio PID is written to a lockfile when opened
+- `stop` command reads the lockfile and kills Studio
+- This is independent of ProcessManager's process tracking
+
+**Important**: Do not use ProcessManager hooks - they have been removed for
+simplicity. Use execa's `cancelSignal` option for graceful cancellation instead.
 
 ## Code Quality Standards
 

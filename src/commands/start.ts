@@ -10,7 +10,7 @@ import { runScript } from "src/utils/run";
 import { getStudioLockFilePath, watchStudioLockFile } from "src/utils/studio-lock-watcher";
 
 import { loadProjectConfig } from "../config";
-import { cleanupLockfile, readLockfilePids, removePidFromLockfile } from "../utils/lockfile";
+import { cleanupLockfile } from "../utils/lockfile";
 
 export const COMMAND = "start";
 export const DESCRIPTION = "Compile, build, and open in Roblox Studio with optional syncback";
@@ -24,15 +24,6 @@ export async function action(): Promise<void> {
 
 	await runScript("compile");
 	await runScript("build");
-
-	// Register cleanup hook to remove Studio lock file on exit
-	const studioLockFilePath = getStudioLockFilePath(config);
-
-	async function cleanupStudioLockfile(): Promise<void> {
-		await cleanupLockfile(studioLockFilePath);
-	}
-
-	processManager.registerCleanupHook(cleanupStudioLockfile);
 
 	const abortController = new AbortController();
 	setupSignalHandlers(abortController);
@@ -82,20 +73,21 @@ function createSignalHandler(abortController: AbortController): () => void {
 /**
  * Cleanup handler for when Studio closes.
  *
+ * @param config - Project configuration.
  * @param abortController - AbortController to abort running processes.
  */
-async function handleStudioClose(abortController: AbortController): Promise<void> {
+async function handleStudioClose(
+	config: Awaited<ReturnType<typeof loadProjectConfig>>,
+	abortController: AbortController,
+): Promise<void> {
 	log.info("Studio closed - stopping workflow...");
 
 	abortController.abort();
 
 	await processManager.cleanup();
 
-	const lockfilePids = await readLockfilePids();
-
-	for (const pid of lockfilePids) {
-		await removePidFromLockfile(pid);
-	}
+	// Clean up Studio lockfile
+	await cleanupLockfile(getStudioLockFilePath(config));
 }
 
 /**
@@ -145,7 +137,7 @@ async function runWorkflow(
 	startBackgroundProcesses(config, abortController);
 
 	const studioWatcher = watchStudioLockFile(getStudioLockFilePath(config), {
-		onStudioClose: async () => handleStudioClose(abortController),
+		onStudioClose: async () => handleStudioClose(config, abortController),
 	});
 
 	try {

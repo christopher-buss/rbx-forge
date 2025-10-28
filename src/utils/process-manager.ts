@@ -1,6 +1,8 @@
 import type { ChildProcess } from "node:child_process";
 import process from "node:process";
 
+import { killProcessTree } from "./kill-process-tree";
+
 /** Configuration options for ProcessManager. */
 interface ProcessManagerConfig {
 	/**
@@ -26,7 +28,6 @@ interface ProcessManagerConfig {
  * and force-kill fallback.
  */
 export class ProcessManager {
-	private readonly cleanupHooks = new Set<() => Promise<void> | void>();
 	/** Configuration for shutdown behavior. */
 	private readonly config: Required<ProcessManagerConfig> = {
 		cleanupTimeout: 5000,
@@ -96,15 +97,12 @@ export class ProcessManager {
 	}
 
 	/**
-	 * Register a cleanup hook that runs during ProcessManager cleanup.
+	 * Check if ProcessManager is currently shutting down.
 	 *
-	 * Hooks run before processes are terminated, allowing commands to perform
-	 * cleanup tasks (like removing lock files) before the process exits.
-	 *
-	 * @param hook - Async or sync function to run during cleanup.
+	 * @returns True if shutdown is in progress.
 	 */
-	public registerCleanupHook(hook: () => Promise<void> | void): void {
-		this.cleanupHooks.add(hook);
+	public get shuttingDown(): boolean {
+		return this.isShuttingDown;
 	}
 
 	/**
@@ -126,15 +124,6 @@ export class ProcessManager {
 		}
 	}
 
-	/**
-	 * Unregister a previously registered cleanup hook.
-	 *
-	 * @param hook - The hook function to unregister.
-	 */
-	public unregisterCleanupHook(hook: () => Promise<void> | void): void {
-		this.cleanupHooks.delete(hook);
-	}
-
 	/** Terminates all registered processes with timeout handling. */
 	private async cleanupProcesses(): Promise<void> {
 		const processCleanupPromises = this.collectProcessCleanupPromises();
@@ -146,7 +135,7 @@ export class ProcessManager {
 		try {
 			await this.withTimeout(Promise.all(processCleanupPromises), this.config.cleanupTimeout);
 		} catch {
-			this.forceKillRemainingProcesses();
+			await this.forceKillRemainingProcesses();
 		}
 
 		this.processes.clear();
@@ -170,58 +159,52 @@ export class ProcessManager {
 	}
 
 	/**
-	 * Force kills a process that didn't terminate gracefully.
+	 * Force kills a process tree that didn't terminate gracefully.
 	 *
 	 * @param childProcess - The process to force kill.
 	 */
-	private forceKillProcess(childProcess: ChildProcess): void {
+	private async forceKillProcess(childProcess: ChildProcess): Promise<void> {
 		if (childProcess.killed) {
 			return;
 		}
 
 		console.warn(`Force killing process ${childProcess.pid}`);
 		try {
-			childProcess.kill(process.platform === "win32" ? undefined : "SIGKILL");
+			await killProcessTree(childProcess.pid, "SIGKILL");
 		} catch {
 			// Process might already be dead
 		}
 	}
 
-	/** Force kills any remaining processes that didn't terminate gracefully. */
-	private forceKillRemainingProcesses(): void {
+	/** Force kills any remaining process trees that didn't terminate gracefully. */
+	private async forceKillRemainingProcesses(): Promise<void> {
+		const killPromises: Array<Promise<void>> = [];
+
 		for (const proc of this.processes) {
 			if (proc.killed || proc.exitCode !== null) {
 				continue;
 			}
 
 			console.warn(`Force killing unresponsive process ${proc.pid}`);
-			try {
-				proc.kill(process.platform === "win32" ? undefined : "SIGKILL");
-			} catch {
-				// Process might already be dead
-			}
+			killPromises.push(
+				killProcessTree(proc.pid, "SIGKILL").catch(() => {
+					// Process might already be dead
+				}),
+			);
 		}
+
+		await Promise.all(killPromises);
 	}
 
 	/**
 	 * Performs the actual cleanup of all tracked resources.
 	 *
-	 * Runs cleanup hooks first, then terminates processes. Processes that don't
-	 * terminate within the cleanup timeout will be force-killed.
+	 * Terminates all tracked processes. Processes that don't terminate within
+	 * the cleanup timeout will be force-killed.
 	 *
 	 * @returns A promise that resolves when cleanup is complete.
 	 */
 	private async performCleanup(): Promise<void> {
-		// Run cleanup hooks first (before killing processes)
-		for (const hook of this.cleanupHooks) {
-			try {
-				await hook();
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				console.warn(`[ProcessManager] Cleanup hook failed: ${message}`);
-			}
-		}
-
 		await this.cleanupProcesses();
 	}
 
@@ -242,8 +225,9 @@ export class ProcessManager {
 			}
 
 			const timeout = setTimeout(() => {
-				this.forceKillProcess(childProcess);
-				resolve();
+				void this.forceKillProcess(childProcess).finally(() => {
+					resolve();
+				});
 			}, this.config.gracefulShutdownTimeout);
 
 			childProcess.on("exit", () => {
@@ -252,29 +236,27 @@ export class ProcessManager {
 			});
 
 			// Try graceful termination first
-			if (!this.tryGracefulKill(childProcess)) {
+			void this.tryGracefulKill(childProcess).then((success) => {
+				if (success) {
+					return;
+				}
+
 				clearTimeout(timeout);
 				resolve();
-			}
+			});
 		});
 	}
 
 	/**
-	 * Attempts to gracefully kill a process.
+	 * Attempts to gracefully kill a process and all its descendants.
 	 *
 	 * @param childProcess - The process to kill.
-	 * @returns True if kill signal was sent, false if process already dead.
+	 * @returns Promise that resolves to true if kill signal was sent, false if
+	 *   process already dead.
 	 */
-	private tryGracefulKill(childProcess: ChildProcess): boolean {
+	private async tryGracefulKill(childProcess: ChildProcess): Promise<boolean> {
 		try {
-			if (process.platform === "win32") {
-				// Windows doesn't support SIGTERM, kill immediately
-				childProcess.kill();
-			} else {
-				// Unix-like: try SIGTERM first
-				childProcess.kill("SIGTERM");
-			}
-
+			await killProcessTree(childProcess.pid, "SIGTERM");
 			return true;
 		} catch {
 			// Process might already be dead
@@ -315,7 +297,13 @@ export const processManager = new ProcessManager();
 // eslint-disable-next-line flawless/naming-convention -- Not a constant
 let signalHandlersSetup = false;
 
-/** Setup signal handlers for graceful shutdown. */
+/**
+ * Setup signal handlers for graceful shutdown.
+ *
+ * When a signal is received, this triggers ProcessManager cleanup. The
+ * application is responsible for detecting graceful shutdown and calling
+ * process.exit() with the appropriate exit code.
+ */
 function setupSignalHandlers(): void {
 	if (signalHandlersSetup) {
 		return;
@@ -327,30 +315,11 @@ function setupSignalHandlers(): void {
 
 	for (const signal of signals) {
 		process.on(signal, () => {
-			void (async () => {
-				await processManager.cleanup();
-				process.exit(0);
-			})();
+			// Trigger cleanup without exiting
+			// Let the application decide the exit code
+			void processManager.cleanup();
 		});
 	}
-
-	// Handle uncaught exceptions
-	process.on("uncaughtException", (error) => {
-		void (async () => {
-			console.error("Uncaught exception:", error);
-			await processManager.cleanup();
-			process.exit(1);
-		})();
-	});
-
-	// Handle unhandled promise rejections
-	process.on("unhandledRejection", (reason, promise) => {
-		void (async () => {
-			console.error("Unhandled rejection at:", promise, "reason:", reason);
-			await processManager.cleanup();
-			process.exit(1);
-		})();
-	});
 }
 
 // Export setup function for commands that need it

@@ -7,7 +7,8 @@ import process from "node:process";
 
 import { loadProjectConfig } from "../config";
 import { formatDuration } from "../utils/format-duration";
-import { addPidToLockfile, removePidFromLockfile } from "../utils/lockfile";
+import { isGracefulShutdown } from "../utils/graceful-shutdown";
+import { setupSignalHandlers } from "../utils/process-manager";
 import { getRojoCommand } from "../utils/rojo";
 import { createSpinner, run, runOutput } from "../utils/run";
 import { getStudioLockFilePath, watchStudioLockFile } from "../utils/studio-lock-watcher";
@@ -61,6 +62,8 @@ interface WatchState {
 }
 
 export async function action(commandOptions: SyncbackOptions = {}): Promise<void> {
+	setupSignalHandlers();
+
 	const config = await loadProjectConfig();
 	const rojo = getRojoCommand();
 
@@ -139,28 +142,7 @@ function createChangeHandler(
 			return;
 		}
 
-		void (async () => {
-			// Prevent concurrent syncback operations
-			if (state.isProcessing) {
-				return;
-			}
-
-			// Get file modification time
-			const now = Date.now();
-			if (now - state.lastModified < 1000) {
-				// Debounce: ignore if changed less than 1 second ago
-				return;
-			}
-
-			state.lastModified = now;
-			state.isProcessing = true;
-
-			try {
-				await executeSyncback(rojo, state.inputPath, commandOptions, state);
-			} finally {
-				state.isProcessing = false;
-			}
-		})();
+		void handleFileChange(rojo, state, commandOptions);
 	};
 }
 
@@ -183,7 +165,6 @@ function createShutdownHandler(
 		state.monitoringSpinner?.stop();
 		log.info("\nStopping syncback watch...");
 		await state.watcher.close();
-		await removePidFromLockfile(process.pid);
 	};
 }
 
@@ -218,13 +199,62 @@ async function executeSyncback(
 
 		const duration = formatDuration(startTime);
 		spinner.stop(`Syncback succeeded (${ansis.dim(duration)})`);
-	} catch {
+	} catch (err) {
+		if (isGracefulShutdown(err)) {
+			// Graceful shutdown - just stop spinner without error message
+			spinner.stop("Syncback interrupted");
+			// Re-throw to propagate to caller
+			throw err;
+		}
+
+		// Actual error - show error message
 		spinner.stop(ansis.red("Syncback failed"));
+		throw err;
 	}
 
 	// Restart the monitoring spinner if in watch mode
 	if (state !== undefined) {
 		state.monitoringSpinner = createSpinner("Monitoring for changes...");
+	}
+}
+
+/**
+ * Handle file change with debouncing and execute syncback.
+ *
+ * @param rojo - The rojo command to execute.
+ * @param state - The watch state.
+ * @param commandOptions - Syncback command options.
+ */
+async function handleFileChange(
+	rojo: string,
+	state: WatchState,
+	commandOptions: SyncbackOptions,
+): Promise<void> {
+	// Prevent concurrent syncback operations
+	if (state.isProcessing) {
+		return;
+	}
+
+	// Get file modification time
+	const now = Date.now();
+	if (now - state.lastModified < 1000) {
+		// Debounce: ignore if changed less than 1 second ago
+		return;
+	}
+
+	state.lastModified = now;
+	state.isProcessing = true;
+
+	try {
+		await executeSyncback(rojo, state.inputPath, commandOptions, state);
+	} catch (err) {
+		// Don't log errors for graceful shutdown (Ctrl+C)
+		if (!isGracefulShutdown(err)) {
+			const message = err instanceof Error ? err.message : String(err);
+			log.error(`Syncback error: ${message}`);
+		}
+	} finally {
+		state.isProcessing = false;
 	}
 }
 
@@ -320,11 +350,6 @@ async function watchMode(
 	inputPath: string,
 	commandOptions: SyncbackOptions,
 ): Promise<void> {
-	const shouldTrackProcess = process.env["RBX_FORGE_CMD"] !== "start";
-	if (shouldTrackProcess) {
-		await addPidToLockfile(process.pid);
-	}
-
 	logWatchModeStart(inputPath);
 
 	const config = await loadProjectConfig();

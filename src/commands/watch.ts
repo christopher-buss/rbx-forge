@@ -6,8 +6,8 @@ import process from "node:process";
 import { getRojoCommand } from "src/utils/rojo";
 
 import { loadProjectConfig } from "../config";
-import { addPidToLockfile, removePidFromLockfile } from "../utils/lockfile";
-import { processManager, setupSignalHandlers } from "../utils/process-manager";
+import { isGracefulShutdown } from "../utils/graceful-shutdown";
+import { setupSignalHandlers } from "../utils/process-manager";
 import { runWithTaskLog, type TaskLogResult } from "../utils/run";
 
 export const COMMAND = "watch";
@@ -52,6 +52,11 @@ export async function action(): Promise<void> {
 function attachErrorHandler(result: TaskLogResult, name: string): TaskLogResult {
 	const wrappedSubprocess = result.subprocess.catch((err: unknown) => {
 		if (!(err instanceof Error)) {
+			throw err;
+		}
+
+		// Don't log errors for graceful shutdowns
+		if (isGracefulShutdown(err)) {
 			throw err;
 		}
 
@@ -116,36 +121,17 @@ function getWatchConfig(config: Awaited<ReturnType<typeof loadProjectConfig>>): 
  * error.
  *
  * @param err - The error that caused the process to exit.
- * @param cleanupHook - The cleanup hook to unregister if needed.
  */
-async function handleProcessExit(err: unknown, cleanupHook: () => Promise<void>): Promise<void> {
+async function handleProcessExit(err: unknown): Promise<void> {
 	// Check if this is a graceful shutdown from ProcessManager
 	if (isGracefulShutdown(err)) {
-		// Graceful shutdown - DON'T unregister hook
-		// ProcessManager's signal handler will run the hook
-		return;
+		// Graceful shutdown - exit cleanly with code 0
+		process.exit(0);
 	}
 
-	// Actual error (not a signal) - unregister and cleanup manually
-	processManager.unregisterCleanupHook(cleanupHook);
+	// Actual error (not a signal) - log and exit
 	logProcessError(err);
-	await removePidFromLockfile(process.pid);
 	process.exit(1);
-}
-
-/**
- * Check if an error is from a graceful shutdown (ProcessManager
- * SIGTERM/SIGINT).
- *
- * @param err - The error to check.
- * @returns True if error is from graceful shutdown.
- */
-function isGracefulShutdown(err: unknown): boolean {
-	if (!(err instanceof ExecaError)) {
-		return false;
-	}
-
-	return err.signal === "SIGTERM" || err.signal === "SIGINT";
 }
 
 function logErrorOutput(
@@ -216,24 +202,14 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 		name: config.projectType === "rbxts" ? "TypeScript Compiler" : "Watch Process",
 	});
 
-	await addPidToLockfile(process.pid);
-
-	async function cleanupHook(): Promise<void> {
-		await removePidFromLockfile(process.pid);
-	}
-
-	processManager.registerCleanupHook(cleanupHook);
-
 	try {
 		await Promise.race([rojoHandle.subprocess, watchHandle.subprocess]);
 
-		// Process exited unexpectedly - unregister hook and clean up
-		processManager.unregisterCleanupHook(cleanupHook);
+		// Process exited unexpectedly
 		log.error("A watch process exited unexpectedly");
-		await removePidFromLockfile(process.pid);
 		process.exit(1);
 	} catch (err) {
-		await handleProcessExit(err, cleanupHook);
+		await handleProcessExit(err);
 	}
 }
 
