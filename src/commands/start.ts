@@ -15,6 +15,8 @@ import { cleanupLockfile } from "../utils/lockfile";
 export const COMMAND = "start";
 export const DESCRIPTION = "Compile, build, and open in Roblox Studio with optional syncback";
 
+let signalHandler: (() => void) | undefined;
+
 export async function action(): Promise<void> {
 	setupProcessManagerHandlers();
 
@@ -43,19 +45,19 @@ export async function action(): Promise<void> {
 		outro(ansis.green("✨ Start workflow complete, successfully exited!"));
 		process.exit(0);
 	} finally {
-		cleanupSignalHandlers(abortController);
+		cleanupSignalHandlers();
 	}
 }
 
-/**
- * Remove SIGINT/SIGTERM signal handlers from process.
- *
- * @param abortController - AbortController used for signal handlers.
- */
-function cleanupSignalHandlers(abortController: AbortController): void {
-	const handler = createSignalHandler(abortController);
-	process.off("SIGINT", handler);
-	process.off("SIGTERM", handler);
+/** Remove SIGINT/SIGTERM signal handlers from process. */
+function cleanupSignalHandlers(): void {
+	if (signalHandler === undefined) {
+		return;
+	}
+
+	process.off("SIGINT", signalHandler);
+	process.off("SIGTERM", signalHandler);
+	signalHandler = undefined;
 }
 
 /**
@@ -158,9 +160,9 @@ async function runWorkflow(
  * @param abortController - AbortController to trigger on signal.
  */
 function setupSignalHandlers(abortController: AbortController): void {
-	const handler = createSignalHandler(abortController);
-	process.on("SIGINT", handler);
-	process.on("SIGTERM", handler);
+	signalHandler = createSignalHandler(abortController);
+	process.on("SIGINT", signalHandler);
+	process.on("SIGTERM", signalHandler);
 }
 
 /**

@@ -1,6 +1,7 @@
 import { log } from "@clack/prompts";
 
 import chokidar, { type FSWatcher } from "chokidar";
+import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -65,12 +66,33 @@ export async function watchStudioLockFile(
 	studioLockFilePath: string,
 	options: WatchStudioLockFileOptions,
 ): Promise<void> {
+	// Check if lock file already exists before starting watcher
+	const isFileExisting = await checkFileExists(studioLockFilePath);
+	if (isFileExisting && options.onStudioOpen !== undefined) {
+		await options.onStudioOpen();
+	}
+
 	return new Promise<void>((resolve, reject) => {
 		const watcher = chokidar.watch(studioLockFilePath, { ignoreInitial: true });
 		const cleanup = createCleanupHandler(watcher);
 
 		setupWatcherEvents({ cleanup, options, reject, resolve, watcher });
 	});
+}
+
+/**
+ * Check if a file exists.
+ *
+ * @param filePath - Path to check.
+ * @returns True if file exists, false otherwise.
+ */
+async function checkFileExists(filePath: string): Promise<boolean> {
+	try {
+		await fs.access(filePath);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /**

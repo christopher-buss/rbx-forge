@@ -13,6 +13,12 @@ import { getRojoCommand } from "../utils/rojo";
 import { createSpinner, run, runOutput } from "../utils/run";
 import { getStudioLockFilePath, watchStudioLockFile } from "../utils/studio-lock-watcher";
 
+/**
+ * Debounce delay in milliseconds to prevent rapid successive syncback
+ * operations.
+ */
+const DEBOUNCE_DELAY_MS = 1000;
+
 export const COMMAND = "syncback";
 export const DESCRIPTION = "Syncback changes from a place file to the project";
 
@@ -237,7 +243,7 @@ async function handleFileChange(
 
 	// Get file modification time
 	const now = Date.now();
-	if (now - state.lastModified < 1000) {
+	if (now - state.lastModified < DEBOUNCE_DELAY_MS) {
 		// Debounce: ignore if changed less than 1 second ago
 		return;
 	}

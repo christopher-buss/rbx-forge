@@ -4,6 +4,15 @@ import ansis from "ansis";
 import fs from "node:fs/promises";
 
 /**
+ * Maximum number of retry attempts for lockfile cleanup when file is busy
+ * (common on Windows).
+ */
+const MAX_LOCKFILE_CLEANUP_RETRIES = 10;
+
+/** Base delay in milliseconds for exponential backoff between retry attempts. */
+const BASE_RETRY_DELAY_MS = 100;
+
+/**
  * Removes a lockfile with retry logic for EBUSY errors.
  *
  * This is used for Studio lockfile cleanup. Retries with exponential backoff if
@@ -12,10 +21,7 @@ import fs from "node:fs/promises";
  * @param lockFilePath - Absolute path to the lockfile to remove.
  */
 export async function cleanupLockfile(lockFilePath: string): Promise<void> {
-	const maxRetries = 10;
-	const baseDelayMs = 100;
-
-	for (let attempt = 0; attempt < maxRetries; attempt++) {
+	for (let attempt = 0; attempt < MAX_LOCKFILE_CLEANUP_RETRIES; attempt++) {
 		try {
 			await fs.rm(lockFilePath);
 			return;
@@ -26,9 +32,9 @@ export async function cleanupLockfile(lockFilePath: string): Promise<void> {
 			}
 
 			const isEbusy = err instanceof Error && "code" in err && err.code === "EBUSY";
-			const isLastAttempt = attempt === maxRetries - 1;
+			const isLastAttempt = attempt === MAX_LOCKFILE_CLEANUP_RETRIES - 1;
 			if (isEbusy && !isLastAttempt) {
-				const delayMs = baseDelayMs * 2 ** attempt;
+				const delayMs = BASE_RETRY_DELAY_MS * 2 ** attempt;
 				await new Promise((resolve) => {
 					setTimeout(resolve, delayMs);
 				});
