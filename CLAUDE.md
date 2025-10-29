@@ -75,7 +75,8 @@ pattern:
 Located in [src/config/](src/config/), uses a multi-layer approach:
 
 - **Loader** ([loader.ts](src/config/loader.ts)): Uses `c12` to load
-  `rbx-forge.config.ts`
+  configuration files (supports `.ts`, `.js`, `.json`, `.yaml`, `.toml`, and
+  more)
 - **Schema** ([schema.ts](src/config/schema.ts)): Runtime validation with
   `arktype`
 - **Defaults** ([defaults.ts](src/config/defaults.ts)): Default configuration
@@ -91,6 +92,17 @@ Located in [src/config/](src/config/), uses a multi-layer approach:
 - `projectType`: Project type (`"rbxts"` or `"luau"`)
 
 The `defineConfig()` helper provides type safety for user configs.
+
+**IMPORTANT: When adding or modifying config options:**
+
+1. Update [schema.ts](src/config/schema.ts) with the new option
+2. Update [defaults.ts](src/config/defaults.ts) with the default value
+3. **MUST update [docs/configuration.md](docs/configuration.md)** with full
+   documentation:
+    - Add the option to the "Available Options" section
+    - Include Type and Default
+    - Provide description and examples
+    - Update any examples if needed
 
 ### Command Chaining and Hook Pattern
 
