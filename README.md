@@ -17,7 +17,6 @@ needed.
 - **Node.js** >= 22.16.0
 - **Rojo** - Install from [rojo.space](https://rojo.space) or optionally via
   [uplift-games/rojo](https://github.com/UpliftGames/rojo/releases/)
-- **Roblox Studio** - Required for full workflow (open, start commands)
 - **Task Runner** (optional) - npm, pnpm, or mise for script generation
 
 ## Installation
