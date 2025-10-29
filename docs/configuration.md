@@ -108,6 +108,32 @@ export default defineConfig({
 
 ---
 
+### `rojoProjectPath`
+
+**Type:** `string` **Default:** `"default.project.json"`
+
+Path to the Rojo project file to use for all commands. This allows you to use
+different project files instead of the default `default.project.json`.
+
+Commands that support the `--project` flag will use this config value as the
+default, but the flag will override it if provided.
+
+**Example:**
+
+```typescript
+export default defineConfig({
+	rojoProjectPath: "custom.project.json",
+});
+```
+
+**Use Cases:**
+
+- Multiple project configurations (e.g., dev vs production)
+- Custom project file naming conventions
+- Monorepo setups with multiple Rojo projects
+
+---
+
 ### `commandNames`
 
 **Type:** `object` **Default:** See below
@@ -439,6 +465,9 @@ export default defineConfig({
 		command: "rbxtsc",
 		watchOnOpen: true,
 	},
+
+	// Rojo project file path
+	rojoProjectPath: "default.project.json",
 
 	// Suppress task runner warnings
 	suppressNoTaskRunnerWarning: false,

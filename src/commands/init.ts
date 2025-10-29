@@ -32,11 +32,23 @@ import { findCommandForPackageManager, run } from "../utils/run";
 export const COMMAND = "init";
 export const DESCRIPTION = `Initialize a new ${packageName} project`;
 
+export const options = [
+	{
+		description:
+			"Path to the Rojo project file to initialize (defaults to default.project.json)",
+		flags: "--project <path>",
+	},
+] as const;
+
+export interface InitOptions {
+	project?: string;
+}
+
 const OPERATION_CANCELLED = "Operation cancelled";
 
 type TaskRunner = "lune" | "mise" | "npm";
 
-export async function action(): Promise<void> {
+export async function action(commandOptions: InitOptions = {}): Promise<void> {
 	if (process.env["NODE_ENV"] === "development") {
 		void run("rm", ["-rf", `${packageName}.config.ts`], {
 			shouldShowCommand: false,
@@ -47,7 +59,7 @@ export async function action(): Promise<void> {
 
 	const { projectType, taskRunners } = await getUserInput();
 
-	await runInitializationTasks(projectType, taskRunners);
+	await runInitializationTasks(projectType, taskRunners, commandOptions);
 	await showNextSteps(taskRunners);
 	outro(ansis.green("✨ You're all set!"));
 }
@@ -94,9 +106,14 @@ async function createForgeConfig(projectType: "luau" | "rbxts"): Promise<string>
 	return `Config file created at ${ansis.magenta(configFileName)}`;
 }
 
-async function createRojoProject(): Promise<string> {
+async function createRojoProject(projectPath?: string): Promise<string> {
+	const args = ["init"];
+	if (projectPath !== undefined && projectPath.length > 0) {
+		args.push(projectPath);
+	}
+
 	try {
-		await run("rojo", ["init"], {
+		await run("rojo", args, {
 			shouldShowCommand: false,
 			shouldStreamOutput: false,
 		});
@@ -154,10 +171,14 @@ async function getUserInput(): Promise<{
 async function runInitializationTasks(
 	projectType: "luau" | "rbxts",
 	taskRunners: Array<TaskRunner>,
+	commandOptions: InitOptions,
 ): Promise<void> {
 	const initTasks = [
 		{ task: checkRojoInstallation, title: "Checking Rojo installation" },
-		{ task: createRojoProject, title: "Creating Rojo project structure" },
+		{
+			task: async () => createRojoProject(commandOptions.project),
+			title: "Creating Rojo project structure",
+		},
 		{
 			task: async () => createForgeConfig(projectType),
 			title: `Creating ${packageName} config`,

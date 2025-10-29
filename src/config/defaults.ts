@@ -27,6 +27,7 @@ export const defaults: ResolvedConfig = {
 		command: "rbxtsc",
 		watchOnOpen: true,
 	},
+	rojoProjectPath: "default.project.json",
 	suppressNoTaskRunnerWarning: false,
 	syncback: {
 		runOnStart: false,

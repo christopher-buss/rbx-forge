@@ -58,7 +58,7 @@ export async function action(commandOptions: BuildOptions = {}): Promise<void> {
 
 	const outputPath = commandOptions.plugin ?? commandOptions.output ?? config.buildOutputPath;
 	const isPluginOutput = commandOptions.plugin !== undefined;
-	const rojoArgs = buildRojoArguments(commandOptions, outputPath, isPluginOutput);
+	const rojoArgs = buildRojoArguments(commandOptions, outputPath, isPluginOutput, config);
 
 	displayBuildInfo(outputPath, isPluginOutput);
 
@@ -85,6 +85,7 @@ function buildRojoArguments(
 	buildOptions: BuildOptions,
 	outputPath: string,
 	isPluginOutput: boolean,
+	config: Awaited<ReturnType<typeof loadProjectConfig>>,
 ): Array<string> {
 	const args = ["build"];
 
@@ -94,8 +95,9 @@ function buildRojoArguments(
 		args.push("--output", outputPath);
 	}
 
-	if (buildOptions.project !== undefined && buildOptions.project.length > 0) {
-		args.push(buildOptions.project);
+	const projectPath = buildOptions.project ?? config.rojoProjectPath;
+	if (projectPath.length > 0) {
+		args.push(projectPath);
 	}
 
 	if (buildOptions.verbose !== undefined && buildOptions.verbose !== false) {
