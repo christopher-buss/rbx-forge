@@ -11,6 +11,7 @@ export async function loadProjectConfig(): Promise<ResolvedConfig> {
 	const { config: rawConfig } = await loadConfig({
 		defaults,
 		name: "rbx-forge",
+		packageJson: true,
 	});
 
 	const validated = configSchema(rawConfig);
