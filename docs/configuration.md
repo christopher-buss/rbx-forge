@@ -112,17 +112,29 @@ export default defineConfig({
 
 **Type:** `string` **Default:** `"default.project.json"`
 
-Path to the Rojo project file to use for all commands. This allows you to use
-different project files instead of the default `default.project.json`.
+Path to the Rojo project file to use for all commands. This accepts either a
+filename (in the current directory) or a full/relative path to a project file in
+any location.
 
 Commands that support the `--project` flag will use this config value as the
 default, but the flag will override it if provided.
 
-**Example:**
+**Examples:**
 
 ```typescript
+// Filename in current directory
 export default defineConfig({
 	rojoProjectPath: "custom.project.json",
+});
+
+// Relative path to subdirectory
+export default defineConfig({
+	rojoProjectPath: "src/project.json",
+});
+
+// Path with multiple levels
+export default defineConfig({
+	rojoProjectPath: "config/rojo/production.project.json",
 });
 ```
 
@@ -130,7 +142,8 @@ export default defineConfig({
 
 - Multiple project configurations (e.g., dev vs production)
 - Custom project file naming conventions
-- Monorepo setups with multiple Rojo projects
+- Monorepo setups with multiple Rojo projects in different directories
+- Organizing project files in subdirectories (e.g., `config/`, `src/`)
 
 ---
 
