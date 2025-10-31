@@ -62,14 +62,14 @@ export interface RunWithTaskLogOptions extends Except<ExecaOptions, "all" | "buf
 	taskName: string;
 }
 
+export type Spinner = ReturnType<typeof spinner>;
+
 export interface TaskLogResult {
 	/** Subprocess promise. */
 	subprocess: ResultPromise;
 	/** Task logger instance for success/error messages. */
 	taskLogger: ReturnType<typeof taskLog>;
 }
-
-type Spinner = ReturnType<typeof spinner>;
 
 /**
  * Creates and starts a spinner with the given message.
@@ -326,9 +326,13 @@ export function runWithTaskLog(
 		taskLogger.message(line);
 	});
 
-	void subprocess.finally(() => {
-		rl.close();
-	});
+	subprocess
+		.finally(() => {
+			rl.close();
+		})
+		.catch(() => {
+			// Handled by caller
+		});
 
 	return { subprocess: subprocess as ResultPromise, taskLogger };
 }
