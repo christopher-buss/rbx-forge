@@ -37,12 +37,6 @@ const OPERATION_CANCELLED = "Operation cancelled";
 type TaskRunner = "lune" | "mise" | "npm";
 
 export async function action(): Promise<void> {
-	if (process.env["NODE_ENV"] === "development") {
-		void run("rm", ["-rf", `${packageName}.config.ts`], {
-			shouldShowCommand: false,
-		});
-	}
-
 	intro(ansis.bold(`🔨 ${packageName} init`));
 
 	const { projectType, taskRunners } = await getUserInput();
