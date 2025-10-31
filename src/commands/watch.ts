@@ -7,7 +7,9 @@ import { getRojoCommand } from "src/utils/rojo";
 
 import { loadProjectConfig } from "../config";
 import { isGracefulShutdown } from "../utils/graceful-shutdown";
+import { findAvailablePort } from "../utils/port-utils";
 import { setupSignalHandlers } from "../utils/process-manager";
+import { cleanupRojoLock, stopExistingRojo, writeRojoLock } from "../utils/rojo-lock-manager";
 import { runWithTaskLog, type TaskLogResult } from "../utils/run";
 
 export const COMMAND = "watch";
@@ -32,6 +34,7 @@ interface WatchConfig {
 interface WatchProcessOptions {
 	config: Awaited<ReturnType<typeof loadProjectConfig>>;
 	rojo: string;
+	rojoPort: number;
 	watchArgs: ReadonlyArray<string>;
 	watchCommand: string;
 }
@@ -42,11 +45,21 @@ export async function action(): Promise<void> {
 	const config = await loadProjectConfig();
 	const rojo = getRojoCommand();
 
+	await stopExistingRojo(config);
+
+	const rojoPort = await findAvailablePort();
+
 	const { args: watchArgs, command: watchCommand } = getWatchConfig(config);
 
-	displayStartInfo(rojo, watchCommand, watchArgs);
+	displayStartInfo(rojo, watchCommand, watchArgs, rojoPort);
 
-	await runWatchProcesses(rojo, watchCommand, watchArgs, config);
+	await runWatchProcesses({
+		config,
+		rojo,
+		rojoPort,
+		watchArgs,
+		watchCommand,
+	});
 }
 
 function attachErrorHandler(result: TaskLogResult, name: string): TaskLogResult {
@@ -82,9 +95,10 @@ function displayStartInfo(
 	rojo: string,
 	watchCommand: string,
 	watchArgs: ReadonlyArray<string>,
+	rojoPort: number,
 ): void {
 	log.info(ansis.bold("→ Starting watch mode"));
-	const rojoCommand = `${rojo} serve`;
+	const rojoCommand = `${rojo} serve --port ${rojoPort}`;
 	const watchFullCommand = `${watchCommand} ${watchArgs.join(" ")}`;
 	log.step(`Rojo: ${ansis.cyan(rojoCommand)}`);
 	log.step(`Watch: ${ansis.cyan(watchFullCommand)}`);
@@ -100,7 +114,6 @@ function getWatchConfig(config: Awaited<ReturnType<typeof loadProjectConfig>>): 
 
 	const luauCommand = config.luau.watch.command;
 	if (!luauCommand) {
-		// cspell:ignore darklua
 		log.error(
 			"No watch command configured for Luau project.\n" +
 				`Add a watch configuration to your rbx-forge.config.ts:\n${ansis.dim(
@@ -173,24 +186,14 @@ function logProcessError(err: unknown): void {
 	}
 }
 
-async function runWatchProcesses(
-	rojo: string,
-	watchCommand: string,
-	watchArgs: ReadonlyArray<string>,
-	config: Awaited<ReturnType<typeof loadProjectConfig>>,
-): Promise<void> {
-	await spawnAndMonitorProcesses({
-		config,
-		rojo,
-		watchArgs,
-		watchCommand,
-	});
+async function runWatchProcesses(options: WatchProcessOptions): Promise<void> {
+	await spawnAndMonitorProcesses(options);
 }
 
 async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<void> {
-	const { config, rojo, watchArgs, watchCommand } = options;
+	const { config, rojo, rojoPort, watchArgs, watchCommand } = options;
 
-	const rojoArgs = ["serve"];
+	const rojoArgs = ["serve", "--port", String(rojoPort)];
 	if (config.rojoProjectPath.length > 0) {
 		rojoArgs.push(config.rojoProjectPath);
 	}
@@ -201,6 +204,11 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 		name: "Rojo Server",
 	});
 
+	const rojoPid = rojoHandle.subprocess.pid;
+	if (rojoPid !== undefined) {
+		await writeRojoLock(config, rojoPid, rojoPort);
+	}
+
 	const watchHandle = await startProcess({
 		args: watchArgs,
 		command: watchCommand,
@@ -210,10 +218,11 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 	try {
 		await Promise.race([rojoHandle.subprocess, watchHandle.subprocess]);
 
-		// Process exited unexpectedly
 		log.error("A watch process exited unexpectedly");
+		await cleanupRojoLock(config);
 		process.exit(1);
 	} catch (err) {
+		await cleanupRojoLock(config);
 		await handleProcessExit(err);
 	}
 }

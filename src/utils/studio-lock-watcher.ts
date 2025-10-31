@@ -2,11 +2,11 @@ import { log } from "@clack/prompts";
 
 import chokidar, { type FSWatcher } from "chokidar";
 import fs from "node:fs/promises";
-import path from "node:path";
 import process from "node:process";
 
 import type { ResolvedConfig } from "../config/schema";
 import { STUDIO_LOCKFILE_SUFFIX } from "../constants";
+import { getLockFilePath } from "./lockfile";
 
 export interface WatchStudioLockFileOptions {
 	/**
@@ -35,8 +35,7 @@ interface SetupWatcherEventsOptions {
  * @returns Absolute path to the Studio lock file.
  */
 export function getStudioLockFilePath(config: ResolvedConfig): string {
-	const projectPath = process.cwd();
-	return path.join(projectPath, config.buildOutputPath + STUDIO_LOCKFILE_SUFFIX);
+	return getLockFilePath(config, STUDIO_LOCKFILE_SUFFIX);
 }
 
 /**
