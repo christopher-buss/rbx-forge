@@ -190,8 +190,13 @@ async function runWatchProcesses(
 async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<void> {
 	const { config, rojo, watchArgs, watchCommand } = options;
 
+	const rojoArgs = ["serve"];
+	if (config.rojoProjectPath.length > 0) {
+		rojoArgs.push(config.rojoProjectPath);
+	}
+
 	const rojoHandle = await startProcess({
-		args: ["serve"],
+		args: rojoArgs,
 		command: rojo,
 		name: "Rojo Server",
 	});
