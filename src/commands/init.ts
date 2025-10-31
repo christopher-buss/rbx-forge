@@ -108,7 +108,8 @@ async function getInstallCommand(shouldUseMise: boolean, shouldUseNpm: boolean):
 	}
 
 	if (shouldUseNpm) {
-		const { args, command } = await findCommandForPackageManager("install");
+		const { name } = (await detect()) ?? { agent: "npm" };
+		const { args, command } = await findCommandForPackageManager("install", [], name);
 		return `${command} ${args.join(" ")}`;
 	}
 
@@ -125,7 +126,8 @@ async function getTaskRunnerCommand(
 	}
 
 	if (shouldUseNpm) {
-		const { args, command } = await findCommandForPackageManager("run", [scriptName]);
+		const { name } = (await detect()) ?? { agent: "npm" };
+		const { args, command } = await findCommandForPackageManager("run", [scriptName], name);
 		return `${command} ${args.join(" ")}`;
 	}
 

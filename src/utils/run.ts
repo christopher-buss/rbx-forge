@@ -5,6 +5,7 @@ import { execa, type Options as ExecaOptions, type ResultPromise } from "execa";
 import process from "node:process";
 import { createInterface } from "node:readline";
 import {
+	type AgentName,
 	type Command,
 	getUserAgent,
 	resolveCommand,
@@ -96,8 +97,9 @@ export function createSpinner(message: string | undefined): Spinner | undefined 
 export async function findCommandForPackageManager(
 	command: Command,
 	args: Array<string> = [],
+	packageManager?: AgentName,
 ): Promise<ResolvedCommand> {
-	const agent = getUserAgent();
+	const agent = packageManager ?? getUserAgent();
 	if (!agent) {
 		throw new Error("Could not detect current package manager.");
 	}
