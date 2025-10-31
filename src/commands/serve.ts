@@ -22,14 +22,30 @@ interface RojoServerResult {
 	subprocess: ResultPromise;
 }
 
-export async function action(): Promise<void> {
+interface RojoServerResult {
+	activeSpinner: Spinner;
+	subprocess: ResultPromise;
+}
+
+export const options = [
+	{
+		description: "Path to the project to serve (defaults to current directory)",
+		flags: "--project <path>",
+	},
+] as const;
+
+export interface ServeOptions {
+	project?: string;
+}
+
+export async function action(commandOptions: ServeOptions = {}): Promise<void> {
 	setupSignalHandlers();
 
 	const config = await loadProjectConfig();
 	await stopExistingRojo(config);
 
 	const port = await findAvailablePort();
-	const result = await startRojoServer(config, port);
+	const result = await startRojoServer(commandOptions, config, port);
 
 	try {
 		await waitForServerOrCancellation(result.subprocess, result.activeSpinner);
@@ -56,12 +72,23 @@ async function handleProcessExit(err: unknown): Promise<void> {
 	throw err;
 }
 
-async function startRojoServer(config: ResolvedConfig, port: number): Promise<RojoServerResult> {
+async function startRojoServer(
+	commandOptions: ServeOptions,
+	config: ResolvedConfig,
+	port: number,
+): Promise<RojoServerResult> {
 	const rojo = getRojoCommand();
 	const activeSpinner = spinner({ cancelMessage: "Cancelling Rojo Serve" });
 	activeSpinner.start(`Starting Rojo server on port ${port}...`);
 
-	const { subprocess } = runWithTaskLog(rojo, ["serve", "--port", String(port)], {
+	const args = ["serve", "--port", String(port)];
+
+	const projectPath = commandOptions.project ?? config.rojoProjectPath;
+	if (projectPath.length > 0) {
+		args.push(projectPath);
+	}
+
+	const { subprocess } = runWithTaskLog(rojo, args, {
 		shouldRegisterProcess: true,
 		taskName: "Rojo Serve",
 	});

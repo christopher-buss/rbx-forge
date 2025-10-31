@@ -28,6 +28,7 @@ export const configSchema = type({
 		"command?": "string",
 		"watchOnOpen?": "boolean",
 	},
+	"rojoProjectPath?": "string",
 	"suppressNoTaskRunnerWarning?": "boolean",
 	"syncback?": {
 		"runOnStart?": "boolean",

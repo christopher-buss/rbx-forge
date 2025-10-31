@@ -3,6 +3,7 @@ import { log } from "@clack/prompts";
 import ansis from "ansis";
 import { stat } from "node:fs/promises";
 import process from "node:process";
+import type { ResolvedConfig } from "src/config/schema";
 import { getRojoCommand } from "src/utils/rojo";
 
 import { loadProjectConfig } from "../config";
@@ -58,7 +59,7 @@ export async function action(commandOptions: BuildOptions = {}): Promise<void> {
 
 	const outputPath = commandOptions.plugin ?? commandOptions.output ?? config.buildOutputPath;
 	const isPluginOutput = commandOptions.plugin !== undefined;
-	const rojoArgs = buildRojoArguments(commandOptions, outputPath, isPluginOutput);
+	const rojoArgs = buildRojoArguments(commandOptions, outputPath, isPluginOutput, config);
 
 	displayBuildInfo(outputPath, isPluginOutput);
 
@@ -85,6 +86,7 @@ function buildRojoArguments(
 	buildOptions: BuildOptions,
 	outputPath: string,
 	isPluginOutput: boolean,
+	config: ResolvedConfig,
 ): Array<string> {
 	const args = ["build"];
 
@@ -94,8 +96,9 @@ function buildRojoArguments(
 		args.push("--output", outputPath);
 	}
 
-	if (buildOptions.project !== undefined && buildOptions.project.length > 0) {
-		args.push(buildOptions.project);
+	const projectPath = buildOptions.project ?? config.rojoProjectPath;
+	if (projectPath.length > 0) {
+		args.push(projectPath);
 	}
 
 	if (buildOptions.verbose !== undefined && buildOptions.verbose !== false) {
