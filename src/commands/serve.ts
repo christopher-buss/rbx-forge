@@ -22,11 +22,6 @@ interface RojoServerResult {
 	subprocess: ResultPromise;
 }
 
-interface RojoServerResult {
-	activeSpinner: Spinner;
-	subprocess: ResultPromise;
-}
-
 export const options = [
 	{
 		description: "Path to the project to serve (defaults to current directory)",
