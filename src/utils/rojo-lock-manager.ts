@@ -6,6 +6,7 @@ import fs from "node:fs/promises";
 import type { ResolvedConfig } from "../config/schema";
 import { ROJO_LOCKFILE_SUFFIX } from "../constants";
 import { cleanupLockfile, getLockFilePath, readLockfileRaw } from "./lockfile";
+import { isPortAvailable } from "./port-utils";
 import { isProcessAlive, killProcess } from "./process-utils";
 
 export interface RojoLockData {
@@ -61,8 +62,14 @@ export async function readRojoLock(lockPath: string): Promise<null | RojoLockDat
 	// Check if process is still running
 	const isRunning = await isProcessAlive(pid);
 	if (!isRunning) {
-		// Stale lockfile, clean it up
 		log.warn(`Cleaned up stale Rojo lockfile (PID ${pid} no longer running)`);
+		await cleanupLockfile(lockPath);
+		return null;
+	}
+
+	// Guard against PID reuse: if the recorded port is free, the lock is stale.
+	if (await isPortAvailable(port)) {
+		log.warn(`Cleaned up stale Rojo lockfile (port ${port} is no longer bound to Rojo)`);
 		await cleanupLockfile(lockPath);
 		return null;
 	}
