@@ -109,8 +109,12 @@ async function getInstallCommand(shouldUseMise: boolean, shouldUseNpm: boolean):
 
 	if (shouldUseNpm) {
 		const { name } = (await detect()) ?? { agent: "npm" };
-		const { args, command } = await findCommandForPackageManager("install", [], name);
-		return `${command} ${args.join(" ")}`;
+		try {
+			const { args, command } = await findCommandForPackageManager("install", [], name);
+			return `${command} ${args.join(" ")}`;
+		} catch {
+			return "npm install";
+		}
 	}
 
 	throw new Error("This should not be called if no task runner is used.");
@@ -127,8 +131,12 @@ async function getTaskRunnerCommand(
 
 	if (shouldUseNpm) {
 		const { name } = (await detect()) ?? { agent: "npm" };
-		const { args, command } = await findCommandForPackageManager("run", [scriptName], name);
-		return `${command} ${args.join(" ")}`;
+		try {
+			const { args, command } = await findCommandForPackageManager("run", [scriptName], name);
+			return `${command} ${args.join(" ")}`;
+		} catch {
+			return `npm run ${scriptName}`;
+		}
 	}
 
 	// Extract base command name (e.g., "forge:build" -> "build")
