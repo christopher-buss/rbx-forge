@@ -58,13 +58,9 @@ export async function action(commandOptions: ServeOptions = {}): Promise<void> {
 
 async function handleProcessExit(err: unknown): Promise<void> {
 	// Check if this is a graceful shutdown from ProcessManager
-	if (isGracefulShutdown(err)) {
-		// Graceful shutdown - exit cleanly with code 0
-		process.exit(0);
+	if (!isGracefulShutdown(err)) {
+		throw err;
 	}
-
-	// Actual error (not a signal) - re-throw
-	throw err;
 }
 
 async function startRojoServer(
