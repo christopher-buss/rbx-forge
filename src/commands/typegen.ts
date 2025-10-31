@@ -62,7 +62,7 @@ export async function action(commandOptions: TypegenOptions = {}): Promise<void>
 	const spinner = createSpinner("Fetching Rojo sourcemap...");
 
 	const projectPath = commandOptions.project ?? config.rojoProjectPath;
-	const rojoSourceMap = await getRojoSourceMap(projectPath, config);
+	const rojoSourceMap = await getRojoSourceMap(config, projectPath);
 
 	spinner.message("Generating TypeScript interfaces...");
 

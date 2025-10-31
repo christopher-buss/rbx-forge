@@ -45,21 +45,21 @@ export async function checkRojoInstallation(): Promise<string> {
  * @returns The rojo command with `.exe` suffix on WSL, without on other
  *   platforms.
  */
-export function getRojoCommand(config?: ResolvedConfig): string {
-	const baseCommand = config?.rojoAlias ?? "rojo";
+export function getRojoCommand(config: ResolvedConfig): string {
+	const baseCommand = config.rojoAlias;
 	return isWsl() ? `${baseCommand}.exe` : baseCommand;
 }
 
 /**
  * Executes `rojo sourcemap` and returns the parsed JSON output.
  *
- * @param rojoProjectPath - Optional path to a specific Rojo project file.
  * @param config - Optional resolved config containing the rojo alias.
+ * @param rojoProjectPath - Optional path to a specific Rojo project file.
  * @returns The parsed Rojo source map.
  */
 export async function getRojoSourceMap(
+	config: ResolvedConfig,
 	rojoProjectPath?: string,
-	config?: ResolvedConfig,
 ): Promise<RojoSourceMap> {
 	const rojo = getRojoCommand(config);
 	const args = ["sourcemap"];
