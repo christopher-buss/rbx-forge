@@ -31,6 +31,14 @@ export interface OpenOptions {
 	place?: string;
 }
 
+interface InterruptSignalOptions {
+	isLockFileCreated: boolean;
+	reject: (err: Error) => void;
+	resolve: () => void;
+	studioLockFilePath: string;
+	studioPid: number;
+}
+
 export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 	const config = await loadProjectConfig();
 	const placeFile = commandOptions.place ?? config.buildOutputPath;
@@ -59,6 +67,7 @@ export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 	log.success("Opened in Roblox Studio");
 
 	// Track Studio PID and set up Ctrl+C handler
+	// This will wait for Studio to create the lock file before returning
 	await trackStudioProcess(config);
 
 	if (config.rbxts.watchOnOpen && process.env["RBX_FORGE_CMD"] === "open") {
@@ -72,6 +81,35 @@ async function ensurePlaceFileExists(placeFile: string, isCustomPlace: boolean):
 	} catch {
 		await handleMissingPlaceFile(placeFile, isCustomPlace);
 	}
+}
+
+/**
+ * Handles SIGINT signal during Studio launch.
+ *
+ * @param interruptOptions - Options for handling the interrupt signal.
+ */
+function handleInterruptSignal(interruptOptions: InterruptSignalOptions): void {
+	const { isLockFileCreated, reject, resolve, studioLockFilePath, studioPid } = interruptOptions;
+
+	// If lock file was created, Studio is running - just exit
+	if (isLockFileCreated) {
+		log.info("Studio has opened the place, leaving it running");
+		resolve();
+		return;
+	}
+
+	// Lock file not created - kill Studio and exit
+	log.info("Studio hasn't opened the place yet, killing process...");
+	killProcess(studioPid)
+		.then(async () => {
+			await cleanupLockfile(studioLockFilePath);
+			resolve();
+		})
+		.catch((err) => {
+			const errorMessage = err instanceof Error ? err.message : String(err);
+			log.warn(`Failed to kill Studio process: ${errorMessage}`);
+			reject(err instanceof Error ? err : new Error(String(err)));
+		});
 }
 
 async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean): Promise<void> {
@@ -102,41 +140,6 @@ async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean)
 		await access(placeFile);
 	} catch {
 		log.error("Build completed but place file was not created");
-		process.exit(1);
-	}
-}
-
-/**
- * Handles Ctrl+C interrupt while Studio is launching.
- *
- * If the Studio .lock file doesn't exist yet (Studio hasn't fully opened the
- * place), kills the Studio process.
- *
- * @param studioLockFilePath - Path to the Studio lock file.
- * @param studioPid - PID of the Studio process.
- * @param lockFileCreated - Whether Studio has created the lock file.
- */
-async function handleStudioInterrupt(
-	studioLockFilePath: string,
-	studioPid: number,
-	lockFileCreated: boolean,
-): Promise<void> {
-	try {
-		// If lock file was created, Studio has opened the place - leave it
-		// running
-		if (lockFileCreated) {
-			log.info("Studio has opened the place, leaving it running");
-			process.exit(0);
-		}
-
-		// Lock file doesn't exist - Studio hasn't fully opened yet
-		log.info("Studio hasn't opened the place yet, killing process...");
-		await killProcess(studioPid);
-		await cleanupLockfile(studioLockFilePath);
-		process.exit(0);
-	} catch (err) {
-		const errorMessage = err instanceof Error ? err.message : String(err);
-		log.warn(`Error handling interrupt: ${errorMessage}`);
 		process.exit(1);
 	}
 }
@@ -178,8 +181,9 @@ async function startWatchOnStudioClose(config: ResolvedConfig): Promise<void> {
  * If Ctrl+C is pressed before the lock file exists (Studio hasn't fully opened
  * the place), the Studio process will be killed.
  *
- * This also watches for Studio to create the .lock file and writes the PID to
- * it for the stop command to use.
+ * This waits for Studio to create the .lock file and writes the PID to it for
+ * the stop command to use. If Ctrl+C is pressed before the lock file is
+ * created, Studio will be killed.
  *
  * @param config - The resolved project configuration.
  */
@@ -196,32 +200,58 @@ async function trackStudioProcess(config: ResolvedConfig): Promise<void> {
 	// TypeScript type narrowing: studioPid is guaranteed to be number here
 	const studioPid: number = studioPidOrNull;
 
-	let isLockFileCreated = false;
+	// Wait for Studio to create the lock file or for Ctrl+C
+	await waitForStudioLockOrInterrupt(studioLockFilePath, studioPid);
+}
 
-	/** Set up Ctrl+C handler. */
-	function sigintHandler(): void {
-		void handleStudioInterrupt(studioLockFilePath, studioPid, isLockFileCreated);
-	}
+/**
+ * Waits for Studio to create the lock file or for user interrupt.
+ *
+ * @param studioLockFilePath - Path to the Studio lock file.
+ * @param studioPid - Studio process PID.
+ */
+async function waitForStudioLockOrInterrupt(
+	studioLockFilePath: string,
+	studioPid: number,
+): Promise<void> {
+	await new Promise<void>((resolve, reject) => {
+		let isLockFileCreated = false;
 
-	process.once("SIGINT", sigintHandler);
+		/** Set up Ctrl+C handler. */
+		function sigintHandler(): void {
+			handleInterruptSignal({
+				isLockFileCreated,
+				reject,
+				resolve,
+				studioLockFilePath,
+				studioPid,
+			});
+		}
 
-	// Watch for Studio to create the lock file when it opens the place
-	// This runs in the background and doesn't block
-	void watchStudioLockFile(studioLockFilePath, {
-		onStudioClose: async () => {
-			// Studio closed - remove the Ctrl+C handler if still present
+		process.once("SIGINT", sigintHandler);
+
+		// Watch for Studio to create the lock file
+		void watchStudioLockFile(studioLockFilePath, {
+			onStudioClose: () => {
+				// Studio closed before fully opening - not expected but handle
+				// gracefully
+				process.removeListener("SIGINT", sigintHandler);
+				resolve();
+			},
+			onStudioOpen: async () => {
+				// Studio created the lock file - write PID to it for stop command
+				await writeStudioLockFile(studioLockFilePath, studioPid);
+				isLockFileCreated = true;
+				// Remove the Ctrl+C handler since Studio is now running
+				process.removeListener("SIGINT", sigintHandler);
+				// Resolve to let the command complete
+				resolve();
+			},
+		}).catch((err) => {
+			// Watcher error
 			process.removeListener("SIGINT", sigintHandler);
-			isLockFileCreated = false;
-		},
-		onStudioOpen: async () => {
-			// Studio created the lock file - write PID to it for stop command
-			await writeStudioLockFile(studioLockFilePath, studioPid);
-			isLockFileCreated = true;
-			// Remove the Ctrl+C handler since Studio is now running
-			process.removeListener("SIGINT", sigintHandler);
-		},
-	}).catch(() => {
-		// Watcher error - not critical for the open command
+			reject(err instanceof Error ? err : new Error(String(err)));
+		});
 	});
 }
 
