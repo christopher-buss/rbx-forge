@@ -43,7 +43,7 @@ export async function action(): Promise<void> {
 	setupSignalHandlers();
 
 	const config = await loadProjectConfig();
-	const rojo = getRojoCommand();
+	const rojo = getRojoCommand(config);
 
 	await stopExistingRojo(config);
 

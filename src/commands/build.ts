@@ -55,7 +55,7 @@ export async function action(commandOptions: BuildOptions = {}): Promise<void> {
 	validateOptions(commandOptions);
 
 	const config = await loadProjectConfig();
-	const rojo = getRojoCommand();
+	const rojo = getRojoCommand(config);
 
 	const outputPath = commandOptions.plugin ?? commandOptions.output ?? config.buildOutputPath;
 	const isPluginOutput = commandOptions.plugin !== undefined;

@@ -67,7 +67,7 @@ async function startRojoServer(
 	config: ResolvedConfig,
 	port: number,
 ): Promise<RojoServerResult> {
-	const rojo = getRojoCommand();
+	const rojo = getRojoCommand(config);
 	const activeSpinner = spinner({ cancelMessage: "Cancelling Rojo Serve" });
 	activeSpinner.start(`Starting Rojo server on port ${port}...`);
 

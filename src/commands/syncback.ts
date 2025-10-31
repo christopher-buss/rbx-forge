@@ -80,9 +80,9 @@ export async function action(commandOptions: SyncbackOptions = {}): Promise<void
 	setupSignalHandlers();
 
 	const config = await loadProjectConfig();
-	const rojo = getRojoCommand();
+	const rojo = getRojoCommand(config);
 
-	await checkRojoSyncback();
+	await checkRojoSyncback(config);
 
 	const inputPath = commandOptions.input ?? config.syncbackInputPath;
 
@@ -126,8 +126,8 @@ function buildRojoArguments(
 	return args;
 }
 
-async function checkRojoSyncback(): Promise<void> {
-	const rojo = getRojoCommand();
+async function checkRojoSyncback(config: ResolvedConfig): Promise<void> {
+	const rojo = getRojoCommand(config);
 
 	try {
 		await runOutput(rojo, ["syncback", "--help"]);
