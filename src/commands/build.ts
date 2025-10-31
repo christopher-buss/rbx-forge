@@ -3,6 +3,7 @@ import { log } from "@clack/prompts";
 import ansis from "ansis";
 import { stat } from "node:fs/promises";
 import process from "node:process";
+import type { ResolvedConfig } from "src/config/schema";
 import { getRojoCommand } from "src/utils/rojo";
 
 import { loadProjectConfig } from "../config";
@@ -85,7 +86,7 @@ function buildRojoArguments(
 	buildOptions: BuildOptions,
 	outputPath: string,
 	isPluginOutput: boolean,
-	config: Awaited<ReturnType<typeof loadProjectConfig>>,
+	config: ResolvedConfig,
 ): Array<string> {
 	const args = ["build"];
 

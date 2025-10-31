@@ -4,6 +4,7 @@ import ansis from "ansis";
 import chokidar, { type FSWatcher } from "chokidar";
 import { access } from "node:fs/promises";
 import process from "node:process";
+import type { ResolvedConfig } from "src/config/schema";
 
 import { loadProjectConfig } from "../config";
 import { formatDuration } from "../utils/format-duration";
@@ -105,7 +106,7 @@ export async function action(commandOptions: SyncbackOptions = {}): Promise<void
 function buildRojoArguments(
 	inputPath: string,
 	syncbackOptions: SyncbackOptions,
-	config: Awaited<ReturnType<typeof loadProjectConfig>>,
+	config: ResolvedConfig,
 ): Array<string> {
 	const args = ["syncback", "--input", inputPath, "--non-interactive"];
 
