@@ -45,7 +45,6 @@ export async function action(commandOptions: ServeOptions = {}): Promise<void> {
 	try {
 		await waitForServerOrCancellation(result.subprocess, result.activeSpinner);
 	} catch (err) {
-		await cleanupRojoLock(config);
 		await handleProcessExit(err);
 	} finally {
 		await cleanupRojoLock(config);
