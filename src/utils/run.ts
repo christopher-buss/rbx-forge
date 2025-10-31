@@ -17,7 +17,7 @@ import { CLI_COMMAND } from "src/constants";
 import type { Except } from "type-fest";
 
 import { getCommandName } from "./command-names";
-import { getCallingTaskRunner } from "./detect-task-runner";
+import { detectAvailableTaskRunner, getCallingTaskRunner } from "./detect-task-runner";
 import { processManager } from "./process-manager";
 
 export interface RunOptions extends ExecaOptions {
@@ -251,12 +251,13 @@ export async function runScript(
 	const resolvedName = getCommandName(scriptName, config);
 	const callingRunner = getCallingTaskRunner();
 
-	if (callingRunner === "mise") {
+	const runner = callingRunner ?? (await detectAvailableTaskRunner());
+	if (runner === "mise") {
 		await run("mise", ["run", resolvedName, ...args], { shouldShowCommand: false, ...options });
 		return;
 	}
 
-	if (callingRunner === "npm") {
+	if (runner === "npm") {
 		await runWithPackageManager(resolvedName, args, options);
 		return;
 	}
