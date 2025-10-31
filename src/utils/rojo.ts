@@ -3,6 +3,7 @@ import { cancel, log } from "@clack/prompts";
 import ansis from "ansis";
 import { scope, type } from "arktype";
 import process from "node:process";
+import type { ResolvedConfig } from "src/config/schema";
 
 import { isWsl } from "./is-wsl";
 import { runOutput } from "./run";
@@ -40,20 +41,27 @@ export async function checkRojoInstallation(): Promise<string> {
  * WSL (Windows Subsystem for Linux) needs to call the Windows executable (.exe)
  * to properly interact with the Windows filesystem and processes.
  *
- * @returns `rojo.exe` on WSL, `rojo` on other platforms.
+ * @param config - Optional resolved config containing the rojo alias.
+ * @returns The rojo command with `.exe` suffix on WSL, without on other
+ *   platforms.
  */
-export function getRojoCommand(): string {
-	return isWsl() ? "rojo.exe" : "rojo";
+export function getRojoCommand(config?: ResolvedConfig): string {
+	const baseCommand = config?.rojoAlias ?? "rojo";
+	return isWsl() ? `${baseCommand}.exe` : baseCommand;
 }
 
 /**
  * Executes `rojo sourcemap` and returns the parsed JSON output.
  *
  * @param rojoProjectPath - Optional path to a specific Rojo project file.
+ * @param config - Optional resolved config containing the rojo alias.
  * @returns The parsed Rojo source map.
  */
-export async function getRojoSourceMap(rojoProjectPath?: string): Promise<RojoSourceMap> {
-	const rojo = getRojoCommand();
+export async function getRojoSourceMap(
+	rojoProjectPath?: string,
+	config?: ResolvedConfig,
+): Promise<RojoSourceMap> {
+	const rojo = getRojoCommand(config);
 	const args = ["sourcemap"];
 
 	if (rojoProjectPath !== undefined && rojoProjectPath.length > 0) {

@@ -147,6 +147,44 @@ export default defineConfig({
 
 ---
 
+### `rojoAlias`
+
+**Type:** `string` **Default:** `"rojo"`
+
+Custom alias for the Rojo command executable. This allows you to use alternative
+Rojo builds or forks without modifying command calls throughout your project.
+
+On WSL (Windows Subsystem for Linux), the `.exe` extension is automatically
+appended to the alias when needed.
+
+**Examples:**
+
+```typescript
+// Use a custom Rojo build
+export default defineConfig({
+	rojoAlias: "rojo-sync",
+});
+
+// Use a fork with different features
+export default defineConfig({
+	rojoAlias: "rojo-custom",
+});
+```
+
+**Use Cases:**
+
+- Using the UpliftGames Rojo fork with syncback support
+- Testing custom Rojo builds
+- Managing multiple Rojo versions (e.g., `rojo-stable`, `rojo-beta`)
+- Project-specific Rojo configurations
+
+**WSL Behavior:**
+
+- Non-WSL: `"rojo-sync"` → executes `rojo-sync`
+- WSL: `"rojo-sync"` → executes `rojo-sync.exe`
+
+---
+
 ### `commandNames`
 
 **Type:** `object` **Default:** See below
@@ -478,6 +516,9 @@ export default defineConfig({
 		command: "rbxtsc",
 		watchOnOpen: true,
 	},
+
+	// Rojo command alias
+	rojoAlias: "rojo",
 
 	// Rojo project file path
 	rojoProjectPath: "default.project.json",
