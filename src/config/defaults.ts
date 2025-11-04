@@ -31,6 +31,7 @@ export const defaults: ResolvedConfig = {
 	rojoProjectPath: "default.project.json",
 	suppressNoTaskRunnerWarning: false,
 	syncback: {
+		projectPath: undefined,
 		runOnStart: false,
 	},
 	syncbackInputPath: "game.rbxl",

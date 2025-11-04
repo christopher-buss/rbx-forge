@@ -32,6 +32,7 @@ export const configSchema = type({
 	"rojoProjectPath?": "string",
 	"suppressNoTaskRunnerWarning?": "boolean",
 	"syncback?": {
+		"projectPath?": "string | undefined",
 		"runOnStart?": "boolean",
 	},
 	"syncbackInputPath?": "string",

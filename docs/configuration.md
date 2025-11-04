@@ -350,11 +350,55 @@ export default defineConfig({
 
 ### `syncback`
 
-**Type:** `object` **Default:** `{ runOnStart: false }`
+**Type:** `object` **Default:**
+`{ projectPath: "default.project.json", runOnStart: false }`
 
 Configuration for syncback functionality (requires UpliftGames Rojo fork).
 
 **Properties:**
+
+#### `syncback.projectPath`
+
+**Type:** `string` **Default:** Inherits from `rojoProjectPath`
+
+Path to the Rojo project file to use specifically for syncback operations. By
+default, this uses the same value as `rojoProjectPath`, so you only need to set
+this if you want a different project file for syncback.
+
+**Why use a separate project file?**
+
+Syncback only pulls instances from the place file if they are descendants of
+nodes defined in your project file. For example, to syncback children of
+`Workspace`, `Workspace` must be present in your project file.
+
+You may want a separate project file for syncback because:
+
+- Your main project file only includes specific services (e.g.,
+  `ServerScriptService`, `ReplicatedStorage`)
+- You want to syncback additional services without affecting your build output
+- You need different `syncbackRules` configurations for different workflows
+
+See the
+[Rojo syncback documentation](https://github.com/UpliftGames/rojo/blob/syncback/docs/syncback.md)
+for more details on syncback rules and configuration.
+
+**Example:**
+
+```typescript
+// If you only set rojoProjectPath, syncback will use it automatically
+export default defineConfig({
+	rojoProjectPath: "custom.project.json",
+	// syncback.projectPath will automatically be "custom.project.json"
+});
+
+// Or explicitly set a different project file for syncback
+export default defineConfig({
+	rojoProjectPath: "default.project.json",
+	syncback: {
+		projectPath: "syncback.project.json",
+	},
+});
+```
 
 #### `syncback.runOnStart`
 

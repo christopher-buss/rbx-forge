@@ -29,7 +29,7 @@ export const options = [
 		flags: "-i, --input <path>",
 	},
 	{
-		description: "Path to the project to syncback to (defaults to current directory)",
+		description: "Path to the project to syncback to",
 		flags: "--project <path>",
 	},
 	{
@@ -110,7 +110,8 @@ function buildRojoArguments(
 ): Array<string> {
 	const args = ["syncback", "--input", inputPath, "--non-interactive"];
 
-	const projectPath = syncbackOptions.project ?? config.rojoProjectPath;
+	const projectPath =
+		syncbackOptions.project ?? config.syncback.projectPath ?? config.rojoProjectPath;
 	if (projectPath.length > 0) {
 		args.push(projectPath);
 	}
