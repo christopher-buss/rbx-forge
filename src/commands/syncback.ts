@@ -11,7 +11,7 @@ import { formatDuration } from "../utils/format-duration";
 import { isGracefulShutdown } from "../utils/graceful-shutdown";
 import { setupSignalHandlers } from "../utils/process-manager";
 import { getRojoCommand } from "../utils/rojo";
-import { createSpinner, run, runOutput } from "../utils/run";
+import { createSpinner, run, runOutput, runScript } from "../utils/run";
 import { getStudioLockFilePath, watchStudioLockFile } from "../utils/studio-lock-watcher";
 
 /**
@@ -27,6 +27,11 @@ export const options = [
 	{
 		description: "Input place or model file to syncback from (overrides config)",
 		flags: "-i, --input <path>",
+	},
+	{
+		description: "Internal mode for per-execution hooks (not for direct use)",
+		flags: "--internal",
+		hidden: true,
 	},
 	{
 		description: "Path to the project to syncback to",
@@ -49,6 +54,7 @@ export const options = [
 export interface SyncbackOptions {
 	color?: string;
 	input?: string;
+	internal?: boolean;
 	project?: string;
 	verbose?: boolean;
 	watch?: boolean;
@@ -77,8 +83,6 @@ interface WatchState {
 }
 
 export async function action(commandOptions: SyncbackOptions = {}): Promise<void> {
-	setupSignalHandlers();
-
 	const config = await loadProjectConfig();
 	const rojo = getRojoCommand(config);
 
@@ -100,7 +104,41 @@ export async function action(commandOptions: SyncbackOptions = {}): Promise<void
 		rojo,
 	};
 
+	// Internal mode for per-execution hooks (minimal execution, no signal
+	// handlers)
+	if (commandOptions.internal === true) {
+		await internalMode(context);
+		return;
+	}
+
+	// Setup signal handlers for watch and single modes
+	setupSignalHandlers();
+
 	await (commandOptions.watch === true ? watchMode(context) : singleMode(context));
+}
+
+/**
+ * Build CLI arguments for internal mode syncback execution.
+ *
+ * @param context - Syncback context containing configuration and options.
+ * @returns Array of CLI arguments for the syncback command.
+ */
+function buildInternalModeArgs(context: SyncbackContext): Array<string> {
+	const args = ["--internal", "--input", context.inputPath];
+
+	if (context.commandOptions.project !== undefined && context.commandOptions.project.length > 0) {
+		args.push("--project", context.commandOptions.project);
+	}
+
+	if (context.commandOptions.verbose !== undefined && context.commandOptions.verbose) {
+		args.push("--verbose");
+	}
+
+	if (context.commandOptions.color !== undefined && context.commandOptions.color.length > 0) {
+		args.push("--color", context.commandOptions.color);
+	}
+
+	return args;
 }
 
 function buildRojoArguments(
@@ -194,6 +232,7 @@ function createShutdownHandler(
 
 /**
  * Execute a syncback operation with progress reporting and spinner feedback.
+ * Uses runScript() to enable user hooks via task runner scripts.
  *
  * @param context - Syncback context containing configuration and options.
  * @param state - Optional watch state to manage monitoring spinner.
@@ -206,11 +245,11 @@ async function executeSyncback(context: SyncbackContext, state?: WatchState): Pr
 
 	const startTime = performance.now();
 	const spinner = createSpinner("Running syncback...");
-
-	const rojoArgs = buildRojoArguments(context.inputPath, context.commandOptions, context.config);
+	const args = buildInternalModeArgs(context);
 
 	try {
-		await run(context.rojo, rojoArgs, {
+		// Call via runScript to enable user hooks (forge:syncback script)
+		await runScript("syncback", args, {
 			shouldStreamOutput: context.commandOptions.verbose !== undefined,
 		});
 
@@ -218,13 +257,10 @@ async function executeSyncback(context: SyncbackContext, state?: WatchState): Pr
 		spinner.stop(`Syncback succeeded (${ansis.dim(duration)})`);
 	} catch (err) {
 		if (isGracefulShutdown(err)) {
-			// Graceful shutdown - just stop spinner without error message
 			spinner.stop("Syncback interrupted");
-			// Re-throw to propagate to caller
 			throw err;
 		}
 
-		// Actual error - show error message
 		spinner.stop(ansis.red("Syncback failed"));
 		throw err;
 	}
@@ -293,6 +329,21 @@ async function initializeWatchState(inputPath: string): Promise<WatchState> {
 		lastModified: 0,
 		watcher: chokidar.watch(inputPath),
 	};
+}
+
+/**
+ * Internal mode for per-execution hooks. Minimal execution without intro/outro
+ * messages. Used by watch mode to enable user hooks via runScript().
+ *
+ * @param context - Syncback context containing configuration and options.
+ */
+async function internalMode(context: SyncbackContext): Promise<void> {
+	const rojoArgs = buildRojoArguments(context.inputPath, context.commandOptions, context.config);
+
+	await run(context.rojo, rojoArgs, {
+		shouldShowCommand: false,
+		shouldStreamOutput: context.commandOptions.verbose !== undefined,
+	});
 }
 
 /**
