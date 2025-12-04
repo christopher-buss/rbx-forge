@@ -33,16 +33,16 @@
 		"publicHoistPattern": ["@typescript/*"]
 	},
 	"scripts": {
-		"build": "tsdown --clean --dts",
+		"build": "bun run ./scripts/build.ts --clean --dts",
 		"lint": "eslint_d --cache",
 		"lint:ci": "eslint --cache --cache-strategy content",
-		"prepack": "nr build",
+		"prepack": "bun run build",
 		"prepare": "simple-git-hooks",
-		"prepublishOnly": "nr build",
+		"prepublishOnly": "bun run build",
 		"release": "bumpp",
-		"stub": "tsdown",
+		"stub": "bun run ./scripts/build.ts",
 		"typecheck": "tsgo --noEmit",
-		"watch": "tsdown --watch --dts"
+		"watch": "bun run ./scripts/build.ts --watch --dts"
 	},
 	"simple-git-hooks": {
 		"pre-commit": "bun x lint-staged"
@@ -84,9 +84,7 @@
 		"lint-staged": "^16.2.6",
 		"publint": "^0.3.15",
 		"simple-git-hooks": "^2.13.1",
-		"tsdown": "^0.15.11",
 		"typescript": "^5.9.3",
-		"unplugin-unused": "^0.5.4"
 	},
 	"packageManager": "bun@1.3.3",
 	"engines": {
