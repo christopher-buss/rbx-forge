@@ -1,5 +1,3 @@
-import { log, outro } from "@clack/prompts";
-
 import ansis from "ansis";
 import process from "node:process";
 import {
@@ -11,6 +9,7 @@ import { getStudioLockFilePath, watchStudioLockFile } from "src/utils/studio-loc
 
 import { loadProjectConfig } from "../config";
 import { cleanupLockfile } from "../utils/lockfile";
+import { logger } from "../utils/logger";
 
 export const COMMAND = "start";
 export const DESCRIPTION = "Compile, build, and open in Roblox Studio with optional syncback";
@@ -22,7 +21,7 @@ export async function action(): Promise<void> {
 
 	const config = await loadProjectConfig();
 
-	log.info(ansis.bold("→ Starting full build workflow"));
+	logger.info(ansis.bold("→ Starting full build workflow"));
 
 	await runScript("compile");
 	await runScript("build");
@@ -34,7 +33,7 @@ export async function action(): Promise<void> {
 		await runWorkflow(config, abortController);
 
 		// Workflow completed and cleanup already ran inside runWorkflow
-		outro(ansis.green("✨ Start workflow complete, successfully exited!"));
+		logger.success("✨ Start workflow complete, successfully exited!");
 		process.exit(0);
 	} catch (err) {
 		if (!isCancellationError(err) && !isShutdownError(err)) {
@@ -42,7 +41,7 @@ export async function action(): Promise<void> {
 		}
 
 		// Ctrl+C or expected shutdown - cleanup already ran in runWorkflow
-		outro(ansis.green("✨ Start workflow complete, successfully exited!"));
+		logger.success("✨ Start workflow complete, successfully exited!");
 		process.exit(0);
 	} finally {
 		cleanupSignalHandlers();
@@ -82,7 +81,7 @@ async function handleStudioClose(
 	config: Awaited<ReturnType<typeof loadProjectConfig>>,
 	abortController: AbortController,
 ): Promise<void> {
-	log.info("Studio closed - stopping workflow...");
+	logger.info("Studio closed - stopping workflow...");
 
 	abortController.abort();
 
@@ -180,12 +179,12 @@ function startBackgroundProcesses(
 
 	runScript("open", [], { shouldRegisterProcess: true }).catch((err) => {
 		if (!isCancellationError(err)) {
-			log.warn(`Open script failed: ${err instanceof Error ? err.message : String(err)}`);
+			logger.warn(`Open script failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	});
 	runScript("watch", [], { shouldRegisterProcess: true }).catch((err) => {
 		if (!isCancellationError(err)) {
-			log.warn(`Watch script failed: ${err instanceof Error ? err.message : String(err)}`);
+			logger.warn(`Watch script failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	});
 
@@ -195,7 +194,7 @@ function startBackgroundProcesses(
 			shouldRegisterProcess: true,
 		}).catch((err) => {
 			if (!isCancellationError(err) && !isShutdownError(err)) {
-				log.warn(
+				logger.warn(
 					`Syncback script failed: ${err instanceof Error ? err.message : String(err)}`,
 				);
 			}

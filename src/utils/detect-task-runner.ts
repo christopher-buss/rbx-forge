@@ -1,5 +1,3 @@
-import { execa } from "execa";
-import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -40,8 +38,9 @@ export async function detectAvailableTaskRunner(): Promise<AvailableTaskRunner> 
 
 	try {
 		const packageJsonPath = path.join(cwd, "package.json");
-		const packageJsonContent = await fs.readFile(packageJsonPath, "utf8");
-		const packageJson = JSON.parse(packageJsonContent) as { scripts?: Record<string, string> };
+		const packageJson = (await Bun.file(packageJsonPath).json()) as {
+			scripts?: Record<string, string>;
+		};
 
 		if (packageJson.scripts && Object.keys(packageJson.scripts).length > 0) {
 			return "npm";
@@ -80,11 +79,11 @@ export async function detectAvailableTaskRunner(): Promise<AvailableTaskRunner> 
  * @returns The detected task runner ("mise", "npm") or null if called directly.
  */
 export function getCallingTaskRunner(): TaskRunner {
-	if (process.env["MISE_TASK_NAME"] !== undefined) {
+	if (Bun.env["MISE_TASK_NAME"] !== undefined) {
 		return "mise";
 	}
 
-	if (process.env["npm_lifecycle_event"] !== undefined) {
+	if (Bun.env["npm_lifecycle_event"] !== undefined) {
 		return "npm";
 	}
 
@@ -99,12 +98,8 @@ export function getCallingTaskRunner(): TaskRunner {
  */
 async function hasMiseTasks(): Promise<boolean> {
 	try {
-		const result = await execa("mise", ["tasks", "ls", "--local"], {
-			cwd: process.cwd(),
-			reject: false,
-		});
-
-		return result.exitCode === 0 && result.stdout.trim().length > 0;
+		const result = await Bun.$`mise tasks ls --local`.quiet().nothrow();
+		return result.exitCode === 0 && result.stdout.toString().trim().length > 0;
 	} catch {
 		return false;
 	}

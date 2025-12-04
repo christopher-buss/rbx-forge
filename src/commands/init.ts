@@ -1,18 +1,6 @@
-import {
-	cancel,
-	confirm,
-	intro,
-	isCancel,
-	log,
-	multiselect,
-	note,
-	outro,
-	select,
-	tasks,
-} from "@clack/prompts";
+import { checkbox, confirm, select } from "@inquirer/prompts";
 
 import ansis from "ansis";
-import process from "node:process";
 import { detect } from "package-manager-detector";
 import type { ResolvedConfig } from "src/config/schema";
 import { updateMiseToml } from "src/utils/mise";
@@ -27,23 +15,25 @@ import { checkRojoInstallation } from "src/utils/rojo";
 import { name as packageName, version as packageVersion } from "../../package.json";
 import { loadProjectConfig, updateProjectConfig } from "../config";
 import { getCommandName } from "../utils/command-names";
-import { findCommandForPackageManager, run } from "../utils/run";
+import { logger } from "../utils/logger";
+import { findCommandForPackageManager } from "../utils/run";
 
 export const COMMAND = "init";
 export const DESCRIPTION = `Initialize a new ${packageName} project`;
 
-const OPERATION_CANCELLED = "Operation cancelled";
-
 type TaskRunner = "lune" | "mise" | "npm";
 
 export async function action(): Promise<void> {
-	intro(ansis.bold(`🔨 ${packageName} init`));
+	console.log();
+	logger.info(ansis.bold(`${packageName} init`));
 
 	const { projectType, taskRunners } = await getUserInput();
 
 	await runInitializationTasks(projectType, taskRunners);
 	await showNextSteps(taskRunners);
-	outro(ansis.green("✨ You're all set!"));
+
+	logger.success("You're all set!");
+	console.log();
 }
 
 async function addRbxForgeToPackageJson(): Promise<void> {
@@ -54,7 +44,6 @@ async function addRbxForgeToPackageJson(): Promise<void> {
 		return;
 	}
 
-	// Check if already installed
 	const hasInDeps = packageJson.dependencies?.[packageName] !== undefined;
 	const hasInDevelopmentDeps = packageJson.devDependencies?.[packageName] !== undefined;
 
@@ -63,43 +52,33 @@ async function addRbxForgeToPackageJson(): Promise<void> {
 	}
 
 	const shouldAddRbxForge = await confirm({
-		initialValue: true,
+		default: true,
 		message: `Add ${packageName} to devDependencies? (recommended)`,
 	});
-
-	if (isCancel(shouldAddRbxForge)) {
-		cancel(OPERATION_CANCELLED);
-		process.exit(0);
-	}
 
 	if (shouldAddRbxForge) {
 		packageJson.devDependencies ??= {};
 		packageJson.devDependencies[packageName] = `^${packageVersion}`;
 		await writePackageJson(packageJsonPath, packageJson);
-		log.success(
+		logger.success(
 			`Added ${packageName}@^${packageVersion} to ${ansis.magenta("devDependencies")}`,
 		);
 	}
 }
 
-async function createForgeConfig(projectType: "luau" | "rbxts"): Promise<string> {
+async function createForgeConfig(projectType: "luau" | "rbxts"): Promise<void> {
 	await updateProjectConfig(projectType);
 	const configFileName = `${packageName}.config.ts`;
-	return `Config file created at ${ansis.magenta(configFileName)}`;
+	logger.success(`Config file created at ${ansis.magenta(configFileName)}`);
 }
 
-async function createRojoProject(): Promise<string> {
+async function createRojoProject(): Promise<void> {
 	try {
-		await run("rojo", ["init"], {
-			shouldShowCommand: false,
-			shouldStreamOutput: false,
-		});
+		await Bun.$`rojo init`.quiet();
+		logger.success("Project structure created");
 	} catch {
-		log.message(ansis.gray("Rojo project structure already exists, skipping"));
-		return "";
+		logger.message(ansis.gray("Rojo project structure already exists, skipping"));
 	}
-
-	return "Project structure created";
 }
 
 async function getInstallCommand(shouldUseMise: boolean, shouldUseNpm: boolean): Promise<string> {
@@ -139,7 +118,6 @@ async function getTaskRunnerCommand(
 		}
 	}
 
-	// Extract base command name (e.g., "forge:build" -> "build")
 	const baseCommand = scriptName.replace(/^forge:/, "");
 	return `${packageName} ${baseCommand}`;
 }
@@ -149,7 +127,6 @@ async function getUserInput(): Promise<{
 	taskRunners: Array<TaskRunner>;
 }> {
 	const projectType = await selectProjectType();
-
 	const taskRunners = await selectTaskRunners();
 
 	return { projectType, taskRunners };
@@ -159,72 +136,45 @@ async function runInitializationTasks(
 	projectType: "luau" | "rbxts",
 	taskRunners: Array<TaskRunner>,
 ): Promise<void> {
-	const initTasks = [
-		{ task: checkRojoInstallation, title: "Checking Rojo installation" },
-		{ task: createRojoProject, title: "Creating Rojo project structure" },
-		{
-			task: async () => createForgeConfig(projectType),
-			title: `Creating ${packageName} config`,
-		},
-	];
+	logger.info("Running initialization tasks...");
+
+	await checkRojoInstallation();
+	await createRojoProject();
+	await createForgeConfig(projectType);
 
 	if (taskRunners.includes("npm")) {
-		// Add package to package.json if not already present
 		await addRbxForgeToPackageJson();
-
-		initTasks.push({
-			task: async () => updatePackageJson(),
-			title: "Adding npm scripts to package.json",
-		});
+		await updatePackageJson();
+		logger.success("Added npm scripts to package.json");
 	}
 
-	// Add mise tasks if mise is selected
 	if (taskRunners.includes("mise")) {
-		initTasks.push({
-			task: async () => updateMiseToml(),
-			title: "Adding mise tasks to .mise.toml",
-		});
+		await updateMiseToml();
+		logger.success("Added mise tasks to .mise.toml");
 	}
-
-	await tasks(initTasks);
 }
 
 async function selectProjectType(): Promise<ResolvedConfig["projectType"]> {
-	const projectType = await select({
-		message: "Pick a project type.",
-		options: [
-			{ label: "TypeScript", value: "rbxts" },
-			{ label: "Luau", value: "luau" },
+	return select({
+		choices: [
+			{ name: "TypeScript", value: "rbxts" as const },
+			{ name: "Luau", value: "luau" as const },
 		],
+		message: "Pick a project type.",
 	});
-
-	if (isCancel(projectType)) {
-		cancel(OPERATION_CANCELLED);
-		process.exit(0);
-	}
-
-	return projectType;
 }
 
 async function selectTaskRunners(): Promise<Array<TaskRunner>> {
 	const { agent } = (await detect()) ?? { agent: "npm" };
 
-	const taskRunners = await multiselect({
-		message: "Pick task runner(s) (optional).",
-		options: [
-			{ hint: "default", label: agent, value: "npm" },
-			{ label: "mise", value: "mise" },
-			{ disabled: true, hint: "coming soon", label: "lune", value: "lune" },
+	return checkbox({
+		choices: [
+			{ name: agent, value: "npm" as const },
+			{ name: "mise", value: "mise" as const },
+			{ disabled: "(coming soon)", name: "lune", value: "lune" as const },
 		],
-		required: false,
+		message: "Pick task runner(s) (optional).",
 	});
-
-	if (isCancel(taskRunners)) {
-		cancel(OPERATION_CANCELLED);
-		process.exit(0);
-	}
-
-	return taskRunners;
 }
 
 async function showNextSteps(taskRunners: Array<TaskRunner>): Promise<void> {
@@ -254,5 +204,9 @@ async function showNextSteps(taskRunners: Array<TaskRunner>): Promise<void> {
 	addStep(`Run ${ansis.cyan(buildCommand)} to build your project`);
 	addStep(`Run ${ansis.cyan(serveCommand)} to start development`);
 
-	note(`Next steps:\n\n${steps.join("\n")}`, "Next Steps");
+	console.log();
+	logger.info("Next steps:");
+	for (const value of steps) {
+		console.log(value);
+	}
 }

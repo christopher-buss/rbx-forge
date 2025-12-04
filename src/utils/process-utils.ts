@@ -1,6 +1,6 @@
+import { platform } from "node:process";
+
 import { isWsl } from "./is-wsl";
-import { run } from "./run";
-import { runPlatform } from "./run-platform";
 
 /**
  * Checks if a process with the given PID is still running.
@@ -10,20 +10,13 @@ import { runPlatform } from "./run-platform";
  */
 export async function isProcessAlive(pid: number): Promise<boolean> {
 	try {
-		const hideOutput = { shouldShowCommand: false, shouldStreamOutput: false };
-
-		await runPlatform({
-			darwin: async () => run("ps", ["-p", String(pid)], hideOutput),
-			linux: async () => {
-				if (isWsl()) {
-					// Use tasklist.exe in WSL
-					return run("tasklist.exe", ["/FI", `PID eq ${pid}`], hideOutput);
-				}
-
-				return run("ps", ["-p", String(pid)], hideOutput);
-			},
-			win32: async () => run("tasklist", ["/FI", `PID eq ${pid}`], hideOutput),
-		});
+		if (platform === "win32") {
+			await Bun.$`tasklist /FI "PID eq ${pid}"`.quiet();
+		} else if (platform === "linux" && isWsl()) {
+			await Bun.$`tasklist.exe /FI "PID eq ${pid}"`.quiet();
+		} else {
+			await Bun.$`ps -p ${pid}`.quiet();
+		}
 
 		return true;
 	} catch {
@@ -37,17 +30,11 @@ export async function isProcessAlive(pid: number): Promise<boolean> {
  * @param pid - Process ID to kill.
  */
 export async function killProcess(pid: number): Promise<void> {
-	const hideOutput = { shouldShowCommand: false, shouldStreamOutput: false };
-
-	await runPlatform({
-		darwin: async () => run("kill", ["-9", String(pid)], hideOutput),
-		linux: async () => {
-			if (isWsl()) {
-				return run("taskkill.exe", ["/f", "/pid", String(pid)], hideOutput);
-			}
-
-			return run("kill", ["-9", String(pid)], hideOutput);
-		},
-		win32: async () => run("taskkill", ["/f", "/pid", String(pid)], hideOutput),
-	});
+	if (platform === "win32") {
+		await Bun.$`taskkill /f /pid ${pid}`.quiet();
+	} else if (platform === "linux" && isWsl()) {
+		await Bun.$`taskkill.exe /f /pid ${pid}`.quiet();
+	} else {
+		await Bun.$`kill -9 ${pid}`.quiet();
+	}
 }

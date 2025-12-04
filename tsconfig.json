@@ -1,8 +1,34 @@
 {
-	"extends": "@isentinel/tsconfig/typescript",
 	"compilerOptions": {
+		"target": "esnext",
+		"lib": ["esnext", "dom", "webworker"],
+		"moduleDetection": "force",
 		"libReplacement": true,
-		"exactOptionalPropertyTypes": true
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"paths": { "*": ["./*"] },
+		"resolveJsonModule": true,
+		"types": ["bun"],
+		"allowJs": true,
+		"strict": true,
+		"strictNullChecks": true,
+		"allowUnreachableCode": false,
+		"exactOptionalPropertyTypes": true,
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitOverride": true,
+		"noImplicitReturns": true,
+		"noPropertyAccessFromIndexSignature": true,
+		"noUncheckedIndexedAccess": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
+		"erasableSyntaxOnly": true,
+		"skipLibCheck": true
 	},
+	"include": ["${configDir}/**/*/*.*"],
 	"exclude": ["node_modules", "dist", "out", ".vscode-test", "temp"]
 }

@@ -1,11 +1,10 @@
-import { cancel, log } from "@clack/prompts";
-
 import ansis from "ansis";
 import { scope, type } from "arktype";
 import process from "node:process";
 import type { ResolvedConfig } from "src/config/schema";
 
 import { isWsl } from "./is-wsl";
+import { logger } from "./logger";
 import { runOutput } from "./run";
 
 export interface RojoSourceMap {
@@ -30,7 +29,7 @@ export async function checkRojoInstallation(): Promise<string> {
 		const rojoVersion = await runOutput("rojo", ["--version"]);
 		return `Found Rojo ${ansis.cyan(rojoVersion)}`;
 	} catch {
-		cancel(ansis.yellow("⚠ Rojo not found - please install Rojo to use this tool"));
+		logger.error(ansis.yellow("⚠ Rojo not found - please install Rojo to use this tool"));
 		process.exit(2);
 	}
 }
@@ -75,7 +74,7 @@ export async function getRojoSourceMap(
 	} catch (err) {
 		const errorMessage =
 			err instanceof Error ? err.message : "Failed to execute rojo sourcemap";
-		log.error(errorMessage);
+		logger.error(errorMessage);
 
 		throw err;
 	}
@@ -91,8 +90,8 @@ function validateSourceMap(parsed: unknown): RojoSourceMap {
 	const validated = rojoSourceMapSchema(parsed);
 
 	if (validated instanceof type.errors) {
-		log.error("Invalid Rojo sourcemap format:");
-		log.error(validated.summary);
+		logger.error("Invalid Rojo sourcemap format:");
+		logger.error(validated.summary);
 
 		throw new Error(`Invalid Rojo sourcemap format: ${validated.summary}`);
 	}

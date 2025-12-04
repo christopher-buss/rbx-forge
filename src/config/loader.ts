@@ -1,9 +1,8 @@
-import { log } from "@clack/prompts";
-
 import { type } from "arktype";
 import { loadConfig } from "c12";
 import process from "node:process";
 
+import { logger } from "../utils/logger";
 import { defaults } from "./defaults";
 import { configSchema, type ResolvedConfig } from "./schema";
 
@@ -17,8 +16,8 @@ export async function loadProjectConfig(): Promise<ResolvedConfig> {
 	const validated = configSchema(rawConfig);
 
 	if (validated instanceof type.errors) {
-		log.error("Invalid configuration:");
-		log.error(validated.summary);
+		logger.error("Invalid configuration:");
+		logger.error(validated.summary);
 		process.exit(1);
 	}
 

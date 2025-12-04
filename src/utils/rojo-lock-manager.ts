@@ -1,11 +1,9 @@
-import { log } from "@clack/prompts";
-
 import ansis from "ansis";
-import fs from "node:fs/promises";
 
 import type { ResolvedConfig } from "../config/schema";
 import { ROJO_LOCKFILE_SUFFIX } from "../constants";
 import { cleanupLockfile, getLockFilePath, readLockfileRaw } from "./lockfile";
+import { logger } from "./logger";
 import { isPortAvailable } from "./port-utils";
 import { isProcessAlive, killProcess } from "./process-utils";
 
@@ -54,22 +52,19 @@ export async function readRojoLock(lockPath: string): Promise<null | RojoLockDat
 	const startTime = Number.parseInt(lines[2] ?? "", 10);
 
 	if (Number.isNaN(pid) || Number.isNaN(port) || Number.isNaN(startTime)) {
-		// Invalid lockfile, clean it up
 		await cleanupLockfile(lockPath);
 		return null;
 	}
 
-	// Check if process is still running
 	const isRunning = await isProcessAlive(pid);
 	if (!isRunning) {
-		log.warn(`Cleaned up stale Rojo lockfile (PID ${pid} no longer running)`);
+		logger.warn(`Cleaned up stale Rojo lockfile (PID ${pid} no longer running)`);
 		await cleanupLockfile(lockPath);
 		return null;
 	}
 
-	// Guard against PID reuse: if the recorded port is free, the lock is stale.
 	if (await isPortAvailable(port)) {
-		log.warn(`Cleaned up stale Rojo lockfile (port ${port} is no longer bound to Rojo)`);
+		logger.warn(`Cleaned up stale Rojo lockfile (port ${port} is no longer bound to Rojo)`);
 		await cleanupLockfile(lockPath);
 		return null;
 	}
@@ -91,7 +86,7 @@ export async function stopExistingRojo(config: ResolvedConfig): Promise<boolean>
 		return false;
 	}
 
-	log.info(
+	logger.info(
 		`Stopping existing Rojo server for ${ansis.cyan(config.buildOutputPath)} ` +
 			`(PID ${lockData.pid}, port ${lockData.port})`,
 	);
@@ -102,7 +97,7 @@ export async function stopExistingRojo(config: ResolvedConfig): Promise<boolean>
 		return true;
 	} catch (err) {
 		const errorMessage = err instanceof Error ? err.message : String(err);
-		log.warn(`Failed to kill Rojo process ${lockData.pid}: ${errorMessage}`);
+		logger.warn(`Failed to kill Rojo process ${lockData.pid}: ${errorMessage}`);
 		await cleanupLockfile(lockPath);
 		return false;
 	}
@@ -125,9 +120,9 @@ export async function writeRojoLock(
 	const contents = `${pid}\n${port}\n${startTime}`;
 
 	try {
-		await fs.writeFile(lockPath, contents, "utf-8");
+		await Bun.write(lockPath, contents);
 	} catch (err) {
 		const errorMessage = err instanceof Error ? err.message : String(err);
-		log.warn(`Failed to write Rojo lockfile: ${errorMessage}`);
+		logger.warn(`Failed to write Rojo lockfile: ${errorMessage}`);
 	}
 }

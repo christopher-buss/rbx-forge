@@ -1,9 +1,3 @@
-import { log, spinner, taskLog } from "@clack/prompts";
-
-import ansis from "ansis";
-import { execa, type Options as ExecaOptions, type ResultPromise } from "execa";
-import process from "node:process";
-import { createInterface } from "node:readline";
 import {
 	type AgentName,
 	type Command,
@@ -15,83 +9,87 @@ import type { ScriptName } from "src/commands";
 import { loadProjectConfig } from "src/config";
 import { CLI_COMMAND } from "src/constants";
 import type { Except } from "type-fest";
+import yoctoSpinner from "yocto-spinner";
 
 import { getCommandName } from "./command-names";
 import { detectAvailableTaskRunner, getCallingTaskRunner } from "./detect-task-runner";
+import { logger } from "./logger";
 import { processManager } from "./process-manager";
 
-export interface RunOptions extends ExecaOptions {
-	/** Custom spinner instance to use instead of creating a new one. */
-	customSpinner?: Spinner;
+export interface RunOptions {
+	/** AbortSignal to cancel the running process. */
+	readonly cancelSignal?: AbortSignal;
+	/** Current working directory for the command. */
+	readonly cwd?: string;
+	/** Environment variables to pass to the command. */
+	readonly env?: Record<string, string | undefined>;
 	/**
 	 * Whether to register process with ProcessManager for automatic cleanup.
 	 *
-	 * When enabled, the process will be gracefully terminated on application
-	 * exit (SIGINT, SIGTERM, etc.) with configurable timeouts.
-	 *
 	 * @default false
 	 */
-	shouldRegisterProcess?: boolean;
+	readonly shouldRegisterProcess?: boolean;
 	/**
 	 * Whether to show the command being executed.
 	 *
 	 * @default true
 	 */
-	shouldShowCommand?: boolean;
+	readonly shouldShowCommand?: boolean;
 	/**
 	 * Whether to stream stdout/stderr to console.
 	 *
 	 * @default true
 	 */
-	shouldStreamOutput?: boolean;
+	readonly shouldStreamOutput?: boolean;
 	/** Show a spinner with this message while the command runs. */
-	spinnerMessage?: string;
+	readonly spinnerMessage?: string;
 	/** Message to show on success (uses spinner.stop if spinner is shown). */
-	successMessage?: string;
+	readonly successMessage?: string;
 }
 
-export interface RunWithTaskLogOptions extends Except<ExecaOptions, "all" | "buffer"> {
-	/** Maximum number of messages to display (default: 12). */
-	messageLimit?: number;
-	/**
-	 * Whether to register process with ProcessManager for automatic cleanup.
-	 *
-	 * @default false
-	 */
-	shouldRegisterProcess?: boolean;
-	/** Display name for the task logger. */
-	taskName: string;
+export interface RunResult {
+	readonly exitCode: number;
+	readonly stderr: string;
+	readonly stdout: string;
 }
 
-export type Spinner = ReturnType<typeof spinner>;
-
-export interface TaskLogResult {
-	/** Subprocess promise. */
-	subprocess: ResultPromise;
-	/** Task logger instance for success/error messages. */
-	taskLogger: ReturnType<typeof taskLog>;
+export interface StreamingRunResult {
+	readonly exitCode: Promise<number>;
+	readonly process: Subprocess;
 }
 
-/**
- * Creates and starts a spinner with the given message.
- *
- * @template T - The type of the message, either string or undefined.
- * @param message - The message to display with the spinner. If undefined, no
- *   spinner is created.
- * @returns A started Spinner instance if a message is provided, otherwise
- *   undefined.
- */
-export function createSpinner<T extends string | undefined>(
-	message: T,
-): T extends string ? Spinner : undefined;
-export function createSpinner(message: string | undefined): Spinner | undefined {
-	if (message === undefined) {
-		return undefined;
+interface RunState {
+	abortHandler: (() => void) | undefined;
+	spinner: ReturnType<typeof yoctoSpinner> | undefined;
+	subprocess: Subprocess;
+}
+
+type Subprocess = ReturnType<typeof Bun.spawn>;
+
+/** Error thrown when a command fails. */
+export class RunError extends Error {
+	public readonly args: ReadonlyArray<string>;
+	public readonly command: string;
+	public readonly exitCode: number;
+	public readonly stderr: string;
+	public readonly stdout: string;
+
+	public override name = "RunError";
+
+	constructor(
+		command: string,
+		args: ReadonlyArray<string>,
+		exitCode: number,
+		stdout: string,
+		stderr: string,
+	) {
+		super(`Command failed: ${command} ${args.join(" ")}`);
+		this.command = command;
+		this.args = args;
+		this.exitCode = exitCode;
+		this.stdout = stdout;
+		this.stderr = stderr;
 	}
-
-	const activeSpinner = spinner();
-	activeSpinner.start(message);
-	return activeSpinner;
 }
 
 export async function findCommandForPackageManager(
@@ -113,78 +111,46 @@ export async function findCommandForPackageManager(
 }
 
 /**
- * Execute a shell command with pretty output using execa and @clack/prompts.
- *
- * @example
- *
- * ```ts
- * // Simple usage
- * await run("rojo", ["build"]);
- *
- * // With spinner
- * await run("rojo", ["build"], {
- * 	spinnerMessage: "Building project...",
- * 	successMessage: "Build complete!",
- * });
- *
- * // Get output
- * const { stdout } = await run("rojo", ["--version"]);
- * console.log(stdout);
- * ```
+ * Execute a shell command with pretty output using Bun.spawn.
  *
  * @param command - The command to execute (e.g., "rojo", "npm").
  * @param args - Array of arguments to pass to the command.
  * @param options - Configuration options for execution and display.
- * @returns Promise resolving to the execa result.
+ * @returns Promise resolving to the run result.
  */
 export async function run(
 	command: string,
 	args: ReadonlyArray<string> = [],
 	options: RunOptions = {},
-): Promise<Awaited<ResultPromise>> {
-	const {
-		customSpinner,
-		shouldRegisterProcess = false,
-		shouldShowCommand = true,
-		shouldStreamOutput = true,
-		spinnerMessage,
-		successMessage,
-		...execaOptions
-	} = options;
+): Promise<RunResult> {
+	const { abortHandler, spinner, subprocess } = initializeRun(command, args, options);
+	const exitCode = await subprocess.exited;
+	const { stderr, stdout } = await getCommandOutputs(
+		options.shouldStreamOutput ?? true,
+		subprocess,
+	);
 
-	if (shouldShowCommand) {
-		log.step(`${command} ${args.join(" ")}`);
+	try {
+		if (exitCode !== 0) {
+			spinner?.error(options.spinnerMessage);
+			throw new RunError(command, args, exitCode, stdout, stderr);
+		}
+
+		finalizeSpinner(spinner, options.successMessage);
+		return { exitCode, stderr, stdout };
+	} finally {
+		if (abortHandler) {
+			options.cancelSignal?.removeEventListener("abort", abortHandler);
+		}
 	}
-
-	const activeSpinner = customSpinner ?? createSpinner(spinnerMessage);
-	const subprocess = execa(command, args, {
-		...execaOptions,
-		stderr: shouldStreamOutput ? "inherit" : (execaOptions.stderr ?? "pipe"),
-		stdout: shouldStreamOutput ? "inherit" : (execaOptions.stdout ?? "pipe"),
-	});
-
-	if (shouldRegisterProcess) {
-		processManager.register(subprocess);
-	}
-
-	return handleSubprocess(subprocess, activeSpinner, successMessage);
 }
 
 /**
- * Execute a command and return only stdout as a string Useful for getting
- * command output without streaming.
+ * Execute a command and return only stdout as a string.
  *
- * @example
- *
- * ```ts
- * const version = await runOutput("rojo", ["--version"]);
- * console.log(version); // "7.4.1"
- * ```
- *
- * @param command - The command to execute (e.g., "rojo", "npm").
+ * @param command - The command to execute.
  * @param args - Array of arguments to pass to the command.
- * @param options - Configuration options (shouldStreamOutput is disabled by
- *   default).
+ * @param options - Configuration options.
  * @returns Promise resolving to the trimmed stdout string.
  */
 export async function runOutput(
@@ -198,49 +164,15 @@ export async function runOutput(
 		shouldStreamOutput: false,
 	});
 
-	const stdout = String(result.stdout);
-	return stdout.trim();
+	return result.stdout.trim();
 }
 
 /**
  * Runs a script via the appropriate task runner.
  *
- * This function enables command chaining while respecting the calling context.
- * If the current process was invoked via npm/mise, subsequent commands will use
- * the same task runner. This ensures consistency and allows users to hook into
- * commands by customizing scripts in package.json or .mise.toml.
- *
- * Priority order:
- *
- * 1. Use the task runner that invoked the current process (context-aware)
- * 2. Auto-detect available task runners (mise > npm)
- * 3. Fallback to direct CLI invocation.
- *
- * @example Implementing a start command that chains build → serve
- *
- * ```typescript
- * // src/commands/start.ts
- * import { loadProjectConfig } from "../config";
- * import { runScript } from "../utils/run-script";
- *
- * export async function action(): Promise<void> {
- * 	const config = await loadProjectConfig();
- *
- * 	// Build the project first
- * 	await runScript("build", config);
- *
- * 	// Then start the dev server
- * 	await runScript("serve", config);
- * }
- *
- * // If user customized their scripts:
- * // package.json: "forge:build": "npm run typecheck && rbx-forge build"
- * // The typecheck will run before building, respecting user hooks!
- * ```
- *
  * @param scriptName - The base script name to run (e.g., "build", "serve").
  * @param args - Additional arguments to pass to the script.
- * @param options - Optional run options (e.g., cancelSignal for cancellation).
+ * @param options - Optional run options.
  */
 export async function runScript(
 	scriptName: ScriptName,
@@ -262,100 +194,130 @@ export async function runScript(
 		return;
 	}
 
-	const hasShownWarning = process.env["RBX_FORGE_NO_TASK_RUNNER_WARNING_SHOWN"] === "1";
+	const hasShownWarning = Bun.env["RBX_FORGE_NO_TASK_RUNNER_WARNING_SHOWN"] === "1";
 	const shouldSuppressWarning = config.suppressNoTaskRunnerWarning;
 	if (!hasShownWarning && !shouldSuppressWarning) {
-		log.warn(
-			ansis.yellow(
-				"⚠ No task runner detected - running command directly. This may skip user-defined hooks.",
-			),
+		logger.warn(
+			"No task runner detected - running command directly. This may skip user-defined hooks.",
 		);
-		process.env["RBX_FORGE_NO_TASK_RUNNER_WARNING_SHOWN"] = "1";
+		Bun.env["RBX_FORGE_NO_TASK_RUNNER_WARNING_SHOWN"] = "1";
 	}
 
 	await run(CLI_COMMAND, [scriptName, ...args], { shouldShowCommand: false, ...options });
 }
 
 /**
- * Execute a command with streaming output to a task logger.
+ * Execute a command with streaming output to console. Returns immediately with
+ * process handle for long-running commands.
  *
- * Useful for long-running processes like compilers and watchers that produce
- * verbose output. Unlike run(), this creates a scrolling task log that shows
- * the last N lines of output.
- *
- * @example
- *
- * ```ts
- * const { subprocess, taskLogger } = await runWithTaskLog(
- * 	"rbxtsc",
- * 	["--verbose"],
- * 	{
- * 		taskName: "Compiling TypeScript...",
- * 	},
- * );
- *
- * try {
- * 	await subprocess;
- * 	taskLogger.success("Compilation complete");
- * } catch (err) {
- * 	taskLogger.error("Compilation failed");
- * 	throw err;
- * }
- * ```
- *
- * @param command - The command to execute (e.g., "rbxtsc", "npm").
+ * @param command - The command to execute.
  * @param args - Array of arguments to pass to the command.
- * @param options - Configuration options including task name and message limit.
- * @returns Object containing the subprocess promise and task logger instance.
+ * @param options - Configuration options.
+ * @returns Object with process handle and exit code promise.
  */
-export function runWithTaskLog(
+export function runStreaming(
 	command: string,
-	args: ReadonlyArray<string>,
-	options: RunWithTaskLogOptions,
-): TaskLogResult {
-	const { messageLimit = 12, shouldRegisterProcess = false, taskName, ...execaOptions } = options;
+	args: ReadonlyArray<string> = [],
+	options: Except<RunOptions, "shouldStreamOutput" | "spinnerMessage" | "successMessage"> = {},
+): StreamingRunResult {
+	const { cwd, env, shouldRegisterProcess = false, shouldShowCommand = true } = options;
 
-	const taskLogger = taskLog({ limit: messageLimit, title: taskName });
+	if (shouldShowCommand) {
+		logger.step(`${command} ${args.join(" ")}`);
+	}
 
-	const subprocess = execa(command, args, { ...execaOptions, all: true, buffer: false });
+	const subprocess = Bun.spawn([command, ...args], {
+		...(cwd !== undefined && { cwd }),
+		env: { ...Bun.env, ...env },
+		stderr: "inherit",
+		stdout: "inherit",
+	});
 
 	if (shouldRegisterProcess) {
 		processManager.register(subprocess);
 	}
 
-	const rl = createInterface({ crlfDelay: Number.POSITIVE_INFINITY, input: subprocess.all });
-
-	rl.on("line", (line) => {
-		taskLogger.message(line);
-	});
-
-	subprocess
-		.finally(() => {
-			rl.close();
-		})
-		.catch(() => {
-			// Handled by caller
-		});
-
-	return { subprocess: subprocess as ResultPromise, taskLogger };
+	return {
+		exitCode: subprocess.exited,
+		process: subprocess,
+	};
 }
 
-async function handleSubprocess<OptionsType extends ExecaOptions>(
-	subprocess: ResultPromise<OptionsType>,
-	activeSpinner: Spinner | undefined,
-	successMessage: string | undefined,
-): Promise<Awaited<ResultPromise>> {
-	try {
-		const result = await subprocess;
-		if (activeSpinner !== undefined && successMessage !== undefined) {
-			activeSpinner.stop(successMessage);
-		}
-
-		return result as unknown as Awaited<ResultPromise>;
-	} catch (err) {
-		activeSpinner?.stop("Command failed");
-		throw err;
+function createSpinner(spinnerMessage?: string): ReturnType<typeof yoctoSpinner> | undefined {
+	if (spinnerMessage === undefined || spinnerMessage.length === 0) {
+		return undefined;
 	}
+
+	return yoctoSpinner({ text: spinnerMessage }).start();
+}
+
+function finalizeSpinner(
+	spinner: ReturnType<typeof yoctoSpinner> | undefined,
+	successMessage?: string,
+): void {
+	if (spinner === undefined) {
+		return;
+	}
+
+	if (successMessage !== undefined && successMessage.length > 0) {
+		spinner.success(successMessage);
+	} else {
+		spinner.stop();
+	}
+}
+
+async function getCommandOutputs(
+	shouldStreamOutput: boolean,
+	subprocess: Subprocess,
+): Promise<{ stderr: string; stdout: string }> {
+	if (shouldStreamOutput) {
+		return { stderr: "", stdout: "" };
+	}
+
+	const { stderr: stderrStream, stdout: stdoutStream } = subprocess;
+
+	// When stdio is "pipe", these are ReadableStreams
+	const stdout =
+		stdoutStream instanceof ReadableStream ? await new Response(stdoutStream).text() : "";
+	const stderr =
+		stderrStream instanceof ReadableStream ? await new Response(stderrStream).text() : "";
+
+	return { stderr, stdout };
+}
+
+function initializeRun(
+	command: string,
+	args: ReadonlyArray<string>,
+	options: RunOptions,
+): RunState {
+	const {
+		cancelSignal,
+		cwd,
+		env,
+		shouldRegisterProcess = false,
+		shouldShowCommand = true,
+		shouldStreamOutput = true,
+		spinnerMessage,
+	} = options;
+
+	if (shouldShowCommand) {
+		logger.step(`${command} ${args.join(" ")}`);
+	}
+
+	const spinner = createSpinner(spinnerMessage);
+	const subprocess = Bun.spawn([command, ...args], {
+		...(cwd !== undefined && { cwd }),
+		env: { ...Bun.env, ...env },
+		stderr: shouldStreamOutput ? "inherit" : "pipe",
+		stdout: shouldStreamOutput ? "inherit" : "pipe",
+	});
+
+	if (shouldRegisterProcess) {
+		processManager.register(subprocess);
+	}
+
+	const abortHandler = setupAbortHandler(cancelSignal, subprocess, spinner);
+	return { abortHandler, spinner, subprocess };
 }
 
 async function runWithPackageManager(
@@ -369,4 +331,27 @@ async function runWithPackageManager(
 		shouldShowCommand: false,
 		...options,
 	});
+}
+
+function setupAbortHandler(
+	cancelSignal: AbortSignal | undefined,
+	subprocess: Subprocess,
+	spinner: ReturnType<typeof yoctoSpinner> | undefined,
+): (() => void) | undefined {
+	if (!cancelSignal) {
+		return undefined;
+	}
+
+	if (cancelSignal.aborted) {
+		subprocess.kill();
+		spinner?.stop();
+		throw new Error("Aborted");
+	}
+
+	function abortHandler(): void {
+		subprocess.kill();
+	}
+
+	cancelSignal.addEventListener("abort", abortHandler);
+	return abortHandler;
 }

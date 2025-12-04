@@ -1,16 +1,11 @@
-import { log } from "@clack/prompts";
-
 import ansis from "ansis";
-import fs from "node:fs/promises";
 import path from "node:path";
-import process from "node:process";
+import { cwd } from "node:process";
 
 import type { ResolvedConfig } from "../config/schema";
+import { logger } from "./logger";
 
-/**
- * Maximum number of retry attempts for lockfile cleanup when file is busy
- * (common on Windows).
- */
+/** Maximum number of retry attempts for lockfile cleanup when file is busy. */
 const MAX_LOCKFILE_CLEANUP_RETRIES = 10;
 
 /** Base delay in milliseconds for exponential backoff between retry attempts. */
@@ -19,34 +14,31 @@ const BASE_RETRY_DELAY_MS = 100;
 /**
  * Removes a lockfile with retry logic for EBUSY errors.
  *
- * This is used for Studio lockfile cleanup. Retries with exponential backoff if
- * the file is busy (common on Windows).
- *
  * @param lockFilePath - Absolute path to the lockfile to remove.
  */
 export async function cleanupLockfile(lockFilePath: string): Promise<void> {
+	const file = Bun.file(lockFilePath);
+
 	for (let attempt = 0; attempt < MAX_LOCKFILE_CLEANUP_RETRIES; attempt++) {
 		try {
-			await fs.rm(lockFilePath);
-			return;
-		} catch (err) {
-			const isCleanedUp = err instanceof Error && "code" in err && err.code === "ENOENT";
-			if (isCleanedUp) {
+			const isRealFile = await file.exists();
+			if (!isRealFile) {
 				return;
 			}
 
+			await file.delete();
+			return;
+		} catch (err) {
 			const isEbusy = err instanceof Error && "code" in err && err.code === "EBUSY";
 			const isLastAttempt = attempt === MAX_LOCKFILE_CLEANUP_RETRIES - 1;
 			if (isEbusy && !isLastAttempt) {
 				const delayMs = BASE_RETRY_DELAY_MS * 2 ** attempt;
-				await new Promise((resolve) => {
-					setTimeout(resolve, delayMs);
-				});
+				await Bun.sleep(delayMs);
 				continue;
 			}
 
 			const errorMessage = err instanceof Error ? err.message : String(err);
-			log.warn(
+			logger.warn(
 				`Failed to clean up lockfile: ${errorMessage}\n` +
 					`Please manually delete: ${ansis.cyan(lockFilePath)}`,
 			);
@@ -63,7 +55,7 @@ export async function cleanupLockfile(lockFilePath: string): Promise<void> {
  * @returns Absolute path to the lockfile.
  */
 export function getLockFilePath(config: ResolvedConfig, suffix: string): string {
-	const projectPath = process.cwd();
+	const projectPath = cwd();
 	return path.join(projectPath, config.buildOutputPath + suffix);
 }
 
@@ -75,16 +67,28 @@ export function getLockFilePath(config: ResolvedConfig, suffix: string): string 
  */
 export async function readLockfileRaw(lockPath: string): Promise<Array<string> | null> {
 	try {
-		const contents = await fs.readFile(lockPath, "utf-8");
-		return contents.split("\n");
-	} catch (err) {
-		// File doesn't exist - this is expected if no process is running
-		if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+		const file = Bun.file(lockPath);
+		const isRealFile = await file.exists();
+
+		if (!isRealFile) {
 			return null;
 		}
 
+		const contents = await file.text();
+		return contents.split("\n");
+	} catch (err) {
 		const errorMessage = err instanceof Error ? err.message : String(err);
-		log.warn(`Failed to read lockfile: ${errorMessage}`);
+		logger.warn(`Failed to read lockfile: ${errorMessage}`);
 		return null;
 	}
+}
+
+/**
+ * Writes content to a lockfile.
+ *
+ * @param lockPath - Path to the lockfile.
+ * @param content - Content to write.
+ */
+export async function writeLockfile(lockPath: string, content: string): Promise<void> {
+	await Bun.write(lockPath, content);
 }

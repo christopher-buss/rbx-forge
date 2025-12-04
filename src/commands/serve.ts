@@ -1,15 +1,12 @@
-import { outro, spinner } from "@clack/prompts";
-
-import ansis from "ansis";
-import type { ResultPromise } from "execa";
-import process from "node:process";
-import { setTimeout } from "node:timers/promises";
+import { stdin } from "node:process";
 import type { ResolvedConfig } from "src/config/schema";
 import { getRojoCommand } from "src/utils/rojo";
-import { runWithTaskLog, type Spinner } from "src/utils/run";
+import { runStreaming, type StreamingRunResult } from "src/utils/run";
+import yoctoSpinner from "yocto-spinner";
 
 import { loadProjectConfig } from "../config";
 import { isGracefulShutdown } from "../utils/graceful-shutdown";
+import { logger } from "../utils/logger";
 import { findAvailablePort } from "../utils/port-utils";
 import { setupSignalHandlers } from "../utils/process-manager";
 import { cleanupRojoLock, stopExistingRojo, writeRojoLock } from "../utils/rojo-lock-manager";
@@ -17,9 +14,8 @@ import { cleanupRojoLock, stopExistingRojo, writeRojoLock } from "../utils/rojo-
 export const COMMAND = "serve";
 export const DESCRIPTION = "Start the Rojo development server";
 
-interface RojoServerResult {
-	activeSpinner: Spinner;
-	subprocess: ResultPromise;
+interface RojoServerResult extends StreamingRunResult {
+	port: number;
 }
 
 export const options = [
@@ -43,20 +39,19 @@ export async function action(commandOptions: ServeOptions = {}): Promise<void> {
 	const result = await startRojoServer(commandOptions, config, port);
 
 	try {
-		await waitForServerOrCancellation(result.subprocess, result.activeSpinner);
+		await result.exitCode;
 	} catch (err) {
 		await handleProcessExit(err);
 	} finally {
 		await cleanupRojoLock(config);
 	}
 
-	if (process.env["RBX_FORGE_CMD"] === "serve") {
-		outro(ansis.green("Rojo server has successfully stopped."));
+	if (Bun.env["RBX_FORGE_CMD"] === "serve") {
+		logger.success("Rojo server has successfully stopped.");
 	}
 }
 
 async function handleProcessExit(err: unknown): Promise<void> {
-	// Check if this is a graceful shutdown from ProcessManager
 	if (!isGracefulShutdown(err)) {
 		throw err;
 	}
@@ -68,8 +63,7 @@ async function startRojoServer(
 	port: number,
 ): Promise<RojoServerResult> {
 	const rojo = getRojoCommand(config);
-	const activeSpinner = spinner({ cancelMessage: "Cancelling Rojo Serve" });
-	activeSpinner.start(`Starting Rojo server on port ${port}...`);
+	const spinner = yoctoSpinner({ text: `Starting Rojo server on port ${port}...` }).start();
 
 	const args = ["serve", "--port", String(port)];
 
@@ -78,37 +72,20 @@ async function startRojoServer(
 		args.push(projectPath);
 	}
 
-	const { subprocess } = runWithTaskLog(rojo, args, {
+	const result = runStreaming(rojo, args, {
 		shouldRegisterProcess: true,
-		taskName: "Rojo Serve",
+		shouldShowCommand: false,
 	});
 
-	const subprocessPid = subprocess.pid;
-	if (subprocessPid !== undefined) {
-		await writeRojoLock(config, subprocessPid, port);
-	}
+	const subprocessPid = result.process.pid;
+	await writeRojoLock(config, subprocessPid, port);
 
-	activeSpinner.message(`Rojo serve running on port ${port}`);
+	spinner.success(`Rojo serve running on port ${port}`);
 
 	// Fix Windows issue: clack doesn't restore raw mode on Windows
-	if (process.stdin.isTTY) {
-		process.stdin.setRawMode(false);
+	if (stdin.isTTY) {
+		stdin.setRawMode(false);
 	}
 
-	return { activeSpinner, subprocess };
-}
-
-async function waitForServerOrCancellation(
-	subprocess: ResultPromise,
-	activeSpinner: Spinner,
-): Promise<void> {
-	await Promise.race([
-		subprocess,
-		(async () => {
-			const spinnerState = activeSpinner as { isCancelled?: boolean };
-			while (spinnerState.isCancelled !== true) {
-				await setTimeout(100);
-			}
-		})(),
-	]);
+	return { ...result, port };
 }

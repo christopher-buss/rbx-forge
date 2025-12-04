@@ -1,12 +1,11 @@
-import { log } from "@clack/prompts";
-
 import ansis from "ansis";
 import { getStudioLockFilePath } from "src/utils/studio-lock-watcher";
+import yoctoSpinner from "yocto-spinner";
 
 import { loadProjectConfig } from "../config";
 import { cleanupLockfile, readLockfileRaw } from "../utils/lockfile";
+import { logger } from "../utils/logger";
 import { killProcess } from "../utils/process-utils";
-import { createSpinner } from "../utils/run";
 
 export const COMMAND = "stop";
 export const DESCRIPTION = "Stop running Roblox Studio processes";
@@ -14,14 +13,14 @@ export const DESCRIPTION = "Stop running Roblox Studio processes";
 export async function action(): Promise<void> {
 	const config = await loadProjectConfig();
 
-	const spinner = createSpinner("Stopping Roblox Studio...");
+	const spinner = yoctoSpinner({ text: "Stopping Roblox Studio..." }).start();
 
 	const didStopStudio = await tryStopStudioProcess(getStudioLockFilePath(config));
 
 	if (!didStopStudio) {
-		spinner.stop(ansis.dim("No running Roblox Studio found"));
+		spinner.success(ansis.dim("No running Roblox Studio found"));
 	} else {
-		spinner.stop(ansis.green("Stopped Roblox Studio"));
+		spinner.success(ansis.green("Stopped Roblox Studio"));
 	}
 }
 
@@ -56,7 +55,7 @@ async function tryStopStudioProcess(lockFilePath: string): Promise<boolean> {
 		return true;
 	} catch (err) {
 		const errorMessage = err instanceof Error ? err.message : String(err);
-		log.warn(`Failed to kill Studio process ${processId}: ${errorMessage}`);
+		logger.warn(`Failed to kill Studio process ${processId}: ${errorMessage}`);
 		return false;
 	} finally {
 		await cleanupLockfile(lockFilePath);

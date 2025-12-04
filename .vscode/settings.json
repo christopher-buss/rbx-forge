@@ -36,7 +36,7 @@
 		"source.fixAll.eslint": "explicit",
 		"source.organizeImports": "never"
 	},
-	"npm.packageManager": "pnpm",
+	"npm.packageManager": "bun",
 
 	// Options for GitHub Copilot
 	"github.copilot.chat.commitMessageGeneration.instructions": [

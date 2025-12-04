@@ -1,6 +1,8 @@
-import type { ExecaError } from "execa";
-
 import { processManager } from "./process-manager";
+
+interface SignalError extends Error {
+	signal?: string;
+}
 
 /**
  * Checks if an error represents a graceful shutdown (SIGTERM/SIGINT).
@@ -25,10 +27,14 @@ export function isGracefulShutdown(err: unknown): boolean {
 	}
 
 	// Fallback: check if error has signal property
-	if (!(err instanceof Error) || !("signal" in err)) {
+	if (!isSignalError(err)) {
 		return false;
 	}
 
-	const execaErr = err as ExecaError;
-	return execaErr.signal === "SIGTERM" || execaErr.signal === "SIGINT";
+	const signalErr = err;
+	return signalErr.signal === "SIGTERM" || signalErr.signal === "SIGINT";
+}
+
+function isSignalError(err: unknown): err is SignalError {
+	return err instanceof Error && "signal" in err;
 }

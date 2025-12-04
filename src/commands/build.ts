@@ -1,15 +1,15 @@
-import { log } from "@clack/prompts";
-
 import ansis from "ansis";
 import { stat } from "node:fs/promises";
 import process from "node:process";
 import type { ResolvedConfig } from "src/config/schema";
 import { getRojoCommand } from "src/utils/rojo";
+import yoctoSpinner from "yocto-spinner";
 
 import { loadProjectConfig } from "../config";
 import { formatDuration } from "../utils/format-duration";
+import { logger } from "../utils/logger";
 import { setupSignalHandlers } from "../utils/process-manager";
-import { createSpinner, run } from "../utils/run";
+import { run } from "../utils/run";
 
 export const COMMAND = "build";
 export const DESCRIPTION = "Build the Rojo project";
@@ -68,7 +68,7 @@ export async function action(commandOptions: BuildOptions = {}): Promise<void> {
 	}
 
 	const startTime = performance.now();
-	const spinner = createSpinner("Building project...");
+	const spinner = yoctoSpinner({ text: "Building project..." }).start();
 
 	await run(rojo, rojoArgs, {
 		shouldRegisterProcess: commandOptions.watch === true,
@@ -79,7 +79,7 @@ export async function action(commandOptions: BuildOptions = {}): Promise<void> {
 	const fileSize = await getFileSize(outputPath, isPluginOutput);
 	const statsDisplay = [outputPath, fileSize, duration].filter(Boolean).join(", ");
 
-	spinner.stop(`Build complete (${ansis.dim(statsDisplay)})`);
+	spinner.success(`Build complete (${ansis.dim(statsDisplay)})`);
 }
 
 function buildRojoArguments(
@@ -120,10 +120,10 @@ function buildRojoArguments(
 }
 
 function displayBuildInfo(outputPath: string, isPluginOutput: boolean): void {
-	log.info(ansis.bold("→ Building project"));
+	logger.info(ansis.bold("→ Building project"));
 
 	const outputDisplay = isPluginOutput ? `plugin: ${outputPath}` : outputPath;
-	log.step(`Output: ${ansis.cyan(outputDisplay)}`);
+	logger.step(`Output: ${ansis.cyan(outputDisplay)}`);
 }
 
 /**
@@ -152,7 +152,7 @@ function validateOptions(buildOptions: BuildOptions): void {
 	const hasPlugin = buildOptions.plugin !== undefined && buildOptions.plugin.length > 0;
 
 	if (hasOutput && hasPlugin) {
-		log.error("Cannot use both --output and --plugin options together");
+		logger.error("Cannot use both --output and --plugin options together");
 		process.exit(1);
 	}
 }

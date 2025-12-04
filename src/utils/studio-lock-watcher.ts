@@ -1,5 +1,3 @@
-import { log } from "@clack/prompts";
-
 import chokidar, { type FSWatcher } from "chokidar";
 import fs from "node:fs/promises";
 import process from "node:process";
@@ -7,6 +5,7 @@ import process from "node:process";
 import type { ResolvedConfig } from "../config/schema";
 import { STUDIO_LOCKFILE_SUFFIX } from "../constants";
 import { getLockFilePath } from "./lockfile";
+import { logger } from "./logger";
 
 export interface WatchStudioLockFileOptions {
 	/**
@@ -116,7 +115,7 @@ function createCleanupHandler(watcher: FSWatcher): () => Promise<void> {
 		} catch (err) {
 			// Ignore errors during cleanup
 			const message = err instanceof Error ? err.message : String(err);
-			log.warn(`Error closing watcher: ${message}`);
+			logger.warn(`Error closing watcher: ${message}`);
 		}
 	};
 }
@@ -146,7 +145,7 @@ function createShutdownHandler(
  */
 function handleWatcherError(error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
-	log.error(`Watcher error: ${message}`);
+	logger.error(`Watcher error: ${message}`);
 }
 
 /**

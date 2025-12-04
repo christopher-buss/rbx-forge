@@ -1,14 +1,13 @@
-import { log } from "@clack/prompts";
-
 import ansis from "ansis";
 
+import { logger } from "../utils/logger";
 import { runScript } from "../utils/run";
 
 export const COMMAND = "restart";
 export const DESCRIPTION = "Stop Roblox Studio and restart the workflow";
 
 export async function action(): Promise<void> {
-	log.info(ansis.bold("→ Restarting workflow"));
+	logger.info(ansis.bold("→ Restarting workflow"));
 
 	await runScript("stop");
 	await runScript("start");

@@ -1,6 +1,6 @@
 /* cspell:words pgrep */
-import { execa } from "execa";
-import process from "node:process";
+
+import { kill, platform } from "node:process";
 
 /**
  * Kills a process and all its descendants (children, grandchildren, etc.).
@@ -8,8 +8,7 @@ import process from "node:process";
  * Platform-specific implementation:
  *
  * - Windows: Uses `taskkill /pid PID /T /F` to kill the process tree
- * - MacOS: Uses `pgrep -P PID` to recursively find children (pgrep: process
- *   grep).
+ * - MacOS: Uses `pgrep -P PID` to recursively find children.
  * - Linux: Uses `ps -o pid --no-headers --ppid PID` to recursively find children.
  *
  * @param pid - The process ID to kill along with all descendants.
@@ -20,9 +19,7 @@ export async function killProcessTree(pid: number | undefined, signal = "SIGTERM
 		throw new Error("Cannot kill process tree: PID is undefined");
 	}
 
-	await (process.platform === "win32"
-		? killProcessTreeWindows(pid)
-		: killProcessTreeUnix(pid, signal));
+	await (platform === "win32" ? killProcessTreeWindows(pid) : killProcessTreeUnix(pid, signal));
 }
 
 /**
@@ -34,7 +31,6 @@ export async function killProcessTree(pid: number | undefined, signal = "SIGTERM
 async function buildProcessTree(parentPid: number): Promise<Array<number>> {
 	const tree: Record<number, Array<number>> = { [parentPid]: [] };
 
-	// Recursively build the tree
 	const processQueue = [parentPid];
 
 	while (processQueue.length > 0) {
@@ -64,12 +60,10 @@ async function buildProcessTree(parentPid: number): Promise<Array<number>> {
 
 		visited.add(pid);
 
-		// Add children first
 		for (const childPid of tree[pid] ?? []) {
 			collectPids(childPid);
 		}
 
-		// Then add parent
 		allPids.push(pid);
 	}
 
@@ -86,14 +80,11 @@ async function buildProcessTree(parentPid: number): Promise<Array<number>> {
  */
 async function getChildPids(pid: number): Promise<Array<number>> {
 	try {
-		const command = process.platform === "darwin" ? "pgrep" : "ps";
-		const args =
-			process.platform === "darwin"
-				? ["-P", String(pid)]
-				: ["-o", "pid", "--no-headers", "--ppid", String(pid)];
+		const result = await (platform === "darwin"
+			? Bun.$`pgrep -P ${pid}`.quiet()
+			: Bun.$`ps -o pid --no-headers --ppid ${pid}`.quiet());
 
-		const result = await execa(command, args);
-		const output = result.stdout.trim();
+		const output = result.stdout.toString().trim();
 
 		if (output.length === 0) {
 			return [];
@@ -115,10 +106,9 @@ async function getChildPids(pid: number): Promise<Array<number>> {
 function killPids(pids: Array<number>, signal: string): void {
 	for (const pid of pids) {
 		try {
-			process.kill(pid, signal as NodeJS.Signals);
+			kill(pid, signal as NodeJS.Signals);
 		} catch (err) {
 			if (err instanceof Error && "code" in err && err.code === "ESRCH") {
-				// Process doesn't exist (already dead)
 				continue;
 			}
 
@@ -128,11 +118,10 @@ function killPids(pids: Array<number>, signal: string): void {
 }
 
 /**
- * Kills a process tree on Unix systems (macOS, Linux) by recursively finding
- * all descendants and killing them.
+ * Kills a process tree on Unix systems.
  *
  * @param pid - The process ID to kill.
- * @param signal - The signal to send (e.g., SIGTERM, SIGKILL).
+ * @param signal - The signal to send.
  */
 async function killProcessTreeUnix(pid: number, signal: string): Promise<void> {
 	const pids = await buildProcessTree(pid);
@@ -146,7 +135,7 @@ async function killProcessTreeUnix(pid: number, signal: string): Promise<void> {
  */
 async function killProcessTreeWindows(pid: number): Promise<void> {
 	try {
-		await execa("taskkill", ["/pid", String(pid), "/T", "/F"]);
+		await Bun.$`taskkill /pid ${pid} /T /F`.quiet();
 	} catch (err) {
 		// Ignore if process doesn't exist
 		if (err instanceof Error && "exitCode" in err && err.exitCode === 128) {
