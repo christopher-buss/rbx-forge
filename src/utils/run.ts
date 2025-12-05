@@ -227,7 +227,7 @@ export function runStreaming(
 		logger.step(`${command} ${args.join(" ")}`);
 	}
 
-	const subprocess = Bun.spawn([resolveBunCommand(command), ...args], {
+	const subprocess = Bun.spawn([command, ...args], {
 		...(cwd !== undefined && { cwd }),
 		env: getSpawnEnvironment(env),
 		stderr: "inherit",
@@ -328,7 +328,7 @@ function initializeRun(
 	}
 
 	const spinner = createSpinner(spinnerMessage);
-	const subprocess = Bun.spawn([resolveBunCommand(command), ...args], {
+	const subprocess = Bun.spawn([command, ...args], {
 		...(cwd !== undefined && { cwd }),
 		env: getSpawnEnvironment(env),
 		stderr: shouldStreamOutput ? "inherit" : "pipe",
@@ -341,17 +341,6 @@ function initializeRun(
 
 	const abortHandler = setupAbortHandler(cancelSignal, subprocess, spinner);
 	return { abortHandler, spinner, subprocess };
-}
-
-/**
- * Resolves "bun" command to actual executable path. Fixes Windows PATH issues
- * where bun isn't found when spawning subprocesses.
- *
- * @param command - The command to resolve.
- * @returns The resolved command path.
- */
-function resolveBunCommand(command: string): string {
-	return command === "bun" ? (Bun.argv[0] ?? "bun") : command;
 }
 
 async function runWithPackageManager(
