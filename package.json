@@ -84,8 +84,5 @@
 	},
 	"publishConfig": {
 		"access": "public"
-	},
-	"patchedDependencies": {
-		"giget@2.0.0": "patches/giget@2.0.0.patch"
 	}
 }
