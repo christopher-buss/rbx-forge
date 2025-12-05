@@ -25,6 +25,8 @@ const ENTRY = path.join(PROJECT_ROOT, "src/index.ts");
 const TSCONFIG_PATH = path.join(PROJECT_ROOT, "tsconfig.json");
 const JS_OUTPUT = path.join(DIST_DIRECTORY, "index.js");
 const MODULE_OUTPUT = path.join(DIST_DIRECTORY, "index.mjs");
+const BUN_SHEBANG = "#!/usr/bin/env bun";
+const NODE_SHEBANG = "#!/usr/bin/env node";
 
 if (flags.clean) {
 	await rm(DIST_DIRECTORY, { force: true, recursive: true });
@@ -146,6 +148,25 @@ async function emitTypes(): Promise<boolean> {
 	return true;
 }
 
+async function ensureBunShebang(outputPath: string): Promise<void> {
+	const entryFile = Bun.file(outputPath);
+
+	if (!(await entryFile.exists())) {
+		console.warn(`⚠ [WARN] Expected bundle at ${outputPath}`);
+		return;
+	}
+
+	let contents = await entryFile.text();
+
+	// Replace existing node shebang with bun shebang
+	if (contents.startsWith(NODE_SHEBANG)) {
+		contents = contents.replace(NODE_SHEBANG, BUN_SHEBANG);
+		await Bun.write(outputPath, contents);
+	} else if (!contents.startsWith("#!")) {
+		await Bun.write(outputPath, `${BUN_SHEBANG}\n${contents}`);
+	}
+}
+
 async function ensureDeclarationExtension(): Promise<void> {
 	const indexDefinitionModule = path.join(DIST_DIRECTORY, "index.d.mts");
 	const entryRelative = "src/index.d.ts";
@@ -158,7 +179,7 @@ async function ensureDeclarationExtension(): Promise<void> {
 
 	const visited = new Set<string>();
 	const bundledImports = new Set<string>();
-	const bundledParts: Array<string> = ["#!/usr/bin/env node", ""];
+	const bundledParts: Array<string> = [BUN_SHEBANG, ""];
 
 	await bundleDtsAsync(entryRelative, visited, bundledParts, bundledImports);
 
@@ -168,7 +189,7 @@ async function ensureDeclarationExtension(): Promise<void> {
 	// Transform inline imports to namespace imports
 	const { content: transformedContent, namespaceImports } = transformInlineImports(rawContent);
 
-	const output: Array<string> = ["#!/usr/bin/env node", ""];
+	const output: Array<string> = [BUN_SHEBANG, ""];
 
 	// Add namespace imports first (for inline import transformations)
 	if (namespaceImports.length > 0) {
@@ -186,22 +207,6 @@ async function ensureDeclarationExtension(): Promise<void> {
 	await rm(indexDefinitionModule, { force: true });
 	await Bun.write(indexDefinitionModule, output.join("\n"));
 	await rm(TYPES_OUT_DIR, { force: true, recursive: true });
-}
-
-async function ensureShebang(outputPath: string): Promise<void> {
-	const entryFile = Bun.file(outputPath);
-
-	if (!(await entryFile.exists())) {
-		console.warn(`⚠ [WARN] Expected bundle at ${outputPath}`);
-		return;
-	}
-
-	const contents = await entryFile.text();
-	if (contents.startsWith("#!")) {
-		return;
-	}
-
-	await Bun.write(outputPath, `#!/usr/bin/env node\n${contents}`);
 }
 
 function extractInlineImports(content: string): Array<InlineImportInfo> {
@@ -331,7 +336,7 @@ async function runOnceAsync(isRebuild: boolean, reason?: string): Promise<boolea
 	}
 
 	await renameJsToMjs();
-	await ensureShebang(MODULE_OUTPUT);
+	await ensureBunShebang(MODULE_OUTPUT);
 
 	const isTypesOkay = await handleDefinitionsAsync();
 	if (!isTypesOkay) {

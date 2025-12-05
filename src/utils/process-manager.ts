@@ -1,4 +1,5 @@
-import { on } from "node:process";
+import process from "node:process";
+import { setTimeout } from "node:timers/promises";
 
 import { killProcessTree } from "./kill-process-tree";
 
@@ -208,7 +209,9 @@ export class ProcessManager {
 
 		// Wait for process to exit or timeout
 		const exitPromise = subprocess.exited;
-		const timeoutPromise = Bun.sleep(this.config.gracefulShutdownTimeout).then(() => "timeout");
+		const timeoutPromise = setTimeout(this.config.gracefulShutdownTimeout).then(
+			() => "timeout",
+		);
 
 		const result = await Promise.race([exitPromise, timeoutPromise]);
 
@@ -225,7 +228,7 @@ export class ProcessManager {
 	 * @returns The promise result or throws if timeout is exceeded.
 	 */
 	private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-		const timeoutPromise = Bun.sleep(timeoutMs).then(() => {
+		const timeoutPromise = setTimeout(timeoutMs).then(() => {
 			throw new Error(`Operation timed out after ${timeoutMs}ms`);
 		});
 
@@ -251,7 +254,7 @@ function setupSignalHandlers(): void {
 	const signals: Array<NodeJS.Signals> = ["SIGINT", "SIGTERM", "SIGQUIT"];
 
 	for (const signal of signals) {
-		on(signal, () => {
+		process.on(signal, () => {
 			void processManager.cleanup();
 		});
 	}
