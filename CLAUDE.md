@@ -1,5 +1,3 @@
-<!-- vibe-rules Integration -->
-
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with
@@ -11,37 +9,37 @@ code in this repository.
 TypeScript development. It wraps and manages Rojo (the Roblox project management
 tool) with a simplified, opinionated workflow.
 
-- **Package Manager**: bun (v1.3.3+)
-- **Node Version**: >=22.16.0
+- **Package Manager**: pnpm (v10.24.0+)
+- **Runtime**: bun (v1.3.3+)
 - **Build Tool**: tsdown (for bundling and DTS generation)
 - **CLI Framework**: Commander.js
 
 ## Development Commands
 
-Use `@antfu/ni` package manager aliases (nr, nci) or bun directly:
+Use `@antfu/ni` package manager aliases (nr, nci) or pnpm directly:
 
 ```bash
 # Install dependencies
-bun install  # or: nci
+pnpm install  # or: nci
 
 # Build the project
-bun run build    # or: nr build
+pnpm run build    # or: nr build
 
 # Development watch mode
-bun run watch    # or: nr watch
+pnpm run watch    # or: nr watch
 
 # Type checking
-bun run typecheck  # or: nr typecheck
+pnpm run typecheck  # or: nr typecheck
 
 # Linting
-bun run lint       # or: nr lint
-bun run lint:ci    # or: nr lint:ci (for CI, uses content-based cache)
+pnpm run lint       # or: nr lint
+pnpm run lint:ci    # or: nr lint:ci (for CI, uses content-based cache)
 
 # Stub build (fast for development)
-bun run stub       # or: nr stub
+pnpm run stub       # or: nr stub
 ```
 
-**Git Hooks**: Pre-commit hook runs `lint-staged` (auto-fixes with eslint_d).
+**Git Hooks**: Pre-commit hook runs `lint-staged` (auto-fixes with eslint).
 
 ## Architecture
 
@@ -354,8 +352,8 @@ revert **Scopes** (optional): assets, audio, core, deps, dev, lint, mtx
 GitHub Actions workflow ([.github/workflows/ci.yaml](.github/workflows/ci.yaml))
 runs:
 
-1. Build check (`bun run build`)
-2. Linting (`bun run lint:ci`)
-3. Type checking (`bun run typecheck`)
+1. Build check (`pnpm run build`)
+2. Linting (`pnpm run lint:ci`)
+3. Type checking (`pnpm run typecheck`)
 
 All three must pass before merging.

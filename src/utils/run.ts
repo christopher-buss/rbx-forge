@@ -1,3 +1,4 @@
+import process from "node:process";
 import {
 	type AgentName,
 	type Command,
@@ -226,9 +227,9 @@ export function runStreaming(
 		logger.step(`${command} ${args.join(" ")}`);
 	}
 
-	const subprocess = Bun.spawn([command, ...args], {
+	const subprocess = Bun.spawn([resolveBunCommand(command), ...args], {
 		...(cwd !== undefined && { cwd }),
-		env: { ...Bun.env, ...env },
+		env: getSpawnEnvironment(env),
 		stderr: "inherit",
 		stdout: "inherit",
 	});
@@ -285,6 +286,28 @@ async function getCommandOutputs(
 	return { stderr, stdout };
 }
 
+/**
+ * Gets spawn environment with node_modules/.bin added to PATH. This ensures
+ * locally installed binaries (like rbxtsc) are found when spawning.
+ *
+ * @param extraEnvironment - Additional environment variables to merge.
+ * @returns Environment object with enhanced PATH.
+ */
+function getSpawnEnvironment(
+	extraEnvironment?: Record<string, string | undefined>,
+): Record<string, string> {
+	const isWindows = process.platform === "win32";
+	const pathSeparator = isWindows ? ";" : ":";
+	const binPath = `${process.cwd()}/node_modules/.bin`;
+	const currentPath = Bun.env["PATH"] ?? "";
+
+	return {
+		...Bun.env,
+		...extraEnvironment,
+		PATH: `${binPath}${pathSeparator}${currentPath}`,
+	} as Record<string, string>;
+}
+
 function initializeRun(
 	command: string,
 	args: ReadonlyArray<string>,
@@ -305,9 +328,9 @@ function initializeRun(
 	}
 
 	const spinner = createSpinner(spinnerMessage);
-	const subprocess = Bun.spawn([command, ...args], {
+	const subprocess = Bun.spawn([resolveBunCommand(command), ...args], {
 		...(cwd !== undefined && { cwd }),
-		env: { ...Bun.env, ...env },
+		env: getSpawnEnvironment(env),
 		stderr: shouldStreamOutput ? "inherit" : "pipe",
 		stdout: shouldStreamOutput ? "inherit" : "pipe",
 	});
@@ -318,6 +341,17 @@ function initializeRun(
 
 	const abortHandler = setupAbortHandler(cancelSignal, subprocess, spinner);
 	return { abortHandler, spinner, subprocess };
+}
+
+/**
+ * Resolves "bun" command to actual executable path. Fixes Windows PATH issues
+ * where bun isn't found when spawning subprocesses.
+ *
+ * @param command - The command to resolve.
+ * @returns The resolved command path.
+ */
+function resolveBunCommand(command: string): string {
+	return command === "bun" ? (Bun.argv[0] ?? "bun") : command;
 }
 
 async function runWithPackageManager(

@@ -7,3 +7,5 @@ dist
 .tsconfig-cache.txt
 
 /.claude/state
+
+*.tgz
