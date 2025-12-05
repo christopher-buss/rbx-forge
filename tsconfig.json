@@ -2,7 +2,11 @@
 	"extends": "@isentinel/tsconfig/typescript",
 	"compilerOptions": {
 		"libReplacement": true,
+		"baseUrl": null,
+		"paths": { "*": ["./*"] },
+		"types": ["bun"],
 		"exactOptionalPropertyTypes": true
 	},
-	"exclude": ["node_modules", "dist", "out", ".vscode-test", "temp"]
+	"include": ["${configDir}/**/*/*.*"],
+	"exclude": ["node_modules", "dist", ".vscode-test", "temp"]
 }

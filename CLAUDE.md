@@ -9,8 +9,8 @@ code in this repository.
 TypeScript development. It wraps and manages Rojo (the Roblox project management
 tool) with a simplified, opinionated workflow.
 
-- **Package Manager**: pnpm (v10.18.1+)
-- **Node Version**: >=22.16.0
+- **Package Manager**: pnpm (v10.24.0+)
+- **Runtime**: bun (v1.3.3+)
 - **Build Tool**: tsdown (for bundling and DTS generation)
 - **CLI Framework**: Commander.js
 
@@ -23,23 +23,23 @@ Use `@antfu/ni` package manager aliases (nr, nci) or pnpm directly:
 pnpm install  # or: nci
 
 # Build the project
-pnpm build    # or: nr build
+pnpm run build    # or: nr build
 
 # Development watch mode
-pnpm watch    # or: nr watch
+pnpm run watch    # or: nr watch
 
 # Type checking
-pnpm typecheck  # or: nr typecheck
+pnpm run typecheck  # or: nr typecheck
 
 # Linting
-pnpm lint       # or: nr lint
-pnpm lint:ci    # or: nr lint:ci (for CI, uses content-based cache)
+pnpm run lint       # or: nr lint
+pnpm run lint:ci    # or: nr lint:ci (for CI, uses content-based cache)
 
 # Stub build (fast for development)
-pnpm stub       # or: nr stub
+pnpm run stub       # or: nr stub
 ```
 
-**Git Hooks**: Pre-commit hook runs `lint-staged` (auto-fixes with eslint_d).
+**Git Hooks**: Pre-commit hook runs `lint-staged` (auto-fixes with eslint).
 
 ## Architecture
 
@@ -352,8 +352,8 @@ revert **Scopes** (optional): assets, audio, core, deps, dev, lint, mtx
 GitHub Actions workflow ([.github/workflows/ci.yaml](.github/workflows/ci.yaml))
 runs:
 
-1. Build check (`nr build`)
-2. Linting (`nr lint:ci`)
-3. Type checking (`nr typecheck`)
+1. Build check (`pnpm run build`)
+2. Linting (`pnpm run lint:ci`)
+3. Type checking (`pnpm run typecheck`)
 
 All three must pass before merging.

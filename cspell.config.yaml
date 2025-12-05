@@ -3,6 +3,7 @@
 version: "0.2"
 language: en
 words:
+  - arktype
   - darklua
   - pids
   - rbxl
@@ -14,3 +15,7 @@ words:
   - scriptable
   - syncback
   - taskkill
+  - yocto
+  - yoctoSpinner
+  - nothrow
+  - tsgo

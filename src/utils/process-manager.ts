@@ -1,5 +1,5 @@
-import type { ChildProcess } from "node:child_process";
 import process from "node:process";
+import { setTimeout } from "node:timers/promises";
 
 import { killProcessTree } from "./kill-process-tree";
 
@@ -20,6 +20,8 @@ interface ProcessManagerConfig {
 	gracefulShutdownTimeout?: number;
 }
 
+type Subprocess = ReturnType<typeof Bun.spawn>;
+
 /**
  * Global process lifecycle manager for proper cleanup.
  *
@@ -33,8 +35,7 @@ export class ProcessManager {
 		cleanupTimeout: 5000,
 		gracefulShutdownTimeout: 3000,
 	};
-	private readonly exitListeners = new WeakMap<ChildProcess, () => void>();
-	private readonly processes = new Set<ChildProcess>();
+	private readonly processes = new Set<Subprocess>();
 
 	private cleanupPromise: null | Promise<void> = null;
 	private isShuttingDown = false;
@@ -71,29 +72,22 @@ export class ProcessManager {
 	}
 
 	/**
-	 * Register a child process for tracking and cleanup.
+	 * Register a Bun subprocess for tracking and cleanup.
 	 *
-	 * Processes registered here will be gracefully terminated (SIGTERM, then
-	 * SIGKILL after timeout) during application shutdown. On Windows, the
-	 * process will be killed immediately as signals are not supported.
-	 *
-	 * @param childProcess - The child process to register.
+	 * @param subprocess - The Bun subprocess to register.
 	 */
-	public register(childProcess: ChildProcess): void {
+	public register(subprocess: Subprocess): void {
 		if (this.isShuttingDown) {
 			console.warn("ProcessManager is shutting down, cannot register new process");
 			return;
 		}
 
-		this.processes.add(childProcess);
+		this.processes.add(subprocess);
 
-		/** Store the listener so we can remove it later. */
-		const exitListener = (): void => {
-			this.unregister(childProcess);
-		};
-
-		this.exitListeners.set(childProcess, exitListener);
-		childProcess.on("exit", exitListener);
+		// Auto-unregister when process exits
+		void subprocess.exited.then(() => {
+			this.processes.delete(subprocess);
+		});
 	}
 
 	/**
@@ -106,22 +100,12 @@ export class ProcessManager {
 	}
 
 	/**
-	 * Unregister a child process from tracking.
+	 * Unregister a subprocess from tracking.
 	 *
-	 * Use this when you want to manually remove a process from tracking without
-	 * waiting for it to exit.
-	 *
-	 * @param childProcess - The child process to unregister.
+	 * @param subprocess - The subprocess to unregister.
 	 */
-	public unregister(childProcess: ChildProcess): void {
-		this.processes.delete(childProcess);
-
-		// Remove the exit listener to prevent memory leaks
-		const listener = this.exitListeners.get(childProcess);
-		if (listener) {
-			childProcess.off("exit", listener);
-			this.exitListeners.delete(childProcess);
-		}
+	public unregister(subprocess: Subprocess): void {
+		this.processes.delete(subprocess);
 	}
 
 	/** Terminates all registered processes with timeout handling. */
@@ -149,9 +133,9 @@ export class ProcessManager {
 	private collectProcessCleanupPromises(): Array<Promise<void>> {
 		const promises: Array<Promise<void>> = [];
 
-		for (const task of this.processes) {
-			if (!task.killed && task.exitCode === null) {
-				promises.push(this.terminateProcess(task));
+		for (const subprocess of this.processes) {
+			if (!subprocess.killed && subprocess.exitCode === null) {
+				promises.push(this.terminateProcess(subprocess));
 			}
 		}
 
@@ -161,16 +145,16 @@ export class ProcessManager {
 	/**
 	 * Force kills a process tree that didn't terminate gracefully.
 	 *
-	 * @param childProcess - The process to force kill.
+	 * @param subprocess - The process to force kill.
 	 */
-	private async forceKillProcess(childProcess: ChildProcess): Promise<void> {
-		if (childProcess.killed) {
+	private async forceKillProcess(subprocess: Subprocess): Promise<void> {
+		if (subprocess.killed) {
 			return;
 		}
 
-		console.warn(`Force killing process ${childProcess.pid}`);
+		console.warn(`Force killing process ${subprocess.pid}`);
 		try {
-			await killProcessTree(childProcess.pid, "SIGKILL");
+			await killProcessTree(subprocess.pid, "SIGKILL");
 		} catch {
 			// Process might already be dead
 		}
@@ -180,14 +164,14 @@ export class ProcessManager {
 	private async forceKillRemainingProcesses(): Promise<void> {
 		const killPromises: Array<Promise<void>> = [];
 
-		for (const proc of this.processes) {
-			if (proc.killed || proc.exitCode !== null) {
+		for (const subprocess of this.processes) {
+			if (subprocess.killed || subprocess.exitCode !== null) {
 				continue;
 			}
 
-			console.warn(`Force killing unresponsive process ${proc.pid}`);
+			console.warn(`Force killing unresponsive process ${subprocess.pid}`);
 			killPromises.push(
-				killProcessTree(proc.pid, "SIGKILL").catch(() => {
+				killProcessTree(subprocess.pid, "SIGKILL").catch(() => {
 					// Process might already be dead
 				}),
 			);
@@ -199,9 +183,6 @@ export class ProcessManager {
 	/**
 	 * Performs the actual cleanup of all tracked resources.
 	 *
-	 * Terminates all tracked processes. Processes that don't terminate within
-	 * the cleanup timeout will be force-killed.
-	 *
 	 * @returns A promise that resolves when cleanup is complete.
 	 */
 	private async performCleanup(): Promise<void> {
@@ -209,58 +190,33 @@ export class ProcessManager {
 	}
 
 	/**
-	 * Terminates a single child process gracefully.
+	 * Terminates a single subprocess gracefully.
 	 *
-	 * On Unix-like systems: sends SIGTERM, then SIGKILL after timeout. On
-	 * Windows: kills immediately (signals not supported).
-	 *
-	 * @param childProcess - The process to terminate.
+	 * @param subprocess - The process to terminate.
 	 * @returns Promise that resolves when the process exits.
 	 */
-	private async terminateProcess(childProcess: ChildProcess): Promise<void> {
-		return new Promise<void>((resolve) => {
-			if (childProcess.killed || childProcess.exitCode !== null) {
-				resolve();
-				return;
-			}
+	private async terminateProcess(subprocess: Subprocess): Promise<void> {
+		if (subprocess.killed || subprocess.exitCode !== null) {
+			return;
+		}
 
-			const timeout = setTimeout(() => {
-				void this.forceKillProcess(childProcess).finally(() => {
-					resolve();
-				});
-			}, this.config.gracefulShutdownTimeout);
-
-			childProcess.on("exit", () => {
-				clearTimeout(timeout);
-				resolve();
-			});
-
-			// Try graceful termination first
-			void this.tryGracefulKill(childProcess).then((success) => {
-				if (success) {
-					return;
-				}
-
-				clearTimeout(timeout);
-				resolve();
-			});
-		});
-	}
-
-	/**
-	 * Attempts to gracefully kill a process and all its descendants.
-	 *
-	 * @param childProcess - The process to kill.
-	 * @returns Promise that resolves to true if kill signal was sent, false if
-	 *   process already dead.
-	 */
-	private async tryGracefulKill(childProcess: ChildProcess): Promise<boolean> {
+		// Try graceful termination first
 		try {
-			await killProcessTree(childProcess.pid, "SIGTERM");
-			return true;
+			await killProcessTree(subprocess.pid, "SIGTERM");
 		} catch {
 			// Process might already be dead
-			return false;
+		}
+
+		// Wait for process to exit or timeout
+		const exitPromise = subprocess.exited;
+		const timeoutPromise = setTimeout(this.config.gracefulShutdownTimeout).then(
+			() => "timeout",
+		);
+
+		const result = await Promise.race([exitPromise, timeoutPromise]);
+
+		if (result === "timeout") {
+			await this.forceKillProcess(subprocess);
 		}
 	}
 
@@ -272,21 +228,11 @@ export class ProcessManager {
 	 * @returns The promise result or throws if timeout is exceeded.
 	 */
 	private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-		let timeoutHandle: NodeJS.Timeout | undefined;
-
-		const timeoutPromise = new Promise<never>((_resolve, reject) => {
-			timeoutHandle = setTimeout(() => {
-				reject(new Error(`Operation timed out after ${timeoutMs}ms`));
-			}, timeoutMs);
+		const timeoutPromise = setTimeout(timeoutMs).then(() => {
+			throw new Error(`Operation timed out after ${timeoutMs}ms`);
 		});
 
-		try {
-			return await Promise.race([promise, timeoutPromise]);
-		} finally {
-			if (timeoutHandle !== undefined) {
-				clearTimeout(timeoutHandle);
-			}
-		}
+		return Promise.race([promise, timeoutPromise]);
 	}
 }
 
@@ -297,13 +243,7 @@ export const processManager = new ProcessManager();
 // eslint-disable-next-line flawless/naming-convention -- Not a constant
 let signalHandlersSetup = false;
 
-/**
- * Setup signal handlers for graceful shutdown.
- *
- * When a signal is received, this triggers ProcessManager cleanup. The
- * application is responsible for detecting graceful shutdown and calling
- * process.exit() with the appropriate exit code.
- */
+/** Setup signal handlers for graceful shutdown. */
 function setupSignalHandlers(): void {
 	if (signalHandlersSetup) {
 		return;
@@ -315,12 +255,9 @@ function setupSignalHandlers(): void {
 
 	for (const signal of signals) {
 		process.on(signal, () => {
-			// Trigger cleanup without exiting
-			// Let the application decide the exit code
 			void processManager.cleanup();
 		});
 	}
 }
 
-// Export setup function for commands that need it
 export { setupSignalHandlers };

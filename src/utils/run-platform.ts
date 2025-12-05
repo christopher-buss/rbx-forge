@@ -1,4 +1,4 @@
-import os from "node:os";
+import { platform } from "node:process";
 
 /**
  * Execute platform-specific callbacks.
@@ -19,10 +19,10 @@ import os from "node:os";
  * @throws If no callback is provided for the current platform.
  */
 export function runPlatform<R>(callbacks: Partial<Record<NodeJS.Platform, () => R>>): R {
-	const callback = callbacks[os.platform()];
+	const callback = callbacks[platform];
 	if (callback) {
 		return callback();
 	}
 
-	throw new Error(`Platform ${os.platform()} not supported`);
+	throw new Error(`Platform ${platform} not supported`);
 }

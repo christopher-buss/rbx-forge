@@ -1,17 +1,17 @@
-import { log } from "@clack/prompts";
-
 import ansis from "ansis";
 import chokidar, { type FSWatcher } from "chokidar";
 import { access } from "node:fs/promises";
 import process from "node:process";
 import type { ResolvedConfig } from "src/config/schema";
+import yoctoSpinner from "yocto-spinner";
 
 import { loadProjectConfig } from "../config";
 import { formatDuration } from "../utils/format-duration";
 import { isGracefulShutdown } from "../utils/graceful-shutdown";
+import { logger } from "../utils/logger";
 import { setupSignalHandlers } from "../utils/process-manager";
 import { getRojoCommand } from "../utils/rojo";
-import { createSpinner, run, runOutput, runScript } from "../utils/run";
+import { run, runOutput, runScript } from "../utils/run";
 import { getStudioLockFilePath, watchStudioLockFile } from "../utils/studio-lock-watcher";
 
 /**
@@ -78,7 +78,7 @@ interface WatchState {
 	inputPath: string;
 	isProcessing: boolean;
 	lastModified: number;
-	monitoringSpinner?: ReturnType<typeof createSpinner>;
+	monitoringSpinner?: ReturnType<typeof yoctoSpinner>;
 	watcher: FSWatcher;
 }
 
@@ -93,7 +93,7 @@ export async function action(commandOptions: SyncbackOptions = {}): Promise<void
 	try {
 		await access(inputPath);
 	} catch {
-		log.error(`Input file not found: ${ansis.cyan(inputPath)}`);
+		logger.error(`Input file not found: ${ansis.cyan(inputPath)}`);
 		process.exit(1);
 	}
 
@@ -217,7 +217,7 @@ function createChangeHandler(
  */
 function createShutdownHandler(
 	state: WatchState,
-	spinner?: ReturnType<typeof createSpinner>,
+	spinner?: ReturnType<typeof yoctoSpinner>,
 ): () => Promise<void> {
 	return async () => {
 		if (spinner !== undefined) {
@@ -225,7 +225,7 @@ function createShutdownHandler(
 		}
 
 		state.monitoringSpinner?.stop();
-		log.info("\nStopping syncback watch...");
+		logger.info("\nStopping syncback watch...");
 		await state.watcher.close();
 	};
 }
@@ -241,10 +241,10 @@ async function executeSyncback(context: SyncbackContext, state?: WatchState): Pr
 	// Stop the monitoring spinner if in watch mode
 	state?.monitoringSpinner?.stop();
 
-	log.info(`\n${ansis.dim(new Date().toLocaleTimeString())} - ${context.inputPath} changed`);
+	logger.info(`\n${ansis.dim(new Date().toLocaleTimeString())} - ${context.inputPath} changed`);
 
 	const startTime = performance.now();
-	const spinner = createSpinner("Running syncback...");
+	const spinner = yoctoSpinner({ text: "Running syncback..." }).start();
 	const args = buildInternalModeArgs(context);
 
 	try {
@@ -254,20 +254,20 @@ async function executeSyncback(context: SyncbackContext, state?: WatchState): Pr
 		});
 
 		const duration = formatDuration(startTime);
-		spinner.stop(`Syncback succeeded (${ansis.dim(duration)})`);
+		spinner.success(`Syncback succeeded (${ansis.dim(duration)})`);
 	} catch (err) {
 		if (isGracefulShutdown(err)) {
 			spinner.stop("Syncback interrupted");
 			throw err;
 		}
 
-		spinner.stop(ansis.red("Syncback failed"));
+		spinner.error(ansis.red("Syncback failed"));
 		throw err;
 	}
 
 	// Restart the monitoring spinner if in watch mode
 	if (state !== undefined) {
-		state.monitoringSpinner = createSpinner("Monitoring for changes...");
+		state.monitoringSpinner = yoctoSpinner({ text: "Monitoring for changes..." }).start();
 	}
 }
 
@@ -299,7 +299,7 @@ async function handleFileChange(context: SyncbackContext, state: WatchState): Pr
 		// Don't log errors for graceful shutdown (Ctrl+C)
 		if (!isGracefulShutdown(err)) {
 			const message = err instanceof Error ? err.message : String(err);
-			log.error(`Syncback error: ${message}`);
+			logger.error(`Syncback error: ${message}`);
 		}
 	} finally {
 		state.isProcessing = false;
@@ -313,7 +313,7 @@ async function handleFileChange(context: SyncbackContext, state: WatchState): Pr
  */
 function handleWatcherError(error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
-	log.error(`Watcher error: ${message}`);
+	logger.error(`Watcher error: ${message}`);
 }
 
 /**
@@ -352,9 +352,9 @@ async function internalMode(context: SyncbackContext): Promise<void> {
  * @param inputPath - The path being watched.
  */
 function logWatchModeStart(inputPath: string): void {
-	log.info(ansis.bold("→ Starting syncback watch mode"));
-	log.step(`Watching: ${ansis.cyan(inputPath)}`);
-	log.step(ansis.dim("Press Ctrl+C to stop"));
+	logger.info(ansis.bold("→ Starting syncback watch mode"));
+	logger.step(`Watching: ${ansis.cyan(inputPath)}`);
+	logger.step(ansis.dim("Press Ctrl+C to stop"));
 }
 
 /**
@@ -377,11 +377,11 @@ function setupWatcherEvents(watcherOptions: WatcherEventOptions): void {
 }
 
 async function singleMode(context: SyncbackContext): Promise<void> {
-	log.info(ansis.bold("→ Running syncback"));
-	log.step(`Input: ${ansis.cyan(context.inputPath)}`);
+	logger.info(ansis.bold("→ Running syncback"));
+	logger.step(`Input: ${ansis.cyan(context.inputPath)}`);
 
 	const startTime = performance.now();
-	const spinner = createSpinner("Syncing back changes...");
+	const spinner = yoctoSpinner({ text: "Syncing back changes..." }).start();
 
 	const rojoArgs = buildRojoArguments(context.inputPath, context.commandOptions, context.config);
 
@@ -391,9 +391,9 @@ async function singleMode(context: SyncbackContext): Promise<void> {
 		});
 
 		const duration = formatDuration(startTime);
-		spinner.stop(`Syncback complete (${ansis.dim(duration)})`);
+		spinner.success(`Syncback complete (${ansis.dim(duration)})`);
 	} catch (err) {
-		spinner.stop(ansis.red("Syncback failed"));
+		spinner.error(ansis.red("Syncback failed"));
 		throw err;
 	}
 }
@@ -415,7 +415,7 @@ async function watchMode(context: SyncbackContext): Promise<void> {
 	logWatchModeStart(context.inputPath);
 
 	const state = await initializeWatchState(context.inputPath);
-	const waitingSpinner = createSpinner("Waiting for Studio lock file...");
+	const waitingSpinner = yoctoSpinner({ text: "Waiting for Studio lock file..." }).start();
 	const shutdown = createShutdownHandler(state, waitingSpinner);
 
 	setupWatcherEvents({
@@ -428,11 +428,13 @@ async function watchMode(context: SyncbackContext): Promise<void> {
 	await watchStudioLockFile(getStudioLockFilePath(context.config), {
 		onStudioClose: async () => {
 			await waitForCompletion(state);
-			state.monitoringSpinner?.stop("Studio lock file removed - stopping syncback watch...");
+			state.monitoringSpinner?.success(
+				"Studio lock file removed - stopping syncback watch...",
+			);
 		},
 		onStudioOpen: () => {
-			waitingSpinner.stop("Studio lock file found!");
-			state.monitoringSpinner = createSpinner("Monitoring for changes...");
+			waitingSpinner.success("Studio lock file found!");
+			state.monitoringSpinner = yoctoSpinner({ text: "Monitoring for changes..." }).start();
 		},
 	});
 

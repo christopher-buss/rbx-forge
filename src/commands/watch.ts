@@ -1,22 +1,19 @@
-import { log } from "@clack/prompts";
-
 import ansis from "ansis";
-import { ExecaError, type ResultPromise } from "execa";
 import process from "node:process";
 import { getRojoCommand } from "src/utils/rojo";
 
 import { loadProjectConfig } from "../config";
 import { isGracefulShutdown } from "../utils/graceful-shutdown";
+import { logger } from "../utils/logger";
 import { findAvailablePort } from "../utils/port-utils";
 import { setupSignalHandlers } from "../utils/process-manager";
 import { cleanupRojoLock, stopExistingRojo, writeRojoLock } from "../utils/rojo-lock-manager";
-import { runWithTaskLog, type TaskLogResult } from "../utils/run";
+import { RunError, runStreaming, type StreamingRunResult } from "../utils/run";
 
 export const COMMAND = "watch";
 export const DESCRIPTION = "Watch and rebuild on file changes";
 
-interface ProcessHandle extends TaskLogResult {
-	/** Process name for logging. */
+interface ProcessHandle extends StreamingRunResult {
 	name: string;
 }
 
@@ -62,46 +59,17 @@ export async function action(): Promise<void> {
 	});
 }
 
-function attachErrorHandler(result: TaskLogResult, name: string): TaskLogResult {
-	const wrappedSubprocess = result.subprocess.catch((err: unknown) => {
-		if (!(err instanceof Error)) {
-			throw err;
-		}
-
-		// Don't log errors for graceful shutdowns
-		if (isGracefulShutdown(err)) {
-			throw err;
-		}
-
-		if (err instanceof ExecaError) {
-			result.taskLogger.error(`${name} failed with exit code ${err.exitCode ?? "unknown"}`);
-
-			logErrorOutput(result.taskLogger, String(err.stderr));
-			logErrorOutput(result.taskLogger, String(err.stdout));
-		} else {
-			result.taskLogger.error(`${name} failed: ${err.message}`);
-		}
-
-		throw err;
-	}) as ResultPromise;
-
-	return {
-		subprocess: wrappedSubprocess,
-		taskLogger: result.taskLogger,
-	};
-}
-
 function displayStartInfo(
 	rojo: string,
 	watchCommand: string,
 	watchArgs: ReadonlyArray<string>,
 	rojoPort: number,
 ): void {
-	log.info(ansis.bold("→ Starting watch mode"));
+	logger.info(ansis.bold("Starting watch mode"));
 	const rojoCommand = `${rojo} serve --port ${rojoPort}`;
 	const watchFullCommand = `${watchCommand} ${watchArgs.join(" ")}`;
-	log.step(`Rojo: ${ansis.cyan(rojoCommand)}`);
-	log.step(`Watch: ${ansis.cyan(watchFullCommand)}`);
+	logger.step(`Rojo: ${ansis.cyan(rojoCommand)}`);
+	logger.step(`Watch: ${ansis.cyan(watchFullCommand)}`);
 }
 
 function getWatchConfig(config: Awaited<ReturnType<typeof loadProjectConfig>>): WatchConfig {
@@ -114,7 +82,7 @@ function getWatchConfig(config: Awaited<ReturnType<typeof loadProjectConfig>>): 
 
 	const luauCommand = config.luau.watch.command;
 	if (!luauCommand) {
-		log.error(
+		logger.error(
 			"No watch command configured for Luau project.\n" +
 				`Add a watch configuration to your rbx-forge.config.ts:\n${ansis.dim(
 					'  luau: {\n    watch: { command: "darklua", args: ["process", "--watch"] }\n  }',
@@ -129,60 +97,33 @@ function getWatchConfig(config: Awaited<ReturnType<typeof loadProjectConfig>>): 
 	};
 }
 
-/**
- * Handle process exit - either expected (graceful shutdown) or unexpected
- * error.
- *
- * @param err - The error that caused the process to exit.
- */
 async function handleProcessExit(err: unknown): Promise<void> {
-	// Check if this is a graceful shutdown from ProcessManager
 	if (isGracefulShutdown(err)) {
-		// Graceful shutdown - exit cleanly with code 0
 		process.exit(0);
 	}
 
-	// Actual error (not a signal) - log and exit
 	logProcessError(err);
 	process.exit(1);
 }
 
-function logErrorOutput(
-	taskLogger: ReturnType<typeof import("@clack/prompts").taskLog>,
-	output: string,
-): void {
-	if (output.length === 0 || output === "undefined") {
-		return;
-	}
-
-	const lines = output.trim().split("\n");
-	for (const line of lines) {
-		taskLogger.error(line);
-	}
-}
-
 function logProcessError(err: unknown): void {
-	if (err instanceof ExecaError) {
-		log.error(`Command failed: ${err.command}`);
+	if (err instanceof RunError) {
+		logger.error(`Command failed: ${err.command} ${err.args.join(" ")}`);
 
-		const stderr = String(err.stderr);
-		if (stderr.length > 0) {
-			log.error("stderr:");
-			log.error(stderr);
+		if (err.stderr.length > 0) {
+			logger.error("stderr:");
+			logger.error(err.stderr);
 		}
 
-		const stdout = String(err.stdout);
-		if (stdout.length > 0) {
-			log.error("stdout:");
-			log.error(stdout);
+		if (err.stdout.length > 0) {
+			logger.error("stdout:");
+			logger.error(err.stdout);
 		}
 
-		if (err.exitCode !== undefined) {
-			log.error(`Exit code: ${err.exitCode}`);
-		}
+		logger.error(`Exit code: ${err.exitCode}`);
 	} else {
 		const errorMessage = err instanceof Error ? err.message : String(err);
-		log.error(`Watch process failed: ${errorMessage}`);
+		logger.error(`Watch process failed: ${errorMessage}`);
 	}
 }
 
@@ -198,27 +139,24 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 		rojoArgs.push(config.rojoProjectPath);
 	}
 
-	const rojoHandle = await startProcess({
+	const rojoHandle = startProcess({
 		args: rojoArgs,
 		command: rojo,
 		name: "Rojo Server",
 	});
 
-	const rojoPid = rojoHandle.subprocess.pid;
-	if (rojoPid !== undefined) {
-		await writeRojoLock(config, rojoPid, rojoPort);
-	}
+	await writeRojoLock(config, rojoHandle.process.pid, rojoPort);
 
-	const watchHandle = await startProcess({
+	const watchHandle = startProcess({
 		args: watchArgs,
 		command: watchCommand,
 		name: config.projectType === "rbxts" ? "TypeScript Compiler" : "Watch Process",
 	});
 
 	try {
-		await Promise.race([rojoHandle.subprocess, watchHandle.subprocess]);
+		await Promise.race([rojoHandle.exitCode, watchHandle.exitCode]);
 
-		log.error("A watch process exited unexpectedly");
+		logger.error("A watch process exited unexpectedly");
 		await cleanupRojoLock(config);
 		process.exit(1);
 	} catch (err) {
@@ -227,18 +165,18 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 	}
 }
 
-async function startProcess(options: StartProcessOptions): Promise<ProcessHandle> {
+function startProcess(options: StartProcessOptions): ProcessHandle {
 	const { args, command, name } = options;
 
-	const result = runWithTaskLog(command, args, {
+	const result = runStreaming(command, args, {
 		shouldRegisterProcess: true,
-		taskName: `${name}...`,
+		shouldShowCommand: false,
 	});
 
-	const wrappedResult = attachErrorHandler(result, name);
+	logger.info(`Started ${name}`);
 
 	return {
-		...wrappedResult,
+		...result,
 		name,
 	};
 }

@@ -1,4 +1,4 @@
-import { cancel, confirm, isCancel, log } from "@clack/prompts";
+import { confirm } from "@inquirer/prompts";
 
 import ansis from "ansis";
 import { detectCodeFormat } from "magicast";
@@ -9,6 +9,8 @@ import { SCRIPT_NAMES } from "src/commands";
 import { loadProjectConfig } from "src/config";
 import { CLI_COMMAND } from "src/constants";
 import { getCommandName } from "src/utils/command-names";
+
+import { logger } from "./logger";
 
 export interface PackageJson {
 	dependencies?: Record<string, string>;
@@ -23,10 +25,9 @@ export function getPackageJsonPath(): string {
 export async function readPackageJson(packageJsonPath: string): Promise<null | PackageJson> {
 	try {
 		await fs.access(packageJsonPath);
-		const content = await fs.readFile(packageJsonPath, "utf8");
-		return JSON.parse(content) as PackageJson;
+		return (await Bun.file(packageJsonPath).json()) as PackageJson;
 	} catch {
-		log.warn(
+		logger.warn(
 			ansis.yellow(
 				"No package.json found - skipping script installation. Run npm init first.",
 			),
@@ -64,9 +65,10 @@ export async function writePackageJson(
 	packageJsonPath: string,
 	packageJson: PackageJson,
 ): Promise<void> {
-	const format = detectCodeFormat(await fs.readFile(packageJsonPath, "utf8"));
+	const bunFile = Bun.file(packageJsonPath);
+	const format = detectCodeFormat(await bunFile.text());
 	const indentation = format.useTabs === true ? "\t" : " ".repeat(format.tabWidth ?? 2);
-	await fs.writeFile(packageJsonPath, `${JSON.stringify(packageJson, undefined, indentation)}\n`);
+	await bunFile.write(`${JSON.stringify(packageJson, undefined, indentation)}\n`);
 }
 
 async function addScriptEntry(
@@ -81,14 +83,9 @@ async function addScriptEntry(
 
 	if (scripts[scriptName] !== undefined) {
 		const shouldOverwrite = await confirm({
-			initialValue: false,
+			default: false,
 			message: `Script "${scriptName}" already exists. Overwrite?\n  Current: "${scripts[scriptName]}"`,
 		});
-
-		if (isCancel(shouldOverwrite)) {
-			cancel("Operation cancelled");
-			process.exit(0);
-		}
 
 		if (shouldOverwrite) {
 			scripts[scriptName] = scriptCommand;

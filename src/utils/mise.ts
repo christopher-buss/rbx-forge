@@ -1,4 +1,4 @@
-import { cancel, confirm, isCancel, log } from "@clack/prompts";
+import { confirm } from "@inquirer/prompts";
 
 import ansis from "ansis";
 import { type } from "arktype";
@@ -9,6 +9,7 @@ import { COMMANDS, SCRIPT_NAMES } from "../commands";
 import { loadProjectConfig } from "../config";
 import type { ResolvedConfig } from "../config/schema";
 import { getCommandName } from "./command-names";
+import { logger } from "./logger";
 import { run, runOutput } from "./run";
 
 interface MiseTask {
@@ -46,7 +47,7 @@ export async function checkMiseInstallation(): Promise<boolean> {
 export async function updateMiseToml(): Promise<string> {
 	const isMiseInstalled = await checkMiseInstallation();
 	if (!isMiseInstalled) {
-		cancel(ansis.yellow("⚠ mise not found - please install mise to continue"));
+		logger.error(ansis.yellow("⚠ mise not found - please install mise to continue"));
 		process.exit(2);
 	}
 
@@ -115,19 +116,12 @@ async function addMiseTasks(
 async function confirmTaskOverwrite(existingTask: MiseTask): Promise<boolean> {
 	const currentCommand = existingTask.run.join(" ");
 
-	log.message(`Current task: ${ansis.cyan(currentCommand)}`);
+	logger.message(`Current task: ${ansis.cyan(currentCommand)}`);
 
-	const shouldOverwrite = await confirm({
-		initialValue: false,
+	return confirm({
+		default: false,
 		message: `Task "${existingTask.name}" already exists. Overwrite?`,
 	});
-
-	if (isCancel(shouldOverwrite)) {
-		cancel("Operation cancelled");
-		process.exit(0);
-	}
-
-	return shouldOverwrite;
 }
 
 /**
