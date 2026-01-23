@@ -21,9 +21,9 @@ interface ProcessHandle extends TaskLogResult {
 }
 
 interface StartProcessOptions {
+	name: string;
 	args: ReadonlyArray<string>;
 	command: string;
-	name: string;
 }
 
 interface WatchConfig {
@@ -199,9 +199,9 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 	}
 
 	const rojoHandle = await startProcess({
+		name: "Rojo Server",
 		args: rojoArgs,
 		command: rojo,
-		name: "Rojo Server",
 	});
 
 	const rojoPid = rojoHandle.subprocess.pid;
@@ -210,9 +210,9 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 	}
 
 	const watchHandle = await startProcess({
+		name: config.projectType === "rbxts" ? "TypeScript Compiler" : "Watch Process",
 		args: watchArgs,
 		command: watchCommand,
-		name: config.projectType === "rbxts" ? "TypeScript Compiler" : "Watch Process",
 	});
 
 	try {
@@ -228,7 +228,7 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 }
 
 async function startProcess(options: StartProcessOptions): Promise<ProcessHandle> {
-	const { args, command, name } = options;
+	const { name, args, command } = options;
 
 	const result = runWithTaskLog(command, args, {
 		shouldRegisterProcess: true,

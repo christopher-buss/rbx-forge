@@ -12,16 +12,16 @@ import { getCommandName } from "./command-names";
 import { run, runOutput } from "./run";
 
 interface MiseTask {
-	description: string;
 	name: string;
+	description: string;
 	run: Array<string>;
 	source: string;
 }
 
 const miseTasksArraySchema = type([
 	{
-		description: "string",
 		name: "string",
+		description: "string",
 		run: "string[]",
 		source: "string",
 	},

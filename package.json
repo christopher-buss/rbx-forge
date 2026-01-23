@@ -13,7 +13,13 @@
 	},
 	"license": "MIT",
 	"author": "Christopher Buss <christopher.buss@pm.me> (https://github.com/christopher-buss)",
-	"contributors": ["osyrisrblx (https://github.com/osyrisrblx)"],
+	"contributors": [
+		{
+			"name": "osyrisrblx",
+			"url": "https://github.com/osyrisrblx"
+		}
+	],
+	"sideEffects": false,
 	"type": "module",
 	"exports": {
 		".": {
@@ -48,44 +54,41 @@
 	"dependencies": {
 		"@clack/prompts": "1.0.0-alpha.6",
 		"ansis": "^4.2.0",
-		"arktype": "^2.1.25",
-		"c12": "^3.3.1",
-		"chokidar": "^4.0.3",
+		"arktype": "^2.1.29",
+		"c12": "^3.3.3",
+		"chokidar": "^5.0.0",
 		"commander": "^14.0.2",
-		"dedent": "^1.7.0",
-		"execa": "^9.6.0",
-		"magicast": "^0.5.0",
-		"package-manager-detector": "^1.5.0",
+		"dedent": "^1.7.1",
+		"execa": "^9.6.1",
+		"magicast": "^0.5.1",
+		"package-manager-detector": "^1.6.0",
 		"picomatch": "^4.0.3",
-		"type-fest": "^5.1.0"
+		"type-fest": "^5.4.1"
 	},
 	"devDependencies": {
-		"@antfu/ni": "^27.0.0",
-		"@isentinel/eslint-config": "^3.5.0",
-		"@isentinel/tsconfig": "^1.0.0",
-		"@types/node": "^24.9.2",
+		"@antfu/ni": "^28.0.1",
+		"@isentinel/eslint-config": "^4.7.6",
+		"@isentinel/tsconfig": "^1.2.0",
+		"@types/node": "^24.10.9",
 		"@types/picomatch": "^4.0.2",
-		"@typescript-eslint/eslint-plugin": "^8.46.2",
-		"@typescript-eslint/parser": "^8.46.2",
+		"@typescript-eslint/eslint-plugin": "^8.53.1",
+		"@typescript-eslint/parser": "^8.53.1",
 		"better-typescript-lib": "^2.12.0",
-		"bumpp": "^10.3.1",
-		"eslint": "^9.38.0",
-		"eslint-plugin-n": "^17.23.1",
+		"bumpp": "^10.4.0",
+		"eslint": "^9.39.2",
+		"eslint-plugin-n": "^17.23.2",
 		"eslint_d": "^14.3.0",
 		"jiti": "^2.6.1",
-		"lint-staged": "^16.2.6",
-		"publint": "^0.3.15",
+		"lint-staged": "^16.2.7",
+		"publint": "^0.3.17",
 		"rbx-forge": "workspace:*",
 		"simple-git-hooks": "^2.13.1",
-		"tsdown": "^0.15.11",
+		"tsdown": "^0.20.0",
 		"typescript": "^5.9.3",
-		"unplugin-unused": "^0.5.4"
+		"unplugin-unused": "^0.5.7"
 	},
-	"packageManager": "pnpm@10.18.1+sha512.77a884a165cbba2d8d1c19e3b4880eee6d2fcabd0d879121e282196b80042351d5eb3ca0935fa599da1dc51265cc68816ad2bddd2a2de5ea9fdf92adbec7cd34",
+	"packageManager": "pnpm@10.28.1+sha512.7d7dbbca9e99447b7c3bf7a73286afaaf6be99251eb9498baefa7d406892f67b879adb3a1d7e687fc4ccc1a388c7175fbaae567a26ab44d1067b54fcb0d6a316",
 	"engines": {
 		"node": ">=22.16.0"
-	},
-	"publishConfig": {
-		"access": "public"
 	}
 }

@@ -9,17 +9,17 @@ import { isWsl } from "./is-wsl";
 import { runOutput } from "./run";
 
 export interface RojoSourceMap {
+	name: string;
 	children?: ReadonlyArray<RojoSourceMap>;
 	// eslint-disable-next-line unicorn/no-keyword-prefix -- Matches Rojo sourcemap output format
 	className: string;
-	name: string;
 }
 
 const types = scope({
 	RojoSourceMap: {
+		"name": "string",
 		"children?": "RojoSourceMap[]",
 		"className": "string",
-		"name": "string",
 	},
 });
 
@@ -56,6 +56,7 @@ export function getRojoCommand(config: ResolvedConfig): string {
  * @param config - Optional resolved config containing the rojo alias.
  * @param rojoProjectPath - Optional path to a specific Rojo project file.
  * @returns The parsed Rojo source map.
+ * @rejects Will throw an error if the Rojo command fails or the output is invalid.
  */
 export async function getRojoSourceMap(
 	config: ResolvedConfig,

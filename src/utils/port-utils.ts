@@ -9,7 +9,7 @@ import { ROJO_DEFAULT_PORT, ROJO_MAX_PORT_ATTEMPTS } from "../constants";
  * @param startPort - The port to start searching from (defaults to
  *   ROJO_DEFAULT_PORT).
  * @returns Promise that resolves to an available port number.
- * @throws Error if no available port is found within the search range.
+ * @rejects When no available port is found within the search range.
  */
 export async function findAvailablePort(startPort: number = ROJO_DEFAULT_PORT): Promise<number> {
 	for (let index = 0; index < ROJO_MAX_PORT_ATTEMPTS; index++) {

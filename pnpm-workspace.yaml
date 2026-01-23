@@ -1,9 +1,16 @@
+catalogMode: prefer
+cleanupUnusedCatalogs: true
+
+publicHoistPattern:
+  - "@typescript/*"
+
+shellEmulator: true
+
+trustPolicy: no-downgrade
+
 packages:
   - .
 
 onlyBuiltDependencies:
   - simple-git-hooks
   - unrs-resolver
-
-publicHoistPattern:
-  - "@typescript/*"

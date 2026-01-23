@@ -236,6 +236,7 @@ function createShutdownHandler(
  *
  * @param context - Syncback context containing configuration and options.
  * @param state - Optional watch state to manage monitoring spinner.
+ * @rejects When syncback command fails.
  */
 async function executeSyncback(context: SyncbackContext, state?: WatchState): Promise<void> {
 	// Stop the monitoring spinner if in watch mode

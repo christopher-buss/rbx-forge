@@ -9,8 +9,8 @@ import { configSchema, type ResolvedConfig } from "./schema";
 
 export async function loadProjectConfig(): Promise<ResolvedConfig> {
 	const { config: rawConfig } = await loadConfig({
-		defaults,
 		name: "rbx-forge",
+		defaults,
 		packageJson: true,
 	});
 

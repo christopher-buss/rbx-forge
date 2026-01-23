@@ -14,6 +14,7 @@ import process from "node:process";
  *
  * @param pid - The process ID to kill along with all descendants.
  * @param signal - The signal to send (default: SIGTERM). Ignored on Windows.
+ * @rejects When PID is undefined or kill operation fails.
  */
 export async function killProcessTree(pid: number | undefined, signal = "SIGTERM"): Promise<void> {
 	if (pid === undefined) {
@@ -143,6 +144,7 @@ async function killProcessTreeUnix(pid: number, signal: string): Promise<void> {
  * Kills a process tree on Windows using taskkill.
  *
  * @param pid - The process ID to kill.
+ * @rejects When taskkill command fails unexpectedly.
  */
 async function killProcessTreeWindows(pid: number): Promise<void> {
 	try {

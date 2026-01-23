@@ -131,6 +131,7 @@ function isShutdownError(err: unknown): boolean {
  * @param config - The project configuration.
  * @param abortController - AbortController to cancel syncback when Studio
  *   closes.
+ * @rejects When workflow encounters an unrecoverable error.
  */
 async function runWorkflow(
 	config: Awaited<ReturnType<typeof loadProjectConfig>>,
