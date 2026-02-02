@@ -24,6 +24,7 @@ interface StartProcessOptions {
 	name: string;
 	args: ReadonlyArray<string>;
 	command: string;
+	messageLimit?: number;
 }
 
 interface WatchConfig {
@@ -213,12 +214,11 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 		name: config.projectType === "rbxts" ? "TypeScript Compiler" : "Watch Process",
 		args: watchArgs,
 		command: watchCommand,
+		messageLimit: 1000,
 	});
 
 	try {
 		await Promise.race([rojoHandle.subprocess, watchHandle.subprocess]);
-
-		log.error("A watch process exited unexpectedly");
 		await cleanupRojoLock(config);
 		process.exit(1);
 	} catch (err) {
@@ -228,9 +228,10 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 }
 
 async function startProcess(options: StartProcessOptions): Promise<ProcessHandle> {
-	const { name, args, command } = options;
+	const { name, args, command, messageLimit } = options;
 
 	const result = runWithTaskLog(command, args, {
+		messageLimit,
 		shouldRegisterProcess: true,
 		taskName: `${name}...`,
 	});

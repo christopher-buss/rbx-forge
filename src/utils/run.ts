@@ -52,7 +52,7 @@ export interface RunOptions extends ExecaOptions {
 
 export interface RunWithTaskLogOptions extends Except<ExecaOptions, "all" | "buffer"> {
 	/** Maximum number of messages to display (default: 12). */
-	messageLimit?: number;
+	messageLimit?: number | undefined;
 	/**
 	 * Whether to register process with ProcessManager for automatic cleanup.
 	 *
