@@ -46,6 +46,55 @@ export async function action(): Promise<void> {
 	outro(ansis.green("✨ You're all set!"));
 }
 
+async function selectProjectType(): Promise<ResolvedConfig["projectType"]> {
+	const projectType = await select({
+		message: "Pick a project type.",
+		options: [
+			{ label: "TypeScript", value: "rbxts" },
+			{ label: "Luau", value: "luau" },
+		],
+	});
+
+	if (isCancel(projectType)) {
+		cancel(OPERATION_CANCELLED);
+		process.exit(0);
+	}
+
+	return projectType;
+}
+
+async function selectTaskRunners(): Promise<Array<TaskRunner>> {
+	const { agent } = (await detect()) ?? { agent: "npm" };
+
+	const taskRunners = await multiselect({
+		message: "Pick task runner(s) (optional).",
+		options: [
+			{ hint: "default", label: agent, value: "npm" },
+			{ label: "mise", value: "mise" },
+			{ disabled: true, hint: "coming soon", label: "lune", value: "lune" },
+		],
+		required: false,
+	});
+
+	if (isCancel(taskRunners)) {
+		cancel(OPERATION_CANCELLED);
+		process.exit(0);
+	}
+
+	return taskRunners;
+}
+
+async function getUserInput(): Promise<{
+	projectType: ResolvedConfig["projectType"];
+	taskRunners: Array<TaskRunner>;
+}> {
+	const projectType = await selectProjectType();
+
+	const taskRunners = await selectTaskRunners();
+
+	return { projectType, taskRunners };
+}
+
 async function addRbxForgeToPackageJson(): Promise<void> {
 	const packageJsonPath = getPackageJsonPath();
 	const packageJson = await readPackageJson(packageJsonPath);
@@ -102,6 +151,40 @@ async function createRojoProject(): Promise<string> {
 	return "Project structure created";
 }
 
+async function runInitializationTasks(
+	projectType: "luau" | "rbxts",
+	taskRunners: Array<TaskRunner>,
+): Promise<void> {
+	const initTasks = [
+		{ task: checkRojoInstallation, title: "Checking Rojo installation" },
+		{ task: createRojoProject, title: "Creating Rojo project structure" },
+		{
+			task: async () => createForgeConfig(projectType),
+			title: `Creating ${packageName} config`,
+		},
+	];
+
+	if (taskRunners.includes("npm")) {
+		// Add package to package.json if not already present
+		await addRbxForgeToPackageJson();
+
+		initTasks.push({
+			task: async () => updatePackageJson(),
+			title: "Adding npm scripts to package.json",
+		});
+	}
+
+	// Add mise tasks if mise is selected
+	if (taskRunners.includes("mise")) {
+		initTasks.push({
+			task: async () => updateMiseToml(),
+			title: "Adding mise tasks to .mise.toml",
+		});
+	}
+
+	await tasks(initTasks);
+}
+
 async function getInstallCommand(shouldUseMise: boolean, shouldUseNpm: boolean): Promise<string> {
 	if (shouldUseMise) {
 		return "mise install";
@@ -142,89 +225,6 @@ async function getTaskRunnerCommand(
 	// Extract base command name (e.g., "forge:build" -> "build")
 	const baseCommand = scriptName.replace(/^forge:/, "");
 	return `${packageName} ${baseCommand}`;
-}
-
-async function getUserInput(): Promise<{
-	projectType: ResolvedConfig["projectType"];
-	taskRunners: Array<TaskRunner>;
-}> {
-	const projectType = await selectProjectType();
-
-	const taskRunners = await selectTaskRunners();
-
-	return { projectType, taskRunners };
-}
-
-async function runInitializationTasks(
-	projectType: "luau" | "rbxts",
-	taskRunners: Array<TaskRunner>,
-): Promise<void> {
-	const initTasks = [
-		{ task: checkRojoInstallation, title: "Checking Rojo installation" },
-		{ task: createRojoProject, title: "Creating Rojo project structure" },
-		{
-			task: async () => createForgeConfig(projectType),
-			title: `Creating ${packageName} config`,
-		},
-	];
-
-	if (taskRunners.includes("npm")) {
-		// Add package to package.json if not already present
-		await addRbxForgeToPackageJson();
-
-		initTasks.push({
-			task: async () => updatePackageJson(),
-			title: "Adding npm scripts to package.json",
-		});
-	}
-
-	// Add mise tasks if mise is selected
-	if (taskRunners.includes("mise")) {
-		initTasks.push({
-			task: async () => updateMiseToml(),
-			title: "Adding mise tasks to .mise.toml",
-		});
-	}
-
-	await tasks(initTasks);
-}
-
-async function selectProjectType(): Promise<ResolvedConfig["projectType"]> {
-	const projectType = await select({
-		message: "Pick a project type.",
-		options: [
-			{ label: "TypeScript", value: "rbxts" },
-			{ label: "Luau", value: "luau" },
-		],
-	});
-
-	if (isCancel(projectType)) {
-		cancel(OPERATION_CANCELLED);
-		process.exit(0);
-	}
-
-	return projectType;
-}
-
-async function selectTaskRunners(): Promise<Array<TaskRunner>> {
-	const { agent } = (await detect()) ?? { agent: "npm" };
-
-	const taskRunners = await multiselect({
-		message: "Pick task runner(s) (optional).",
-		options: [
-			{ hint: "default", label: agent, value: "npm" },
-			{ label: "mise", value: "mise" },
-			{ disabled: true, hint: "coming soon", label: "lune", value: "lune" },
-		],
-		required: false,
-	});
-
-	if (isCancel(taskRunners)) {
-		cancel(OPERATION_CANCELLED);
-		process.exit(0);
-	}
-
-	return taskRunners;
 }
 
 async function showNextSteps(taskRunners: Array<TaskRunner>): Promise<void> {

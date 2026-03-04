@@ -63,35 +63,6 @@ export async function action(): Promise<void> {
 	});
 }
 
-function attachErrorHandler(result: TaskLogResult, name: string): TaskLogResult {
-	const wrappedSubprocess = result.subprocess.catch((err: unknown) => {
-		if (!(err instanceof Error)) {
-			throw err;
-		}
-
-		// Don't log errors for graceful shutdowns
-		if (isGracefulShutdown(err)) {
-			throw err;
-		}
-
-		if (err instanceof ExecaError) {
-			result.taskLogger.error(`${name} failed with exit code ${err.exitCode ?? "unknown"}`);
-
-			logErrorOutput(result.taskLogger, String(err.stderr));
-			logErrorOutput(result.taskLogger, String(err.stdout));
-		} else {
-			result.taskLogger.error(`${name} failed: ${err.message}`);
-		}
-
-		throw err;
-	}) as ResultPromise;
-
-	return {
-		subprocess: wrappedSubprocess,
-		taskLogger: result.taskLogger,
-	};
-}
-
 function displayStartInfo(
 	rojo: string,
 	watchCommand: string,
@@ -130,6 +101,31 @@ function getWatchConfig(config: Awaited<ReturnType<typeof loadProjectConfig>>): 
 	};
 }
 
+function logProcessError(err: unknown): void {
+	if (err instanceof ExecaError) {
+		log.error(`Command failed: ${err.command}`);
+
+		const stderr = String(err.stderr);
+		if (stderr.length > 0) {
+			log.error("stderr:");
+			log.error(stderr);
+		}
+
+		const stdout = String(err.stdout);
+		if (stdout.length > 0) {
+			log.error("stdout:");
+			log.error(stdout);
+		}
+
+		if (err.exitCode !== undefined) {
+			log.error(`Exit code: ${err.exitCode}`);
+		}
+	} else {
+		const errorMessage = err instanceof Error ? err.message : String(err);
+		log.error(`Watch process failed: ${errorMessage}`);
+	}
+}
+
 /**
  * Handle process exit - either expected (graceful shutdown) or unexpected
  * error.
@@ -162,33 +158,50 @@ function logErrorOutput(
 	}
 }
 
-function logProcessError(err: unknown): void {
-	if (err instanceof ExecaError) {
-		log.error(`Command failed: ${err.command}`);
-
-		const stderr = String(err.stderr);
-		if (stderr.length > 0) {
-			log.error("stderr:");
-			log.error(stderr);
+function attachErrorHandler(result: TaskLogResult, name: string): TaskLogResult {
+	const wrappedSubprocess = result.subprocess.catch((err: unknown) => {
+		if (!(err instanceof Error)) {
+			throw err;
 		}
 
-		const stdout = String(err.stdout);
-		if (stdout.length > 0) {
-			log.error("stdout:");
-			log.error(stdout);
+		// Don't log errors for graceful shutdowns
+		if (isGracefulShutdown(err)) {
+			throw err;
 		}
 
-		if (err.exitCode !== undefined) {
-			log.error(`Exit code: ${err.exitCode}`);
+		if (err instanceof ExecaError) {
+			result.taskLogger.error(`${name} failed with exit code ${err.exitCode ?? "unknown"}`);
+
+			logErrorOutput(result.taskLogger, String(err.stderr));
+			logErrorOutput(result.taskLogger, String(err.stdout));
+		} else {
+			result.taskLogger.error(`${name} failed: ${err.message}`);
 		}
-	} else {
-		const errorMessage = err instanceof Error ? err.message : String(err);
-		log.error(`Watch process failed: ${errorMessage}`);
-	}
+
+		throw err;
+	}) as ResultPromise;
+
+	return {
+		subprocess: wrappedSubprocess,
+		taskLogger: result.taskLogger,
+	};
 }
 
-async function runWatchProcesses(options: WatchProcessOptions): Promise<void> {
-	await spawnAndMonitorProcesses(options);
+async function startProcess(options: StartProcessOptions): Promise<ProcessHandle> {
+	const { name, args, command, messageLimit } = options;
+
+	const result = runWithTaskLog(command, args, {
+		messageLimit,
+		shouldRegisterProcess: true,
+		taskName: `${name}...`,
+	});
+
+	const wrappedResult = attachErrorHandler(result, name);
+
+	return {
+		...wrappedResult,
+		name,
+	};
 }
 
 async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<void> {
@@ -227,19 +240,6 @@ async function spawnAndMonitorProcesses(options: WatchProcessOptions): Promise<v
 	}
 }
 
-async function startProcess(options: StartProcessOptions): Promise<ProcessHandle> {
-	const { name, args, command, messageLimit } = options;
-
-	const result = runWithTaskLog(command, args, {
-		messageLimit,
-		shouldRegisterProcess: true,
-		taskName: `${name}...`,
-	});
-
-	const wrappedResult = attachErrorHandler(result, name);
-
-	return {
-		...wrappedResult,
-		name,
-	};
+async function runWatchProcesses(options: WatchProcessOptions): Promise<void> {
+	await spawnAndMonitorProcesses(options);
 }

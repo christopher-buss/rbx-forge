@@ -61,14 +61,6 @@ export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 	}
 }
 
-async function ensurePlaceFileExists(placeFile: string, isCustomPlace: boolean): Promise<void> {
-	try {
-		await access(placeFile);
-	} catch {
-		await handleMissingPlaceFile(placeFile, isCustomPlace);
-	}
-}
-
 async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean): Promise<void> {
 	log.error(`Place file not found: ${ansis.cyan(placeFile)}`);
 
@@ -98,6 +90,14 @@ async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean)
 	} catch {
 		log.error("Build completed but place file was not created");
 		process.exit(1);
+	}
+}
+
+async function ensurePlaceFileExists(placeFile: string, isCustomPlace: boolean): Promise<void> {
+	try {
+		await access(placeFile);
+	} catch {
+		await handleMissingPlaceFile(placeFile, isCustomPlace);
 	}
 }
 

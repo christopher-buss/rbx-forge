@@ -6,8 +6,6 @@ publicHoistPattern:
 
 shellEmulator: true
 
-trustPolicy: no-downgrade
-
 packages:
   - .
 

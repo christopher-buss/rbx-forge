@@ -81,6 +81,24 @@ async function addMiseTask(
 	);
 }
 
+async function confirmTaskOverwrite(existingTask: MiseTask): Promise<boolean> {
+	const currentCommand = existingTask.run.join(" ");
+
+	log.message(`Current task: ${ansis.cyan(currentCommand)}`);
+
+	const shouldOverwrite = await confirm({
+		initialValue: false,
+		message: `Task "${existingTask.name}" already exists. Overwrite?`,
+	});
+
+	if (isCancel(shouldOverwrite)) {
+		cancel("Operation cancelled");
+		process.exit(0);
+	}
+
+	return shouldOverwrite;
+}
+
 async function addMiseTasks(
 	commands: ReadonlyArray<(typeof COMMANDS)[number]>,
 	existingTasks: Map<string, MiseTask>,
@@ -110,24 +128,6 @@ async function addMiseTasks(
 	}
 
 	return { added, skipped };
-}
-
-async function confirmTaskOverwrite(existingTask: MiseTask): Promise<boolean> {
-	const currentCommand = existingTask.run.join(" ");
-
-	log.message(`Current task: ${ansis.cyan(currentCommand)}`);
-
-	const shouldOverwrite = await confirm({
-		initialValue: false,
-		message: `Task "${existingTask.name}" already exists. Overwrite?`,
-	});
-
-	if (isCancel(shouldOverwrite)) {
-		cancel("Operation cancelled");
-		process.exit(0);
-	}
-
-	return shouldOverwrite;
 }
 
 /**

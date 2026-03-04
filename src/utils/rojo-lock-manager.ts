@@ -16,16 +16,6 @@ export interface RojoLockData {
 }
 
 /**
- * Removes the Rojo lock file for the given configuration.
- *
- * @param config - The resolved project configuration.
- */
-export async function cleanupRojoLock(config: ResolvedConfig): Promise<void> {
-	const lockPath = getRojoLockFilePath(config);
-	await cleanupLockfile(lockPath);
-}
-
-/**
  * Helper to construct Rojo lock file path from config.
  *
  * @param config - The resolved project configuration.
@@ -33,6 +23,16 @@ export async function cleanupRojoLock(config: ResolvedConfig): Promise<void> {
  */
 export function getRojoLockFilePath(config: ResolvedConfig): string {
 	return getLockFilePath(config, ROJO_LOCKFILE_SUFFIX);
+}
+
+/**
+ * Removes the Rojo lock file for the given configuration.
+ *
+ * @param config - The resolved project configuration.
+ */
+export async function cleanupRojoLock(config: ResolvedConfig): Promise<void> {
+	const lockPath = getRojoLockFilePath(config);
+	await cleanupLockfile(lockPath);
 }
 
 /**

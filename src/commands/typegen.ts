@@ -77,6 +77,38 @@ export async function action(commandOptions: TypegenOptions = {}): Promise<void>
 	spinner.stop(`Types generated (${ansis.dim(fileInfo)})`);
 }
 
+function generateInterfaces(
+	rojoSourceMap: RojoSourceMap,
+	shouldInclude: (path: string, depth: number) => boolean,
+): string {
+	if (rojoSourceMap.children === undefined) {
+		return "";
+	}
+
+	const interfaces: Array<string> = [];
+
+	for (const service of rojoSourceMap.children) {
+		if (BANNED_SERVICES.has(service.name) || service.children === undefined) {
+			continue;
+		}
+
+		const context: BuildContext = {
+			indentLevel: 1,
+			pathSegments: [service.name],
+			shouldInclude,
+		};
+
+		const members = buildProperties(service.children, context);
+
+		// Only generate interface if it has members
+		if (members.length > 0) {
+			interfaces.push(`interface ${service.name} {\n${members}\n}`);
+		}
+	}
+
+	return interfaces.join("\n\n");
+}
+
 function buildProperties(children: ReadonlyArray<RojoSourceMap>, context: BuildContext): string {
 	const seen = new Set<string>();
 	const lines: Array<string> = [];
@@ -108,6 +140,11 @@ function buildProperties(children: ReadonlyArray<RojoSourceMap>, context: BuildC
 	}
 
 	return lines.join("\n");
+}
+
+function escapePropertyName(name: string): string {
+	const isValidIdentifier = /^[\w$]+$/.test(name) && !/^\d/.test(name);
+	return isValidIdentifier ? name : `"${name}"`;
 }
 
 function buildPropertyLine(
@@ -149,41 +186,4 @@ function buildTypeString(sourceMap: RojoSourceMap, context: BuildContext): strin
 	}
 
 	return type;
-}
-
-function escapePropertyName(name: string): string {
-	const isValidIdentifier = /^[\w$]+$/.test(name) && !/^\d/.test(name);
-	return isValidIdentifier ? name : `"${name}"`;
-}
-
-function generateInterfaces(
-	rojoSourceMap: RojoSourceMap,
-	shouldInclude: (path: string, depth: number) => boolean,
-): string {
-	if (rojoSourceMap.children === undefined) {
-		return "";
-	}
-
-	const interfaces: Array<string> = [];
-
-	for (const service of rojoSourceMap.children) {
-		if (BANNED_SERVICES.has(service.name) || service.children === undefined) {
-			continue;
-		}
-
-		const context: BuildContext = {
-			indentLevel: 1,
-			pathSegments: [service.name],
-			shouldInclude,
-		};
-
-		const members = buildProperties(service.children, context);
-
-		// Only generate interface if it has members
-		if (members.length > 0) {
-			interfaces.push(`interface ${service.name} {\n${members}\n}`);
-		}
-	}
-
-	return interfaces.join("\n\n");
 }

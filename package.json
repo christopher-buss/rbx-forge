@@ -2,7 +2,14 @@
 	"name": "rbx-forge",
 	"version": "1.0.0-beta.8",
 	"description": "A roblox-ts and Luau CLI tool for fully-managed Rojo projects",
-	"keywords": ["rbxts", "roblox", "rojo", "typescript", "cli", "tool"],
+	"keywords": [
+		"rbxts",
+		"roblox",
+		"rojo",
+		"typescript",
+		"cli",
+		"tool"
+	],
 	"homepage": "https://github.com/christopher-buss/rbx-forge#readme",
 	"bugs": {
 		"url": "https://github.com/christopher-buss/rbx-forge/issues"
@@ -32,7 +39,10 @@
 		"forge": "dist/index.mjs",
 		"fge": "dist/index.mjs"
 	},
-	"files": ["dist", "scripts"],
+	"files": [
+		"dist",
+		"scripts"
+	],
 	"scripts": {
 		"build": "tsdown --clean --dts",
 		"lint": "eslint_d --cache",
@@ -52,38 +62,38 @@
 		"*": "eslint_d --fix --cache"
 	},
 	"dependencies": {
-		"@clack/prompts": "1.0.0-alpha.6",
+		"@clack/prompts": "1.1.0",
 		"ansis": "^4.2.0",
-		"arktype": "^2.1.29",
-		"c12": "^3.3.3",
+		"arktype": "^2.2.0",
+		"c12": "^v4.0.0-beta.3",
 		"chokidar": "^5.0.0",
-		"commander": "^14.0.2",
-		"dedent": "^1.7.1",
+		"commander": "^14.0.3",
+		"dedent": "^1.7.2",
 		"execa": "^9.6.1",
-		"magicast": "^0.5.1",
+		"magicast": "^0.5.2",
 		"package-manager-detector": "^1.6.0",
 		"picomatch": "^4.0.3",
-		"type-fest": "^5.4.1"
+		"type-fest": "^5.4.4"
 	},
 	"devDependencies": {
-		"@antfu/ni": "^28.0.1",
-		"@isentinel/eslint-config": "^4.7.6",
+		"@antfu/ni": "^28.2.0",
+		"@isentinel/eslint-config": "5.0.0-beta.8",
 		"@isentinel/tsconfig": "^1.2.0",
-		"@types/node": "^24.10.9",
+		"@types/node": "^24.11.0",
 		"@types/picomatch": "^4.0.2",
-		"@typescript-eslint/eslint-plugin": "^8.53.1",
-		"@typescript-eslint/parser": "^8.53.1",
+		"@typescript-eslint/eslint-plugin": "^8.56.1",
+		"@typescript-eslint/parser": "^8.56.1",
 		"better-typescript-lib": "^2.12.0",
-		"bumpp": "^10.4.0",
-		"eslint": "^9.39.2",
-		"eslint-plugin-n": "^17.23.2",
+		"bumpp": "^10.4.1",
+		"eslint": "^9.39.3",
+		"eslint-plugin-n": "^17.24.0",
 		"eslint_d": "^14.3.0",
 		"jiti": "^2.6.1",
-		"lint-staged": "^16.2.7",
-		"publint": "^0.3.17",
+		"lint-staged": "^16.3.2",
+		"publint": "^0.3.18",
 		"rbx-forge": "workspace:*",
 		"simple-git-hooks": "^2.13.1",
-		"tsdown": "^0.20.0",
+		"tsdown": "^0.20.3",
 		"typescript": "^5.9.3",
 		"unplugin-unused": "^0.5.7"
 	},

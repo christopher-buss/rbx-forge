@@ -20,6 +20,8 @@ import { getCommandName } from "./command-names";
 import { detectAvailableTaskRunner, getCallingTaskRunner } from "./detect-task-runner";
 import { processManager } from "./process-manager";
 
+export type Spinner = ReturnType<typeof spinner>;
+
 export interface RunOptions extends ExecaOptions {
 	/** Custom spinner instance to use instead of creating a new one. */
 	customSpinner?: Spinner;
@@ -62,8 +64,6 @@ export interface RunWithTaskLogOptions extends Except<ExecaOptions, "all" | "buf
 	/** Display name for the task logger. */
 	taskName: string;
 }
-
-export type Spinner = ReturnType<typeof spinner>;
 
 export interface TaskLogResult {
 	/** Subprocess promise. */

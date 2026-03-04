@@ -27,6 +27,34 @@ export async function killProcessTree(pid: number | undefined, signal = "SIGTERM
 }
 
 /**
+ * Gets child process IDs for a given parent PID.
+ *
+ * @param pid - The parent process ID.
+ * @returns Array of child PIDs.
+ */
+async function getChildPids(pid: number): Promise<Array<number>> {
+	try {
+		const command = process.platform === "darwin" ? "pgrep" : "ps";
+		const args =
+			process.platform === "darwin"
+				? ["-P", String(pid)]
+				: ["-o", "pid", "--no-headers", "--ppid", String(pid)];
+
+		const result = await execa(command, args);
+		const output = result.stdout.trim();
+
+		if (output.length === 0) {
+			return [];
+		}
+
+		return output.split("\n").map((line) => Number.parseInt(line.trim(), 10));
+	} catch {
+		// Process might have no children or might have exited
+		return [];
+	}
+}
+
+/**
  * Recursively builds a process tree by finding all descendants of a given PID.
  *
  * @param parentPid - The parent process ID.
@@ -77,34 +105,6 @@ async function buildProcessTree(parentPid: number): Promise<Array<number>> {
 	collectPids(parentPid);
 
 	return allPids;
-}
-
-/**
- * Gets child process IDs for a given parent PID.
- *
- * @param pid - The parent process ID.
- * @returns Array of child PIDs.
- */
-async function getChildPids(pid: number): Promise<Array<number>> {
-	try {
-		const command = process.platform === "darwin" ? "pgrep" : "ps";
-		const args =
-			process.platform === "darwin"
-				? ["-P", String(pid)]
-				: ["-o", "pid", "--no-headers", "--ppid", String(pid)];
-
-		const result = await execa(command, args);
-		const output = result.stdout.trim();
-
-		if (output.length === 0) {
-			return [];
-		}
-
-		return output.split("\n").map((line) => Number.parseInt(line.trim(), 10));
-	} catch {
-		// Process might have no children or might have exited
-		return [];
-	}
 }
 
 /**

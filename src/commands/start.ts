@@ -61,38 +61,6 @@ function cleanupSignalHandlers(): void {
 }
 
 /**
- * Create signal handler that aborts the controller.
- *
- * @param abortController - AbortController to abort on signal.
- * @returns Signal handler function.
- */
-function createSignalHandler(abortController: AbortController): () => void {
-	return () => {
-		abortController.abort();
-	};
-}
-
-/**
- * Cleanup handler for when Studio closes.
- *
- * @param config - Project configuration.
- * @param abortController - AbortController to abort running processes.
- */
-async function handleStudioClose(
-	config: Awaited<ReturnType<typeof loadProjectConfig>>,
-	abortController: AbortController,
-): Promise<void> {
-	log.info("Studio closed - stopping workflow...");
-
-	abortController.abort();
-
-	await processManager.cleanup();
-
-	// Clean up Studio lockfile
-	await cleanupLockfile(getStudioLockFilePath(config));
-}
-
-/**
  * Check if error is from expected cancellation (abort signal).
  *
  * @param err - The error to check.
@@ -117,6 +85,64 @@ function isCancellationError(err: unknown): boolean {
  */
 function isShutdownError(err: unknown): boolean {
 	return err instanceof Error && err.message.includes("Shutdown");
+}
+
+/**
+ * Cleanup handler for when Studio closes.
+ *
+ * @param config - Project configuration.
+ * @param abortController - AbortController to abort running processes.
+ */
+async function handleStudioClose(
+	config: Awaited<ReturnType<typeof loadProjectConfig>>,
+	abortController: AbortController,
+): Promise<void> {
+	log.info("Studio closed - stopping workflow...");
+
+	abortController.abort();
+
+	await processManager.cleanup();
+
+	// Clean up Studio lockfile
+	await cleanupLockfile(getStudioLockFilePath(config));
+}
+
+/**
+ * Start background processes for the workflow.
+ *
+ * @param config - Project configuration.
+ * @param abortController - AbortController for canceling processes.
+ */
+function startBackgroundProcesses(
+	config: Awaited<ReturnType<typeof loadProjectConfig>>,
+	abortController: AbortController,
+): void {
+	// Start child processes in background (will be killed when Studio closes)
+	// Catch their rejections to prevent unhandled promise rejections
+
+	runScript("open", [], { shouldRegisterProcess: true }).catch((err) => {
+		if (!isCancellationError(err)) {
+			log.warn(`Open script failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	});
+	runScript("watch", [], { shouldRegisterProcess: true }).catch((err) => {
+		if (!isCancellationError(err)) {
+			log.warn(`Watch script failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	});
+
+	if (config.syncback.runOnStart) {
+		runScript("syncback", ["--watch"], {
+			cancelSignal: abortController.signal,
+			shouldRegisterProcess: true,
+		}).catch((err) => {
+			if (!isCancellationError(err) && !isShutdownError(err)) {
+				log.warn(
+					`Syncback script failed: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		});
+	}
 }
 
 /**
@@ -156,6 +182,18 @@ async function runWorkflow(
 }
 
 /**
+ * Create signal handler that aborts the controller.
+ *
+ * @param abortController - AbortController to abort on signal.
+ * @returns Signal handler function.
+ */
+function createSignalHandler(abortController: AbortController): () => void {
+	return () => {
+		abortController.abort();
+	};
+}
+
+/**
  * Setup signal handlers for graceful shutdown on Ctrl+C.
  *
  * @param abortController - AbortController to trigger on signal.
@@ -164,42 +202,4 @@ function setupSignalHandlers(abortController: AbortController): void {
 	signalHandler = createSignalHandler(abortController);
 	process.on("SIGINT", signalHandler);
 	process.on("SIGTERM", signalHandler);
-}
-
-/**
- * Start background processes for the workflow.
- *
- * @param config - Project configuration.
- * @param abortController - AbortController for canceling processes.
- */
-function startBackgroundProcesses(
-	config: Awaited<ReturnType<typeof loadProjectConfig>>,
-	abortController: AbortController,
-): void {
-	// Start child processes in background (will be killed when Studio closes)
-	// Catch their rejections to prevent unhandled promise rejections
-
-	runScript("open", [], { shouldRegisterProcess: true }).catch((err) => {
-		if (!isCancellationError(err)) {
-			log.warn(`Open script failed: ${err instanceof Error ? err.message : String(err)}`);
-		}
-	});
-	runScript("watch", [], { shouldRegisterProcess: true }).catch((err) => {
-		if (!isCancellationError(err)) {
-			log.warn(`Watch script failed: ${err instanceof Error ? err.message : String(err)}`);
-		}
-	});
-
-	if (config.syncback.runOnStart) {
-		runScript("syncback", ["--watch"], {
-			cancelSignal: abortController.signal,
-			shouldRegisterProcess: true,
-		}).catch((err) => {
-			if (!isCancellationError(err) && !isShutdownError(err)) {
-				log.warn(
-					`Syncback script failed: ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
-		});
-	}
 }
