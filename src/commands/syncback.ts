@@ -67,19 +67,18 @@ interface SyncbackContext {
 	rojo: string;
 }
 
+interface WatchState {
+	inputPath: string;
+	isProcessing: boolean;
+	lastModified: number;
+	watcher: FSWatcher;
+}
+
 interface WatcherEventOptions {
 	commandOptions: SyncbackOptions;
 	config: Awaited<ReturnType<typeof loadProjectConfig>>;
 	rojo: string;
 	state: WatchState;
-}
-
-interface WatchState {
-	inputPath: string;
-	isProcessing: boolean;
-	lastModified: number;
-	monitoringSpinner?: ReturnType<typeof createSpinner>;
-	watcher: FSWatcher;
 }
 
 export async function action(commandOptions: SyncbackOptions = {}): Promise<void> {
@@ -117,28 +116,25 @@ export async function action(commandOptions: SyncbackOptions = {}): Promise<void
 	await (commandOptions.watch === true ? watchMode(context) : singleMode(context));
 }
 
-/**
- * Build CLI arguments for internal mode syncback execution.
- *
- * @param context - Syncback context containing configuration and options.
- * @returns Array of CLI arguments for the syncback command.
- */
-function buildInternalModeArgs(context: SyncbackContext): Array<string> {
-	const args = ["--internal", "--input", context.inputPath];
+async function checkRojoSyncback(config: ResolvedConfig): Promise<void> {
+	const rojo = getRojoCommand(config);
 
-	if (context.commandOptions.project !== undefined && context.commandOptions.project.length > 0) {
-		args.push("--project", context.commandOptions.project);
+	try {
+		await runOutput(rojo, ["syncback", "--help"]);
+	} catch (err) {
+		let message = "Rojo syncback functionality is not available.\n\n";
+		message += "Syncback requires the UpliftGames fork of Rojo with syncback support.\n\n";
+		message += "Installation options:\n";
+		message += "• Download from: https://github.com/UpliftGames/rojo/releases/\n";
+		message += "Note: Standard Rojo does not currently include syncback functionality.";
+
+		if (err !== undefined) {
+			const errorDetails = err instanceof Error ? err.message : String(err);
+			message += ansis.dim(`\n\nError details:\n${errorDetails}`);
+		}
+
+		throw new Error(message);
 	}
-
-	if (context.commandOptions.verbose !== undefined && context.commandOptions.verbose) {
-		args.push("--verbose");
-	}
-
-	if (context.commandOptions.color !== undefined && context.commandOptions.color.length > 0) {
-		args.push("--color", context.commandOptions.color);
-	}
-
-	return args;
 }
 
 function buildRojoArguments(
@@ -165,47 +161,41 @@ function buildRojoArguments(
 	return args;
 }
 
-async function checkRojoSyncback(config: ResolvedConfig): Promise<void> {
-	const rojo = getRojoCommand(config);
-
-	try {
-		await runOutput(rojo, ["syncback", "--help"]);
-	} catch (err) {
-		let message = "Rojo syncback functionality is not available.\n\n";
-		message += "Syncback requires the UpliftGames fork of Rojo with syncback support.\n\n";
-		message += "Installation options:\n";
-		message += "• Download from: https://github.com/UpliftGames/rojo/releases/\n";
-		message += "Note: Standard Rojo does not currently include syncback functionality.";
-
-		if (err !== undefined) {
-			const errorDetails = err instanceof Error ? err.message : String(err);
-			message += ansis.dim(`\n\nError details:\n${errorDetails}`);
-		}
-
-		throw new Error(message);
-	}
-}
-
 /**
- * Create a handler for file change events with debouncing and syncback
- * execution.
+ * Internal mode for per-execution hooks. Minimal execution without intro/outro
+ * messages. Used by watch mode to enable user hooks via runScript().
  *
  * @param context - Syncback context containing configuration and options.
- * @param state - The watch state.
- * @returns A function that handles file change events.
  */
-function createChangeHandler(
-	context: SyncbackContext,
-	state: WatchState,
-): (filePath: string) => void {
-	return (filePath: string) => {
-		// Only syncback when the input file changes, not the lock file
-		if (filePath !== state.inputPath) {
-			return;
-		}
+async function internalMode(context: SyncbackContext): Promise<void> {
+	const rojoArgs = buildRojoArguments(context.inputPath, context.commandOptions, context.config);
 
-		void handleFileChange(context, state);
-	};
+	await run(context.rojo, rojoArgs, {
+		shouldShowCommand: false,
+		shouldStreamOutput: context.commandOptions.verbose !== undefined,
+	});
+}
+
+async function singleMode(context: SyncbackContext): Promise<void> {
+	log.info(ansis.bold("→ Running syncback"));
+	log.step(`Input: ${ansis.cyan(context.inputPath)}`);
+
+	const startTime = performance.now();
+	const spinner = createSpinner("Syncing back changes...");
+
+	const rojoArgs = buildRojoArguments(context.inputPath, context.commandOptions, context.config);
+
+	try {
+		await run(context.rojo, rojoArgs, {
+			shouldStreamOutput: context.commandOptions.verbose !== undefined,
+		});
+
+		const duration = formatDuration(startTime);
+		spinner.stop(`Syncback complete (${ansis.dim(duration)})`);
+	} catch (err) {
+		spinner.stop(ansis.red("Syncback failed"));
+		throw err;
+	}
 }
 
 /**
@@ -224,10 +214,59 @@ function createShutdownHandler(
 			spinner.stop();
 		}
 
-		state.monitoringSpinner?.stop();
 		log.info("\nStopping syncback watch...");
 		await state.watcher.close();
 	};
+}
+
+/**
+ * Initialize watch state and display startup messages.
+ *
+ * @param inputPath - Path to the input file.
+ * @returns The initialized watch state.
+ */
+async function initializeWatchState(inputPath: string): Promise<WatchState> {
+	return {
+		inputPath,
+		isProcessing: false,
+		lastModified: 0,
+		watcher: chokidar.watch(inputPath),
+	};
+}
+
+/**
+ * Log watch mode startup messages.
+ *
+ * @param inputPath - The path being watched.
+ */
+function logWatchModeStart(inputPath: string): void {
+	log.info(ansis.bold("→ Starting syncback watch mode"));
+	log.step(`Watching: ${ansis.cyan(inputPath)}`);
+	log.step(ansis.dim("Press Ctrl+C to stop"));
+}
+
+/**
+ * Build CLI arguments for internal mode syncback execution.
+ *
+ * @param context - Syncback context containing configuration and options.
+ * @returns Array of CLI arguments for the syncback command.
+ */
+function buildInternalModeArgs(context: SyncbackContext): Array<string> {
+	const args = ["--internal", "--input", context.inputPath];
+
+	if (context.commandOptions.project !== undefined && context.commandOptions.project.length > 0) {
+		args.push("--project", context.commandOptions.project);
+	}
+
+	if (context.commandOptions.verbose !== undefined && context.commandOptions.verbose) {
+		args.push("--verbose");
+	}
+
+	if (context.commandOptions.color !== undefined && context.commandOptions.color.length > 0) {
+		args.push("--color", context.commandOptions.color);
+	}
+
+	return args;
 }
 
 /**
@@ -239,9 +278,6 @@ function createShutdownHandler(
  * @rejects When syncback command fails.
  */
 async function executeSyncback(context: SyncbackContext, state?: WatchState): Promise<void> {
-	// Stop the monitoring spinner if in watch mode
-	state?.monitoringSpinner?.stop();
-
 	log.info(`\n${ansis.dim(new Date().toLocaleTimeString())} - ${context.inputPath} changed`);
 
 	const startTime = performance.now();
@@ -266,9 +302,8 @@ async function executeSyncback(context: SyncbackContext, state?: WatchState): Pr
 		throw err;
 	}
 
-	// Restart the monitoring spinner if in watch mode
 	if (state !== undefined) {
-		state.monitoringSpinner = createSpinner("Monitoring for changes...");
+		log.info("Monitoring for changes...");
 	}
 }
 
@@ -308,6 +343,28 @@ async function handleFileChange(context: SyncbackContext, state: WatchState): Pr
 }
 
 /**
+ * Create a handler for file change events with debouncing and syncback
+ * execution.
+ *
+ * @param context - Syncback context containing configuration and options.
+ * @param state - The watch state.
+ * @returns A function that handles file change events.
+ */
+function createChangeHandler(
+	context: SyncbackContext,
+	state: WatchState,
+): (filePath: string) => void {
+	return (filePath: string) => {
+		// Only syncback when the input file changes, not the lock file
+		if (filePath !== state.inputPath) {
+			return;
+		}
+
+		void handleFileChange(context, state);
+	};
+}
+
+/**
  * Handle watcher errors by logging them.
  *
  * @param error - The error that occurred.
@@ -315,47 +372,6 @@ async function handleFileChange(context: SyncbackContext, state: WatchState): Pr
 function handleWatcherError(error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
 	log.error(`Watcher error: ${message}`);
-}
-
-/**
- * Initialize watch state and display startup messages.
- *
- * @param inputPath - Path to the input file.
- * @returns The initialized watch state.
- */
-async function initializeWatchState(inputPath: string): Promise<WatchState> {
-	return {
-		inputPath,
-		isProcessing: false,
-		lastModified: 0,
-		watcher: chokidar.watch(inputPath),
-	};
-}
-
-/**
- * Internal mode for per-execution hooks. Minimal execution without intro/outro
- * messages. Used by watch mode to enable user hooks via runScript().
- *
- * @param context - Syncback context containing configuration and options.
- */
-async function internalMode(context: SyncbackContext): Promise<void> {
-	const rojoArgs = buildRojoArguments(context.inputPath, context.commandOptions, context.config);
-
-	await run(context.rojo, rojoArgs, {
-		shouldShowCommand: false,
-		shouldStreamOutput: context.commandOptions.verbose !== undefined,
-	});
-}
-
-/**
- * Log watch mode startup messages.
- *
- * @param inputPath - The path being watched.
- */
-function logWatchModeStart(inputPath: string): void {
-	log.info(ansis.bold("→ Starting syncback watch mode"));
-	log.step(`Watching: ${ansis.cyan(inputPath)}`);
-	log.step(ansis.dim("Press Ctrl+C to stop"));
 }
 
 /**
@@ -375,28 +391,6 @@ function setupWatcherEvents(watcherOptions: WatcherEventOptions): void {
 
 	state.watcher.on("change", createChangeHandler(context, state));
 	state.watcher.on("error", handleWatcherError);
-}
-
-async function singleMode(context: SyncbackContext): Promise<void> {
-	log.info(ansis.bold("→ Running syncback"));
-	log.step(`Input: ${ansis.cyan(context.inputPath)}`);
-
-	const startTime = performance.now();
-	const spinner = createSpinner("Syncing back changes...");
-
-	const rojoArgs = buildRojoArguments(context.inputPath, context.commandOptions, context.config);
-
-	try {
-		await run(context.rojo, rojoArgs, {
-			shouldStreamOutput: context.commandOptions.verbose !== undefined,
-		});
-
-		const duration = formatDuration(startTime);
-		spinner.stop(`Syncback complete (${ansis.dim(duration)})`);
-	} catch (err) {
-		spinner.stop(ansis.red("Syncback failed"));
-		throw err;
-	}
 }
 
 /**
@@ -429,11 +423,11 @@ async function watchMode(context: SyncbackContext): Promise<void> {
 	await watchStudioLockFile(getStudioLockFilePath(context.config), {
 		onStudioClose: async () => {
 			await waitForCompletion(state);
-			state.monitoringSpinner?.stop("Studio lock file removed - stopping syncback watch...");
+			log.info("Studio lock file removed - stopping syncback watch...");
 		},
 		onStudioOpen: () => {
 			waitingSpinner.stop("Studio lock file found!");
-			state.monitoringSpinner = createSpinner("Monitoring for changes...");
+			log.info("Monitoring for changes...");
 		},
 	});
 
