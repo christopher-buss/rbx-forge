@@ -1,6 +1,6 @@
 {
 	"name": "rbx-forge",
-	"version": "1.0.0-beta.8",
+	"version": "1.0.0-beta.9",
 	"description": "A roblox-ts and Luau CLI tool for fully-managed Rojo projects",
 	"keywords": [
 		"rbxts",
