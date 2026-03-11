@@ -7,6 +7,7 @@ import process from "node:process";
 import type { ResolvedConfig } from "src/config/schema";
 
 import { loadProjectConfig } from "../config";
+import { CLI_COMMAND } from "../constants";
 import { getWindowsPath } from "../utils/get-windows-path";
 import { isWsl } from "../utils/is-wsl";
 import { cleanupLockfile } from "../utils/lockfile";
@@ -20,22 +21,79 @@ export const DESCRIPTION = "Open place file in Roblox Studio";
 
 export const options = [
 	{
+		description: "Build before opening",
+		flags: "-b, --build",
+	},
+	{
+		description: "Skip building before opening",
+		flags: "-B, --no-build",
+	},
+	{
 		description: "Path to the place file to open (overrides config)",
 		flags: "-p, --place <path>",
 	},
 ] as const;
 
 export interface OpenOptions {
+	build?: boolean;
 	place?: string;
 }
 
 export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 	const config = await loadProjectConfig();
-	const placeFile = commandOptions.place ?? config.buildOutputPath;
+	const isDirectInvocation = process.env["RBX_FORGE_CMD"] === "open";
+	const placeFile =
+		commandOptions.place ??
+		(isDirectInvocation ? config.open.buildOutputPath : undefined) ??
+		config.buildOutputPath;
 	const isCustomPlace = commandOptions.place !== undefined;
 
-	await ensurePlaceFileExists(placeFile, isCustomPlace);
+	const shouldBuild =
+		commandOptions.build ?? (isDirectInvocation ? config.open.buildFirst : false);
 
+	await (shouldBuild
+		? runOpenBuild(config)
+		: ensurePlaceFileExists(placeFile, isCustomPlace, config));
+
+	await openInStudio(placeFile);
+
+	if (config.rbxts.watchOnOpen && process.env["RBX_FORGE_CMD"] === "open") {
+		await startWatchOnStudioClose(config);
+	}
+}
+
+function getOpenBuildArgs(config: ResolvedConfig): Array<string> {
+	const args: Array<string> = [];
+	if (config.open.buildOutputPath !== undefined) {
+		args.push("--output", config.open.buildOutputPath);
+	}
+
+	if (config.open.projectPath !== undefined) {
+		args.push("--project", config.open.projectPath);
+	}
+
+	return args;
+}
+
+async function runOpenBuild(config: ResolvedConfig): Promise<void> {
+	if (config.projectType === "rbxts") {
+		await runScript("compile");
+	}
+
+	const isDirectInvocation = process.env["RBX_FORGE_CMD"] === "open";
+	const openArgs = isDirectInvocation ? getOpenBuildArgs(config) : [];
+
+	// Bypass task runner when using open-specific args to avoid conflicting
+	// with args baked into the user's build script
+	if (openArgs.length > 0) {
+		await run(CLI_COMMAND, ["build", ...openArgs], { shouldShowCommand: false });
+		return;
+	}
+
+	await runScript("build");
+}
+
+async function openInStudio(placeFile: string): Promise<void> {
 	log.info(ansis.bold("→ Opening in Roblox Studio"));
 	log.step(`File: ${ansis.cyan(placeFile)}`);
 
@@ -55,13 +113,13 @@ export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 	});
 
 	log.success("Opened in Roblox Studio");
-
-	if (config.rbxts.watchOnOpen && process.env["RBX_FORGE_CMD"] === "open") {
-		await startWatchOnStudioClose(config);
-	}
 }
 
-async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean): Promise<void> {
+async function handleMissingPlaceFile(
+	placeFile: string,
+	isCustomPlace: boolean,
+	config: ResolvedConfig,
+): Promise<void> {
 	log.error(`Place file not found: ${ansis.cyan(placeFile)}`);
 
 	// Don't offer to build custom place files
@@ -83,7 +141,7 @@ async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean)
 		process.exit(1);
 	}
 
-	await runScript("build");
+	await runOpenBuild(config);
 
 	try {
 		await access(placeFile);
@@ -93,11 +151,15 @@ async function handleMissingPlaceFile(placeFile: string, isCustomPlace: boolean)
 	}
 }
 
-async function ensurePlaceFileExists(placeFile: string, isCustomPlace: boolean): Promise<void> {
+async function ensurePlaceFileExists(
+	placeFile: string,
+	isCustomPlace: boolean,
+	config: ResolvedConfig,
+): Promise<void> {
 	try {
 		await access(placeFile);
 	} catch {
-		await handleMissingPlaceFile(placeFile, isCustomPlace);
+		await handleMissingPlaceFile(placeFile, isCustomPlace, config);
 	}
 }
 
