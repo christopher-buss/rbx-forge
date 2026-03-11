@@ -21,11 +21,16 @@ export const defaults: ResolvedConfig = {
 			command: "",
 		},
 	},
+	open: {
+		buildFirst: true,
+		buildOutputPath: undefined,
+		projectPath: undefined,
+	},
 	projectType: "rbxts",
 	rbxts: {
 		args: ["--verbose"],
 		command: "rbxtsc",
-		watchOnOpen: true,
+		watchOnOpen: false,
 	},
 	rojoAlias: "rojo",
 	rojoProjectPath: "default.project.json",

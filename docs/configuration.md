@@ -262,7 +262,7 @@ Configuration for roblox-ts compiler (only applies when `projectType: "rbxts"`).
 {
 	command: "rbxtsc",
 	args: ["--verbose"],
-	watchOnOpen: true,
+	watchOnOpen: false,
 }
 ```
 
@@ -282,7 +282,7 @@ Additional arguments to pass to the compiler.
 
 #### `rbxts.watchOnOpen`
 
-**Type:** `boolean` **Default:** `true`
+**Type:** `boolean` **Default:** `false`
 
 Whether to automatically start watch mode when opening in Studio.
 
@@ -294,7 +294,7 @@ export default defineConfig({
 	rbxts: {
 		args: ["--verbose", "--logTruthyChanges"],
 		command: "rbxtsc",
-		watchOnOpen: true,
+		watchOnOpen: false,
 	},
 });
 ```
@@ -345,6 +345,69 @@ export default defineConfig({
 	projectType: "luau",
 });
 ```
+
+---
+
+### `open`
+
+**Type:** `object` **Default:**
+`{ buildFirst: true, buildOutputPath: undefined, projectPath: undefined }`
+
+Configuration for the `open` command. These overrides only apply when `open` is
+invoked directly (`rbx-forge open`), not when chained from other commands like
+`start`.
+
+**Properties:**
+
+#### `open.buildFirst`
+
+**Type:** `boolean` **Default:** `true`
+
+Whether to automatically build the place file before opening it in Roblox
+Studio. This ensures the place file is always up-to-date when opening directly.
+Only applies when `open` is invoked directly — chained invocations (e.g., from
+`start`) skip auto-building.
+
+Can be overridden per-invocation with `--build` / `--no-build` flags.
+
+#### `open.buildOutputPath`
+
+**Type:** `string | undefined` **Default:** `undefined`
+
+Path to the place file to open in Roblox Studio. When set and `open` is invoked
+directly, this overrides the global `buildOutputPath`. If the place file doesn't
+exist, the auto-build will also output to this path.
+
+#### `open.projectPath`
+
+**Type:** `string | undefined` **Default:** `undefined`
+
+Path to the Rojo project file to use when auto-building for the `open` command.
+When set and `open` is invoked directly, this is passed to the build command via
+`--project`.
+
+**Example:**
+
+```typescript
+export default defineConfig({
+	// Global build uses assets-only project
+	buildOutputPath: "game.rbxl",
+
+	// Open command uses a combined project for one-shot builds
+	open: {
+		buildOutputPath: "review.rbxl",
+		projectPath: "combined.project.json",
+	},
+
+	rojoProjectPath: "assets.project.json",
+});
+```
+
+**Use Cases:**
+
+- One-shot builds for code review (combined assets + code, no syncback)
+- Opening a different place file without affecting the main build pipeline
+- Using a separate project.json that includes all sources for testing
 
 ---
 
@@ -551,6 +614,13 @@ export default defineConfig({
 		},
 	},
 
+	// Open command overrides (one-shot builds)
+	open: {
+		buildFirst: true,
+		buildOutputPath: "review.rbxl",
+		projectPath: "combined.project.json",
+	},
+
 	// Project type
 	projectType: "rbxts",
 
@@ -558,7 +628,7 @@ export default defineConfig({
 	rbxts: {
 		args: ["--verbose", "--logTruthyChanges"],
 		command: "rbxtsc",
-		watchOnOpen: true,
+		watchOnOpen: false,
 	},
 
 	// Rojo command alias

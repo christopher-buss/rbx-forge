@@ -1,6 +1,8 @@
 import { type } from "arktype";
 import type { RequiredDeep } from "type-fest";
 
+const OPTIONAL_STRING = "string | undefined" as const;
+
 export const configSchema = type({
 	"buildOutputPath?": "string",
 	"commandNames?": {
@@ -22,6 +24,11 @@ export const configSchema = type({
 			"command?": "string",
 		},
 	},
+	"open?": {
+		"buildFirst?": "boolean",
+		"buildOutputPath?": OPTIONAL_STRING,
+		"projectPath?": OPTIONAL_STRING,
+	},
 	"projectType": "'rbxts' | 'luau'",
 	"rbxts?": {
 		"args?": "string[]",
@@ -32,14 +39,14 @@ export const configSchema = type({
 	"rojoProjectPath?": "string",
 	"suppressNoTaskRunnerWarning?": "boolean",
 	"syncback?": {
-		"projectPath?": "string | undefined",
+		"projectPath?": OPTIONAL_STRING,
 		"runOnStart?": "boolean",
 	},
 	"syncbackInputPath?": "string",
 	"typegen?": {
 		"exclude?": "string[]",
 		"include?": "string[]",
-		"maxDepth?": "number | undefined",
+		"maxDepth?": "number | undefined" as const,
 	},
 	"typegenOutputPath?": "string",
 });
