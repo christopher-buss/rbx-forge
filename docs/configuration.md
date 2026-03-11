@@ -262,7 +262,7 @@ Configuration for roblox-ts compiler (only applies when `projectType: "rbxts"`).
 {
 	command: "rbxtsc",
 	args: ["--verbose"],
-	watchOnOpen: true,
+	watchOnOpen: false,
 }
 ```
 
@@ -282,7 +282,7 @@ Additional arguments to pass to the compiler.
 
 #### `rbxts.watchOnOpen`
 
-**Type:** `boolean` **Default:** `true`
+**Type:** `boolean` **Default:** `false`
 
 Whether to automatically start watch mode when opening in Studio.
 
@@ -294,7 +294,7 @@ export default defineConfig({
 	rbxts: {
 		args: ["--verbose", "--logTruthyChanges"],
 		command: "rbxtsc",
-		watchOnOpen: true,
+		watchOnOpen: false,
 	},
 });
 ```
@@ -628,7 +628,7 @@ export default defineConfig({
 	rbxts: {
 		args: ["--verbose", "--logTruthyChanges"],
 		command: "rbxtsc",
-		watchOnOpen: true,
+		watchOnOpen: false,
 	},
 
 	// Rojo command alias

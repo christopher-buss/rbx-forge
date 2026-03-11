@@ -51,9 +51,11 @@ export async function action(commandOptions: OpenOptions = {}): Promise<void> {
 	const shouldBuild =
 		commandOptions.build ?? (isDirectInvocation ? config.open.buildFirst : false);
 
+	const isBuildExplicitlyDisabled = commandOptions.build === false;
+
 	await (shouldBuild
-		? runOpenBuild(config)
-		: ensurePlaceFileExists(placeFile, isCustomPlace, config));
+		? runOpenBuild(config, placeFile)
+		: ensurePlaceFileExists(placeFile, isCustomPlace, config, isBuildExplicitlyDisabled));
 
 	await openInStudio(placeFile);
 
@@ -75,13 +77,18 @@ function getOpenBuildArgs(config: ResolvedConfig): Array<string> {
 	return args;
 }
 
-async function runOpenBuild(config: ResolvedConfig): Promise<void> {
+async function runOpenBuild(config: ResolvedConfig, placeFile: string): Promise<void> {
 	if (config.projectType === "rbxts") {
 		await runScript("compile");
 	}
 
 	const isDirectInvocation = process.env["RBX_FORGE_CMD"] === "open";
 	const openArgs = isDirectInvocation ? getOpenBuildArgs(config) : [];
+
+	// Ensure build outputs to the same file Studio will open
+	if (!openArgs.includes("--output") && placeFile !== config.buildOutputPath) {
+		openArgs.push("--output", placeFile);
+	}
 
 	// Bypass task runner when using open-specific args to avoid conflicting
 	// with args baked into the user's build script
@@ -119,11 +126,12 @@ async function handleMissingPlaceFile(
 	placeFile: string,
 	isCustomPlace: boolean,
 	config: ResolvedConfig,
+	noBuild: boolean,
 ): Promise<void> {
 	log.error(`Place file not found: ${ansis.cyan(placeFile)}`);
 
-	// Don't offer to build custom place files
-	if (isCustomPlace) {
+	// Don't offer to build custom place files or when --no-build was passed
+	if (isCustomPlace || noBuild) {
 		process.exit(1);
 	}
 
@@ -141,7 +149,7 @@ async function handleMissingPlaceFile(
 		process.exit(1);
 	}
 
-	await runOpenBuild(config);
+	await runOpenBuild(config, placeFile);
 
 	try {
 		await access(placeFile);
@@ -155,11 +163,12 @@ async function ensurePlaceFileExists(
 	placeFile: string,
 	isCustomPlace: boolean,
 	config: ResolvedConfig,
+	noBuild: boolean,
 ): Promise<void> {
 	try {
 		await access(placeFile);
 	} catch {
-		await handleMissingPlaceFile(placeFile, isCustomPlace, config);
+		await handleMissingPlaceFile(placeFile, isCustomPlace, config, noBuild);
 	}
 }
 
