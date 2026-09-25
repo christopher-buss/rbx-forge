@@ -189,7 +189,7 @@ function statusWith(
 		pid: SUPERVISOR,
 		running: true,
 		services: {
-			compiler: { status: "off" },
+			compiler: { building: false, status: "off" },
 			rojo: { port: 34_872, status: "ready" },
 			studio,
 			syncback: { status: "off" },

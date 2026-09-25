@@ -2,6 +2,7 @@ import { type } from "arktype";
 
 import { ForgeError } from "../errors.ts";
 import { callSessionAsync } from "../ipc/client.ts";
+import { IPC_WAIT_MS } from "../ipc/protocol.ts";
 import type { IpcTransport } from "../ipc/transport.ts";
 import type { FileSystem } from "../seams/file-system.ts";
 import type { SessionStatus } from "../session/status.ts";
@@ -76,19 +77,26 @@ export function findSession(
  *
  * @param ipc - Reaches its endpoint.
  * @param session - Its identity record and token.
+ * @param waitMs - Ask for the status once the last build is fresh
+ *   (`freshStatus`), waiting up to this long; omit for the status now.
  * @returns The status it answered, checked against the state contract.
  * @rejects {ForgeError} `not_running` when nothing answers at its endpoint;
  *   `supervisor_unresponsive` when it does not answer in time;
- *   `internal_error` when the answer is not a status.
+ *   `internal_error` when the answer is not a status; the wait's own
+ *   failure, such as `compile_timeout` or `service_failed`.
  */
 export async function fetchStatusAsync(
 	ipc: IpcTransport,
 	session: KnownSession,
+	waitMs?: number,
 ): Promise<SessionStatus> {
 	const result = await callSessionAsync(
 		ipc,
 		{ endpoint: session.identity.endpoint, token: session.token },
-		"status",
+		waitMs === undefined ? "status" : "freshStatus",
+		waitMs === undefined
+			? {}
+			: { params: { timeoutMs: waitMs }, responseTimeoutMs: waitMs + IPC_WAIT_MS },
 	);
 	const status = parseStatus(result);
 	if (status === undefined) {

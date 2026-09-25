@@ -22,6 +22,12 @@ export interface CompileReport {
 	errors: number;
 }
 
+/**
+ * What one line of watch-mode output tells: a compile started, or one ended
+ * with its report.
+ */
+export type CompileEvent = { report: CompileReport; type: "end" } | { type: "start" };
+
 /** Reads compiler output line by line. */
 export interface DiagnosticsParser {
 	/**
@@ -32,10 +38,11 @@ export interface DiagnosticsParser {
 	/**
 	 * Read one output line.
 	 *
-	 * @returns The report of the compile a watch-mode summary line (`Found 2
-	 *   errors.`) ends, else `undefined`.
+	 * @returns `start` for a watch-mode start line (`File change detected.
+	 *   Starting incremental compilation...`); `end` with the report of the
+	 *   compile a summary line (`Found 2 errors.`) ends; else `undefined`.
 	 */
-	read: (line: string) => CompileReport | undefined;
+	read: (line: string) => CompileEvent | undefined;
 }
 
 // `src/a.ts:3:7 - error TS2322: message` (pretty, what rbxtsc prints).
@@ -47,6 +54,10 @@ const HEADER = /^(?<severity>error|warning) TS ?(?<code>[^\s:]+): (?<message>.*)
 // `[10:00:00] Found 2 errors. Watching for file changes.`, or tsc's
 // `Found 2 errors in 2 files.`
 const SUMMARY = /^(?:\[[^\]]*\] |[\d:]+(?: [AP]M)? - )?Found (?<count>\d+) errors?\b/;
+// The line a watch-mode compile starts with, after the same time: the first
+// compile, a rebuild, or a reload of the tsconfig chain.
+const START =
+	/^(?:\[[^\]]*\] |[\d:]+(?: [AP]M)? - )?(?:Starting compilation in watch mode|File change detected\. Starting incremental compilation|tsconfig change detected\b)/;
 const NUMERIC_CODE = /^\d+$/;
 
 interface ParserState {
@@ -141,15 +152,18 @@ function readText(state: ParserState, text: string): void {
 	}
 }
 
-function readLine(state: ParserState, line: string): CompileReport | undefined {
+function readLine(state: ParserState, line: string): CompileEvent | undefined {
 	const text = stripVTControlCharacters(line).trimEnd();
 	const count = SUMMARY.exec(text)?.groups?.["count"];
-	let report: CompileReport | undefined;
-	if (count === undefined) {
-		readText(state, text);
-	} else {
-		report = take(state, Number(count));
+	if (count !== undefined) {
+		return { report: take(state, Number(count)), type: "end" };
 	}
 
-	return report;
+	if (START.test(text)) {
+		close(state);
+		return { type: "start" };
+	}
+
+	readText(state, text);
+	return undefined;
 }

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { IpcListener } from "../ipc/connection.ts";
 import { startIpcServer } from "../ipc/server.ts";
 import type { Seams } from "../seams/seams.ts";
+import type { BuildWatch } from "../session/build-watch.ts";
+import { createBuildWatch } from "../session/build-watch.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { SessionStatus, StatusStore } from "../session/status.ts";
 import { createStatusStore, isReady } from "../session/status.ts";
@@ -26,6 +28,8 @@ export interface ControlSetup {
 	plan: { compiler: boolean; open: boolean; syncback: boolean };
 	/** The fixed Rojo port. */
 	port: number;
+	/** The session reads its compiler's builds (roblox-ts). */
+	readsBuilds: boolean;
 	/** The supervisor's stop requests: `shutdown` feeds them. */
 	stop: StopSource;
 	/** Runs `forge sync` through the session body. */
@@ -34,6 +38,8 @@ export interface ControlSetup {
 
 /** A session's files, status, and open control endpoint. */
 export interface SessionControl {
+	/** The compiler's builds; the session body reads its output into them. */
+	builds: BuildWatch;
 	/**
 	 * Stop serving, once every request in progress has an answer. Call last,
 	 * so the final status is what late clients see.
@@ -52,9 +58,9 @@ export type ControlSeams = Pick<
 /**
  * Step 5 of `runSupervisorAsync`: create the session
  * directory with its identity record and token, keep `state.json` up to
- * date, and open the control endpoint (`status`, `sync`, `shutdown`). Call only
- * while holding the singleton lock. When the endpoint cannot open, nothing
- * of the session ran, so its files go.
+ * date, and open the control endpoint (`status`, `freshStatus`, `sync`,
+ * `shutdown`). Call only while holding the singleton lock. When the endpoint
+ * cannot open, nothing of the session ran, so its files go.
  *
  * @param seams - The clock, file system, host, transport, addon, and ids.
  * @param setup - The identity, plan, port, stop requests, and `onReady`.
@@ -70,11 +76,12 @@ export async function openSessionAsync(
 		value: token,
 		write: tokenWriter(seams),
 	});
-	const status = createSessionStatus(seams, setup, files.state);
+	const { builds, status } = createSessionState(seams, setup, files.state);
 	await setup.pause();
 	const listener = await listenOrRemoveAsync(seams, setup, files.sessionId);
 	const server = startIpcServer(listener, {
 		handlers: controlHandlers({
+			builds,
 			sessionId: setup.identity.sessionId,
 			status,
 			stop: setup.stop,
@@ -82,60 +89,13 @@ export async function openSessionAsync(
 		}),
 		token,
 	});
-	// The stop source lives as long as this supervisor: no removal needed.
-	setup.stop.onStop(() => {
-		status.phase("stopping");
-	});
 	return {
+		builds,
 		closeAsync: async () => {
 			await server.closeAsync();
 		},
 		files,
 		status,
-	};
-}
-
-/**
- * Open the endpoint; when it cannot open, delete the session's files.
- *
- * @param seams - The transport and file system.
- * @param setup - The endpoint, in the identity record.
- * @param sessionId - The session whose files go on failure.
- * @returns The listening endpoint.
- * @rejects `endpoint_in_use`.
- */
-async function listenOrRemoveAsync(
-	seams: Pick<ControlSeams, "fileSystem" | "ipc">,
-	{ forge, identity }: Pick<ControlSetup, "forge" | "identity">,
-	sessionId: string,
-): Promise<IpcListener> {
-	try {
-		return await seams.ipc.listenAsync(identity.endpoint);
-	} catch (err) {
-		removeSession(seams.fileSystem, forge, sessionId);
-		throw err;
-	}
-}
-
-/**
- * How the token file is written: on Windows with an owner-only DACL through
- * the addon, so it never exists readable by others; elsewhere with mode
- * 0600 (the default).
- *
- * @param seams - The host and native addon.
- * @returns The Windows writer, or `undefined` for the default.
- */
-function tokenWriter(
-	seams: Pick<ControlSeams, "host" | "native">,
-): ((file: string, text: string) => void) | undefined {
-	if (seams.host.platform !== "win32") {
-		return undefined;
-	}
-
-	return (file, text) => {
-		const { writePrivateFile } = seams.native();
-		assert(writePrivateFile !== undefined);
-		writePrivateFile(file, text);
 	};
 }
 
@@ -218,4 +178,82 @@ function createSessionStatus(
 			writeState(seams.fileSystem, stateFile, next);
 		}),
 	);
+}
+
+/**
+ * The session's status and builds. Once the session is `stopping` (a stop
+ * request, or its end), every wait for a build fails.
+ *
+ * @param seams - The clock and file system.
+ * @param setup - The identity, plan, port, stop requests, and `onReady`.
+ * @param stateFile - `state.json`.
+ * @returns The status store and the build watch.
+ */
+function createSessionState(
+	seams: Pick<ControlSeams, "clock" | "fileSystem">,
+	setup: ControlSetup,
+	stateFile: string,
+): { builds: BuildWatch; status: StatusStore } {
+	const store = createSessionStatus(seams, setup, stateFile);
+	const builds = createBuildWatch({
+		clock: seams.clock,
+		recorder: store,
+		tracks: setup.readsBuilds,
+	});
+	const status: StatusStore = {
+		...store,
+		phase: (phase) => {
+			store.phase(phase);
+			builds.close();
+		},
+	};
+	// The stop source lives as long as this supervisor: no removal needed.
+	setup.stop.onStop(() => {
+		status.phase("stopping");
+	});
+	return { builds, status };
+}
+
+/**
+ * Open the endpoint; when it cannot open, delete the session's files.
+ *
+ * @param seams - The transport and file system.
+ * @param setup - The endpoint, in the identity record.
+ * @param sessionId - The session whose files go on failure.
+ * @returns The listening endpoint.
+ * @rejects `endpoint_in_use`.
+ */
+async function listenOrRemoveAsync(
+	seams: Pick<ControlSeams, "fileSystem" | "ipc">,
+	{ forge, identity }: Pick<ControlSetup, "forge" | "identity">,
+	sessionId: string,
+): Promise<IpcListener> {
+	try {
+		return await seams.ipc.listenAsync(identity.endpoint);
+	} catch (err) {
+		removeSession(seams.fileSystem, forge, sessionId);
+		throw err;
+	}
+}
+
+/**
+ * How the token file is written: on Windows with an owner-only DACL through
+ * the addon, so it never exists readable by others; elsewhere with mode
+ * 0600 (the default).
+ *
+ * @param seams - The host and native addon.
+ * @returns The Windows writer, or `undefined` for the default.
+ */
+function tokenWriter(
+	seams: Pick<ControlSeams, "host" | "native">,
+): ((file: string, text: string) => void) | undefined {
+	if (seams.host.platform !== "win32") {
+		return undefined;
+	}
+
+	return (file, text) => {
+		const { writePrivateFile } = seams.native();
+		assert(writePrivateFile !== undefined);
+		writePrivateFile(file, text);
+	};
 }

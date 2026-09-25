@@ -40,6 +40,18 @@ The pipe that ties a `start` session to the `start` process. Its end of file
 stops the session.\
 _Avoid_: heartbeat, parent watch
 
+## Builds
+
+**Build**:\
+One compile of the watch-mode compiler, from its start line to its summary line,
+with its errors and diagnostics. The last one is in the state contract.\
+_Avoid_: compile result, rebuild
+
+**Quiet window**:\
+The time (750 ms) in which no compile may start before the last build counts as
+fresh. A compile that starts in it restarts the wait.\
+_Avoid_: debounce, settle time
+
 ## Ownership and cleanup
 
 **Lease**:\

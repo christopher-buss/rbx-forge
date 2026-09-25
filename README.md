@@ -63,14 +63,14 @@ The bins `forge` and `rbx-forge` are the same. Run forge from the project root.
 
 Session commands:
 
-| Command             | What it does                                                                                                                              |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `forge start`       | Run the session in this terminal. Ctrl+C, a closed terminal, or a killed `start` stops every process of the session.                      |
-| `forge up`          | Start the same session in the background. Returns when Rojo listens and the first compile is done. Reports a running session if one runs. |
-| `forge status`      | Each service's state, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks.                     |
-| `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                            |
-| `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.          |
-| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.           |
+| Command             | What it does                                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `forge start`       | Run the session in this terminal. Ctrl+C, a closed terminal, or a killed `start` stops every process of the session.                       |
+| `forge up`          | Start the same session in the background. Returns when Rojo listens and the first compile is done. Reports a running session if one runs.  |
+| `forge status`      | Each service's state, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below. |
+| `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                             |
+| `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.           |
+| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.            |
 
 `start` and `up` take the same flags:
 
@@ -89,6 +89,12 @@ Session commands:
 that does not stop, and what is left of its session, each verified),
 `--keep-studio` (leave the session's Studio open), and `--recovery <mode>` (see
 [Auto-recovery](./docs/studio.md#auto-recovery)).
+
+`status --wait` returns the status once the compiler's last build is fresh: no
+compile runs, and none started for a short quiet window. Run it after an edit.
+`--timeout <ms>` bounds the wait (default 300000), else it fails with
+`compile_timeout`. With no roblox-ts compiler in the session, it returns at
+once.
 
 One session runs per project (per worktree and build output). A second `start`
 fails with `session_running`; a second `up` joins the running session. A new
@@ -138,7 +144,9 @@ stable, and each maps to one exit code. The loop:
 
 1. `forge up --json` starts the session, or finds the running one.
 2. Edit code.
-3. `forge status --json` gives the compile errors with file, line, and column.
+3. `forge status --json --wait` gives the compile errors with file, line, and
+   column. `--wait` waits for the compile of your edit, so the result is never
+   the build before it.
 4. Play and read the console with the Roblox Studio MCP.
 5. `forge sync --json` pulls Studio edits into the project.
 6. `forge down --json` closes Studio and stops the session.

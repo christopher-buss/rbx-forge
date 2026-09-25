@@ -28,7 +28,7 @@ function parseAll(lines: ReadonlyArray<string>): {
 	const parser = createDiagnosticsParser();
 	const summaries = lines
 		.map((line) => parser.read(line))
-		.filter((report) => report !== undefined);
+		.flatMap((event) => (event?.type === "end" ? [event.report] : []));
 
 	return { final: parser.finish(), summaries };
 }
@@ -234,5 +234,40 @@ describe(createDiagnosticsParser, () => {
 			parseAll(["compiling as game..", "", "  indented text", "error: not a diagnostic"])
 				.final,
 		).toStrictEqual({ diagnostics: [], errors: 0 });
+	});
+
+	it("should end a diagnostic at a start line", () => {
+		expect.assertions(1);
+
+		const { final } = parseAll([
+			"src/a.ts:1:1 - error TS1005: ';' expected.",
+			"[10:00:00] File change detected. Starting incremental compilation...",
+			"compiling as game..",
+		]);
+
+		expect(final.diagnostics).toStrictEqual([
+			expect.objectContaining({ message: "';' expected." }),
+		]);
+	});
+
+	it.for([
+		"\u001B[90m[\u001B[0m04:52:31\u001B[0m] Starting compilation in watch mode...\r",
+		"[\u001B[90m21:32:12\u001B[0m] File change detected. Starting incremental compilation...\r",
+		"10:00:00 AM - File change detected. Starting incremental compilation...",
+		"[10:00:00] tsconfig change detected (tsconfig.json) \u2014 reloading...",
+	])("should take %j for a start line", (line) => {
+		expect.assertions(1);
+
+		expect(createDiagnosticsParser().read(line)).toStrictEqual({ type: "start" });
+	});
+
+	it.for([
+		"compiling as game..",
+		"src/a.ts:1:1 - error TS1005: File change detected. Starting incremental compilation...",
+		"",
+	])("should not take %j for a start line", (line) => {
+		expect.assertions(1);
+
+		expect(createDiagnosticsParser().read(line)).toBeUndefined();
 	});
 });

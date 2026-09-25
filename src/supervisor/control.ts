@@ -1,11 +1,14 @@
 import { ForgeError } from "../errors.ts";
 import type { IpcServerOptions } from "../ipc/server.ts";
+import type { BuildWatch } from "../session/build-watch.ts";
+import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { StatusStore } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
 
 /** What the control channel of one session reaches. */
 export interface ControlTarget {
+	builds: Pick<BuildWatch, "tick" | "waitAsync">;
 	sessionId: string;
 	status: Pick<StatusStore, "snapshot">;
 	stop: Pick<StopSource, "request">;
@@ -16,6 +19,9 @@ export interface ControlTarget {
  * The methods a session serves on its control channel:
  *
  * - `status`: the state contract (`session/status.ts`).
+ * - `freshStatus`: the state contract once the compiler's last build is
+ *   fresh (`session/build-watch.ts`), waiting up to the `timeoutMs` param
+ *   ({@link FRESH_BUILD_TIMEOUT_MS} when absent).
  * - `shutdown`: stop the session through its single shutdown path. Answers
  *   at once; the caller waits for the session to be gone. With a
  *   `sessionId` param, only that session stops: another one answers
@@ -26,11 +32,20 @@ export interface ControlTarget {
  *   with the save watch. Answers once the run ended,
  *   with what was synced and each hook result, or with the run's failure.
  *
- * @param target - The session's id, status, stop requests, and syncback.
- * @returns The `status`, `sync`, and `shutdown` handlers of the session.
+ * @param target - The session's builds, id, status, stop requests, and
+ *   syncback.
+ * @returns The handlers of the session.
  */
 export function controlHandlers(target: ControlTarget): IpcServerOptions["handlers"] {
 	return {
+		freshStatus: async ({ timeoutMs }) => {
+			await target.builds.waitAsync(
+				typeof timeoutMs === "number" && timeoutMs >= 0
+					? timeoutMs
+					: FRESH_BUILD_TIMEOUT_MS,
+			);
+			return snapshot(target);
+		},
 		shutdown: (parameters) => {
 			const wanted = parameters["sessionId"];
 			if (typeof wanted === "string" && wanted !== target.sessionId) {
@@ -47,7 +62,13 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 			);
 			return { accepted: true, sessionId: target.sessionId };
 		},
-		status: () => ({ ...target.status.snapshot() }),
+		status: () => snapshot(target),
 		sync: async () => target.sync.runAsync(),
 	};
+}
+
+function snapshot({ builds, status }: ControlTarget): Record<string, unknown> {
+	// Start lines that one summary line ended may have settled meanwhile.
+	builds.tick();
+	return { ...status.snapshot() };
 }

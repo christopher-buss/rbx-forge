@@ -1,7 +1,7 @@
 import type { Type } from "arktype";
 import { type } from "arktype";
 
-import type { CompileReport, Diagnostic } from "../compiler/diagnostics.ts";
+import type { Diagnostic } from "../compiler/diagnostics.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
 
@@ -14,7 +14,8 @@ import type { StudioProcess } from "../studio/launcher.ts";
  *   "running": true, "sessionId": "…", "pid": 1234, "startedAt": "…", "phase": "ready",
  *   "services": {
  *     "rojo":     { "status": "ready", "port": 34872 },
- *     "compiler": { "status": "ready", "lastBuild": { "at": "…", "errors": 0, "diagnostics": [] } },
+ *     "compiler": { "status": "ready", "building": false,
+ *                   "lastBuild": { "startedAt": "…", "at": "…", "errors": 0, "diagnostics": [] } },
  *     "syncback": { "status": "idle", "lastRun": { "at": "…", "ok": true, "durationMs": 812, "hooks": [] } },
  *     "studio":   { "status": "open", "place": "…", "pid": 5678, "startTime": "…" }
  *   }
@@ -34,6 +35,11 @@ export interface LastBuild {
 	at: string;
 	diagnostics: Array<Diagnostic>;
 	errors: number;
+	/**
+	 * When it started (its start line), as an ISO date; `at` when the
+	 * compiler printed no start line.
+	 */
+	startedAt: string;
 }
 
 /** One syncback run with its hooks. */
@@ -72,7 +78,8 @@ export interface SessionStatus {
 	/** `false` once the session has stopped. */
 	running: boolean;
 	services: {
-		compiler: { lastBuild?: LastBuild; status: ServiceStatus };
+		/** `building`: a compile runs (from its start line to its summary). */
+		compiler: { building: boolean; lastBuild?: LastBuild; status: ServiceStatus };
 		rojo: { port: number; status: ServiceStatus };
 		/**
 		 * `place`: the place Studio opens or has open, once forge launched
@@ -91,8 +98,13 @@ export interface SessionStatus {
 
 /** What the session body tells the status as the session runs. */
 export interface StatusRecorder {
-	/** The watch-mode compiler finished a compile. */
-	compiled: (report: CompileReport) => void;
+	/** The watch-mode compiler started a compile, or has none running. */
+	building: (isBuilding: boolean) => void;
+	/**
+	 * The watch-mode compiler finished a compile. `isBuilding`: another one
+	 * still runs.
+	 */
+	compiled: (build: LastBuild, isBuilding: boolean) => void;
 	/**
 	 * A service's worker started (`ready` or, for a compiler that reports
 	 * compiles, `starting`) or its tree is gone.
@@ -146,6 +158,11 @@ export function isReady(status: SessionStatus): boolean {
 	return status.phase === "ready";
 }
 
+export function isoTime(ms: number): string {
+	const time = new Date(ms);
+	return time.toISOString();
+}
+
 /**
  * Keep a session's status. `onChange` gets every new status, such as to
  * write `state.json`.
@@ -188,7 +205,7 @@ function initialStatus(start: StatusStart): SessionStatus {
 		pid: start.pid,
 		running: true,
 		services: {
-			compiler: { status: start.compiler ? "starting" : "off" },
+			compiler: { building: false, status: start.compiler ? "starting" : "off" },
 			rojo: { port: start.port, status: "starting" },
 			studio: { status: start.open ? "opening" : "off" },
 			syncback: { status: start.syncback ? "idle" : "off" },
@@ -196,11 +213,6 @@ function initialStatus(start: StatusStart): SessionStatus {
 		sessionId: start.sessionId,
 		startedAt: start.startedAt,
 	};
-}
-
-function isoTime(ms: number): string {
-	const time = new Date(ms);
-	return time.toISOString();
 }
 
 /**
@@ -216,17 +228,16 @@ function createRecorder(
 	now: () => number,
 	changed: () => void,
 ): StatusRecorder {
-	function at(): string {
-		return isoTime(now());
-	}
-
 	// Between runs, syncback is back where it started: `idle` or `off`.
 	const resting = status.services.syncback.status;
 
 	return {
-		compiled: ({ diagnostics, errors }) => {
-			const lastBuild = { at: at(), diagnostics, errors };
-			status.services.compiler = { lastBuild, status: "ready" };
+		building: (isBuilding) => {
+			status.services.compiler.building = isBuilding;
+			changed();
+		},
+		compiled: (lastBuild, isBuilding) => {
+			status.services.compiler = { building: isBuilding, lastBuild, status: "ready" };
 			changed();
 		},
 		service: (id, serviceStatus) => {
@@ -238,7 +249,7 @@ function createRecorder(
 			changed();
 		},
 		syncbackFinished: (run) => {
-			status.services.syncback = { lastRun: { at: at(), ...run }, status: resting };
+			status.services.syncback = { lastRun: { at: isoTime(now()), ...run }, status: resting };
 			changed();
 		},
 		syncbackStarted: () => {
@@ -285,10 +296,12 @@ const statusSchema: Type<SessionStatus> = type({
 	running: "boolean",
 	services: {
 		compiler: {
+			"building": "boolean",
 			"lastBuild?": {
 				at: TEXT,
 				diagnostics: diagnostic.array(),
 				errors: INTEGER,
+				startedAt: TEXT,
 			},
 			"status": serviceStatus,
 		},

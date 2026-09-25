@@ -119,7 +119,7 @@ async function serveStudioAsync(
 		pid: 500,
 		running: true,
 		services: {
-			compiler: { status: "off" },
+			compiler: { building: false, status: "off" },
 			rojo: { port: 34_872, status: "ready" },
 			studio: entry,
 			syncback: { status: "off" },

@@ -16,6 +16,8 @@ import { PROJECT } from "./seams.ts";
 export interface FakeSession {
 	/** What `status` answers instead of the status, such as a bad answer. */
 	answer?: Record<string, unknown>;
+	/** Answers `freshStatus`; the status at once by default. */
+	freshStatus: IpcHandler;
 	identity: IdentityRecord;
 	/** What `status` answers; change it to move the session on. */
 	status: SessionStatus;
@@ -45,7 +47,7 @@ export function makeStatus(overrides: Partial<SessionStatus> = {}): SessionStatu
 		pid: 500,
 		running: true,
 		services: {
-			compiler: { status: "off" },
+			compiler: { building: false, status: "off" },
 			rojo: { port: 34_872, status: "ready" },
 			studio: { status: "off" },
 			syncback: { status: "off" },
@@ -72,6 +74,7 @@ export async function serveFakeSessionAsync(
 ): Promise<FakeSession> {
 	const identity = writeSessionFiles(memory, status);
 	const session: FakeSession = {
+		freshStatus: () => answerStatus(),
 		identity,
 		status,
 		stop: async () => {
@@ -79,9 +82,14 @@ export async function serveFakeSessionAsync(
 		},
 		sync: () => ({ ...SYNCED }),
 	};
+	function answerStatus(): Record<string, unknown> {
+		return session.answer ?? { ...session.status };
+	}
+
 	const server: IpcServer = startIpcServer(await transport.listenAsync(identity.endpoint), {
 		handlers: {
-			status: () => session.answer ?? { ...session.status },
+			freshStatus: async (parameters) => session.freshStatus(parameters),
+			status: answerStatus,
 			sync: async (parameters) => session.sync(parameters),
 		},
 		token: "token",

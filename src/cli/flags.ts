@@ -62,6 +62,33 @@ export const GLOBAL_FLAGS: ReadonlyArray<FlagDefinition> = [
 ];
 
 /**
+ * Read a `number` flag that sets no config option, such as `--timeout`.
+ *
+ * @param name - The flag's name, for the error.
+ * @param value - Its value as parsed.
+ * @param unit - What it counts, such as `seconds`.
+ * @param max - The largest value it takes.
+ * @returns The number, at least 0.
+ * @throws {ForgeError} `usage` when it is not a number from 0 to `max`.
+ */
+export function readCountFlag(
+	name: string,
+	value: FlagValues[string],
+	unit: string,
+	max: number = Number.MAX_SAFE_INTEGER,
+): number {
+	const count = typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+	if (Number.isNaN(count) || count < 0 || count > max) {
+		throw new ForgeError(
+			"usage",
+			`--${name} takes a number of ${unit}, not "${String(value)}".`,
+		);
+	}
+
+	return count;
+}
+
+/**
  * A flag table in the shape `node:util` `parseArgs` reads. Help is rendered
  * from the same table, so the two cannot drift apart.
  *
