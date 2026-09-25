@@ -228,12 +228,12 @@ both):
 
 ## Consequences
 
-- On GitHub-hosted Windows runners, a plain `up` gets `detach_unsupported`,
-  because the step's job has no breakaway rights. E2E tests for `up` on Windows
-  must run the CLI inside a harness job with `BREAKAWAY_OK | KILL_ON_JOB_CLOSE`
-  (this works nested in the runner's job), and one test must assert
-  `detach_unsupported` inside a job without `BREAKAWAY_OK`. The harness needs
-  native job code in the test support (the addon can expose it for tests only).
+- On GitHub-hosted Windows runners, a plain `up` from a step shell gets
+  `detach_unsupported`, because the step's job has no breakaway rights. In
+  practice (#43) the `up` e2e tests need no harness: vitest's own libuv job
+  allows breakaway, so the nested breakaway succeeds (the rule above). The
+  `detach_unsupported` e2e test runs the CLI inside a job without `BREAKAWAY_OK`
+  (`test/fixtures/bin/in-job.ts`).
 - The terminals we use today put no job on their shells, so `up` works there.
   Hosts that change this get a clear error, not a leaked or killed supervisor.
 - The release workflow owns a step that the napi CLI does not have (adding the
@@ -250,8 +250,9 @@ both):
   that forbids detach.
 - Survival after the Codex and VS Code hosts end: not measured; same
   expectation.
-- A real second local user against the pipe DACL (S3). Fallback: the S5
-  exact-DACL assertion. A CI job that creates a local user is possible later.
+- A real second local user against the pipe DACL (S3). Since #43 the
+  `other-user` CI job creates one on each OS and runs `pnpm test:other-user`
+  (ADR 0003).
 - A full publish dry run (`napi artifacts` and `napi pre-publish`) and the
   static MSVC runtime for the Windows binary: to verify in the release ticket.
 - macOS lease detection through `PROC_PIDLISTFDS`: out of scope for this spike.
