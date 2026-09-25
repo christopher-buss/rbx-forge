@@ -32,6 +32,7 @@ export type ForgeErrorCode =
 	| "identity_mismatch"
 	| "internal_error"
 	| "interrupted"
+	| "native_missing"
 	| "needs_confirmation"
 	| "not_running"
 	| "port_in_use"
@@ -101,6 +102,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	},
 	internal_error: { exitCode: EXIT_FAILURE, text: "An unexpected error; a bug in forge." },
 	interrupted: { exitCode: EXIT_INTERRUPTED, text: "Stopped by a signal." },
+	native_missing: {
+		exitCode: EXIT_FAILURE,
+		text: "The native addon for this OS is not installed or does not load.",
+	},
 	needs_confirmation: {
 		exitCode: EXIT_NEEDS_CONFIRMATION,
 		text: "A question has no safe default and the run cannot prompt.",

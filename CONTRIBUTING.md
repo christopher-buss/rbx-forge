@@ -18,10 +18,26 @@ pnpm lint
 pnpm typecheck
 pnpm knip
 pnpm build
+pnpm build:native
 pnpm test
 pnpm test:e2e
-cargo build --manifest-path reaper/Cargo.toml
+cargo test --manifest-path reaper/Cargo.toml
+cargo clippy --manifest-path reaper/Cargo.toml --all-targets -- -D warnings
 ```
+
+## Native addon
+
+The integration and e2e tests load the addon from `reaper/target/napi`, so run
+`pnpm build:native` after a change in `reaper/`. To run the CLI from a checkout,
+set `RBX_FORGE_NATIVE_DIR` to that directory; without it, forge loads the
+`@rbx-forge/native-<platform>` package.
+
+- `reaper/src/os/`: the OS primitives (file locks, process start times, pinned
+  processes). Both the addon and the `forge-reaper` binary compile it; its Rust
+  tests run through the binary target (`cargo test`).
+- `reaper/src/lib.rs`: the napi layer, types and errors only.
+- `src/native/addon.ts`: the same surface in TypeScript, written by hand. Change
+  it with `lib.rs`.
 
 ## Commit messages
 
