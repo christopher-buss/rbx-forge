@@ -1,6 +1,6 @@
 import type { AddressInfo } from "node:net";
 import { connect, createServer } from "node:net";
-import { Duplex, duplexPair } from "node:stream";
+import { Duplex, duplexPair, PassThrough } from "node:stream";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import type { NativePipeConnection, NativePipeServer } from "../native/addon.ts";
@@ -11,6 +11,7 @@ import {
 	socketListener,
 	streamConnection,
 } from "./connection.ts";
+import { IPC_WAIT_MS } from "./protocol.ts";
 
 /**
  * A stream whose writes never finish.
@@ -162,6 +163,41 @@ describe(streamConnection, () => {
 		connection.close();
 
 		await expect(other.readLineAsync(1000)).resolves.toStrictEqual({ type: "closed" });
+	});
+
+	it("should let go of the stream once its end is written, leaving no timer", async () => {
+		expect.assertions(2);
+
+		vi.useFakeTimers();
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+		const stream = new PassThrough();
+		const closed = new Promise((resolve) => {
+			stream.once("close", resolve);
+		});
+		streamConnection(stream).close();
+
+		await expect(closed).resolves.toBeUndefined();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("should let go of a stream whose end is never written after the wait bound", async () => {
+		expect.assertions(2);
+
+		vi.useFakeTimers();
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+		const [near] = duplexPair();
+		streamConnection(near).close();
+		vi.advanceTimersByTime(IPC_WAIT_MS - 1);
+
+		expect(near.destroyed).toBeFalse();
+
+		vi.advanceTimersByTime(1);
+
+		expect(near.destroyed).toBeTrue();
 	});
 
 	it("should report a write that cannot finish in time or at all", async () => {

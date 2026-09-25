@@ -3,7 +3,7 @@ import type { Server, Socket } from "node:net";
 import type { Duplex } from "node:stream";
 
 import type { NativePipeConnection, NativePipeServer } from "../native/addon.ts";
-import { MAX_LINE_BYTES } from "./protocol.ts";
+import { IPC_WAIT_MS, MAX_LINE_BYTES } from "./protocol.ts";
 
 /** What one bounded line read got. */
 export type LineRead =
@@ -117,7 +117,17 @@ export function streamConnection(stream: Duplex, maxBytes: number = MAX_LINE_BYT
 	const source = watchLines(stream);
 	return {
 		close: () => {
-			stream.end();
+			// Let go once the end is written, or after the wait bound: a
+			// peer that never reads or closes (a hung supervisor) must not
+			// keep this process alive.
+			const timer = setTimeout(() => {
+				stream.destroy();
+			}, IPC_WAIT_MS);
+			timer.unref();
+			stream.end(() => {
+				clearTimeout(timer);
+				stream.destroy();
+			});
 		},
 		readLineAsync: async (timeoutMs) => {
 			const deadline = Date.now() + timeoutMs;
