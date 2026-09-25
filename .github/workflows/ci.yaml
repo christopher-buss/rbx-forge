@@ -12,6 +12,14 @@ permissions:
 
 env:
   CI: true
+  # Loads the addon given as the first argument and calls every export.
+  LOAD_ADDON: >-
+    const addon = require(require("node:path").resolve(process.argv[1]));
+    const pinned = addon.pinProcess(process.pid);
+    if (pinned.startTime !== addon.processStartTime(process.pid)) throw new Error("start time");
+    const lock = addon.tryLockFile(require("node:os").tmpdir() + "/forge-load.lock", "exclusive");
+    lock.release();
+    console.log("forge-native", addon.nativeVersion(), process.platform, process.arch, pinned.executablePath());
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -25,9 +33,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/setup
+        with:
+          tools: node rust
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-check-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('reaper/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            reaper/target
+          restore-keys: cargo-check-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build
         run: pnpm build
+
+      # Integration and e2e tests load the addon from `reaper/target/napi`.
+      - name: Build native addon
+        run: pnpm build:native
+
+      - name: Native tests
+        run: cargo test --manifest-path reaper/Cargo.toml
 
       - name: Typecheck
         run: pnpm typecheck
@@ -107,6 +134,25 @@ jobs:
         run: cargo build --manifest-path reaper/Cargo.toml --release --bin forge-reaper --target ${{ matrix.target }}
         shell: bash
 
+      # Load the addon in a Node of the target's platform and call it. musl
+      # builds load in an Alpine container. Not loaded: x86_64-apple-darwin
+      # (no x64 Node on the arm64 runner) and x86_64-unknown-linux-musl (the
+      # host `cc` links the glibc loader into it, so Alpine cannot load it;
+      # the release ticket fixes the musl toolchain).
+      - if: ${{ matrix.load }}
+        name: Load addon
+        run: node -e "$LOAD" reaper/target/napi/*.node
+        shell: bash
+        env:
+          LOAD: ${{ env.LOAD_ADDON }}
+
+      - if: ${{ matrix.alpine }}
+        name: Load addon (Alpine)
+        run: docker run --rm -v "$PWD/reaper/target/napi:/napi" -e LOAD node:24-alpine sh -c 'node -e "$LOAD" /napi/*.node'
+        shell: bash
+        env:
+          LOAD: ${{ env.LOAD_ADDON }}
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-${{ matrix.target }}
@@ -118,12 +164,12 @@ jobs:
     strategy:
       matrix:
         include:
-          - { host: windows-latest, target: x86_64-pc-windows-msvc }
-          - { host: windows-11-arm, target: aarch64-pc-windows-msvc }
-          - { host: macos-latest, target: aarch64-apple-darwin }
+          - { host: windows-latest, load: true, target: x86_64-pc-windows-msvc }
+          - { host: windows-11-arm, load: true, target: aarch64-pc-windows-msvc }
+          - { host: macos-latest, load: true, target: aarch64-apple-darwin }
           - { host: macos-latest, target: x86_64-apple-darwin }
-          - { checks: true, host: ubuntu-latest, target: x86_64-unknown-linux-gnu }
-          - { host: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { checks: true, host: ubuntu-latest, load: true, target: x86_64-unknown-linux-gnu }
+          - { host: ubuntu-24.04-arm, load: true, target: aarch64-unknown-linux-gnu }
           - { host: ubuntu-latest, musl: true, target: x86_64-unknown-linux-musl }
-          - { host: ubuntu-24.04-arm, musl: true, target: aarch64-unknown-linux-musl }
+          - { alpine: true, host: ubuntu-24.04-arm, musl: true, target: aarch64-unknown-linux-musl }
       fail-fast: false

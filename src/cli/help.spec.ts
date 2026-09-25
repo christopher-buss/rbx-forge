@@ -9,7 +9,7 @@ import { renderCommandHelp, renderHelp } from "./help.ts";
 const ALL_FLAGS = [...GLOBAL_FLAGS, ...COMMANDS.flatMap(({ flags }) => flags)];
 
 const GLOBAL_PAGE_LINES = renderHelp(COMMANDS).split("\n");
-/** The command column is as wide as the longest command name. */
+/** The help page pads every command name to the longest. */
 const NAME_WIDTH = Math.max(...COMMANDS.map(({ name }) => name.length));
 const COMMAND_FLAGS = COMMANDS.flatMap((command) => {
 	return [...command.flags, ...GLOBAL_FLAGS].map((flag) => ({ command, flag }));

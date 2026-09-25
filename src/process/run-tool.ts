@@ -4,8 +4,8 @@ import { ForgeError } from "../errors.ts";
 import type { ProcessOutcome } from "./process-runner.ts";
 import { resolveTool, toolInvocation } from "./resolve-tool.ts";
 
-/** A tool forge runs to completion, such as `rojo build` or `rbxtsc`. */
-export interface ToolCall {
+/** A tool {@link probeToolAsync} runs quietly. */
+export interface ToolProbe {
 	args: ReadonlyArray<string>;
 	/** The configured command, such as `rojo` or a fork's alias. */
 	command: string;
@@ -15,6 +15,10 @@ export interface ToolCall {
 	missing: Extract<ForgeErrorCode, "compiler_missing" | "rojo_missing">;
 	/** What to install or configure when the tool is missing. */
 	missingHint: string;
+}
+
+/** A tool forge runs to completion, such as `rojo build` or `rbxtsc`. */
+export interface ToolCall extends ToolProbe {
 	/** The step name the reporter shows, such as `rojo build`. */
 	step: string;
 }
@@ -38,29 +42,34 @@ const MESSAGE_TAIL_LINES = 20;
  * @rejects {ForgeError} `call.missing` when the tool is not installed, or
  *   `process_failed` when it fails.
  */
-export async function runToolAsync(
-	{ cwd, env, reporter, seams }: CommandContext,
-	call: ToolCall,
-): Promise<ToolSuccess> {
-	const lookup = { cwd, env, fileSystem: seams.fileSystem, host: seams.host };
-	const tool = resolveTool(call.command, lookup);
-	if (tool === undefined) {
-		throw missingError(call);
-	}
-
+export async function runToolAsync(context: CommandContext, call: ToolCall): Promise<ToolSuccess> {
+	const { reporter } = context;
+	const spawn = prepareSpawn(context, call);
 	reporter.emit({ name: call.step, status: "started", type: "step" });
-	const outcome = await seams.processRunner({
-		...toolInvocation(tool, call.args, lookup),
-		cwd,
-		env,
-	});
+	const outcome = await spawn();
 	const isOk = outcome.type === "exited" && outcome.exitCode === 0;
 	reporter.emit({ name: call.step, status: isOk ? "succeeded" : "failed", type: "step" });
 
 	return checkOutcome(call, outcome);
 }
 
-function missingError(call: ToolCall): ForgeError {
+/**
+ * Run a tool quietly to learn what it supports, such as `rojo syncback
+ * --help`. A check, not a step: the reporter sees nothing.
+ *
+ * @param context - The run: project root, environment, seams.
+ * @param call - The tool and its arguments.
+ * @returns Whether it exited with code 0.
+ * @rejects {ForgeError} `call.missing` when the tool is not installed, or
+ *   `process_failed` when it cannot start.
+ */
+export async function probeToolAsync(context: CommandContext, call: ToolProbe): Promise<boolean> {
+	const outcome = await prepareSpawn(context, call)();
+	checkSpawned(call, outcome);
+	return outcome.type === "exited" && outcome.exitCode === 0;
+}
+
+function missingError(call: ToolProbe): ForgeError {
 	return new ForgeError(
 		call.missing,
 		`${call.label} ("${call.command}") is not installed: it is not a bin of a project dependency or on PATH.`,
@@ -68,15 +77,45 @@ function missingError(call: ToolCall): ForgeError {
 	);
 }
 
-function checkOutcome(call: ToolCall, outcome: ProcessOutcome): ToolSuccess {
-	if (outcome.type === "spawn_failed") {
-		if (outcome.errorCode === "ENOENT") {
-			throw missingError(call);
-		}
-
-		throw new ForgeError("process_failed", `${call.label} could not start: ${outcome.message}`);
+/**
+ * Resolve the tool now, so a missing tool fails before anything is reported.
+ *
+ * @param context - The run: project root, environment, seams.
+ * @param call - The tool and its arguments.
+ * @returns Starts the tool and waits for it.
+ */
+function prepareSpawn(
+	{ cwd, env, seams }: CommandContext,
+	call: ToolProbe,
+): () => Promise<ProcessOutcome> {
+	const lookup = { cwd, env, fileSystem: seams.fileSystem, host: seams.host };
+	const tool = resolveTool(call.command, lookup);
+	if (tool === undefined) {
+		throw missingError(call);
 	}
 
+	return async () => {
+		return seams.processRunner({ ...toolInvocation(tool, call.args, lookup), cwd, env });
+	};
+}
+
+function checkSpawned(
+	call: ToolProbe,
+	outcome: ProcessOutcome,
+): asserts outcome is Exclude<ProcessOutcome, { type: "spawn_failed" }> {
+	if (outcome.type !== "spawn_failed") {
+		return;
+	}
+
+	if (outcome.errorCode === "ENOENT") {
+		throw missingError(call);
+	}
+
+	throw new ForgeError("process_failed", `${call.label} could not start: ${outcome.message}`);
+}
+
+function checkOutcome(call: ToolCall, outcome: ProcessOutcome): ToolSuccess {
+	checkSpawned(call, outcome);
 	if (outcome.type === "exited" && outcome.exitCode === 0) {
 		return { durationMs: outcome.durationMs, outputTail: outcome.outputTail };
 	}
