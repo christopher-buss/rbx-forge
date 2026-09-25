@@ -104,6 +104,23 @@ describe(requireSyncbackAsync, () => {
 		} satisfies Partial<ForgeError>);
 	});
 
+	it("should fail as process_failed naming Rojo when it cannot start", async () => {
+		expect.assertions(1);
+
+		const { context } = makeProbe({
+			errorCode: "EACCES",
+			message: "spawn rojo-fork EACCES",
+			type: "spawn_failed",
+		});
+
+		await expect(
+			requireSyncbackAsync(context, { rojoAlias: "rojo-fork" }),
+		).rejects.toMatchObject({
+			code: "process_failed",
+			message: "Rojo could not start: spawn rojo-fork EACCES",
+		});
+	});
+
 	it("should fail with rojo_missing when Rojo is not installed", async () => {
 		expect.assertions(1);
 
