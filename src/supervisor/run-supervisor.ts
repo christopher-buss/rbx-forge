@@ -329,6 +329,7 @@ async function runLockedAsync(
 		forge,
 		identity: identityOf(context, config, options.version),
 		onReady: options.onReady,
+		pause: async () => options.pause("control", options.stop.signal),
 		plan: { ...services.plan, compiler: services.compiler !== undefined },
 		port: config.rojoPort,
 		stop: options.stop,

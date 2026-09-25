@@ -16,6 +16,11 @@ export interface ControlSetup {
 	identity: IdentityRecord;
 	/** Called once, when the session is first ready. */
 	onReady: (() => void) | undefined;
+	/**
+	 * The test pause point `control`: the files and `current` exist, the
+	 * endpoint does not.
+	 */
+	pause: () => Promise<void>;
 	/** What the session runs, for its first status. */
 	plan: { compiler: boolean; open: boolean; syncback: boolean };
 	/** The fixed Rojo port. */
@@ -63,6 +68,7 @@ export async function openSessionAsync(
 		write: tokenWriter(seams),
 	});
 	const status = createSessionStatus(seams, setup, files.state);
+	await setup.pause();
 	const listener = await listenOrRemoveAsync(seams, setup, files.sessionId);
 	const server = startIpcServer(listener, {
 		handlers: controlHandlers({

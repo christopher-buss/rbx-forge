@@ -11,7 +11,8 @@
  * `RBX_FORGE_TEST_PAUSE_DIR` and `RBX_FORGE_TEST_PAUSE` enable the
  * fault-injection pause points (`session/pause.ts`); only tests set them.
  */
-import { appendFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
 
 import packageJson from "../package.json" with { type: "json" };
@@ -22,7 +23,12 @@ import { createNodeSeams } from "./seams/node-seams.ts";
 import type { Reporter } from "./seams/reporter.ts";
 import { createSignals } from "./seams/signals.ts";
 import type { Pause } from "./session/pause.ts";
-import { createFilePause, neverPauseAsync, parsePausePoints } from "./session/pause.ts";
+import {
+	createFilePause,
+	neverPauseAsync,
+	parsePausePoints,
+	PAUSE_POLL_MS,
+} from "./session/pause.ts";
 import { createStopSource } from "./session/stop-source.ts";
 import type { SessionRequest } from "./supervisor/channel.ts";
 import { createChannelReporter, parseSessionRequest } from "./supervisor/channel.ts";
@@ -62,6 +68,7 @@ process.stdout.on("error", () => {
 
 const { env } = process;
 const PAUSE_DIRECTORY = env["RBX_FORGE_TEST_PAUSE_DIR"];
+const PAUSE_POINTS = parsePausePoints(env["RBX_FORGE_TEST_PAUSE"]);
 const PAUSE: Pause =
 	PAUSE_DIRECTORY === undefined
 		? neverPauseAsync
@@ -70,8 +77,32 @@ const PAUSE: Pause =
 				directory: PAUSE_DIRECTORY,
 				fileSystem: nodeFileSystem,
 				pid: process.pid,
-				points: parsePausePoints(env["RBX_FORGE_TEST_PAUSE"]),
+				points: PAUSE_POINTS,
 			});
+
+/**
+ * Test only (`RBX_FORGE_TEST_PAUSE=block`): once the test writes
+ * `<dir>/block.request`, write `<dir>/block.blocked` (content: this PID)
+ * and block the event loop for good, as a hung supervisor that answers
+ * nothing (spec #28, F1 and F5). Only a kill ends it.
+ *
+ * @param directory - The pause directory.
+ */
+function watchBlockRequest(directory: string): void {
+	const request = path.join(directory, "block.request");
+	setInterval(() => {
+		if (!existsSync(request)) {
+			return;
+		}
+
+		writeFileSync(path.join(directory, "block.blocked"), String(process.pid));
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+	}, PAUSE_POLL_MS).unref();
+}
+
+if (PAUSE_DIRECTORY !== undefined && PAUSE_POINTS.has("block")) {
+	watchBlockRequest(PAUSE_DIRECTORY);
+}
 
 /**
  * Where the supervisor's messages go: to `start` through stdout; when

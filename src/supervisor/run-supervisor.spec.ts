@@ -244,6 +244,24 @@ function stopAt(point: PausePoint, stop: StopSource): Pause {
 }
 
 /**
+ * A pause that calls `note`, then sends SIGTERM, at one point.
+ *
+ * @param point - Where to stop.
+ * @param stop - The run's stop source.
+ * @param note - Reads what the test checks there.
+ * @returns The pause.
+ */
+function noteAndStopAt(point: PausePoint, stop: StopSource, note: () => void): Pause {
+	return async (at, signal) => {
+		if (at === point) {
+			note();
+		}
+
+		await stopAt(point, stop)(at, signal);
+	};
+}
+
+/**
  * The identity record in a copy of the project's files.
  *
  * @param files - The files, as `memory.files()` returns them.
@@ -1152,6 +1170,24 @@ describe("forge start session files", () => {
 			]);
 		},
 	);
+
+	it("should pause at control with the session's files written and no endpoint yet, and start nothing once stopped there (C14)", async () => {
+		expect.assertions(2);
+
+		const seen: Array<unknown> = [];
+		const run = startCommand({
+			pause: (stop) => {
+				return noteAndStopAt("control", stop, () => {
+					seen.push(run.memory.files()[".forge/current"], run.ipc.endpoints.size);
+				});
+			},
+		});
+
+		await expect(run.result).resolves.toMatchObject({
+			data: { reason: "SIGTERM", reports: [] },
+		});
+		expect([seen, run.fake.calls]).toStrictEqual([["session-1\n", 0], ["terminate 3000"]]);
+	});
 
 	it("should name owner_gone when the owner went before the session started", async () => {
 		expect.assertions(1);

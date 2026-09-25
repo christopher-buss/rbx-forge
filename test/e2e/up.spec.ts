@@ -93,7 +93,7 @@ describe("forge up", () => {
 		// `up` has exited; its session runs on.
 		const isAlive = isProcessAlive(pid);
 		const records = await waitForWorkersAsync(fixture.log, 3, 30_000);
-		await stopDetachedAsync(fixture.project);
+		await stopDetachedAsync(fixture);
 		const workers = records.map(({ pid: worker }) => worker);
 
 		expect(isAlive).toBeTrue();

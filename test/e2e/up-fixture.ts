@@ -1,21 +1,20 @@
 /**
  * Detached sessions for e2e tests: `forge up` in a fixture project
- * (`session-fixture.ts`), and a cleanup that stops the session through its
- * control channel and waits until its supervisor is gone.
+ * (`session-fixture.ts`), and a cleanup that stops the session with
+ * `forge down --force` and makes sure its supervisor is gone.
  */
+import { spawn } from "node:child_process";
 import nodeFs from "node:fs";
 import process from "node:process";
 import { onTestFinished } from "vitest";
 
 import { findSession } from "../../src/client/session.ts";
-import { callSessionAsync } from "../../src/ipc/client.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
-import { realTransport } from "../helpers/native-testing.ts";
 import type { ResultLine } from "../helpers/output.ts";
 import { parseResult } from "../helpers/output.ts";
 import { isProcessAlive, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { BinRun } from "./run-bin.ts";
-import { runBinAsync } from "./run-bin.ts";
+import { BIN, runBinAsync } from "./run-bin.ts";
 import type { Fixture } from "./session-fixture.ts";
 
 /** Rojo alone: the quickest session. */
@@ -27,25 +26,28 @@ export interface UpRun extends BinRun {
 }
 
 /**
- * Stop the project's session, if one runs: `shutdown` over its control
- * channel, then wait for its supervisor to exit; kill it when it does not.
+ * Stop the project's session, if one runs: `forge down --force`; kill its
+ * supervisor when it still runs after that.
  *
- * @param project - The project directory.
+ * @param fixture - The project and its environment.
  */
-export async function stopDetachedAsync(project: string): Promise<void> {
-	const session = findSession(nodeFs, forgeFiles(project));
+export async function stopDetachedAsync(fixture: Fixture): Promise<void> {
+	const session = findSession(nodeFs, forgeFiles(fixture.project));
 	if (session === undefined) {
 		return;
 	}
 
-	const { endpoint, pid } = session.identity;
-	try {
-		await callSessionAsync(realTransport(), { endpoint, token: session.token }, "shutdown");
-	} catch {
-		// Already stopping or gone.
-	}
-
-	const alive = await waitForDeathAsync([pid], 20_000);
+	// Spawned here, not through `runBinAsync`: this runs in a test's cleanup.
+	const down = spawn(process.execPath, [BIN, "down", "--force", "--json", "--timeout", "5"], {
+		cwd: fixture.project,
+		env: fixture.environment(),
+		stdio: "ignore",
+		windowsHide: true,
+	});
+	await new Promise((resolve) => {
+		down.once("close", resolve);
+	});
+	const alive = await waitForDeathAsync([session.identity.pid], 5000);
 	const survivors = alive.filter(isProcessAlive);
 	for (const survivor of survivors) {
 		process.kill(survivor, "SIGKILL");
@@ -67,7 +69,7 @@ export async function runForgeAsync(
 	variables: Record<string, string> = {},
 ): Promise<UpRun> {
 	onTestFinished(async () => {
-		await stopDetachedAsync(fixture.project);
+		await stopDetachedAsync(fixture);
 	});
 	const run = await runBinAsync([...argv], fixture.project, fixture.environment(variables));
 	return { ...run, result: parseResult(run.stdout) };

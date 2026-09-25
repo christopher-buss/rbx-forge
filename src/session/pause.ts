@@ -10,10 +10,12 @@ import type { FileSystem } from "../seams/file-system.ts";
  *
  * - `created`: first instruction; the owner pipe is already watched.
  * - `lock`: before the singleton lock.
+ * - `control`: the session's files and `current` exist; before its
+ *   endpoint opens and before its reaper starts.
  * - `leased`: the reaper holds its lease; before `go`.
  * - `admitted`: right after `go`; before any worker.
  */
-export type PausePoint = "admitted" | "created" | "leased" | "lock";
+export type PausePoint = "admitted" | "control" | "created" | "leased" | "lock";
 
 /**
  * Wait at a pause point. Resolves when the test resumes it, or at once when

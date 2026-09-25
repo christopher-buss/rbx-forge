@@ -19,6 +19,11 @@ export const FORCED_SHUTDOWN_MS = 5000;
 export const KILL_WAIT_MS = 5000;
 /** How often `down` looks at the supervisor again. */
 export const DOWN_POLL_MS = 100;
+/**
+ * How long a supervisor that let go of the singleton lock gets to exit: it
+ * only writes its result then.
+ */
+export const EXIT_WAIT_MS = 2000;
 
 /** A barrier wait nothing aborts. */
 const NEVER = AbortSignal.any([]);
@@ -77,7 +82,8 @@ interface Target {
  *
  * 1. Its supervisor has exited: its pinned process (PID plus start time)
  *    is gone, or the singleton lock is free, which no running supervisor
- *    of this project leaves free.
+ *    of this project leaves free (then its pinned process gets
+ *    {@link EXIT_WAIT_MS} to exit).
  * 2. Its barrier is clear: its lease is free and a scan finds none of its
  *    processes.
  *
@@ -156,14 +162,33 @@ function isLockFree(seams: Pick<DownSeams, "native">, forge: ForgeFiles): boolea
 
 /**
  * Condition 1 of {@link stopSessionAsync}: the target's supervisor has
- * exited.
+ * exited. A supervisor that let go of the singleton lock is ending, so it
+ * gets {@link EXIT_WAIT_MS} to exit; a process that keeps running without
+ * the lock is not a supervisor of this project (a stale record whose PID
+ * and start time match), and never blocks `down`.
  *
- * @param seams - The native addon.
+ * @param seams - The clock and native addon.
  * @param target - The pinned supervisor.
  * @returns Whether it has.
  */
-function isGone(seams: Pick<DownSeams, "native">, { forge, pin }: Target): boolean {
-	return pin?.isAlive() !== true || isLockFree(seams, forge);
+async function isGoneAsync(
+	seams: Pick<DownSeams, "clock" | "native">,
+	{ forge, pin }: Target,
+): Promise<boolean> {
+	if (pin?.isAlive() !== true) {
+		return true;
+	}
+
+	if (!isLockFree(seams, forge)) {
+		return false;
+	}
+
+	const deadline = seams.clock.now() + EXIT_WAIT_MS;
+	while (pin.isAlive() && seams.clock.now() < deadline) {
+		await seams.clock.sleep(DOWN_POLL_MS);
+	}
+
+	return true;
 }
 
 /**
@@ -215,7 +240,7 @@ async function requestStopAsync(
 	const deadline = seams.clock.now() + waitMs;
 	let isAccepted = false;
 	for (;;) {
-		if (isGone(seams, target)) {
+		if (await isGoneAsync(seams, target)) {
 			return true;
 		}
 
@@ -230,7 +255,7 @@ async function requestStopAsync(
 
 async function waitGoneAsync(seams: DownSeams, target: Target, waitMs: number): Promise<boolean> {
 	const deadline = seams.clock.now() + waitMs;
-	while (!isGone(seams, target)) {
+	while (!(await isGoneAsync(seams, target))) {
 		if (seams.clock.now() >= deadline) {
 			return false;
 		}
@@ -269,7 +294,7 @@ async function stopSupervisorAsync(
 	target: Target,
 	options: DownOptions,
 ): Promise<StoppedBy> {
-	if (isGone(seams, target)) {
+	if (await isGoneAsync(seams, target)) {
 		return "gone";
 	}
 

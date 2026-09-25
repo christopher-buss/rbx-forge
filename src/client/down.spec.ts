@@ -15,7 +15,13 @@ import type { Clock } from "../seams/clock.ts";
 import type { IdentityRecord } from "../supervisor/session-files.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
 import type { DownOptions, DownPoint, DownReport } from "./down.ts";
-import { DOWN_POLL_MS, FORCED_SHUTDOWN_MS, KILL_WAIT_MS, stopSessionAsync } from "./down.ts";
+import {
+	DOWN_POLL_MS,
+	EXIT_WAIT_MS,
+	FORCED_SHUTDOWN_MS,
+	KILL_WAIT_MS,
+	stopSessionAsync,
+} from "./down.ts";
 import type { KnownSession } from "./session.ts";
 import { findSession } from "./session.ts";
 
@@ -370,6 +376,27 @@ describe(stopSessionAsync, () => {
 			expect(world.native.processes.get(SUPERVISOR)!.alive).toBeTrue();
 		},
 	);
+
+	it("should wait for a supervisor that let go of the lock to exit", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld({ holdsLock: false });
+		at(world, 300, () => {
+			world.native.processes.get(SUPERVISOR)!.alive = false;
+		});
+
+		await expect(downAsync(world)).resolves.toMatchObject({ stoppedBy: "gone" });
+		expect(world.clock.now()).toBe(300);
+	});
+
+	it("should wait no longer than the exit wait for a live process without the lock (F6)", async () => {
+		expect.assertions(1);
+
+		const world = makeWorld({ holdsLock: false });
+		await downAsync(world);
+
+		expect(world.clock.now()).toBe(EXIT_WAIT_MS);
+	});
 
 	it("should treat a supervisor it cannot open as gone", async () => {
 		expect.assertions(1);
