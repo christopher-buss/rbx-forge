@@ -86,7 +86,6 @@ impl RecordFile {
         std::fs::write(&temporary, record.to_string())?;
         std::fs::rename(&temporary, &self.path)
     }
-
 }
 
 /// Real workers for one session.
