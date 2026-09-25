@@ -9,6 +9,13 @@
  *   spawns. Grandchildren stay alive and spawn nothing.
  * - `FIXTURE_DETACH=1`: grandchildren start detached (own process group /
  *   session on POSIX), so they escape the parent's group.
+ * - `FIXTURE_CHAIN`: every grandchild spawns one more grandchild (detached
+ *   too with `FIXTURE_DETACH`) until this many links hang below it.
+ * - `FIXTURE_ORPHAN=1`: a grandchild exits once it has spawned its next
+ *   link, so the link is orphaned (double fork).
+ * - `FIXTURE_STORM_MS`: the last link spawns one more plain grandchild this
+ *   often, `FIXTURE_STORM_MAX` (default 20) in all: a bounded fork storm.
+ * - `FIXTURE_SCRUB=1`: the worker's grandchildren start without the markers.
  * - `FIXTURE_IGNORE_SIGNALS=1`: this process and its grandchildren ignore
  *   SIGINT, SIGTERM, SIGHUP, and SIGBREAK.
  * - `FIXTURE_EXIT_CODE`: exit code of a one-shot run (default 0).
@@ -38,6 +45,7 @@ import process from "node:process";
 const ROJO_VERSION = "7.7.0";
 const KEEP_ALIVE_MS = 60_000;
 const IGNORED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"] as const;
+const DEFAULT_STORM_MAX = 20;
 
 const [ROLE = "worker", ...ARGS] = process.argv.slice(2);
 const { env } = process;
@@ -74,19 +82,64 @@ function ignoreSignals(): void {
 	}
 }
 
+function spawnGrandchild(childEnvironment: NodeJS.ProcessEnv): ReturnType<typeof spawn> {
+	const child = spawn(process.execPath, [import.meta.filename, "grandchild"], {
+		detached: env["FIXTURE_DETACH"] === "1",
+		env: childEnvironment,
+		stdio: "ignore",
+		windowsHide: true,
+	});
+	child.unref();
+	return child;
+}
+
 function spawnGrandchildren(): void {
 	const count = Number(env["FIXTURE_GRANDCHILDREN"] ?? "0");
-	const isDetached = env["FIXTURE_DETACH"] === "1";
-	const childEnvironment = { ...env, FIXTURE_GRANDCHILDREN: "0" };
+	const childEnvironment: NodeJS.ProcessEnv = { ...env, FIXTURE_GRANDCHILDREN: "0" };
+	if (env["FIXTURE_SCRUB"] === "1") {
+		delete childEnvironment["RBX_FORGE_SESSION"];
+		delete childEnvironment["RBX_FORGE_WORKER"];
+	}
 
 	for (let index = 0; index < count; index++) {
-		const child = spawn(process.execPath, [import.meta.filename, "grandchild"], {
-			detached: isDetached,
-			env: childEnvironment,
-			stdio: "ignore",
-			windowsHide: true,
-		});
-		child.unref();
+		spawnGrandchild(childEnvironment);
+	}
+}
+
+/**
+ * Spawn plain grandchildren on a timer, up to the storm's size.
+ *
+ * @param intervalMs - Time between two spawns.
+ */
+function storm(intervalMs: number): void {
+	const plain: NodeJS.ProcessEnv = { ...env, FIXTURE_CHAIN: "0", FIXTURE_ORPHAN: "0" };
+	delete plain["FIXTURE_STORM_MS"];
+	let left = Number(env["FIXTURE_STORM_MAX"] ?? String(DEFAULT_STORM_MAX));
+	const timer = setInterval(() => {
+		spawnGrandchild(plain);
+		left--;
+		if (left <= 0) {
+			clearInterval(timer);
+		}
+	}, intervalMs);
+}
+
+/** A grandchild: the next link of a chain, a storm, or nothing. */
+function runGrandchild(): void {
+	setInterval(doNothing, KEEP_ALIVE_MS);
+	const links = Number(env["FIXTURE_CHAIN"] ?? "0");
+	if (links > 0) {
+		const link = spawnGrandchild({ ...env, FIXTURE_CHAIN: String(links - 1) });
+		if (env["FIXTURE_ORPHAN"] === "1") {
+			link.once("spawn", () => process.exit(0));
+		}
+
+		return;
+	}
+
+	const stormMs = env["FIXTURE_STORM_MS"];
+	if (stormMs !== undefined) {
+		storm(Number(stormMs));
 	}
 }
 
@@ -202,9 +255,8 @@ ignoreSignals();
 record();
 
 switch (ROLE) {
-	case "grandchild":
-	case "studio": {
-		setInterval(doNothing, KEEP_ALIVE_MS);
+	case "grandchild": {
+		runGrandchild();
 		break;
 	}
 	case "hook": {
@@ -222,6 +274,10 @@ switch (ROLE) {
 	}
 	case "rojo": {
 		runRojo();
+		break;
+	}
+	case "studio": {
+		setInterval(doNothing, KEEP_ALIVE_MS);
 		break;
 	}
 	default: {
