@@ -163,6 +163,20 @@ describe(runCliAsync, () => {
 			);
 		});
 
+		it("should pass the one argument of a command that reads one, and no more", async () => {
+			expect.assertions(4);
+
+			const { command, runs } = recordingProbe();
+			const cli = makeCli({
+				commands: [{ ...command, argument: { name: "name", text: "The name." } }],
+			});
+
+			await expect(cli.run("probe", "rojo")).resolves.toBe(EXIT_SUCCESS);
+			await expect(cli.run("probe")).resolves.toBe(EXIT_SUCCESS);
+			await expect(cli.run("probe", "rojo", "extra")).resolves.toBe(EXIT_USAGE);
+			expect(runs.map(({ input }) => input.argument)).toStrictEqual(["rojo", undefined]);
+		});
+
 		it("should report a bad flag value as usage, naming the flag", async () => {
 			expect.assertions(3);
 

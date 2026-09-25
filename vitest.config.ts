@@ -70,6 +70,19 @@ export default defineConfig({
 					unstubEnvs: true,
 				},
 			},
+			{
+				extends: true,
+				test: {
+					// CI only: it needs a second local user (`other-user` job).
+					name: "other-user",
+					clearMocks: true,
+					include: ["test/other-user/**/*.spec.ts"],
+					restoreMocks: true,
+					setupFiles,
+					testTimeout: 30_000,
+					unstubEnvs: true,
+				},
+			},
 		],
 		watch: false,
 	},

@@ -26,6 +26,12 @@ export interface SessionRequest {
 	compiler: boolean;
 	/** The config values its flags set (the top config layer). */
 	config: ConfigLayer;
+	/**
+	 * Set by `forge up`: the supervisor has no owner pipe and outlives its
+	 * caller. It writes its messages to `report` until the session is
+	 * ready, and then deletes it.
+	 */
+	detached?: { report: string };
 	/** `--no-open` sets it to `false`. */
 	open: boolean;
 }
@@ -59,6 +65,7 @@ const diagnostic = type({
 const event: Type<ReporterEvent> = type.or(
 	{ diagnostics: diagnostic.array(), errors: "number.integer", type: "'compiled'" },
 	{ message: "string", type: "'info' | 'warning'" },
+	{ line: "string", service: "string", type: "'log'" },
 	{ name: "string", status: "'failed' | 'started' | 'succeeded'", type: "'step'" },
 );
 
@@ -83,7 +90,12 @@ const messageLine = jsonLine.pipe(messageSchema);
 const INTERNAL_ERROR: ForgeErrorCode = "internal_error";
 
 const requestSchema = jsonLine.pipe(
-	type({ compiler: "boolean", config: "object", open: "boolean" }),
+	type({
+		"compiler": "boolean",
+		"config": "object",
+		"detached?": { report: "string" },
+		"open": "boolean",
+	}),
 );
 
 const stopLine = jsonLine.pipe(type({ signal: type.enumerated(...STOP_SIGNALS), type: "'stop'" }));
@@ -122,7 +134,12 @@ export function parseSessionRequest(text: string | undefined): SessionRequest {
 			`The session request's config is invalid:\n${lines.join("\n")}`,
 		);
 	});
-	return { compiler: parsed.compiler, config, open: parsed.open };
+	return {
+		compiler: parsed.compiler,
+		config,
+		...(parsed.detached === undefined ? {} : { detached: parsed.detached }),
+		open: parsed.open,
+	};
 }
 
 /**

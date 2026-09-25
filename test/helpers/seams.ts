@@ -5,6 +5,7 @@ import path from "node:path";
 import { vi } from "vitest";
 
 import type { CommandContext } from "../../src/commands/context.ts";
+import type { IpcTransport } from "../../src/ipc/transport.ts";
 import type { ProcessRunner } from "../../src/process/process-runner.ts";
 import type { ReaperLauncher } from "../../src/reaper/reaper-client.ts";
 import type { Clock } from "../../src/seams/clock.ts";
@@ -22,6 +23,7 @@ import type {
 import type { Seams } from "../../src/seams/seams.ts";
 import type { Signals } from "../../src/seams/signals.ts";
 import type { StudioLauncher } from "../../src/studio/launcher.ts";
+import type { DetachedLauncher } from "../../src/supervisor/detached-launcher.ts";
 import type { SupervisorLauncher } from "../../src/supervisor/launcher.ts";
 
 /** The project directory of every in-memory test project. */
@@ -84,8 +86,13 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 			sleep: vi.fn<Clock["sleep"]>().mockResolvedValue(undefined),
 		},
 		configLoader: vi.fn<ConfigLoader>(unreachable("config loader")),
+		detachedSupervisor: vi.fn<DetachedLauncher>(unreachable("detached supervisor")),
 		fileSystem: createMemoryFileSystem().fileSystem,
 		host: createTestHost(),
+		ipc: {
+			connectAsync: vi.fn<IpcTransport["connectAsync"]>(unreachable("ipc")),
+			listenAsync: vi.fn<IpcTransport["listenAsync"]>(unreachable("ipc")),
+		},
 		native: unreachable("native addon"),
 		network: { isPortFreeAsync: vi.fn<Network["isPortFreeAsync"]>(unreachable("network")) },
 		processRunner: vi.fn<ProcessRunner>(unreachable("process runner")),

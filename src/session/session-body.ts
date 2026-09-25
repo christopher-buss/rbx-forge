@@ -8,6 +8,7 @@ import type { CommandContext } from "../commands/context.ts";
 import { openPlaceAsync } from "../commands/open.ts";
 import { createDiagnosticsParser } from "../compiler/diagnostics.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
+import { toForgeError } from "../errors.ts";
 import { logFilePath, openLogFile } from "../output/log-file.ts";
 import type { Invocation } from "../process/command-line.ts";
 import type { SpawnedWorker } from "../reaper/reaper-client.ts";
@@ -21,6 +22,8 @@ import { followOutput } from "./output-follower.ts";
 import type { SessionPlan } from "./plan.ts";
 import { createReaperRunner } from "./reaper-runner.ts";
 import type { SessionScope } from "./run-session.ts";
+import type { StatusRecorder, SyncbackRun } from "./status.ts";
+import { parseHookResults } from "./status.ts";
 import type { WatchOptions } from "./watch.ts";
 import { waitForStudioCloseAsync, watchSavesAsync } from "./watch.ts";
 
@@ -43,6 +46,8 @@ export interface SessionSetup {
 	directory: string;
 	plan: SessionPlan;
 	rojo: ServiceInvocation;
+	/** Gets what the session does, for `status` and `state.json`. */
+	status: StatusRecorder;
 }
 
 /** How often the session reads a service's output. */
@@ -77,11 +82,15 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 			scope.track(watchStudioAsync(session, scope, place));
 		}
 
-		await startServiceAsync(session, scope, session.rojo);
+		await startServiceAsync(session, scope, session.rojo, { initial: "ready" });
 		const { compiler } = session;
 		if (compiler !== undefined) {
 			const reader = compiler.parsesDiagnostics ? compileReader(session) : undefined;
-			await startServiceAsync(session, scope, compiler.service, reader);
+			await startServiceAsync(session, scope, compiler.service, {
+				// A compiler that reports compiles is ready after its first one.
+				initial: reader === undefined ? "ready" : "starting",
+				onLine: reader,
+			});
 		}
 
 		// A stop request while the services started: the session is ending.
@@ -188,12 +197,17 @@ async function watchStudioAsync(
 ): Promise<void> {
 	const { reporter } = session.context;
 	await waitForStudioCloseAsync(watchOptions(session, scope), studioLockPath(place), () => {
+		session.status.studio("open");
 		reporter.emit({
 			message: `Roblox Studio has ${place} open. The session ends when Studio closes it.`,
 			type: "info",
 		});
 	});
-	// A watch that ended first ended with the session, so this does nothing.
+	// A watch that ended first ended with the session: Studio stays open.
+	if (!scope.signal.aborted) {
+		session.status.studio("closed");
+	}
+
 	scope.end({ type: "studio_closed" });
 }
 
@@ -201,6 +215,21 @@ function describeError(error: unknown): string {
 	// Steps fail only with errors.
 	assert(error instanceof Error);
 	return error.message;
+}
+
+/**
+ * The status record of a failed syncback run: its error and the hooks that
+ * ran before it failed.
+ *
+ * @param error - What the run rejected with.
+ * @param durationMs - How long it ran.
+ * @returns A run with `ok: false`, the error's code and message, and the
+ *   hooks its details carry.
+ */
+function failedRun(error: unknown, durationMs: number): SyncbackRun {
+	const { code, details, message } = toForgeError(error);
+	const hooks = parseHookResults(details?.["hooks"]);
+	return { durationMs, error: { code, message }, hooks, ok: false };
 }
 
 /**
@@ -214,18 +243,23 @@ async function watchSavesForSyncbackAsync(
 	session: SessionSetup,
 	scope: SessionScope,
 ): Promise<void> {
-	const { config, context } = session;
+	const { config, context, status } = session;
 	const { reporter } = context;
+	const { clock } = context.seams;
 	const runs = workerContext(session, scope, "syncback");
 	const target = resolveSyncbackTarget(config);
 	const runner = createCoalescingRunner(async () => {
+		const started = clock.now();
+		status.syncbackStarted();
 		try {
-			const { value } = await syncbackAsync(runs, config, target);
+			const { hooks, value } = await syncbackAsync(runs, config, target);
+			status.syncbackFinished({ durationMs: clock.now() - started, hooks, ok: true });
 			reporter.emit({
 				message: `Synced ${value.input} into ${value.project}.`,
 				type: "info",
 			});
 		} catch (err) {
+			status.syncbackFinished(failedRun(err, clock.now() - started));
 			// A run the session's end cut short is not a failure to report.
 			if (!scope.signal.aborted) {
 				reporter.emit({
@@ -252,6 +286,7 @@ function compileReader(session: SessionSetup): (line: string) => void {
 	return (line) => {
 		const report = parser.read(line);
 		if (report !== undefined) {
+			session.status.compiled(report);
 			session.context.reporter.emit({ ...report, type: "compiled" });
 		}
 	};
@@ -298,19 +333,39 @@ async function followUntilExitAsync(
 }
 
 /**
+ * Read a service's output until its tree is gone, then mark it stopped.
+ *
+ * @param session - Its status.
+ * @param id - Which service: its entry in the status.
+ * @param watch - The clock, the service's worker, and its output reader.
+ */
+async function followServiceAsync(
+	session: SessionSetup,
+	id: ServiceInvocation["id"],
+	{ clock, follower, worker }: { clock: Clock; follower: OutputFollower; worker: SpawnedWorker },
+): Promise<void> {
+	await followUntilExitAsync(clock, worker, follower);
+	session.status.service(id, "stopped");
+}
+
+/**
  * Start one service through the reaper. Its output goes line by line to its
  * rotated log and to `onLine`.
  *
  * @param session - The context and the session directory.
  * @param scope - Starts the service and tracks its output.
  * @param service - The resolved service.
- * @param onLine - Also gets each output line.
+ * @param options - Its status once it runs, and what else gets each output
+ *   line.
  */
 async function startServiceAsync(
 	session: SessionSetup,
 	scope: SessionScope,
 	service: ServiceInvocation,
-	onLine?: (line: string) => void,
+	{
+		initial,
+		onLine,
+	}: { initial: "ready" | "starting"; onLine?: ((line: string) => void) | undefined },
 ): Promise<void> {
 	const { cwd, env, reporter, seams } = session.context;
 	const { clock, fileSystem } = seams;
@@ -329,11 +384,12 @@ async function startServiceAsync(
 	}
 
 	reporter.emit({ name: step, status: "succeeded", type: "step" });
+	session.status.service(service.id, initial);
 	const follower = followOutput(fileSystem, spool, (line) => {
 		log.write(stripVTControlCharacters(line));
 		onLine?.(line);
 	});
-	scope.track(followUntilExitAsync(clock, worker, follower));
+	scope.track(followServiceAsync(session, service.id, { clock, follower, worker }));
 }
 
 function announceReady({ config, context, plan }: SessionSetup): void {

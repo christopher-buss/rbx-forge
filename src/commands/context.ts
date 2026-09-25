@@ -20,6 +20,8 @@ export interface CommandContext {
 
 /** What a command read from its command line. */
 export interface CommandInput {
+	/** The positional argument, for a command that reads one. */
+	argument?: string;
 	/** The config values its flags set; pass to `loadProjectConfigAsync`. */
 	config: ConfigLayer;
 	/** Every flag value, by flag name. */

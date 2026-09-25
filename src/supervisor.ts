@@ -1,31 +1,56 @@
 /**
  * Supervisor entry: `forge start` runs this file as a separate process
- * (`supervisor/launcher.ts`), with the session request as its one argument
- * and the owner pipe as its stdin. Like `cli.ts`, it is a process entry: it
- * reads argv and the environment, builds the real seams, and exits. Every
- * decision lives in `supervisor/run-supervisor.ts`, where a test drives it.
+ * (`supervisor/launcher.ts`), with the session request as its one argument and
+ * the owner pipe as its stdin. `forge up` runs it detached
+ * (`supervisor/detached-launcher.ts`): no owner pipe, and its messages go to
+ * the request's report file until the session is ready. Like `cli.ts`, it is a
+ * process entry: it reads argv and the environment, builds the real seams, and
+ * exits. Every decision lives in `supervisor/run-supervisor.ts`, where a test
+ * drives it.
  *
  * `RBX_FORGE_TEST_PAUSE_DIR` and `RBX_FORGE_TEST_PAUSE` enable the
  * fault-injection pause points (`session/pause.ts`); only tests set them.
  */
+import { appendFileSync, rmSync } from "node:fs";
 import process from "node:process";
 
 import packageJson from "../package.json" with { type: "json" };
-import { toForgeError } from "./errors.ts";
+import { ForgeError, toForgeError } from "./errors.ts";
 import { nodeClock } from "./seams/clock.ts";
 import { nodeFileSystem } from "./seams/file-system.ts";
 import { createNodeSeams } from "./seams/node-seams.ts";
+import type { Reporter } from "./seams/reporter.ts";
 import { createSignals } from "./seams/signals.ts";
 import type { Pause } from "./session/pause.ts";
 import { createFilePause, neverPauseAsync, parsePausePoints } from "./session/pause.ts";
 import { createStopSource } from "./session/stop-source.ts";
+import type { SessionRequest } from "./supervisor/channel.ts";
 import { createChannelReporter, parseSessionRequest } from "./supervisor/channel.ts";
 import { watchOwner } from "./supervisor/owner.ts";
 import { runSupervisorAsync } from "./supervisor/run-supervisor.ts";
 
-// First: the owner pipe and the stop signals, so no stop is ever missed.
+/**
+ * Read the request first: a detached supervisor has no owner pipe to watch.
+ *
+ * @returns The request, or the error that reading it gave.
+ */
+function readRequest(): ForgeError | SessionRequest {
+	try {
+		return parseSessionRequest(process.argv[2]);
+	} catch (err) {
+		return toForgeError(err);
+	}
+}
+
+const REQUEST = readRequest();
+const REPORT = REQUEST instanceof ForgeError ? undefined : REQUEST.detached?.report;
+
+// Next: the owner pipe and the stop signals, so no stop is ever missed.
 const stop = createStopSource();
-watchOwner(process.stdin, stop);
+if (REPORT === undefined) {
+	watchOwner(process.stdin, stop);
+}
+
 createSignals(process).onStop((signal) => {
 	stop.request({ signal, type: "signal" });
 });
@@ -49,15 +74,52 @@ const PAUSE: Pause =
 			});
 
 /**
- * Run the session and write its result to `start`.
+ * Where the supervisor's messages go: to `start` through stdout; when
+ * detached, to the report file until the session is ready, and after that
+ * to stdout (the supervisor log).
+ *
+ * @param report - The report file of a detached supervisor.
+ * @returns The reporter, and what to call once the session is ready.
+ */
+function createOutput(report: string | undefined): { onReady: () => void; reporter: Reporter } {
+	let target = report;
+	const reporter = createChannelReporter((text) => {
+		if (target === undefined) {
+			process.stdout.write(text);
+			return;
+		}
+
+		try {
+			appendFileSync(target, text);
+		} catch {
+			// `forge up` is gone and its report with it; nobody reads this.
+		}
+	});
+	return {
+		onReady: () => {
+			if (target === undefined) {
+				return;
+			}
+
+			rmSync(target, { force: true });
+			target = undefined;
+		},
+		reporter,
+	};
+}
+
+/**
+ * Run the session and write its result to `start` or `up`.
  *
  * @returns The exit code: the error's, or 0.
  */
 async function superviseAsync(): Promise<number> {
-	const reporter = createChannelReporter((text) => {
-		process.stdout.write(text);
-	});
+	const { onReady, reporter } = createOutput(REPORT);
 	try {
+		if (REQUEST instanceof ForgeError) {
+			throw REQUEST;
+		}
+
 		const result = await runSupervisorAsync(
 			{
 				cwd: process.cwd(),
@@ -72,8 +134,8 @@ async function superviseAsync(): Promise<number> {
 					supervisorEntry: import.meta.filename,
 				}),
 			},
-			parseSessionRequest(process.argv[2]),
-			{ pause: PAUSE, stop, version: packageJson.version },
+			REQUEST,
+			{ onReady, pause: PAUSE, stop, version: packageJson.version },
 		);
 		reporter.succeed("start", result);
 		return 0;

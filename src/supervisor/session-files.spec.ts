@@ -47,17 +47,20 @@ describe(sessionFiles, () => {
 			output: path.join(directory, "output"),
 			record: path.join(directory, "reaper.json"),
 			sessionId: "s-1",
+			state: path.join(directory, "state.json"),
 			token: path.join(directory, "token"),
 		});
 	});
 });
+
+const SECRET = { value: "secret" };
 
 describe(createSession, () => {
 	it("should write the identity record, the token, and the current hint", () => {
 		expect.assertions(2);
 
 		const memory = createMemoryFileSystem({ ".forge/current": "old\n" });
-		const files = createSession(memory.fileSystem, FORGE, IDENTITY, "secret");
+		const files = createSession(memory.fileSystem, FORGE, IDENTITY, SECRET);
 
 		expect(files).toStrictEqual(sessionFiles(FORGE, "s-1"));
 		expect(memory.files()).toStrictEqual({
@@ -73,7 +76,7 @@ describe(createSession, () => {
 
 		const memory = createMemoryFileSystem({ ".forge/sessions/s-1/supervisor.id": "first" });
 
-		expect(() => createSession(memory.fileSystem, FORGE, IDENTITY, "secret")).toThrow(/EEXIST/);
+		expect(() => createSession(memory.fileSystem, FORGE, IDENTITY, SECRET)).toThrow(/EEXIST/);
 		expect(memory.files()[".forge/sessions/s-1/supervisor.id"]).toBe("first");
 	});
 
@@ -82,17 +85,33 @@ describe(createSession, () => {
 
 		const memory = createMemoryFileSystem({ ".forge/sessions/s-1/token": "first" });
 
-		expect(() => createSession(memory.fileSystem, FORGE, IDENTITY, "secret")).toThrow(/EEXIST/);
+		expect(() => createSession(memory.fileSystem, FORGE, IDENTITY, SECRET)).toThrow(/EEXIST/);
 	});
 
 	it("should make the token readable by its owner only", () => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
-		const { token } = createSession(memory.fileSystem, FORGE, IDENTITY, "secret");
+		const { token } = createSession(memory.fileSystem, FORGE, IDENTITY, SECRET);
 
 		// memfs keeps the mode it was given on every OS.
 		expect(memory.fileSystem.statSync(token).mode & 0o777).toBe(0o600);
+	});
+
+	it("should write the token through the writer it is given", () => {
+		expect.assertions(2);
+
+		const memory = createMemoryFileSystem();
+		const written: Array<[string, string]> = [];
+		const { token } = createSession(memory.fileSystem, FORGE, IDENTITY, {
+			value: "secret",
+			write: (file, text) => {
+				written.push([file, text]);
+			},
+		});
+
+		expect(written).toStrictEqual([[token, "secret"]]);
+		expect(memory.files()[".forge/sessions/s-1/token"]).toBeUndefined();
 	});
 });
 

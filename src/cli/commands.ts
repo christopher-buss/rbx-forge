@@ -3,16 +3,24 @@ import { runCompileCommandAsync } from "../commands/compile.ts";
 import { runConfigAsync } from "../commands/config.ts";
 import type { CommandRun } from "../commands/context.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
+import { LOG_NAMES, LOGS_FLAGS, runLogsAsync } from "../commands/logs.ts";
 import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
 import { runStartAsync, START_FLAGS } from "../commands/start.ts";
+import { runStatusAsync } from "../commands/status.ts";
 import { runStopAsync } from "../commands/stop.ts";
 import { runSyncbackCommandAsync, SYNCBACK_FLAGS } from "../commands/syncback.ts";
 import { runTypegenCommandAsync, TYPEGEN_FLAGS } from "../commands/typegen.ts";
+import { runUpAsync, UP_FLAGS } from "../commands/up.ts";
 import type { FlagDefinition } from "./flags.ts";
 
 /** One `forge <command>`: its flags, help line, and what it runs. */
 export interface CommandDefinition {
 	name: string;
+	/**
+	 * The one positional argument the command reads, such as `service` for
+	 * `forge logs <service>`. Commands without one reject any.
+	 */
+	argument?: { name: string; text: string };
 	/** Flags besides the global ones. Parser and help both read this. */
 	flags: ReadonlyArray<FlagDefinition>;
 	run: CommandRun;
@@ -58,6 +66,30 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		run: runStartAsync,
 		summary:
 			"Run the dev session in this terminal: compile, build, open Studio, serve Rojo, and watch. Every process it starts stops with it.",
+	},
+	{
+		name: "up",
+		flags: UP_FLAGS,
+		run: runUpAsync,
+		summary:
+			"Start the dev session in the background, as start does, and return once Rojo and the compiler are ready. Reports the running session if there is one.",
+	},
+	{
+		name: "status",
+		flags: [],
+		run: runStatusAsync,
+		summary:
+			"Show the running session: each service, the Rojo port, the last compile with its diagnostics, and the last syncback with its hooks.",
+	},
+	{
+		name: "logs",
+		argument: {
+			name: "name",
+			text: `The log to read: ${LOG_NAMES.join(", ")}.`,
+		},
+		flags: LOGS_FLAGS,
+		run: runLogsAsync,
+		summary: "Print a service's full log; --follow keeps printing new lines.",
 	},
 	{
 		name: "stop",

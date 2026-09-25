@@ -50,7 +50,7 @@ export async function runCliAsync(
 	let command: CommandDefinition | undefined;
 	try {
 		command = findCommand(argv, context.commands);
-		const values = parseValues(argv, command);
+		const { argument, values } = parseValues(argv, command);
 		const page = pageFor(command, values, context);
 		if (page !== undefined || command === undefined) {
 			context.output.stdout(page ?? renderHelp(context.commands));
@@ -58,6 +58,7 @@ export async function runCliAsync(
 		}
 
 		const result = await command.run(commandContext(context, reporter, isJson), {
+			...(argument === undefined ? {} : { argument }),
 			config: configLayerFromFlags(command.flags, values),
 			flags: values,
 		});
@@ -147,7 +148,7 @@ function findCommand(
 function parseValues(
 	argv: ReadonlyArray<string>,
 	command: CommandDefinition | undefined,
-): FlagValues {
+): { argument: string | undefined; values: FlagValues } {
 	let parsed;
 	try {
 		parsed = parseArgs({
@@ -163,12 +164,13 @@ function parseValues(
 		throw new ForgeError("usage", err.message, { cause: err, hint: USAGE_HINT });
 	}
 
-	const [, extra] = parsed.positionals;
-	if (extra !== undefined) {
-		throw new ForgeError("usage", `Unexpected argument "${extra}".`, { hint: USAGE_HINT });
+	const [, argument, extra] = parsed.positionals;
+	const unexpected = command?.argument === undefined ? argument : extra;
+	if (unexpected !== undefined) {
+		throw new ForgeError("usage", `Unexpected argument "${unexpected}".`, { hint: USAGE_HINT });
 	}
 
-	return parsed.values;
+	return { argument, values: parsed.values };
 }
 
 function reportFailure(reporter: Reporter, command: string | undefined, err: unknown): ExitCode {

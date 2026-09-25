@@ -43,10 +43,15 @@ export function renderCommandHelp(command: CommandDefinition): string {
 	}
 
 	blocks.push({ rows: GLOBAL_FLAGS.map(flagRow), title: "Global options" });
+	const { argument } = command;
+	if (argument !== undefined) {
+		blocks.unshift({ rows: [[`<${argument.name}>`, argument.text]], title: "Arguments" });
+	}
 
+	const usage = argument === undefined ? "" : ` <${argument.name}>`;
 	return renderPage(
 		`forge ${command.name} - ${command.summary}`,
-		`forge ${command.name} [options]`,
+		`forge ${command.name}${usage} [options]`,
 		blocks,
 	);
 }

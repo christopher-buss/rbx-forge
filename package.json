@@ -57,6 +57,7 @@
 		"test": "pnpm test:unit && pnpm test:integration",
 		"test:e2e": "vitest run --project e2e",
 		"test:integration": "vitest run --project integration",
+		"test:other-user": "vitest run --project other-user",
 		"test:unit": "vitest run --project unit --coverage",
 		"typecheck": "tsc --build",
 		"watch": "tsdown --watch"

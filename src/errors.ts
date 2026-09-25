@@ -28,6 +28,7 @@ export type ForgeErrorCode =
 	| "config_removed_key"
 	| "declined"
 	| "detach_unsupported"
+	| "endpoint_in_use"
 	| "hook_depth_exceeded"
 	| "hook_failed"
 	| "identity_mismatch"
@@ -95,6 +96,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	detach_unsupported: {
 		exitCode: EXIT_FAILURE,
 		text: "The host does not let a session outlive the terminal.",
+	},
+	endpoint_in_use: {
+		exitCode: EXIT_FAILURE,
+		text: "Another process holds the session's control endpoint, or its directory is not safe.",
 	},
 	hook_depth_exceeded: {
 		exitCode: EXIT_FAILURE,

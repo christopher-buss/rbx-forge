@@ -1,7 +1,9 @@
+import type { IpcTransport } from "../ipc/transport.ts";
 import type { NativeLoader } from "../native/addon.ts";
 import type { ProcessRunner } from "../process/process-runner.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
+import type { DetachedLauncher } from "../supervisor/detached-launcher.ts";
 import type { SupervisorLauncher } from "../supervisor/launcher.ts";
 import type { ChildProcessRunner } from "./child-process.ts";
 import type { Clock } from "./clock.ts";
@@ -32,8 +34,12 @@ export interface Seams {
 	childProcess: ChildProcessRunner;
 	clock: Clock;
 	configLoader: ConfigLoader;
+	/** Starts the detached supervisor of a `forge up` session. */
+	detachedSupervisor: DetachedLauncher;
 	fileSystem: FileSystem;
 	host: Host;
+	/** Opens and reaches a session's control endpoint. */
+	ipc: IpcTransport;
 	/** The `@rbx-forge/native` addon, loaded on first use. */
 	native: NativeLoader;
 	network: Network;

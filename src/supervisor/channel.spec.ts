@@ -51,6 +51,19 @@ describe(parseSessionRequest, () => {
 		expect(parseSessionRequest(encodeSessionRequest(request))).toStrictEqual(request);
 	});
 
+	it("should read back what up encodes", () => {
+		expect.assertions(1);
+
+		const request = {
+			compiler: true,
+			config: {},
+			detached: { report: "/r.ndjson" },
+			open: false,
+		};
+
+		expect(parseSessionRequest(encodeSessionRequest(request))).toStrictEqual(request);
+	});
+
 	it.for([undefined, "", "{", '{"compiler":true}', '{"compiler":1,"config":{},"open":true}'])(
 		"should fail with internal_error on %j",
 		(text) => {

@@ -9,7 +9,9 @@ export type StopRequest =
 	 * The owner pipe closed: `forge start` is gone (killed, or its terminal
 	 * closed).
 	 */
-	| { type: "owner_gone" };
+	| { type: "owner_gone" }
+	/** A client asked the session to stop over its control channel. */
+	| { type: "shutdown" };
 
 /** Calls `listener` once, on the first stop request; returns its removal. */
 export type OnStop = (listener: (request: StopRequest) => void) => () => void;

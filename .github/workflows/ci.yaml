@@ -187,3 +187,59 @@ jobs:
           - { host: ubuntu-latest, musl: true, target: x86_64-unknown-linux-musl }
           - { host: ubuntu-24.04-arm, musl: true, target: aarch64-unknown-linux-musl }
       fail-fast: false
+
+  # IPC security S3 (spec #28): another local user is denied the control
+  # channel. Needs a second local user, so it runs only here, never on a
+  # developer machine.
+  other-user:
+    name: Other user (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup
+        with:
+          tools: node rust
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-check-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('reaper/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            reaper/target
+          restore-keys: cargo-check-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build native addon
+        run: pnpm build:native
+
+      - if: runner.os == 'Linux'
+        name: Create a second local user (Linux)
+        run: sudo useradd --no-create-home forge-other
+        shell: bash
+
+      - if: runner.os == 'macOS'
+        name: Create a second local user (macOS)
+        run: sudo sysadminctl -addUser forge-other -password "$(openssl rand -hex 16)"
+        shell: bash
+
+      - if: runner.os == 'Windows'
+        name: Create a second local user (Windows)
+        run: |
+          $password = "Fo!" + [guid]::NewGuid().ToString("N") + "aZ9"
+          Write-Output "::add-mask::$password"
+          net user forge-other $password /add
+          "RBX_FORGE_OTHER_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        shell: pwsh
+
+      - env:
+          RBX_FORGE_OTHER_USER: forge-other
+        name: Other user
+        run: pnpm test:other-user
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    timeout-minutes: 20

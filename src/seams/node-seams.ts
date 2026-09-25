@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
+import nodeFs from "node:fs";
 import { createRequire } from "node:module";
+import nodeNet from "node:net";
 import process from "node:process";
 
+import type { IpcTransport } from "../ipc/transport.ts";
+import { createNodeTransport } from "../ipc/transport.ts";
 import type { NativeLoader } from "../native/addon.ts";
 import {
 	createNativeLoader,
@@ -13,6 +17,7 @@ import { createChildProcessRunner } from "../process/process-runner.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
 import { createReaperLauncher } from "../reaper/reaper-client.ts";
 import { createStudioLauncher } from "../studio/launcher.ts";
+import { createDetachedLauncher } from "../supervisor/detached-launcher.ts";
 import { createSupervisorLauncher } from "../supervisor/launcher.ts";
 import { nodeChildProcessRunner } from "./child-process.ts";
 import { nodeClock } from "./clock.ts";
@@ -65,8 +70,13 @@ export function createNodeSeams({
 		childProcess: nodeChildProcessRunner,
 		clock: nodeClock,
 		configLoader: loadConfigFileAsync,
+		detachedSupervisor: createDetachedLauncher(
+			{ ...PROCESS_BACKEND, fileSystem: nodeFileSystem, native },
+			supervisorEntry,
+		),
 		fileSystem: nodeFileSystem,
 		host: nodeHost,
+		ipc: createNodeIpcTransport(native),
 		native,
 		network: nodeNetwork,
 		processRunner: createChildProcessRunner(PROCESS_BACKEND),
@@ -77,6 +87,16 @@ export function createNodeSeams({
 		studioLauncher: createStudioLauncher(PROCESS_BACKEND),
 		supervisor: createSupervisorLauncher(PROCESS_BACKEND, supervisorEntry),
 	};
+}
+
+function createNodeIpcTransport(native: NativeLoader): IpcTransport {
+	return createNodeTransport({
+		fileSystem: nodeFs,
+		native,
+		net: nodeNet,
+		platform: nodeHost.platform,
+		userId: nodeHost.userId,
+	});
 }
 
 function createNodeReaperLauncher(

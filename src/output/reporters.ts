@@ -86,6 +86,10 @@ export function createTtyReporter(output: OutputStreams): Reporter {
 					output.stdout(`${event.message}\n`);
 					break;
 				}
+				case "log": {
+					output.stdout(`${event.line}\n`);
+					break;
+				}
 				case "step": {
 					output.stdout(`${STEP_MARKS[event.status]} ${event.name}\n`);
 					break;

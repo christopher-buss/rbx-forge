@@ -123,6 +123,15 @@ describe(createTtyReporter, () => {
 		expect(captured.stderr()).toBe("");
 	});
 
+	it("should write a log line as it is", () => {
+		expect.assertions(1);
+
+		const captured = captureOutput();
+		createTtyReporter(captured.output).emit({ line: "  raw", service: "rojo", type: "log" });
+
+		expect(captured.stdout()).toBe("  raw\n");
+	});
+
 	it("should write a clean watch-mode compile as one line", () => {
 		expect.assertions(1);
 

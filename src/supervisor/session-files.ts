@@ -10,7 +10,8 @@ import type { FileSystem } from "../seams/file-system.ts";
  * .forge/supervisor.lock               singleton: exclusive lock, held for the supervisor's life
  * .forge/current                       hint: the id of the live session
  * .forge/sessions/<id>/supervisor.id   write-once identity record
- * .forge/sessions/<id>/token           IPC token (0600)
+ * .forge/sessions/<id>/token           IPC token (0600; Windows: owner-only DACL)
+ * .forge/sessions/<id>/state.json      the session's status (`session/status.ts`)
  * .forge/sessions/<id>/workers.lock    lease: the reaper and its workers hold it shared
  * .forge/sessions/<id>/reaper.json     reaper record: written by the reaper only
  * .forge/sessions/<id>/output/         raw worker output while the session runs
@@ -45,6 +46,8 @@ export interface SessionFiles {
 	/** `reaper.json`: the reaper's own record. */
 	record: string;
 	sessionId: string;
+	/** `state.json`: the session's status, rewritten on each change. */
+	state: string;
 	/** `token`: the IPC token. */
 	token: string;
 }
@@ -65,6 +68,13 @@ export interface IdentityRecord {
 	startedAt: string;
 	/** The forge version that runs it. */
 	version: string;
+}
+
+/** A session's IPC token, and what writes its file. */
+export interface SessionToken {
+	value: string;
+	/** Writes the token file; when missing, it is written with mode 0600. */
+	write?: ((file: string, text: string) => void) | undefined;
 }
 
 /**
@@ -99,6 +109,7 @@ export function sessionFiles(forge: ForgeFiles, sessionId: string): SessionFiles
 		output: path.join(directory, "output"),
 		record: path.join(directory, "reaper.json"),
 		sessionId,
+		state: path.join(directory, "state.json"),
 		token: path.join(directory, "token"),
 	};
 }
@@ -124,7 +135,9 @@ export function listSessions(
  * @param fileSystem - Writes the files.
  * @param forge - The project's `.forge` files.
  * @param identity - The record; its `sessionId` names the directory.
- * @param token - The IPC token.
+ * @param token - The IPC token, and what writes its file: by default
+ *   `writeFileSync` with mode 0600. Windows passes a writer that creates it
+ *   with an owner-only DACL.
  * @returns The session's files.
  * @throws When the session directory already has an identity record: a
  *   record is written once and never replaced.
@@ -133,12 +146,17 @@ export function createSession(
 	fileSystem: Pick<FileSystem, "mkdirSync" | "writeFileSync">,
 	forge: ForgeFiles,
 	identity: IdentityRecord,
-	token: string,
+	token: SessionToken,
 ): SessionFiles {
 	const files = sessionFiles(forge, identity.sessionId);
 	fileSystem.mkdirSync(files.output, { recursive: true });
 	fileSystem.writeFileSync(files.identity, `${JSON.stringify(identity)}\n`, { flag: "wx" });
-	fileSystem.writeFileSync(files.token, token, { flag: "wx", mode: 0o600 });
+	if (token.write === undefined) {
+		fileSystem.writeFileSync(files.token, token.value, { flag: "wx", mode: 0o600 });
+	} else {
+		token.write(files.token, token.value);
+	}
+
 	fileSystem.writeFileSync(forge.current, `${identity.sessionId}\n`);
 	return files;
 }

@@ -132,6 +132,21 @@ describe(renderCommandHelp, () => {
 		);
 	});
 
+	it("should show the argument of a command that reads one", () => {
+		expect.assertions(2);
+
+		const page = renderCommandHelp({
+			name: "demo",
+			argument: { name: "name", text: "The name." },
+			flags: [],
+			run: async () => ({ data: {}, summary: "" }),
+			summary: "Demo.",
+		});
+
+		expect(page).toContain("\nUsage\n  forge demo <name> [options]\n");
+		expect(page).toContain("\nArguments\n  <name>  The name.\n");
+	});
+
 	it("should leave out the options block for a command without flags", () => {
 		expect.assertions(1);
 

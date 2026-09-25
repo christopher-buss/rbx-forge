@@ -18,6 +18,8 @@ export interface OutputStreams {
 export type ReporterEvent =
 	/** The watch-mode compiler finished one compile. */
 	| { diagnostics: Array<Diagnostic>; errors: number; type: "compiled" }
+	| { line: string; service: string; type: "log" }
+	/** One line of a service's log (`forge logs`). */
 	| { message: string; type: "info" }
 	| { message: string; type: "warning" }
 	| { name: string; status: "failed" | "started" | "succeeded"; type: "step" };

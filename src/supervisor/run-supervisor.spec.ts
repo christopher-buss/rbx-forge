@@ -1,6 +1,8 @@
 import path from "node:path";
 import { assert, describe, expect, it, vi } from "vitest";
 
+import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
+import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createFakeReaper, createFakeSignals } from "../../test/helpers/fake-reaper.ts";
 import type { FakeReaper, FakeReaperOptions, FakeSignals } from "../../test/helpers/fake-reaper.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
@@ -17,6 +19,7 @@ import {
 import type { MemoryFileSystem, RecordingReporter } from "../../test/helpers/seams.ts";
 import type { FlagValues } from "../cli/flags.ts";
 import { ForgeError } from "../errors.ts";
+import { callSessionAsync } from "../ipc/client.ts";
 import type { WorkerReport, WorkerSpec } from "../reaper/protocol.ts";
 import type { ReaperEnd } from "../reaper/reaper-client.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
@@ -62,19 +65,28 @@ interface StartSetup {
 	file?: object;
 	files?: Record<string, string>;
 	flags?: FlagValues;
+	/** Makes the control endpoint's transport; in memory by default. */
+	ipc?: () => MemoryTransport;
 	/** Whether the Rojo port is free. */
 	isPortFree?: boolean;
 	/** How a one-shot run ends; services never end on their own. */
 	oneShot?: (worker: WorkerSpec) => undefined | WorkerReport;
+	/** Gets the supervisor's ready call. */
+	onReady?: () => void;
 	/** Makes the test pause points from the run's stop source. */
 	pause?: (stop: StopSource) => Pause;
+	/** The host OS; Linux by default. */
+	platform?: NodeJS.Platform;
 	projectType?: "luau" | "rbxts";
 	reaper?: FakeReaperOptions;
+	/** The addon's private file writer (Windows). */
+	writePrivateFile?: (file: string, text: string) => void;
 }
 
 interface StartRun {
 	clock: ManualClock;
 	fake: FakeReaper;
+	ipc: MemoryTransport;
 	isPortFreeAsync: ReturnType<typeof vi.fn<Network["isPortFreeAsync"]>>;
 	memory: MemoryFileSystem;
 	native: FakeNative;
@@ -147,11 +159,15 @@ function startCommand({
 	file = {},
 	files = TOOL_FILES,
 	flags = ROJO_ONLY,
+	ipc: makeTransport = createMemoryTransport,
 	isPortFree = true,
 	oneShot = succeedOneShots,
+	onReady,
 	pause = () => neverPauseAsync,
+	platform = "linux",
 	projectType = "luau",
 	reaper = {},
+	writePrivateFile,
 }: StartSetup = {}): StartRun {
 	const memory = createMemoryFileSystem(files);
 	const clock = createManualClock(Date.UTC(2026, 0, 1));
@@ -159,6 +175,8 @@ function startCommand({
 	const signals = createFakeSignals();
 	const stop = createStopSource();
 	signals.onStop(stop.request);
+	const ipc = makeTransport();
+	const seams = createTestSeams();
 	const native = createFakeNative({ 4242: { alive: true, executablePath: "/node" } });
 	const reporter = createRecordingReporter();
 	const isPortFreeAsync = vi.fn<Network["isPortFreeAsync"]>().mockResolvedValue(isPortFree);
@@ -174,7 +192,14 @@ function startCommand({
 			clock: clock.clock,
 			configLoader,
 			fileSystem: memory.fileSystem,
-			native: () => native.addon,
+			host: { ...seams.host, platform },
+			ipc,
+			native: () => {
+				return {
+					...native.addon,
+					...(writePrivateFile === undefined ? {} : { writePrivateFile }),
+				};
+			},
 			network: { isPortFreeAsync },
 			randomId: () => "session-1",
 			reaper: fake.launch,
@@ -185,11 +210,13 @@ function startCommand({
 	return {
 		clock,
 		fake,
+		ipc,
 		isPortFreeAsync,
 		memory,
 		native,
 		reporter,
 		result: runSupervisorAsync(context, requestFor(flags), {
+			onReady,
 			pause: pause(stop),
 			stop,
 			version: "9.9.9",
@@ -226,6 +253,18 @@ function identityIn(files: Record<string, null | string>): IdentityRecord {
 	assert(typeof text === "string", "expected an identity record");
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- createSession writes this shape
 	return JSON.parse(text) as unknown as IdentityRecord;
+}
+
+/**
+ * The session's `state.json` now.
+ *
+ * @param run - The session.
+ * @returns Its parsed content.
+ */
+function stateOf(run: StartRun): unknown {
+	const text = run.memory.files()[".forge/sessions/session-1/state.json"];
+	assert(typeof text === "string", "expected state.json");
+	return JSON.parse(text);
 }
 
 async function flushAsync(): Promise<void> {
@@ -859,6 +898,68 @@ describe("forge start hooks and syncback", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 	});
 
+	it("should keep each syncback run and its hooks in the status", async () => {
+		expect.assertions(1);
+
+		const run = await savedAsync();
+
+		expect(stateOf(run)).toMatchObject({
+			services: {
+				syncback: {
+					lastRun: {
+						at: "2026-01-01T00:00:00.500Z",
+						durationMs: 0,
+						hooks: [
+							{
+								id: "syncback:post:0",
+								command: "lint",
+								ok: true,
+								outcome: "succeeded",
+							},
+						],
+						ok: true,
+					},
+					status: "idle",
+				},
+			},
+		});
+	});
+
+	it.for([
+		["the hook", "syncback-3", "hook_failed", 1],
+		["Rojo", "syncback-2", "process_failed", 0],
+	] as const)(
+		"should keep a syncback run that %s failed, with its error and hooks",
+		async ([, worker, code, hooks]) => {
+			expect.assertions(2);
+
+			const run = await savedAsync({
+				...SYNCBACK,
+				oneShot: oneShotsWith({ [worker]: EXITED }),
+			});
+			const state = stateOf(run);
+
+			expect(state).toMatchObject({
+				services: { syncback: { lastRun: { error: { code }, ok: false }, status: "idle" } },
+			});
+			expect(state).toHaveProperty(
+				"services.syncback.lastRun.hooks",
+				expect.toBeArrayOfSize(hooks),
+			);
+		},
+	);
+
+	it("should report a running syncback as running", async () => {
+		expect.assertions(1);
+
+		const run = await savedAsync({
+			...SYNCBACK,
+			oneShot: oneShotsWith({ "syncback-2": "hold" }),
+		});
+
+		expect(stateOf(run)).toMatchObject({ services: { syncback: { status: "running" } } });
+	});
+
 	it("should not report a syncback the session's end cut short", async () => {
 		expect.assertions(1);
 
@@ -1082,6 +1183,189 @@ describe("forge start session files", () => {
 		const run = startCommand({ reaper: { launchError: error } });
 
 		await expect(run.result).rejects.toBe(error);
+		expect(
+			Object.keys(run.memory.files()).filter((file) => file.startsWith(".forge/")),
+		).toStrictEqual([".forge/sessions"]);
+	});
+});
+
+const CONTROL_TARGET = {
+	endpoint: endpointFor({
+		buildOutputPath: "game.rbxl",
+		env: {},
+		platform: "linux",
+		projectRoot: PROJECT,
+		userId: 1000,
+	}),
+	token: "session-1",
+};
+
+describe("forge up control channel", () => {
+	it("should serve its status on the control endpoint while it runs, then close it", async () => {
+		expect.assertions(2);
+
+		const run = startCommand();
+		await flushAsync();
+		const status = await callSessionAsync(run.ipc, CONTROL_TARGET, "status");
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(status).toStrictEqual({
+			phase: "ready",
+			pid: 4242,
+			running: true,
+			services: {
+				compiler: { status: "off" },
+				rojo: { port: 4000, status: "ready" },
+				studio: { status: "off" },
+				syncback: { status: "off" },
+			},
+			sessionId: "session-1",
+			startedAt: IDENTITY.startedAt,
+		});
+		await expect(callSessionAsync(run.ipc, CONTROL_TARGET, "status")).rejects.toMatchObject({
+			code: "not_running",
+		});
+	});
+
+	it("should stop with reason shutdown when asked on the control channel", async () => {
+		expect.assertions(2);
+
+		const run = startCommand();
+		await flushAsync();
+
+		await expect(callSessionAsync(run.ipc, CONTROL_TARGET, "shutdown")).resolves.toStrictEqual({
+			accepted: true,
+			sessionId: "session-1",
+		});
+		await expect(run.result).resolves.toStrictEqual({
+			data: { port: 4000, reason: "shutdown", reports: [] },
+			summary: "Stopped on request; every process of the session is gone.",
+		});
+	});
+
+	it("should call onReady once, when the session is first ready", async () => {
+		expect.assertions(2);
+
+		const onReady = vi.fn<() => void>();
+		const run = startCommand({ flags: { open: false }, onReady, projectType: "rbxts" });
+		await flushAsync();
+		const beforeCompile = onReady.mock.calls.length;
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "compiler.log"),
+			"Found 0 errors. Watching for file changes.\nFound 0 errors. Watching for file changes.\n",
+		);
+		await passAsync(run, OUTPUT_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(beforeCompile).toBe(0);
+		expect(onReady).toHaveBeenCalledOnce();
+	});
+
+	it("should never call onReady for a session stopped while its services start", async () => {
+		expect.assertions(1);
+
+		const onReady = vi.fn<() => void>();
+		const run: StartRun = startCommand({
+			onReady,
+			reaper: {
+				onSpawn: onSpawnOf("rojo", () => {
+					run.signals.fire("SIGINT");
+				}),
+			},
+		});
+		await run.result;
+
+		expect(onReady).not.toHaveBeenCalled();
+	});
+
+	it("should keep the compiler's last build with its diagnostics in state.json", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "compiler.log"),
+			"src/a.ts:3:7 - error TS2322: Bad.\n\nFound 1 error. Watching for file changes.\n",
+		);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		expect(stateOf(run)).toMatchObject({
+			phase: "ready",
+			services: {
+				compiler: {
+					lastBuild: {
+						at: "2026-01-01T00:00:00.250Z",
+						diagnostics: [{ code: "TS2322", file: "src/a.ts", line: 3 }],
+						errors: 1,
+					},
+					status: "ready",
+				},
+			},
+		});
+	});
+
+	it("should show a stopping session, with Studio still open, while its workers go", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ flags: { compiler: false } });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, "1");
+		await passAsync(run, FILE_POLL_MS);
+		const open = stateOf(run);
+		run.native.addon.tryLockFile(path.join(SESSION, "workers.lock"), "shared");
+		run.signals.fire("SIGINT");
+		const caught = run.result.catch((err: unknown) => err);
+		await passAsync(run, 5250);
+		await caught;
+
+		expect(open).toMatchObject({ phase: "ready", services: { studio: { status: "open" } } });
+		expect(stateOf(run)).toMatchObject({
+			phase: "stopping",
+			running: true,
+			services: { studio: { status: "open" } },
+		});
+	});
+
+	it("should write the token through the addon, owner-only, on Windows", async () => {
+		expect.assertions(2);
+
+		const writePrivateFile = vi.fn<(file: string, text: string) => void>();
+		const run = startCommand({
+			files: { "tools/rojo.exe": "" },
+			platform: "win32",
+			writePrivateFile,
+		});
+		await flushAsync();
+		const files = run.memory.files();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(writePrivateFile).toHaveBeenCalledExactlyOnceWith(
+			path.join(SESSION, "token"),
+			"session-1",
+		);
+		expect(files[".forge/sessions/session-1/token"]).toBeUndefined();
+	});
+
+	it("should delete the session files and start nothing when the endpoint cannot open", async () => {
+		expect.assertions(3);
+
+		const error = new ForgeError("endpoint_in_use", "held");
+		const run = startCommand({
+			ipc: () => {
+				return {
+					...createMemoryTransport(),
+					listenAsync: async () => {
+						throw error;
+					},
+				};
+			},
+		});
+
+		await expect(run.result).rejects.toBe(error);
+		expect(run.fake.launches).toStrictEqual([]);
 		expect(
 			Object.keys(run.memory.files()).filter((file) => file.startsWith(".forge/")),
 		).toStrictEqual([".forge/sessions"]);

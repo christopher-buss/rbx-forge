@@ -17,6 +17,7 @@ import type { SessionEndReason, SessionOutcome } from "../session/run-session.ts
 import { runSessionAsync } from "../session/run-session.ts";
 import type { SessionSetup } from "../session/session-body.ts";
 import { createSessionBody } from "../session/session-body.ts";
+import type { StatusStore } from "../session/status.ts";
 import type { StopRequest, StopSource } from "../session/stop-source.ts";
 import type { SessionRequest } from "./channel.ts";
 import { endpointFor } from "./endpoint.ts";
@@ -26,8 +27,9 @@ import {
 	OLD_SESSION_MARGIN_MS,
 	waitForLeaseAsync,
 } from "./locks.ts";
+import { openSessionAsync } from "./session-control.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "./session-files.ts";
-import { createSession, forgeFiles, removeSession } from "./session-files.ts";
+import { forgeFiles, removeSession } from "./session-files.ts";
 
 /**
  * How long the final barrier waits for the lease once the reaper has
@@ -40,6 +42,11 @@ const NEVER_ABORTS = AbortSignal.any([]);
 
 /** What a supervisor runs with besides the command context. */
 export interface SupervisorOptions {
+	/**
+	 * Called once, when the session is first ready: Rojo serves and the
+	 * compiler finished its first compile. `forge up` returns then.
+	 */
+	onReady?: (() => void) | undefined;
 	/** The test pause points; `neverPauseAsync` in production. */
 	pause: Pause;
 	/**
@@ -57,7 +64,11 @@ interface OwnSession {
 	files: SessionFiles;
 	forge: ForgeFiles;
 	services: Pick<SessionSetup, "compiler" | "config" | "context" | "plan" | "rojo">;
+	status: StatusStore;
 }
+
+/** An end that needs no detail beyond its name. */
+type QuietEnd = Exclude<SessionEndReason["type"], "failed" | "service_exited" | "signal">;
 
 /**
  * The supervisor of one `forge start` session (spec #28): the separate
@@ -72,11 +83,13 @@ interface OwnSession {
  *    those sessions' directories.
  * 4. Check the fixed Rojo port.
  * 5. Create the session directory: write-once identity record, token,
- *    `current`.
+ *    `current`. Open the control endpoint (`status`, `shutdown`), and keep
+ *    `state.json` up to date.
  * 6. Run the session (`runSessionAsync`): launch the reaper, admit it only
  *    while no stop request came, and run the body.
  * 7. Final barrier: the lease is free once the reaper and every worker are
- *    gone. Then delete the session's directory.
+ *    gone. Then delete the session's directory, answer the requests in
+ *    progress, and close the endpoint.
  *
  * A stop request before step 5 ends the run with no session; after it, the
  * session's single shutdown path runs.
@@ -89,7 +102,7 @@ interface OwnSession {
  *   `port_in_use`; `rojo_missing` or `compiler_missing`; a step's failure
  *   (such as `compile_failed` or `hook_failed`); `service_failed` when a
  *   service exits; `cleanup_in_progress` when a worker outlived the wait; a
- *   config error; or `reaper_unavailable`.
+ *   config error; `endpoint_in_use`; or `reaper_unavailable`.
  */
 export async function runSupervisorAsync(
 	context: CommandContext,
@@ -138,6 +151,13 @@ function stopped(stop: StopSource): CommandResult | undefined {
 		summary: `Stopped on ${reasonName(reason)} before the session started; nothing ran.`,
 	};
 }
+
+/** The summary of each end that needs no detail. */
+const STOP_SUMMARIES = {
+	owner_gone: "forge start is gone; every process of the session is gone.",
+	shutdown: "Stopped on request; every process of the session is gone.",
+	studio_closed: "Studio closed the place; every process of the session is gone.",
+} satisfies Record<QuietEnd, string>;
 
 function describeExit({ exitCode, signal }: WorkerReport): string {
 	if (exitCode !== null) {
@@ -198,16 +218,12 @@ function endedResult(
 				summary: `Stopped on ${reason.signal}; every process of the session is gone.`,
 			};
 		}
-		case "owner_gone": {
-			return {
-				data: { ...data, reason: "owner_gone" },
-				summary: "forge start is gone; every process of the session is gone.",
-			};
-		}
+		case "owner_gone":
+		case "shutdown":
 		case "studio_closed": {
 			return {
-				data: { ...data, reason: "studio_closed" },
-				summary: "Studio closed the place; every process of the session is gone.",
+				data: { ...data, reason: reason.type },
+				summary: STOP_SUMMARIES[reason.type],
 			};
 		}
 	}
@@ -226,7 +242,7 @@ function endedResult(
 async function runSessionOnceAsync(
 	seams: CommandContext["seams"],
 	{ pause, stop }: SupervisorOptions,
-	{ config, files, forge, services }: OwnSession,
+	{ config, files, forge, services, status }: OwnSession,
 ): Promise<SessionOutcome> {
 	try {
 		return await runSessionAsync(
@@ -238,7 +254,7 @@ async function runSessionOnceAsync(
 				recordPath: files.record,
 				sessionId: files.sessionId,
 			},
-			createSessionBody({ ...services, directory: files.directory }),
+			createSessionBody({ ...services, directory: files.directory, status }),
 		);
 	} catch (err) {
 		removeSession(seams.fileSystem, forge, files.sessionId);
@@ -349,12 +365,24 @@ async function runLockedAsync(
 		return late;
 	}
 
-	const identity = identityOf(context, config, options.version);
-	const files = createSession(seams.fileSystem, forge, identity, seams.randomId());
-	const session = { config, files, forge, services };
-	const { end, reason } = await runSessionOnceAsync(seams, options, session);
-	await finalBarrierAsync(seams, session, end.reports);
-	return endedResult(reason, cwd, { port: config.rojoPort, reports: end.reports });
+	const { files, status, ...control } = await openSessionAsync(seams, {
+		forge,
+		identity: identityOf(context, config, options.version),
+		onReady: options.onReady,
+		plan: { ...services.plan, compiler: services.compiler !== undefined },
+		port: config.rojoPort,
+		stop: options.stop,
+	});
+	try {
+		const session = { config, files, forge, services, status };
+		const { end, reason } = await runSessionOnceAsync(seams, options, session);
+		status.phase("stopping");
+		await finalBarrierAsync(seams, session, end.reports);
+		status.phase("stopped");
+		return endedResult(reason, cwd, { port: config.rojoPort, reports: end.reports });
+	} finally {
+		await control.closeAsync();
+	}
 }
 
 /**
