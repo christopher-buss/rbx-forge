@@ -9,6 +9,11 @@ export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
 		text: "Compile, build, and run the compiler in watch mode (the default); --no-compiler runs none of them.",
 	},
 	{
+		name: "force",
+		kind: "boolean",
+		text: "Kill what is left of an earlier session when it outlives the wait, verified as the session's own.",
+	},
+	{
 		name: "open",
 		kind: "boolean",
 		text: "Open the place in Studio and stop when Studio closes it (the default); --no-open leaves Studio alone.",
@@ -52,6 +57,7 @@ export async function runStartAsync(
 			compiler: input.flags["compiler"] !== false,
 			config: input.config,
 			open: input.flags["open"] !== false,
+			...(input.flags["force"] === true ? { force: true } : {}),
 		},
 	});
 	const dispose = seams.signals.onStop(run.stop);

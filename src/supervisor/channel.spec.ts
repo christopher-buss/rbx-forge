@@ -51,17 +51,34 @@ describe(parseSessionRequest, () => {
 		expect(parseSessionRequest(encodeSessionRequest(request))).toStrictEqual(request);
 	});
 
-	it.for([undefined, "", "{", '{"compiler":true}', '{"compiler":1,"config":{},"open":true}'])(
-		"should fail with internal_error on %j",
-		(text) => {
-			expect.assertions(2);
+	it("should read back --force, and leave it out when false", () => {
+		expect.assertions(2);
 
-			const error = catchForgeError(() => parseSessionRequest(text));
+		const forced = { compiler: true, config: {}, force: true, open: true };
 
-			expect(error.code).toBe("internal_error");
-			expect(error.message).toStartWith("The supervisor got no session request: ");
-		},
-	);
+		expect(parseSessionRequest(encodeSessionRequest(forced))).toStrictEqual(forced);
+		expect(parseSessionRequest(JSON.stringify({ ...forced, force: false }))).toStrictEqual({
+			compiler: true,
+			config: {},
+			open: true,
+		});
+	});
+
+	it.for([
+		undefined,
+		"",
+		"{",
+		'{"compiler":true}',
+		'{"compiler":1,"config":{},"open":true}',
+		'{"compiler":true,"config":{},"force":1,"open":true}',
+	])("should fail with internal_error on %j", (text) => {
+		expect.assertions(2);
+
+		const error = catchForgeError(() => parseSessionRequest(text));
+
+		expect(error.code).toBe("internal_error");
+		expect(error.message).toStartWith("The supervisor got no session request: ");
+	});
 
 	it("should fail with internal_error on a config layer the schema rejects", () => {
 		expect.assertions(1);

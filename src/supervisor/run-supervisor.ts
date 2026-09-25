@@ -18,22 +18,18 @@ import { runSessionAsync } from "../session/run-session.ts";
 import type { SessionSetup } from "../session/session-body.ts";
 import { createSessionBody } from "../session/session-body.ts";
 import type { StopRequest, StopSource } from "../session/stop-source.ts";
-import type { SessionRequest } from "./channel.ts";
-import { endpointFor } from "./endpoint.ts";
+import type { ForcedCleanup } from "./barrier.ts";
 import {
-	acquireSingleton,
 	clearOldSessionsAsync,
 	OLD_SESSION_MARGIN_MS,
-	waitForLeaseAsync,
-} from "./locks.ts";
+	SETTLE_MS,
+	waitForBarrierAsync,
+} from "./barrier.ts";
+import type { SessionRequest } from "./channel.ts";
+import { endpointFor } from "./endpoint.ts";
+import { acquireSingleton } from "./locks.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "./session-files.ts";
 import { createSession, forgeFiles, removeSession } from "./session-files.ts";
-
-/**
- * How long the final barrier waits for the lease once the reaper has
- * exited. On POSIX a worker that escaped its tree still holds it.
- */
-const FINAL_BARRIER_MS = 5000;
 
 /** The final barrier always runs to its bound. */
 const NEVER_ABORTS = AbortSignal.any([]);
@@ -68,15 +64,17 @@ interface OwnSession {
  * 1. Load the config and resolve the services (Rojo, the compiler).
  * 2. Take the singleton lock (`session_running` when another session holds
  *    it) and keep it until it returns.
- * 3. Barrier: wait until every older session's lease is free, and delete
- *    those sessions' directories.
+ * 3. Barrier: wait until no process of any older session is left (its
+ *    lease is free and a scan finds none), and delete those sessions'
+ *    directories. With `request.force`, an older session that outlives the
+ *    bound is cleaned up by force first.
  * 4. Check the fixed Rojo port.
  * 5. Create the session directory: write-once identity record, token,
  *    `current`.
  * 6. Run the session (`runSessionAsync`): launch the reaper, admit it only
  *    while no stop request came, and run the body.
- * 7. Final barrier: the lease is free once the reaper and every worker are
- *    gone. Then delete the session's directory.
+ * 7. Final barrier: no process of the session is left once the reaper and
+ *    every worker are gone. Then delete the session's directory.
  *
  * A stop request before step 5 ends the run with no session; after it, the
  * session's single shutdown path runs.
@@ -86,10 +84,11 @@ interface OwnSession {
  * @param options - Stop requests, pause points, and version.
  * @returns The stop reason and every worker's report, once all are gone.
  * @rejects {ForgeError} `session_running`; `previous_generation_alive`;
- *   `port_in_use`; `rojo_missing` or `compiler_missing`; a step's failure
- *   (such as `compile_failed` or `hook_failed`); `service_failed` when a
- *   service exits; `cleanup_in_progress` when a worker outlived the wait; a
- *   config error; or `reaper_unavailable`.
+ *   `cleanup_unverifiable` (only with `force`); `port_in_use`; `rojo_missing`
+ *   or `compiler_missing`; a step's failure (such as `compile_failed` or
+ *   `hook_failed`); `service_failed` when a service exits;
+ *   `cleanup_in_progress` when a worker outlived the wait; a config error; or
+ *   `reaper_unavailable`.
  */
 export async function runSupervisorAsync(
 	context: CommandContext,
@@ -111,7 +110,12 @@ export async function runSupervisorAsync(
 	const forge = forgeFiles(cwd);
 	const singleton = acquireSingleton(seams, forge);
 	try {
-		return await runLockedAsync(context, options, { config, forge, services });
+		return await runLockedAsync(context, options, {
+			config,
+			force: request.force === true,
+			forge,
+			services,
+		});
 	} finally {
 		singleton.release();
 	}
@@ -183,7 +187,7 @@ function serviceFailed(
 function endedResult(
 	reason: SessionEndReason,
 	cwd: string,
-	data: { port: number; reports: Array<FinalReport> },
+	data: { cleanups?: Array<ForcedCleanup>; port: number; reports: Array<FinalReport> },
 ): CommandResult {
 	switch (reason.type) {
 		case "failed": {
@@ -252,7 +256,7 @@ function survivorsOf(reports: ReadonlyArray<FinalReport>): Array<string> {
 
 /**
  * Step 7 of {@link runSupervisorAsync}: the final barrier. The session's
- * files go once its lease is free and every tree was reported empty;
+ * files go once its barrier is clear and every tree was reported empty;
  * otherwise they stay, so the next session's barrier waits.
  *
  * @param seams - The clock, file system, and native addon.
@@ -267,15 +271,18 @@ async function finalBarrierAsync(
 	reports: Array<FinalReport>,
 ): Promise<void> {
 	const survivors = survivorsOf(reports);
-	const lease = await waitForLeaseAsync(seams, files.lease, FINAL_BARRIER_MS, NEVER_ABORTS);
-	lease?.release();
-	if (lease === undefined || survivors.length > 0) {
+	const barrier = await waitForBarrierAsync(seams, files, SETTLE_MS, NEVER_ABORTS);
+	// The final barrier never aborts.
+	assert(barrier !== undefined);
+	if (!barrier.clear || survivors.length > 0) {
 		const names = survivors.length > 0 ? survivors.join(", ") : "the session";
+		const { pids } = barrier;
+		const named = pids.length > 0 ? ` (PIDs ${pids.join(", ")})` : "";
 		throw new ForgeError(
 			"cleanup_in_progress",
-			`Processes of ${names} were still alive when forge stopped waiting.`,
+			`Processes of ${names} were still alive when forge stopped waiting${named}.`,
 			{
-				details: { reports, sessionId: files.sessionId },
+				details: { pids, reports, sessionId: files.sessionId },
 				hint: "Check for them, and stop them by hand.",
 			},
 		);
@@ -338,11 +345,26 @@ async function requireFreePortAsync(network: Network, port: number): Promise<voi
 async function runLockedAsync(
 	context: CommandContext,
 	options: SupervisorOptions,
-	{ config, forge, services }: Pick<OwnSession, "config" | "forge" | "services">,
+	{
+		config,
+		force,
+		forge,
+		services,
+	}: Pick<OwnSession, "config" | "forge" | "services"> & { force: boolean },
 ): Promise<CommandResult> {
-	const { cwd, seams } = context;
-	const bound = config.gracefulTimeoutMs + OLD_SESSION_MARGIN_MS;
-	await clearOldSessionsAsync(seams, forge, bound, options.stop.signal);
+	const { cwd, reporter, seams } = context;
+	const cleanups = await clearOldSessionsAsync(seams, forge, {
+		boundMs: config.gracefulTimeoutMs + OLD_SESSION_MARGIN_MS,
+		force,
+		signal: options.stop.signal,
+	});
+	for (const { killed, sessionId } of cleanups) {
+		reporter.emit({
+			message: `--force killed ${killed.length} processes of the earlier session ${sessionId}.`,
+			type: "warning",
+		});
+	}
+
 	await requireFreePortAsync(seams.network, config.rojoPort);
 	const late = stopped(options.stop);
 	if (late !== undefined) {
@@ -354,7 +376,11 @@ async function runLockedAsync(
 	const session = { config, files, forge, services };
 	const { end, reason } = await runSessionOnceAsync(seams, options, session);
 	await finalBarrierAsync(seams, session, end.reports);
-	return endedResult(reason, cwd, { port: config.rojoPort, reports: end.reports });
+	return endedResult(reason, cwd, {
+		port: config.rojoPort,
+		reports: end.reports,
+		...(cleanups.length > 0 ? { cleanups } : {}),
+	});
 }
 
 /**

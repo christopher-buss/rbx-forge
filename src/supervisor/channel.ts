@@ -26,6 +26,11 @@ export interface SessionRequest {
 	compiler: boolean;
 	/** The config values its flags set (the top config layer). */
 	config: ConfigLayer;
+	/**
+	 * `--force`: an earlier session whose processes outlive the barrier's
+	 * bound is cleaned up by force.
+	 */
+	force?: boolean;
 	/** `--no-open` sets it to `false`. */
 	open: boolean;
 }
@@ -83,7 +88,7 @@ const messageLine = jsonLine.pipe(messageSchema);
 const INTERNAL_ERROR: ForgeErrorCode = "internal_error";
 
 const requestSchema = jsonLine.pipe(
-	type({ compiler: "boolean", config: "object", open: "boolean" }),
+	type({ "compiler": "boolean", "config": "object", "force?": "boolean", "open": "boolean" }),
 );
 
 const stopLine = jsonLine.pipe(type({ signal: type.enumerated(...STOP_SIGNALS), type: "'stop'" }));
@@ -122,7 +127,12 @@ export function parseSessionRequest(text: string | undefined): SessionRequest {
 			`The session request's config is invalid:\n${lines.join("\n")}`,
 		);
 	});
-	return { compiler: parsed.compiler, config, open: parsed.open };
+	return {
+		compiler: parsed.compiler,
+		config,
+		open: parsed.open,
+		...(parsed.force === true ? { force: true } : {}),
+	};
 }
 
 /**

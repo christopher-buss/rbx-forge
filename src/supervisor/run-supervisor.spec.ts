@@ -140,6 +140,7 @@ function requestFor(flags: FlagValues): SessionRequest {
 		compiler: flags["compiler"] !== false,
 		config: flags["syncback"] === true ? { syncback: { runOnStart: true } } : {},
 		open: flags["open"] !== false,
+		...(flags["force"] === true ? { force: true } : {}),
 	};
 }
 
@@ -1039,9 +1040,38 @@ describe("forge start session files", () => {
 
 		await expect(caught).resolves.toMatchObject({
 			code: "previous_generation_alive",
-			hint: `Wait for them to exit, or stop them, then start again. Their session files are in ${path.dirname(OLD_LEASE)}.`,
+			hint: `Wait for them to exit, or run again with --force to kill them. Their session files are in ${path.dirname(OLD_LEASE)}.`,
 		});
 		expect(run.fake.launches).toStrictEqual([]);
+	});
+
+	it("should kill an older session that outlives the wait with --force, then start (C4)", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({ files: WITH_OLD, flags: { ...ROJO_ONLY, force: true } });
+		const lease = run.native.addon.tryLockFile(OLD_LEASE, "shared");
+		assert(lease !== null);
+		run.native.sessions.set("old", [{ isReaper: true, lease, pid: 77 }, { pid: 78 }]);
+		await passAsync(run, 18_250);
+		run.signals.fire("SIGINT");
+		const cleanups = [{ killed: [78, 77], sessionId: "old", survivors: [], unverifiable: [] }];
+
+		await expect(run.result).resolves.toMatchObject({ data: { cleanups } });
+		expect(run.native.cleanups).toMatchObject([{ target: { sessionId: "old" } }]);
+		expect(run.reporter.events).toContainEqual({
+			message: "--force killed 2 processes of the earlier session old.",
+			type: "warning",
+		});
+		expect(run.fake.launches).toHaveLength(1);
+	});
+
+	it("should leave cleanups out of the result when no older session needed one", async () => {
+		expect.assertions(1);
+
+		const run = await stoppedAsync({ files: WITH_OLD, flags: { ...ROJO_ONLY, force: true } });
+		const { data } = await run.result;
+
+		expect(Object.keys(data)).not.toContain("cleanups");
 	});
 
 	it("should create no session when stopped while it waits for an older session", async () => {
@@ -1073,6 +1103,24 @@ describe("forge start session files", () => {
 			message: "Processes of the session were still alive when forge stopped waiting.",
 		});
 		expect(run.memory.files()[".forge/current"]).toBe("session-1\n");
+	});
+
+	it("should name the surviving PIDs when the final barrier times out", async () => {
+		expect.assertions(1);
+
+		const run = startCommand();
+		await flushAsync();
+		run.native.sessions.set("session-1", [{ pid: 91 }, { pid: 92 }]);
+		run.signals.fire("SIGINT");
+		const caught = run.result.catch((err: unknown) => err);
+		await passAsync(run, 5250);
+
+		await expect(caught).resolves.toMatchObject({
+			code: "cleanup_in_progress",
+			details: { pids: [91, 92], sessionId: "session-1" },
+			message:
+				"Processes of the session were still alive when forge stopped waiting (PIDs 91, 92).",
+		});
 	});
 
 	it("should delete the session files when the reaper does not start", async () => {
