@@ -390,15 +390,27 @@ impl Tree {
                 return Ok(Finished {
                     status,
                     empty: true,
+                    survivors: Vec::new(),
                 });
             }
             if Instant::now() >= deadline {
                 return Ok(Finished {
                     status,
                     empty: false,
+                    survivors: Vec::new(),
                 });
             }
             thread::sleep(POLL_INTERVAL);
         }
     }
+}
+
+/// Jobs own every descendant from creation: nothing to set up.
+pub fn become_owner() -> io::Result<()> {
+    Ok(())
+}
+
+/// Jobs kill every descendant: no orphan outlives its tree.
+pub fn sweep_orphans(_bound: Duration) -> io::Result<Vec<u32>> {
+    Ok(Vec::new())
 }

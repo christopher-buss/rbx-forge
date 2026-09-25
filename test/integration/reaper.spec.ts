@@ -1,8 +1,11 @@
 /**
  * The reaper through its Node API, with real processes: lifecycle scenarios
- * L1, L4, L5, and L9 of spec #28, and `terminate` semantics. L2 (hard kill
- * of the host) runs end to end in `test/e2e/start.spec.ts`.
+ * L1, L3, L3b, L3c, L4, L5, and L9 of spec #28, and `terminate` semantics.
+ * L2 (hard kill of the host) runs end to end in `test/e2e/start.spec.ts`.
+ * The PID-reuse half of L3c needs a reused PID, which only the native tests
+ * can stage (`reaper/src/os/worker/tests.rs`).
  */
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
@@ -18,7 +21,7 @@ import { loadRealNative, REAPER_PATH } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import {
 	isProcessAlive,
-	killWorkers,
+	killLoggedWorkersAsync,
 	readWorkerLog,
 	waitForDeathAsync,
 	waitForWorkersAsync,
@@ -48,8 +51,8 @@ async function startSessionAsync(): Promise<TestSession> {
 	const leasePath = path.join(directory, "workers.lock");
 	const log = path.join(directory, "workers.ndjson");
 	const sessionId = randomUUID();
-	onTestFinished(() => {
-		killWorkers(readWorkerLog(log));
+	onTestFinished(async () => {
+		await killLoggedWorkersAsync(log);
 	});
 	const reaper = await launchReaperAsync(
 		{
@@ -85,6 +88,9 @@ async function startSessionAsync(): Promise<TestSession> {
 		},
 	};
 }
+
+/** Grandchildren that leave the worker's process group (and session). */
+const ESCAPED = { FIXTURE_DETACH: "1" };
 
 function pidsOf(log: string): Array<number> {
 	return readWorkerLog(log).map(({ pid }) => pid);
@@ -191,6 +197,141 @@ describe("reaper", () => {
 
 		expect(survivors).toStrictEqual([]);
 	}, 60_000);
+
+	it("should kill setsid and double-forked descendants (L3)", async () => {
+		expect.assertions(2);
+
+		const { log, reaper, worker } = await startSessionAsync();
+		reaper.go();
+		await reaper.spawnAsync(
+			worker("rojo", {
+				...ESCAPED,
+				FIXTURE_CHAIN: "1",
+				FIXTURE_GRANDCHILDREN: "2",
+				FIXTURE_ORPHAN: "1",
+			}),
+		);
+		// rojo, two grandchildren that exit, and their two orphaned links.
+		await waitForWorkersAsync(log, 5);
+		const end = await reaper.terminateAsync(1000);
+
+		expect(end.reports).toMatchObject([
+			{ id: "rojo", report: { incomplete: false, survivors: [] } },
+		]);
+		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
+	});
+
+	it("should kill escaped descendants of a worker that exits on its own", async () => {
+		expect.assertions(2);
+
+		const { log, reaper, worker } = await startSessionAsync();
+		reaper.go();
+		const rojo = await reaper.spawnAsync(
+			worker("rojo", {
+				...ESCAPED,
+				FIXTURE_EXIT_AFTER_MS: "500",
+				FIXTURE_GRANDCHILDREN: "2",
+			}),
+		);
+		await waitForWorkersAsync(log, 3);
+
+		await expect(rojo.exited).resolves.toMatchObject({ exitCode: 0, incomplete: false });
+		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
+	});
+
+	it("should kill an escaped chain that ignores SIGTERM and storms in one run (L3b)", async () => {
+		expect.assertions(2);
+
+		const { log, reaper, worker } = await startSessionAsync();
+		reaper.go();
+		await reaper.spawnAsync(
+			worker("rojo", {
+				...ESCAPED,
+				FIXTURE_CHAIN: "2",
+				FIXTURE_GRANDCHILDREN: "1",
+				FIXTURE_IGNORE_SIGNALS: "1",
+				FIXTURE_STORM_MS: "25",
+			}),
+		);
+		// rojo, the chain A → B → C, and the first storm children.
+		await waitForWorkersAsync(log, 6);
+		const end = await reaper.terminateAsync(300);
+
+		expect(end.reports).toMatchObject([
+			{ id: "rojo", report: { forced: true, incomplete: false } },
+		]);
+		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
+	});
+
+	it("should never kill escaped descendants of another worker or session (L3c)", async () => {
+		expect.assertions(2);
+
+		const first = await startSessionAsync();
+		const second = await startSessionAsync();
+		first.reaper.go();
+		second.reaper.go();
+		await first.reaper.spawnAsync(
+			first.worker("rojo", { ...ESCAPED, FIXTURE_GRANDCHILDREN: "1" }),
+		);
+		await first.reaper.spawnAsync(
+			first.worker("compiler", { ...ESCAPED, FIXTURE_GRANDCHILDREN: "1" }),
+		);
+		await second.reaper.spawnAsync(
+			second.worker("rojo", { ...ESCAPED, FIXTURE_GRANDCHILDREN: "1" }),
+		);
+		const firstRecords = await waitForWorkersAsync(first.log, 4);
+		const bystanders = [
+			...firstRecords.filter(({ markers }) => markers.worker === "compiler"),
+			...(await waitForWorkersAsync(second.log, 2)),
+		].map(({ pid }) => pid);
+		const targets = firstRecords
+			.filter(({ markers }) => markers.worker === "rojo")
+			.map(({ pid }) => pid);
+		first.reaper.stop("rojo", 0);
+
+		await expect(waitForDeathAsync(targets)).resolves.toStrictEqual([]);
+		expect(bystanders.filter((pid) => isProcessAlive(pid))).toStrictEqual(bystanders);
+	});
+
+	// Only Linux has a subreaper. Windows jobs hold such orphans anyway; on
+	// macOS they are an accepted limit (spec #28).
+	it.skipIf(process.platform !== "linux")(
+		"should kill an orphan that scrubbed its markers once the session ends",
+		async () => {
+			expect.assertions(2);
+
+			const { log, reaper, worker } = await startSessionAsync();
+			reaper.go();
+			await reaper.spawnAsync(
+				worker("rojo", { ...ESCAPED, FIXTURE_GRANDCHILDREN: "1", FIXTURE_SCRUB: "1" }),
+			);
+			const [, grandchild] = await waitForWorkersAsync(log, 2);
+			assert(grandchild !== undefined);
+
+			expect(grandchild.markers).toStrictEqual({});
+
+			await reaper.terminateAsync(1000);
+
+			await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
+		},
+	);
+
+	// Windows has no SIGTERM to catch: there the reaper's jobs close instead.
+	it.skipIf(process.platform === "win32")(
+		"should stop every tree when the reaper gets SIGTERM, as on parent death",
+		async () => {
+			expect.assertions(2);
+
+			const { log, reaper, worker } = await startSessionAsync();
+			reaper.go();
+			await reaper.spawnAsync(worker("rojo", { ...ESCAPED, FIXTURE_GRANDCHILDREN: "2" }));
+			await waitForWorkersAsync(log, 3);
+			process.kill(reaper.pid, "SIGTERM");
+
+			await expect(reaper.ended).resolves.toMatchObject({ terminated: true });
+			await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
+		},
+	);
 
 	it("should reject a worker whose program does not exist", async () => {
 		expect.assertions(1);

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { encodeRequest, parseEvent } from "./protocol.ts";
 
-const REPORT = { exitCode: 0, forced: false, incomplete: false, signal: null };
+const REPORT = { exitCode: 0, forced: false, incomplete: false, signal: null, survivors: [] };
 
 describe(encodeRequest, () => {
 	it("should write a control request as one JSON line", () => {
@@ -96,12 +96,28 @@ describe(parseEvent, () => {
 		).toStrictEqual({ reports: [{ id: "a", report: REPORT }], type: "terminated" });
 	});
 
+	it("should read the PIDs of the members that outlived the bound", () => {
+		expect.assertions(1);
+
+		const report = { ...REPORT, incomplete: true, survivors: [41, 42] };
+
+		expect(parseEvent(JSON.stringify({ id: "a", report, type: "exited" }))).toStrictEqual({
+			id: "a",
+			report,
+			type: "exited",
+		});
+	});
+
 	it.for([
 		["not JSON", "leased"],
 		["an unknown type", '{"type":"exploded"}'],
 		["a bad reason", '{"type":"rejected","id":"a","reason":"tired","message":"m"}'],
 		["a report without flags", '{"type":"exited","id":"a","report":{"exitCode":0}}'],
 		["a fractional pid", '{"type":"leased","pid":1.5}'],
+		[
+			"survivors that are not PIDs",
+			'{"type":"exited","id":"a","report":{"exitCode":0,"forced":false,"incomplete":true,"signal":null,"survivors":["x"]}}',
+		],
 	] as const)("should return undefined for %s", ([, line]) => {
 		expect.assertions(1);
 

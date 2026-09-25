@@ -43,6 +43,12 @@ export interface WorkerReport {
 	incomplete: boolean;
 	/** The POSIX signal number that ended the leader. */
 	signal: null | number;
+	/**
+	 * POSIX: the PIDs of the members that still lived. The reaper always
+	 * sends the list (empty on Windows, which cannot name them); a report the
+	 * host makes for a dead reaper has none.
+	 */
+	survivors?: Array<number>;
 }
 
 /** Why the reaper started no worker for a `spawn`. */
@@ -63,10 +69,11 @@ export type ReaperEvent =
 	| { reports: Array<FinalReport>; type: "terminated" };
 
 const report = type({
-	exitCode: "number.integer | null",
-	forced: "boolean",
-	incomplete: "boolean",
-	signal: "number.integer | null",
+	"exitCode": "number.integer | null",
+	"forced": "boolean",
+	"incomplete": "boolean",
+	"signal": "number.integer | null",
+	"survivors?": "number.integer[]",
 });
 
 const eventSchema: Type<ReaperEvent> = type.or(

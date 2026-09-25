@@ -114,3 +114,23 @@ export function killWorkers(records: ReadonlyArray<WorkerRecord>): void {
 		}
 	}
 }
+
+/**
+ * Force-kill every worker the log records until none is left: a storm may
+ * record new workers while the kills run. Gives up after `timeoutMs`.
+ *
+ * @param logFile - The `FIXTURE_LOG` path.
+ * @param timeoutMs - The bound.
+ */
+export async function killLoggedWorkersAsync(logFile: string, timeoutMs = 5000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		const alive = readWorkerLog(logFile).filter(({ pid }) => isProcessAlive(pid));
+		if (alive.length === 0 || Date.now() > deadline) {
+			return;
+		}
+
+		killWorkers(alive);
+		await sleep(POLL_MS);
+	}
+}

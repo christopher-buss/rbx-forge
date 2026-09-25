@@ -51,6 +51,45 @@ pub fn start_time(pid: u32) -> io::Result<Option<StartTime>> {
     sys::start_time(pid)
 }
 
+/// One row of the process table, read by PID: a PID in a row names the
+/// process only until it is reaped. Pin it before acting on it.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProcessEntry {
+    pub pid: u32,
+    pub ppid: u32,
+    /// The process group id.
+    pub group: u32,
+    pub start_time: StartTime,
+    /// A zombie: exited, not yet reaped.
+    pub exited: bool,
+}
+
+/// Every process the OS lists. Processes that end during the listing are
+/// left out.
+///
+/// # Errors
+///
+/// When the OS refuses the listing.
+#[cfg(unix)]
+pub fn processes() -> io::Result<Vec<ProcessEntry>> {
+    sys::processes()
+}
+
+/// Whether an environment block (`NAME=value` entries, each ended by NUL)
+/// holds every pair exactly.
+#[cfg(unix)]
+fn block_contains(block: &[u8], pairs: &[(&str, &str)]) -> bool {
+    pairs.iter().all(|(name, value)| {
+        block.split(|byte| *byte == 0).any(|entry| {
+            entry.len() == name.len() + 1 + value.len()
+                && entry.starts_with(name.as_bytes())
+                && entry[name.len()] == b'='
+                && entry.ends_with(value.as_bytes())
+        })
+    })
+}
+
 /// A process held by identity. See the module docs.
 #[derive(Debug)]
 pub struct PinnedProcess {
@@ -144,6 +183,24 @@ impl PinnedProcess {
     pub fn wait_for_exit(&self, timeout: Duration) -> io::Result<bool> {
         self.pin.wait_for_exit(timeout)
     }
+
+    /// Whether the environment the pinned process started with holds every
+    /// `(name, value)` pair. A process that changes its own environment
+    /// later keeps the one it started with here.
+    ///
+    /// Returns `Ok(None)` when the process has exited.
+    ///
+    /// # Errors
+    ///
+    /// When the OS refuses the read, for example for a process of another
+    /// user.
+    #[cfg(unix)]
+    pub fn has_environment(&self, pairs: &[(&str, &str)]) -> io::Result<Option<bool>> {
+        Ok(self
+            .pin
+            .environment()?
+            .map(|block| block_contains(&block, pairs)))
+    }
 }
 
 #[cfg(test)]
@@ -236,6 +293,83 @@ mod tests {
         child.wait().unwrap();
 
         assert!(!exited);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn block_contains_matches_whole_entries_only() {
+        let block = b"A=1\0RBX=session\0B=\0";
+
+        assert!(super::block_contains(
+            block,
+            &[("A", "1"), ("RBX", "session")]
+        ));
+        assert!(super::block_contains(block, &[("B", "")]));
+        assert!(!super::block_contains(block, &[("A", "12")]));
+        assert!(!super::block_contains(block, &[("RB", "X=session")]));
+        assert!(!super::block_contains(block, &[("A", "1"), ("C", "1")]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn processes_lists_a_child_with_its_parent_group_and_start_time() {
+        let mut child = sleeper();
+        let entries = super::processes().unwrap();
+        let entry = entries
+            .iter()
+            .find(|entry| entry.pid == child.id())
+            .copied();
+        let own_group = entries
+            .iter()
+            .find(|entry| entry.pid == std::process::id())
+            .map(|entry| entry.group);
+        let start = start_time(child.id()).unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let entry = entry.unwrap();
+
+        assert_eq!(entry.ppid, std::process::id());
+        assert_eq!(Some(entry.group), own_group);
+        assert_eq!(Some(entry.start_time), start);
+        assert!(!entry.exited);
+    }
+
+    /// Poll `has_environment` for up to five seconds until it holds `pairs`.
+    #[cfg(unix)]
+    fn wait_for_environment(
+        pinned: &PinnedProcess,
+        pairs: &[(&str, &str)],
+    ) -> std::io::Result<Option<bool>> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let found = pinned.has_environment(pairs);
+            if matches!(found, Ok(Some(true))) || std::time::Instant::now() >= deadline {
+                return found;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn has_environment_reads_the_environment_the_process_started_with() {
+        let mut child = Command::new("sleep")
+            .arg("60")
+            .env("FORGE_TEST_MARKER", "yes")
+            .stdin(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pinned = PinnedProcess::open(child.id()).unwrap().unwrap();
+        // `spawn` can return while `exec` still sets up the new image, whose
+        // environment reads empty until then.
+        let found = wait_for_environment(&pinned, &[("FORGE_TEST_MARKER", "yes")]);
+        let wrong = pinned.has_environment(&[("FORGE_TEST_MARKER", "no")]);
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        assert_eq!(found.unwrap(), Some(true));
+        assert_eq!(wrong.unwrap(), Some(false));
+        assert_eq!(pinned.has_environment(&[]).unwrap(), None);
     }
 
     #[cfg(unix)]

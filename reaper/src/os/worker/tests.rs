@@ -34,6 +34,7 @@ fn shell(name: &str, script: &str, log: Option<&Path>) -> Spec {
         args,
         cwd: directory(name),
         env: std::env::vars().collect(),
+        markers: Vec::new(),
         log: log.map(Path::to_path_buf),
         verbatim,
         job_name: format!("Local\\rbx-forge-test-{}-{name}", std::process::id()),
@@ -129,4 +130,141 @@ fn a_missing_program_fails_to_spawn() {
     spec.file = directory("missing").join("no-such-program");
 
     assert!(WorkerTree::spawn(&spec, &Inherit::default()).is_err());
+}
+
+/// Markers unique to one test.
+#[cfg(unix)]
+fn markers(name: &str) -> Vec<(String, String)> {
+    let id = format!("{}-{name}", std::process::id());
+    vec![
+        ("FORGE_TEST_SESSION".into(), id.clone()),
+        ("FORGE_TEST_WORKER".into(), id),
+    ]
+}
+
+#[cfg(unix)]
+fn pairs(markers: &[(String, String)]) -> Vec<(&str, &str)> {
+    markers
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect()
+}
+
+/// A `sleep` with these variables, and its row in the process table.
+#[cfg(unix)]
+fn marked_sleeper(
+    variables: &[(String, String)],
+) -> (std::process::Child, crate::os::process::ProcessEntry) {
+    let child = std::process::Command::new("sleep")
+        .arg("60")
+        .envs(variables.iter().cloned())
+        .stdin(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    // `spawn` can return while `exec` still sets up the new image, whose
+    // environment reads empty until then.
+    let pinned = crate::os::process::PinnedProcess::open(child.id())
+        .unwrap()
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while pinned.has_environment(&pairs(variables)).unwrap() != Some(true)
+        && std::time::Instant::now() < deadline
+    {
+        thread::sleep(Duration::from_millis(5));
+    }
+    let entry = crate::os::process::processes()
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.pid == child.id())
+        .unwrap();
+    (child, entry)
+}
+
+#[cfg(unix)]
+#[test]
+fn kill_marked_kills_a_process_with_every_marker_through_its_pin() {
+    let markers = markers("hit");
+    let (mut child, entry) = marked_sleeper(&markers);
+
+    let killed = super::sys::kill_marked(&entry, &pairs(&markers)).map(|pin| pin.pid());
+    let status = child.wait().unwrap();
+
+    assert_eq!(killed, Some(entry.pid));
+    assert_eq!(
+        std::os::unix::process::ExitStatusExt::signal(&status),
+        Some(libc::SIGKILL)
+    );
+}
+
+/// L3c: the listing saw another process under this PID (another start
+/// time), so the process now under it is never killed.
+#[cfg(unix)]
+#[test]
+fn kill_marked_never_kills_a_process_that_reused_the_pid() {
+    let markers = markers("reuse");
+    let (mut child, mut entry) = marked_sleeper(&markers);
+    entry.start_time -= 1;
+
+    let killed = super::sys::kill_marked(&entry, &pairs(&markers)).is_some();
+    let alive = child.try_wait().unwrap().is_none();
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    assert!(!killed);
+    assert!(alive);
+}
+
+#[cfg(unix)]
+#[test]
+fn kill_marked_never_kills_a_process_without_every_marker() {
+    let markers = markers("partial");
+    let (mut child, entry) = marked_sleeper(&markers[..1]);
+
+    let killed = super::sys::kill_marked(&entry, &pairs(&markers)).is_some();
+    let alive = child.try_wait().unwrap().is_none();
+    child.kill().unwrap();
+    child.wait().unwrap();
+
+    assert!(!killed);
+    assert!(alive);
+}
+
+/// L3: a descendant that left the group (and outlived its parent) dies in
+/// the forced stop through its markers.
+#[cfg(unix)]
+#[test]
+fn finish_kills_a_marked_descendant_that_left_the_group() {
+    let markers = markers("escape");
+    let pid_file = directory("escape").join("escaped.pid");
+    let script = format!(
+        "perl -e 'setpgrp(0, 0); open(F, \">{file}.tmp\"); print F $$; close F; \
+         rename(\"{file}.tmp\", \"{file}\"); sleep 60' & \
+         while [ ! -s {file} ]; do sleep 0.05; done; exit 0",
+        file = pid_file.display()
+    );
+    let mut spec = shell("escape", &script, None);
+    spec.env.extend(markers.iter().cloned());
+    spec.markers = markers;
+    let tree = WorkerTree::spawn(&spec, &Inherit::default()).unwrap();
+    tree.release();
+    tree.wait_leader().unwrap();
+    let escaped: u32 = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let pinned = crate::os::process::PinnedProcess::open(escaped)
+        .unwrap()
+        .unwrap();
+    let group_before = crate::os::process::processes()
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.pid == escaped)
+        .map(|entry| entry.group);
+    let finished = tree.finish(Duration::from_secs(5)).unwrap();
+
+    assert_eq!(group_before, Some(escaped));
+    assert_eq!(finished.survivors, Vec::<u32>::new());
+    assert!(finished.empty);
+    assert!(pinned.wait_for_exit(Duration::from_secs(5)).unwrap());
 }

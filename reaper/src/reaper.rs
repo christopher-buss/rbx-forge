@@ -58,6 +58,9 @@ pub trait Platform {
     type Tree: Tree;
     /// Create the worker, held so it runs no code until [`Tree::release`].
     fn spawn(&mut self, serial: u64, request: &SpawnRequest) -> io::Result<Self::Tree>;
+    /// Once every tree is finished, before `terminated`: kill what no tree
+    /// names (Linux: orphans the subreaper adopted).
+    fn sweep_orphans(&mut self);
 }
 
 /// What the main loop reacts to.
@@ -65,7 +68,8 @@ pub trait Platform {
 pub enum Input {
     /// One line from stdin.
     Line(String),
-    /// stdin reached EOF or failed: the host is gone.
+    /// The host is gone: stdin reached EOF or failed, or `SIGTERM` arrived
+    /// (POSIX; on Linux also the parent-death signal).
     StdinClosed,
     /// The leader of the worker with this serial exited.
     LeaderExited(u64),
@@ -130,6 +134,7 @@ impl<P: Platform, W: Write> Reaper<P, W> {
             self.force_due();
         }
 
+        self.platform.sweep_orphans();
         let reports = std::mem::take(&mut self.reports);
         self.emit(&Event::Terminated { reports });
         self.out
@@ -293,6 +298,7 @@ impl<P: Platform, W: Write> Reaper<P, W> {
             Finished {
                 status: ExitStatus::default(),
                 empty: false,
+                survivors: Vec::new(),
             }
         });
         let report = Report {
@@ -300,6 +306,7 @@ impl<P: Platform, W: Write> Reaper<P, W> {
             signal: finished.status.signal,
             forced: worker.forced,
             incomplete: !finished.empty,
+            survivors: finished.survivors,
         };
         self.emit(&Event::Exited {
             id: worker.id.clone(),
@@ -332,6 +339,8 @@ mod tests {
         exited: Arc<(Mutex<bool>, Condvar)>,
         /// The leader exits on its graceful signal.
         obeys: bool,
+        /// What `finish` reports as still alive.
+        survivors: Vec<u32>,
     }
 
     impl FakeTree {
@@ -385,7 +394,8 @@ mod tests {
                     code: Some(0),
                     signal: None,
                 },
-                empty: true,
+                empty: self.survivors.is_empty(),
+                survivors: self.survivors.clone(),
             })
         }
     }
@@ -395,6 +405,7 @@ mod tests {
         /// Leaders that exit on their graceful signal.
         obeys: bool,
         fails: bool,
+        survivors: Vec<u32>,
     }
 
     impl Platform for FakePlatform {
@@ -412,7 +423,12 @@ mod tests {
                 log: Arc::clone(&self.log),
                 exited: Arc::new((Mutex::new(false), Condvar::new())),
                 obeys: self.obeys,
+                survivors: self.survivors.clone(),
             })
+        }
+
+        fn sweep_orphans(&mut self) {
+            self.log.lock().unwrap().push("sweep".to_owned());
         }
     }
 
@@ -462,6 +478,7 @@ mod tests {
             log: Arc::default(),
             obeys,
             fails: false,
+            survivors: Vec::new(),
         }
     }
 
@@ -486,7 +503,7 @@ mod tests {
 
         assert_eq!(types(&run), ["leased", "rejected", "terminated"]);
         assert_eq!(run.events[1]["reason"], "not_admitted");
-        assert!(run.log.is_empty());
+        assert_eq!(run.log, ["sweep"]);
     }
 
     #[test]
@@ -502,9 +519,34 @@ mod tests {
         assert_eq!(run.events[1]["startTime"], "7");
         assert_eq!(
             run.log,
-            ["spawn 0 a", "release 0", "graceful 0", "kill 0", "finish 0"]
+            [
+                "spawn 0 a",
+                "release 0",
+                "graceful 0",
+                "kill 0",
+                "finish 0",
+                "sweep"
+            ]
         );
         assert_eq!(run.events[2]["report"]["forced"], false);
+    }
+
+    #[test]
+    fn reports_the_survivors_of_a_tree_that_did_not_empty() {
+        let run = run(
+            FakePlatform {
+                survivors: vec![41, 42],
+                ..platform(true)
+            },
+            &[go(), spawn_line("a"), terminate(1000)],
+            false,
+        );
+
+        assert_eq!(run.events[2]["report"]["incomplete"], true);
+        assert_eq!(
+            run.events[2]["report"]["survivors"],
+            serde_json::json!([41, 42])
+        );
     }
 
     #[test]
@@ -540,7 +582,8 @@ mod tests {
                 "graceful 0",
                 "kill 0",
                 "kill 0",
-                "finish 0"
+                "finish 0",
+                "sweep"
             ]
         );
     }
