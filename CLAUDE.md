@@ -357,3 +357,31 @@ runs:
 3. Type checking (`nr typecheck`)
 
 All three must pass before merging.
+
+## Agent skills
+
+Skills live in `.agents/skills/` (Claude Code reads them through the symlinks
+in `.claude/skills/`). Most come from
+[mattpocock/skills](https://github.com/mattpocock/skills) and are pinned in
+`skills-lock.json`. `create-pr` and `zoom-out` are local skills.
+
+Local edits to upstream skills (re-apply after `npx skills update`):
+
+- `grilling`: top-three rounds, skimmable format, ASD-STE100, `CONTEXT.md`
+  vocabulary.
+- `handoff`: handoffs into another repository.
+- `implement`: autonomous flow (`/simplify`, `/code-review`, frequent commits,
+  `/create-pr`).
+- `research`: escape `## Sources` brackets for GFM.
+- `to-spec`: assign to `@me`; every new module gets tests.
+- `to-tickets`: native sub-issue and blocked-by links; assign to `@me`.
+
+### Issue tracker
+
+GitHub Issues for `christopher-buss/rbx-forge` via `gh`. See
+`docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context (`CONTEXT.md` + `docs/adr/` at the root). See
+`docs/agents/domain.md`.
