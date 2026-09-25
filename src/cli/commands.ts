@@ -1,4 +1,5 @@
 import { BUILD_FLAGS, runBuildCommandAsync } from "../commands/build.ts";
+import { runCompileCommandAsync } from "../commands/compile.ts";
 import { runConfigAsync } from "../commands/config.ts";
 import type { CommandRun } from "../commands/context.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
@@ -37,6 +38,12 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		flags: BUILD_FLAGS,
 		run: runBuildCommandAsync,
 		summary: "Build the Rojo project to a place or model file, or a Studio plugin.",
+	},
+	{
+		name: "compile",
+		flags: [],
+		run: runCompileCommandAsync,
+		summary: "Compile the roblox-ts project once and report its errors (rbxts only).",
 	},
 	{
 		name: "open",

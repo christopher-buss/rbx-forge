@@ -13,7 +13,7 @@ import type { CommandContext } from "../commands/context.ts";
 import type { ForgeError } from "../errors.ts";
 import type { ProcessOutcome, ProcessRunner } from "./process-runner.ts";
 import type { ToolCall } from "./run-tool.ts";
-import { probeToolAsync, runToolAsync } from "./run-tool.ts";
+import { probeToolAsync, runToolAsync, spawnToolAsync } from "./run-tool.ts";
 
 const TOOLS = path.join(PROJECT, "tools");
 const INSTALLED: Record<string, string> = { "tools/rbxtsc": "" };
@@ -239,5 +239,30 @@ describe(probeToolAsync, () => {
 			code: "process_failed",
 			message: "The compiler could not start: spawn rbxtsc EACCES",
 		});
+	});
+});
+
+describe(spawnToolAsync, () => {
+	it("should return how a failing tool ended instead of throwing", async () => {
+		expect.assertions(2);
+
+		const { context, reporter } = makeToolRun(exited(1, ["error"]));
+
+		await expect(spawnToolAsync(context, CALL)).resolves.toStrictEqual(exited(1, ["error"]));
+		expect(reporter.events.at(-1)).toStrictEqual({
+			name: "rbxtsc",
+			status: "failed",
+			type: "step",
+		});
+	});
+
+	it("should hand the tool's output lines to onLine", async () => {
+		expect.assertions(1);
+
+		const { context, processRunner } = makeToolRun(exited(0));
+		const onLine = vi.fn<(line: string) => void>();
+		await spawnToolAsync(context, { ...CALL, onLine });
+
+		expect(processRunner).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ onLine }));
 	});
 });

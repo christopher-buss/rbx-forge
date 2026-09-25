@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { ChildProcess } from "node:child_process";
 import path from "node:path";
+import type { Readable } from "node:stream";
 
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Clock } from "../seams/clock.ts";
@@ -23,6 +24,12 @@ export interface ProcessSpec {
 	cwd: string;
 	env: Environment;
 	file: string;
+	/**
+	 * Gets every output line as it arrives, stdout and stderr together, then
+	 * a last line with no newline when the process ends. The outcome keeps
+	 * only a tail; this sees the whole output, for a log or a parser.
+	 */
+	onLine?: (line: string) => void;
 	/** Kill the whole process tree after this many milliseconds. */
 	timeoutMs?: number;
 	/**
@@ -76,8 +83,12 @@ interface Closed {
 
 /** The output a run keeps. */
 interface CollectedOutput {
-	/** The kept lines; a last line with no newline is included. */
-	lines: () => Array<string>;
+	/**
+	 * Stop collecting: hand a last line with no newline to `onLine`.
+	 *
+	 * @returns The kept lines, that last line included.
+	 */
+	finish: () => Array<string>;
 	/** Stop reading: destroy both pipes. */
 	release: () => void;
 }
@@ -186,12 +197,47 @@ async function killTreeAsync(
 }
 
 /**
- * Keep the last {@link OUTPUT_TAIL_LINES} lines of a child's output.
+ * Split a chunk of output into lines.
+ *
+ * @param partial - The line the last chunk left unfinished.
+ * @param chunk - Text as it arrived; it may end mid-line.
+ * @returns The complete lines, without a trailing carriage return, and the
+ *   text after the last newline.
+ */
+function splitChunk(partial: string, chunk: string): { complete: Array<string>; rest: string } {
+	const parts = `${partial}${chunk}`.split("\n");
+	const rest = parts.pop();
+	// `split` always returns at least one part.
+	assert(rest !== undefined);
+	return { complete: parts.map((line) => line.replace(TRAILING_CR, "")), rest };
+}
+
+/**
+ * Read a child's stdout and stderr as text.
  *
  * @param child - A child spawned with piped stdout and stderr.
+ * @param write - Gets each chunk as it arrives.
+ * @returns Both streams.
+ */
+function readOutput(child: ChildProcess, write: (chunk: string) => void): Array<Readable> {
+	return [child.stdout, child.stderr].map((stream) => {
+		// Spawned with piped stdout and stderr.
+		assert(stream !== null);
+		stream.setEncoding("utf8");
+		stream.on("data", write);
+		return stream;
+	});
+}
+
+/**
+ * Keep the last {@link OUTPUT_TAIL_LINES} lines of a child's output, and hand
+ * every line to `onLine`.
+ *
+ * @param child - A child spawned with piped stdout and stderr.
+ * @param onLine - Gets every line, if given.
  * @returns The kept lines and a way to stop reading.
  */
-function collectOutput(child: ChildProcess): CollectedOutput {
+function collectOutput(child: ChildProcess, onLine?: (line: string) => void): CollectedOutput {
 	let lines: Array<string> = [];
 	let partial = "";
 
@@ -201,26 +247,25 @@ function collectOutput(child: ChildProcess): CollectedOutput {
 	 * @param chunk - Text as it arrived; it may end mid-line.
 	 */
 	function write(chunk: string): void {
-		const parts = `${partial}${chunk}`.split("\n");
-		const last = parts.pop();
-		// `split` always returns at least one part.
-		assert(last !== undefined);
-		partial = last;
-		lines = [...lines, ...parts.map((line) => line.replace(TRAILING_CR, ""))].slice(
-			-OUTPUT_TAIL_LINES,
-		);
+		const { complete, rest } = splitChunk(partial, chunk);
+		partial = rest;
+		for (const line of complete) {
+			onLine?.(line);
+		}
+
+		lines = [...lines, ...complete].slice(-OUTPUT_TAIL_LINES);
 	}
 
-	const streams = [child.stdout, child.stderr].map((stream) => {
-		// Spawned with piped stdout and stderr.
-		assert(stream !== null);
-		stream.setEncoding("utf8");
-		stream.on("data", write);
-		return stream;
-	});
+	const streams = readOutput(child, write);
 
 	return {
-		lines: () => (partial === "" ? lines : [...lines, partial].slice(-OUTPUT_TAIL_LINES)),
+		finish: () => {
+			if (partial !== "") {
+				write("\n");
+			}
+
+			return lines;
+		},
 		release: () => {
 			for (const stream of streams) {
 				stream.destroy();
@@ -252,7 +297,7 @@ async function runChildAsync(
 		return { errorCode: error.code, message: error.message, type: "spawn_failed" };
 	}
 
-	const output = collectOutput(child);
+	const output = collectOutput(child, spec.onLine);
 	const exited = waitForEventAsync(child, "exit");
 	const closed = waitForEventAsync(child, "close");
 	if (await outlivesTimeoutAsync(closed, clock, spec.timeoutMs)) {
@@ -262,12 +307,12 @@ async function runChildAsync(
 		output.release();
 		return {
 			durationMs: clock.now() - startedAt,
-			outputTail: output.lines(),
+			outputTail: output.finish(),
 			type: "timed_out",
 		};
 	}
 
 	const { exitCode, signal } = await closed;
 	const durationMs = clock.now() - startedAt;
-	return { durationMs, exitCode, outputTail: output.lines(), signal, type: "exited" };
+	return { durationMs, exitCode, outputTail: output.finish(), signal, type: "exited" };
 }

@@ -1,1 +1,4 @@
 * text eol=lf
+
+# Recorded compiler output: bytes as the compiler wrote them (ANSI, CRLF).
+test/fixtures/rbxtsc/*.txt -text

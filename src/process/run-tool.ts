@@ -19,6 +19,8 @@ export interface ToolProbe {
 
 /** A tool forge runs to completion, such as `rojo build` or `rbxtsc`. */
 export interface ToolCall extends ToolProbe {
+	/** Gets every output line, for a log or a parser. */
+	onLine?: (line: string) => void;
 	/** The step name the reporter shows, such as `rojo build`. */
 	step: string;
 }
@@ -33,6 +35,57 @@ export interface ToolSuccess {
 const MESSAGE_TAIL_LINES = 20;
 
 /**
+ * Like {@link runToolAsync}, but return how the tool ended, for a caller that
+ * reads a failure itself. Pass the outcome to {@link checkToolOutcome} for the
+ * usual errors.
+ *
+ * @param context - The run: project root, environment, seams, reporter.
+ * @param call - The tool and its arguments.
+ * @returns How the tool ended.
+ * @rejects {ForgeError} `call.missing` when the tool is not installed.
+ */
+export async function spawnToolAsync(
+	context: CommandContext,
+	call: ToolCall,
+): Promise<ProcessOutcome> {
+	const { reporter } = context;
+	const spawn = prepareSpawn(context, call);
+	reporter.emit({ name: call.step, status: "started", type: "step" });
+	const outcome = await spawn();
+	const isOk = outcome.type === "exited" && outcome.exitCode === 0;
+	reporter.emit({ name: call.step, status: isOk ? "succeeded" : "failed", type: "step" });
+
+	return outcome;
+}
+
+/**
+ * Turn how a tool ended into its success, or the error for its failure.
+ *
+ * @param call - The tool that ran.
+ * @param outcome - How it ended.
+ * @returns Its duration and output tail when it exited with code 0.
+ * @throws {ForgeError} `call.missing` when it could not start because it is
+ *   gone, else `process_failed`.
+ */
+export function checkToolOutcome(call: ToolCall, outcome: ProcessOutcome): ToolSuccess {
+	checkSpawned(call, outcome);
+	if (outcome.type === "exited" && outcome.exitCode === 0) {
+		return { durationMs: outcome.durationMs, outputTail: outcome.outputTail };
+	}
+
+	const reason =
+		outcome.type === "exited"
+			? `exit code ${String(outcome.exitCode)}`
+			: "timed out and was killed";
+	const tail = outcome.outputTail.slice(-MESSAGE_TAIL_LINES).map((line) => `  ${line}`);
+	throw new ForgeError(
+		"process_failed",
+		[`${call.step} failed (${reason}).`, ...tail].join("\n"),
+		{ details: { outputTail: outcome.outputTail } },
+	);
+}
+
+/**
  * Resolve a tool (`process/resolve-tool.ts`), run it in the project root, and
  * wait for it. Reports the run as a step.
  *
@@ -43,14 +96,7 @@ const MESSAGE_TAIL_LINES = 20;
  *   `process_failed` when it fails.
  */
 export async function runToolAsync(context: CommandContext, call: ToolCall): Promise<ToolSuccess> {
-	const { reporter } = context;
-	const spawn = prepareSpawn(context, call);
-	reporter.emit({ name: call.step, status: "started", type: "step" });
-	const outcome = await spawn();
-	const isOk = outcome.type === "exited" && outcome.exitCode === 0;
-	reporter.emit({ name: call.step, status: isOk ? "succeeded" : "failed", type: "step" });
-
-	return checkOutcome(call, outcome);
+	return checkToolOutcome(call, await spawnToolAsync(context, call));
 }
 
 /**
@@ -86,7 +132,7 @@ function missingError(call: ToolProbe): ForgeError {
  */
 function prepareSpawn(
 	{ cwd, env, seams }: CommandContext,
-	call: ToolProbe,
+	call: Pick<ToolCall, "onLine"> & ToolProbe,
 ): () => Promise<ProcessOutcome> {
 	const lookup = { cwd, env, fileSystem: seams.fileSystem, host: seams.host };
 	const tool = resolveTool(call.command, lookup);
@@ -94,8 +140,14 @@ function prepareSpawn(
 		throw missingError(call);
 	}
 
+	const { onLine } = call;
 	return async () => {
-		return seams.processRunner({ ...toolInvocation(tool, call.args, lookup), cwd, env });
+		return seams.processRunner({
+			...toolInvocation(tool, call.args, lookup),
+			cwd,
+			env,
+			...(onLine === undefined ? {} : { onLine }),
+		});
 	};
 }
 
@@ -112,22 +164,4 @@ function checkSpawned(
 	}
 
 	throw new ForgeError("process_failed", `${call.label} could not start: ${outcome.message}`);
-}
-
-function checkOutcome(call: ToolCall, outcome: ProcessOutcome): ToolSuccess {
-	checkSpawned(call, outcome);
-	if (outcome.type === "exited" && outcome.exitCode === 0) {
-		return { durationMs: outcome.durationMs, outputTail: outcome.outputTail };
-	}
-
-	const reason =
-		outcome.type === "exited"
-			? `exit code ${String(outcome.exitCode)}`
-			: "timed out and was killed";
-	const tail = outcome.outputTail.slice(-MESSAGE_TAIL_LINES).map((line) => `  ${line}`);
-	throw new ForgeError(
-		"process_failed",
-		[`${call.step} failed (${reason}).`, ...tail].join("\n"),
-		{ details: { outputTail: outcome.outputTail } },
-	);
 }

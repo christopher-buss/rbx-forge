@@ -1,0 +1,20 @@
+copy include files ( 3 ms )
+copy non-compiled files ( 1 ms )
+compiling as game..
+1/2 compile src\shared\module.ts ( 13 ms )
+2/2 compile src\shared\other.ts ( 0 ms )
+[96msrc/shared/module.ts[0m:[93m1[0m:[93m7[0m - [91merror[0m[90m TS2322: [0mType 'string' is not assignable to type 'number'.
+
+[7m1[0m const x: number = "hello";
+[7m [0m [91m      ~[0m
+
+[96msrc/shared/module.ts[0m:[93m3[0m:[93m13[0m - [91merror[0m[90m TS2552: [0mCannot find name 'undefinedName'. Did you mean 'undefined'?
+
+[7m3[0m  return a + undefinedName;
+[7m [0m [91m            ~~~~~~~~~~~~~[0m
+
+[96msrc/shared/other.ts[0m:[93m1[0m:[93m14[0m - [91merror[0m[90m TS2322: [0mType 'number' is not assignable to type 'string'.
+
+[7m1[0m export const y: string = 5;
+[7m [0m [91m             ~[0m
+

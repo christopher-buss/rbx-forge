@@ -17,6 +17,8 @@
  * - `FIXTURE_ROJO_ERROR`: `rojo syncback` prints this and exits with code 1.
  * - `FIXTURE_SOURCEMAP`: what `rojo sourcemap --output <file>` writes; no
  *   file when unset.
+ * - `FIXTURE_COMPILER_OUTPUT`: a file whose bytes a one-shot `rbxtsc` writes
+ *   to stdout before it exits, such as recorded compiler output.
  * - `FIXTURE_PLACE_CONTENT`: what `rojo build` writes to its output (default
  *   `fake place`).
  *
@@ -28,7 +30,7 @@
  * inherited by every grandchild unchanged.
  */
 import { spawn } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import process from "node:process";
 
 const ROJO_VERSION = "7.7.0";
@@ -154,6 +156,11 @@ function runCompiler(): void {
 		process.stdout.write("Found 0 errors. Watching for file changes.\n");
 		stayAlive();
 		return;
+	}
+
+	const output = env["FIXTURE_COMPILER_OUTPUT"];
+	if (output !== undefined) {
+		process.stdout.write(readFileSync(output));
 	}
 
 	exitOnce();
