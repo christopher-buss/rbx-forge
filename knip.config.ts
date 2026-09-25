@@ -6,6 +6,8 @@ export default {
 		"test/fixtures/bin/*.ts",
 	],
 	ignore: [".agents/**"],
+	// Windows tools the opt-in real Studio test runs.
+	ignoreBinaries: ["tasklist"],
 	ignoreDependencies: [
 		// Ambient lib replacement through `libReplacement`.
 		"better-typescript-lib",
