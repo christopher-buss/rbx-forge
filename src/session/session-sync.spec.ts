@@ -74,6 +74,7 @@ describe(createSessionSync, () => {
 
 		await expect(pending).rejects.toMatchObject({
 			code: "not_running",
+			hint: 'Start a session with "forge up", or run "forge syncback".',
 			message: "The session is stopping; it runs no more syncback.",
 		});
 	});

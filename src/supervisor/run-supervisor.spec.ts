@@ -593,6 +593,42 @@ describe(runSupervisorAsync, () => {
 		expect(run.reporter.events).not.toContainEqual(expect.objectContaining({ type: "info" }));
 	});
 
+	it("should show a stopping session while Rojo's port check is still going", async () => {
+		expect.assertions(1);
+
+		const listening = Promise.withResolvers<boolean>();
+		const run = startCommand({ isListening: async () => listening.promise });
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await flushAsync();
+		const during = stateOf(run);
+		listening.resolve(true);
+		await run.result;
+
+		expect(during).toMatchObject({ phase: "stopping", running: true });
+	});
+
+	it("should show a planned compiler as starting before anything runs", async () => {
+		expect.assertions(1);
+
+		const states: Array<Promise<unknown>> = [];
+		const run: StartRun = startCommand({
+			flags: { open: false },
+			projectType: "rbxts",
+			reaper: {
+				onLaunch: () => {
+					states.push(callSessionAsync(run.ipc, CONTROL_TARGET, "status"));
+					run.signals.fire("SIGTERM");
+				},
+			},
+		});
+		await run.result;
+
+		await expect(Promise.all(states)).resolves.toMatchObject([
+			{ services: { compiler: { status: "starting" } } },
+		]);
+	});
+
 	it("should fail with service_failed when Rojo never listens within the bound", async () => {
 		expect.assertions(2);
 
@@ -1674,6 +1710,26 @@ describe("forge sync control channel", () => {
 			"syncback-1: syncback default.project.json --input game.rbxl --non-interactive",
 		]);
 		expect(spawnedIds(run.fake).filter((id) => id.includes("--input"))).toHaveLength(2);
+	});
+
+	it("should answer not_running once a stop request came", async () => {
+		expect.assertions(1);
+
+		const run = startCommand(LINT_HOOK);
+		await flushAsync();
+		// A worker's lease holds the final barrier, so the session stays up.
+		run.native.addon.tryLockFile(path.join(SESSION, "workers.lock"), "shared");
+		run.signals.fire("SIGINT");
+		await flushAsync();
+		const answer = syncAsync(run);
+		const ended = run.result.catch((err: unknown) => err);
+		await passAsync(run, 5250);
+		await ended;
+
+		await expect(answer).resolves.toMatchObject({
+			code: "not_running",
+			hint: 'Start a session with "forge up", or run "forge syncback".',
+		});
 	});
 
 	it("should answer not_running when the session stops before syncback can run", async () => {

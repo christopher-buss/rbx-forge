@@ -51,6 +51,52 @@ describe(nodeNetwork.isPortFreeAsync, () => {
 });
 
 describe(nodeNetwork.isListeningAsync, () => {
+	it("should check 127.0.0.1 only, not every name of localhost", async () => {
+		expect.assertions(1);
+
+		const server = createServer();
+		const port = await new Promise<number>((resolve) => {
+			server.listen({ host: "::1", port: 0 }, () => {
+				// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a TCP server's address is an object
+				resolve((server.address() as AddressInfo).port);
+			});
+		});
+		onTestFinished(() => {
+			server.close();
+		});
+
+		await expect(nodeNetwork.isListeningAsync(port)).resolves.toBeFalse();
+	});
+
+	it("should close its connection once it got through", async () => {
+		expect.assertions(1);
+
+		const closed = Promise.withResolvers<string>();
+		const server = createServer((socket) => {
+			socket.once("close", () => {
+				closed.resolve("closed");
+			});
+		});
+		const port = await new Promise<number>((resolve) => {
+			server.listen({ host: "127.0.0.1", port: 0 }, () => {
+				// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a TCP server's address is an object
+				resolve((server.address() as AddressInfo).port);
+			});
+		});
+		onTestFinished(() => {
+			server.close();
+		});
+		await nodeNetwork.isListeningAsync(port);
+		const timer = setTimeout(() => {
+			closed.resolve("open");
+		}, 2000);
+		onTestFinished(() => {
+			clearTimeout(timer);
+		});
+
+		await expect(closed.promise).resolves.toBe("closed");
+	});
+
 	it("should report a port a server listens on as listening", async () => {
 		expect.assertions(1);
 

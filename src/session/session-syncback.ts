@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import path from "node:path";
 
 import type { CommandContext } from "../commands/context.ts";
@@ -60,6 +61,8 @@ export function startSyncback(
 	const run = { ...runs, target: resolveSyncbackTarget(session.config) };
 	const runner = createCoalescingRunner(async () => syncbackOnceAsync(session, scope, run));
 	session.sync.attach(runner.request);
+	// The runs end with the session either way; tracking orders them.
+	// Stryker disable next-line CallExpression: equivalent
 	scope.track(closeSyncbackAsync(session, scope, runner));
 	return runner;
 }
@@ -145,20 +148,9 @@ async function syncbackOnceAsync(
 }
 
 async function abortedAsync(signal: AbortSignal): Promise<void> {
-	return new Promise((resolve) => {
-		if (signal.aborted) {
-			resolve();
-			return;
-		}
-
-		signal.addEventListener(
-			"abort",
-			() => {
-				resolve();
-			},
-			{ once: true },
-		);
-	});
+	if (!signal.aborted) {
+		await once(signal, "abort");
+	}
 }
 
 /**

@@ -95,6 +95,7 @@ describe(runSyncAsync, () => {
 
 		await expect(runSyncAsync(context)).rejects.toMatchObject({
 			code: "internal_error",
+			hint: "The session may run another forge version. Stop it, then start it again.",
 			message: "The session answered sync with something else.",
 		});
 	});

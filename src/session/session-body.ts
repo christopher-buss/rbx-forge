@@ -115,6 +115,8 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 				watchOptions(session, scope),
 				syncback,
 			);
+			// The watch ends with the session either way; tracking orders it.
+			// Stryker disable next-line CallExpression: equivalent
 			scope.track(saves);
 		}
 	};
