@@ -260,7 +260,10 @@ describe(clearOldSessionsAsync, () => {
 		expect.assertions(2);
 
 		const { manual, memory, native, seams } = makeSeams(OLD_FILES);
-		native.sessions.set("old", [{ pid: 42, unverifiable: true }]);
+		native.sessions.set("old", [
+			{ pid: 42, unverifiable: true },
+			{ pid: 43, unverifiable: true },
+		]);
 		const caught = clearOldSessionsAsync(seams, FORGE, {
 			boundMs: 0,
 			force: true,
@@ -271,13 +274,13 @@ describe(clearOldSessionsAsync, () => {
 		await expect(caught).resolves.toMatchObject({
 			code: "cleanup_unverifiable",
 			details: {
-				cleanup: { killed: [], sessionId: "old", survivors: [], unverifiable: [42] },
-				pids: [42],
+				cleanup: { killed: [], sessionId: "old", survivors: [], unverifiable: [42, 43] },
+				pids: [42, 43],
 				sessionId: "old",
 			},
 			hint: `Check them, and stop them by hand. Their session files are in ${OLD.directory}.`,
 			message:
-				"Processes of an earlier session could not be verified, so they were not killed (PIDs 42).",
+				"Processes of an earlier session could not be verified, so they were not killed (PIDs 42, 43).",
 		});
 		expect(Object.keys(memory.files())).toContain(".forge/sessions/old/supervisor.id");
 	});
