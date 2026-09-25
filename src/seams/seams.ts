@@ -1,4 +1,5 @@
 import type { ProcessRunner } from "../process/process-runner.ts";
+import type { StudioLauncher } from "../studio/launcher.ts";
 import type { ChildProcessRunner } from "./child-process.ts";
 import type { Clock } from "./clock.ts";
 import type { ConfigLoader } from "./config-loader.ts";
@@ -34,4 +35,6 @@ export interface Seams {
 	 */
 	processRunner: ProcessRunner;
 	prompter: Prompter;
+	/** Opens a place in Studio outside every forge-owned process tree. */
+	studioLauncher: StudioLauncher;
 }

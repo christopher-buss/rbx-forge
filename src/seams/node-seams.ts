@@ -1,4 +1,5 @@
 import { createChildProcessRunner } from "../process/process-runner.ts";
+import { createStudioLauncher } from "../studio/launcher.ts";
 import { nodeChildProcessRunner } from "./child-process.ts";
 import { nodeClock } from "./clock.ts";
 import { loadConfigFileAsync } from "./config-loader.ts";
@@ -32,5 +33,10 @@ export function createNodeSeams({ input, output }: TerminalStreams): Seams {
 			host: nodeHost,
 		}),
 		prompter: createReadlinePrompter(input, output),
+		studioLauncher: createStudioLauncher({
+			childProcess: nodeChildProcessRunner,
+			clock: nodeClock,
+			host: nodeHost,
+		}),
 	};
 }

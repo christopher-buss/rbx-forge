@@ -2,6 +2,7 @@ import { BUILD_FLAGS, runBuildCommandAsync } from "../commands/build.ts";
 import { runConfigAsync } from "../commands/config.ts";
 import type { CommandRun } from "../commands/context.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
+import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
 import type { FlagDefinition } from "./flags.ts";
 
 /** One `forge <command>`: its flags, help line, and what it runs. */
@@ -33,5 +34,11 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		flags: BUILD_FLAGS,
 		run: runBuildCommandAsync,
 		summary: "Build the Rojo project to a place or model file, or a Studio plugin.",
+	},
+	{
+		name: "open",
+		flags: OPEN_FLAGS,
+		run: runOpenAsync,
+		summary: "Open the place in Roblox Studio, building it first when configured or asked.",
 	},
 ];
