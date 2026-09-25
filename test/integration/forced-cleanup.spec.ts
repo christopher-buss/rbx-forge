@@ -22,13 +22,14 @@ import {
 	waitForDeathAsync,
 	waitForWorkersAsync,
 } from "../helpers/worker-log.ts";
-import type { Launched } from "./session-harness.ts";
+import type { Launched, Settled } from "./session-harness.ts";
 import {
 	filesLeft,
 	launch,
 	makeProjectAsync,
 	native,
 	ROJO_ONLY,
+	settledWithinAsync,
 	stageOldSessionAsync,
 	waitForAsync,
 } from "./session-harness.ts";
@@ -36,19 +37,35 @@ import {
 const FORCE = { ...ROJO_ONLY, force: true };
 /** The barrier's bound, the cleanup, and the session's start. */
 const FORCED_START_MS = 45_000;
+/**
+ * A refusal: the barrier's bound (15 s) and the supervisor's start. A
+ * stop: its escalation (22 s) and the final barrier (5 s) at worst.
+ */
+const EXIT_MS = 30_000;
 
 /**
  * Wait until the forced session is ready, stop it, and return what its
- * cleanup of the earlier session did.
+ * cleanup of the earlier session did. A forced session that fails ends the
+ * wait at once, with its error.
  *
  * @param run - The supervisor started with `--force`.
  * @returns The one cleanup it reports.
  */
 async function forcedCleanupAsync(run: Launched): Promise<CleanupReport> {
-	await waitForAsync(() => run.events.find(({ type }) => type === "info"), FORCED_START_MS);
+	let early: Settled | undefined;
+	void run.settled.then((settled) => {
+		early = settled;
+	});
+	await waitForAsync(() => {
+		return run.events.find(({ type }) => type === "info") ?? early;
+	}, FORCED_START_MS);
+	assert(
+		early === undefined,
+		`the forced session ended before it was ready: ${String(early?.ok === false ? early.error : "ok")}`,
+	);
 	run.stop("SIGINT");
-	const settled = await run.settled;
-	assert(settled.ok, "the forced session failed");
+	const settled = await settledWithinAsync(run, "stop the forced session", EXIT_MS);
+	assert(settled.ok, `the forced session failed: ${String(settled.ok ? "" : settled.error)}`);
 	const { cleanups } = settled.result.data;
 	assert(Array.isArray(cleanups) && cleanups.length === 1, "expected one cleanup");
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the supervisor reports this shape
@@ -73,7 +90,7 @@ describe("forced cleanup", () => {
 		const workers = records.map(({ pid }) => pid);
 		// Let the grandchild close its lease.
 		await sleep(1000);
-		const refused = await launch(project).settled;
+		const refused = await settledWithinAsync(launch(project), "refuse", EXIT_MS);
 		assert(!refused.ok && refused.error instanceof ForgeError, "expected a refusal");
 
 		const { details } = refused.error;

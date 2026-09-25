@@ -160,6 +160,37 @@ export async function waitForAsync<T>(
 }
 
 /**
+ * Wait until the supervisor has exited, within a bound, so a supervisor
+ * that hangs fails the test at the phase it hung in, with its events.
+ *
+ * @param run - The running supervisor.
+ * @param phase - What the test waits for, for the error.
+ * @param timeoutMs - How long to wait.
+ * @returns How it ended.
+ * @rejects When the bound passes first.
+ */
+export async function settledWithinAsync(
+	run: Launched,
+	phase: string,
+	timeoutMs: number,
+): Promise<Settled> {
+	const timer = new AbortController();
+	const late = sleep(timeoutMs, undefined, { signal: timer.signal }).then(() => {
+		throw new Error(
+			`${phase}: the supervisor did not exit within ${timeoutMs} ms. Its events: ${JSON.stringify(run.events)}`,
+		);
+	});
+	try {
+		return await Promise.race([run.settled, late]);
+	} finally {
+		timer.abort();
+		late.catch(() => {
+			// Aborted once the supervisor exited.
+		});
+	}
+}
+
+/**
  * Wait until the supervisor reported the session ready.
  *
  * @param launched - The running supervisor.
