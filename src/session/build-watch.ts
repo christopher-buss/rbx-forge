@@ -29,7 +29,8 @@ export interface BuildWatch {
 	tick: () => void;
 	/**
 	 * Wait until the last build is fresh: no compile runs, and none started
-	 * for one quiet window since the call or the last build.
+	 * for one quiet window since the call or the last build. A `timeoutMs`
+	 * of 0 does not wait: the caller reads the status now.
 	 *
 	 * @rejects {ForgeError} `compile_timeout` after `timeoutMs`; the failure
 	 *   given to `fail` or `close`.
@@ -93,7 +94,7 @@ export function createBuildWatch({ clock, recorder, tracks }: BuildWatchOptions)
 			tick(watch, clock.now());
 		},
 		waitAsync: async (timeoutMs) => {
-			if (tracks) {
+			if (tracks && timeoutMs > 0) {
 				await waitFreshAsync(watch, timeoutMs);
 			}
 		},
@@ -154,11 +155,12 @@ function timedOut(tracker: FreshnessTracker, timeoutMs: number): ForgeError {
 	} else if (tracker.lastBuild() === undefined) {
 		why = "the first compile has not ended";
 	} else if (timeoutMs < QUIET_WINDOW_MS) {
-		why = `the quiet window (${QUIET_WINDOW_MS} ms) is longer than the wait`;
+		why = `the quiet window (${QUIET_WINDOW_MS / 1000} s) is longer than the wait`;
 	}
 
-	return new ForgeError("compile_timeout", `No fresh build within ${timeoutMs} ms: ${why}.`, {
-		details: { building: isBuilding, timeoutMs },
+	const timeoutSeconds = timeoutMs / 1000;
+	return new ForgeError("compile_timeout", `No fresh build within ${timeoutSeconds} s: ${why}.`, {
+		details: { building: isBuilding, timeoutSeconds },
 		hint: 'Read the compiler\'s output with "forge logs compiler", or wait longer with --timeout.',
 	});
 }

@@ -34,9 +34,13 @@ output every 250 ms.
 - **No compiler to read.** A session with no roblox-ts compiler (Luau, or
   `--no-compiler`) answers at once. A session that is still starting waits for
   its first build.
-- **Failures.** No fresh build within `--timeout` (default 300 s) gives
-  `compile_timeout`; a compiler that stops during the wait gives
-  `service_failed`; a session that stops gives `not_running`.
+- **Failures.** No fresh build within `--timeout` (in seconds, as for `down`;
+  default 300) gives `compile_timeout`; a compiler that stops during the wait
+  gives `service_failed`; a session that stops gives `not_running`. A timeout
+  above 0 and shorter than the quiet window (0.75 s) always fails while a
+  compiler runs.
+- **`--timeout 0` does not wait.** It returns the status now, with `building`,
+  and never gives `compile_timeout`: an agent can read the state without a wait.
 
 ## Considered options
 

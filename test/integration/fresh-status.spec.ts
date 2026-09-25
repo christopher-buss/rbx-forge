@@ -98,7 +98,7 @@ describe("freshStatus", () => {
 
 		await expect(session.askAsync(500)).rejects.toMatchObject({
 			code: "compile_timeout",
-			details: { building: true, timeoutMs: 500 },
+			details: { building: true, timeoutSeconds: 0.5 },
 		});
 	});
 

@@ -95,9 +95,9 @@ that does not stop, and what is left of its session, each verified),
 
 `status --wait` returns the status once the compiler's last build is fresh: no
 compile runs, and none started for a short quiet window. Run it after an edit.
-`--timeout <ms>` bounds the wait (default 300000), else it fails with
-`compile_timeout`. With no roblox-ts compiler in the session, it returns at
-once.
+`--timeout <seconds>` bounds the wait (default 300), else it fails with
+`compile_timeout`. `--timeout 0` does not wait: it returns the status now. With
+no roblox-ts compiler in the session, it returns at once.
 
 One session runs per project (per worktree and build output). A second `start`
 fails with `session_running`; a second `up` joins the running session. A new

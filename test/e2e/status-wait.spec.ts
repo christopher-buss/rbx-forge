@@ -6,6 +6,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_SUCCESS } from "../../src/exit-codes.ts";
@@ -101,6 +102,27 @@ describe("forge status --wait", () => {
 				.filter(({ role }) => role === "sloptor")
 				.map(({ args }) => args),
 		).toContainEqual(["build", "--json", "-w"]);
+	});
+
+	it("should return the status at once with --timeout 0 while a compile runs", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
+		const watched = path.join(fixture.project, "src", "main.ts");
+		mkdirSync(path.dirname(watched), { recursive: true });
+		writeFileSync(watched, "export {};\n");
+		await runForgeAsync(fixture, ["up", "--no-open", "--json"], {
+			FIXTURE_COMPILE_MS: "8000",
+			FIXTURE_COMPILER_WATCH: watched,
+		});
+		writeFileSync(watched, "export const error = 1;\n");
+		// The compile starts about 80 ms after the edit, and the session reads
+		// its output every 250 ms; it then runs for 8 s.
+		await sleep(1500);
+		const now = await runForgeAsync(fixture, ["status", "--json", "--wait", "--timeout", "0"]);
+
+		expect(now.status).toBe(EXIT_SUCCESS);
+		expect(statusOf(now)).toMatchObject({ building: true, lastBuild: { errors: 0 } });
 	});
 
 	it("should return at once with no roblox-ts compiler", async () => {

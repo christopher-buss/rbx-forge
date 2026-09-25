@@ -153,14 +153,19 @@ describe(runStatusAsync, () => {
 		expect(asked).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 300_000 });
 	});
 
-	it.for([0, 2000, 2_147_000_000])("should pass --timeout %d on to the wait", async (ms) => {
+	it.for([
+		["0", 0],
+		["2", 2000],
+		["0.5", 500],
+		["2147000", 2_147_000_000],
+	] as const)("should pass --timeout %s (seconds) on to the wait", async ([seconds, ms]) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
 		const session = await serveFakeSessionAsync(memory, ipc);
 		const asked = vi.fn<IpcHandler>(() => ({ ...session.status }));
 		session.freshStatus = asked;
-		await runStatusAsync(context, withFlags({ timeout: String(ms), wait: true }));
+		await runStatusAsync(context, withFlags({ timeout: seconds, wait: true }));
 
 		expect(asked).toHaveBeenCalledExactlyOnceWith({ timeoutMs: ms });
 	});
@@ -207,15 +212,12 @@ describe(runStatusAsync, () => {
 	});
 
 	it.for([
-		[{ timeout: "2000" }, "--timeout needs --wait."],
-		[{ timeout: "soon", wait: true }, '--timeout takes a number of milliseconds, not "soon".'],
-		[{ timeout: "-1", wait: true }, '--timeout takes a number of milliseconds, not "-1".'],
-		[{ timeout: " ", wait: true }, '--timeout takes a number of milliseconds, not " ".'],
-		[{ timeout: true, wait: true }, '--timeout takes a number of milliseconds, not "true".'],
-		[
-			{ timeout: "3000000000", wait: true },
-			'--timeout takes a number of milliseconds, not "3000000000".',
-		],
+		[{ timeout: "2" }, "--timeout needs --wait."],
+		[{ timeout: "soon", wait: true }, '--timeout takes a number of seconds, not "soon".'],
+		[{ timeout: "-1", wait: true }, '--timeout takes a number of seconds, not "-1".'],
+		[{ timeout: " ", wait: true }, '--timeout takes a number of seconds, not " ".'],
+		[{ timeout: true, wait: true }, '--timeout takes a number of seconds, not "true".'],
+		[{ timeout: "2147001", wait: true }, '--timeout takes a number of seconds, not "2147001".'],
 	] as const)("should fail with usage for the flags %j", async ([flags, message]) => {
 		expect.assertions(1);
 
