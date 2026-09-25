@@ -1,6 +1,6 @@
 import { onTestFinished } from "vitest";
 
-import type { IpcServer } from "../../src/ipc/server.ts";
+import type { IpcHandler, IpcServer } from "../../src/ipc/server.ts";
 import { startIpcServer } from "../../src/ipc/server.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import type { IdentityRecord } from "../../src/supervisor/session-files.ts";
@@ -21,7 +21,17 @@ export interface FakeSession {
 	status: SessionStatus;
 	/** Stop answering, as a dead supervisor does. Its files stay. */
 	stop: () => Promise<void>;
+	/** Answers `sync`; a synced place with no hooks by default. */
+	sync: IpcHandler;
 }
+
+/** What a fake session's `sync` answers by default. */
+export const SYNCED: Readonly<Record<string, unknown>> = {
+	durationMs: 12,
+	hooks: [],
+	input: `${PROJECT}/game.rbxl`,
+	project: "default.project.json",
+};
 
 /**
  * A status as a supervisor reports it.
@@ -67,9 +77,13 @@ export async function serveFakeSessionAsync(
 		stop: async () => {
 			await server.closeAsync();
 		},
+		sync: () => ({ ...SYNCED }),
 	};
 	const server: IpcServer = startIpcServer(await transport.listenAsync(identity.endpoint), {
-		handlers: { status: () => session.answer ?? { ...session.status } },
+		handlers: {
+			status: () => session.answer ?? { ...session.status },
+			sync: async (parameters) => session.sync(parameters),
+		},
 		token: "token",
 	});
 	onTestFinished(async () => {

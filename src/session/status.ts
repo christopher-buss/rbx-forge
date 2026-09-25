@@ -60,6 +60,10 @@ export interface SessionStatus {
 		compiler: { lastBuild?: LastBuild; status: ServiceStatus };
 		rojo: { port: number; status: ServiceStatus };
 		studio: { status: "closed" | "off" | "open" | "opening" };
+		/**
+		 * `off` when the session does not run syncback on save; `forge sync`
+		 * runs still show `running` and their `lastRun`.
+		 */
 		syncback: { lastRun?: LastSyncback; status: "idle" | "off" | "running" };
 	};
 	sessionId: string;
@@ -190,6 +194,9 @@ function createRecorder(
 		return isoTime(now());
 	}
 
+	// Between runs, syncback is back where it started: `idle` or `off`.
+	const resting = status.services.syncback.status;
+
 	return {
 		compiled: ({ diagnostics, errors }) => {
 			const lastBuild = { at: at(), diagnostics, errors };
@@ -205,7 +212,7 @@ function createRecorder(
 			changed();
 		},
 		syncbackFinished: (run) => {
-			status.services.syncback = { lastRun: { at: at(), ...run }, status: "idle" };
+			status.services.syncback = { lastRun: { at: at(), ...run }, status: resting };
 			changed();
 		},
 		syncbackStarted: () => {

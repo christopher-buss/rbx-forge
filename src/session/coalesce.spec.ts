@@ -7,7 +7,7 @@ interface Controlled {
 	calls: Array<string>;
 	/** End the run that is going. */
 	finish: () => void;
-	task: () => Promise<void>;
+	task: () => Promise<number>;
 }
 
 function controlledTask(): Controlled {
@@ -27,6 +27,7 @@ function controlledTask(): Controlled {
 				ends.push(resolve);
 			});
 			calls.push(`end ${run}`);
+			return run;
 		},
 	};
 }
@@ -43,7 +44,7 @@ describe(createCoalescingRunner, () => {
 
 		const task = controlledTask();
 		const runner = createCoalescingRunner(task.task);
-		runner.request();
+		void runner.request();
 		await flushAsync();
 		task.finish();
 		await runner.settled();
@@ -56,9 +57,9 @@ describe(createCoalescingRunner, () => {
 
 		const task = controlledTask();
 		const runner = createCoalescingRunner(task.task);
-		runner.request();
-		runner.request();
-		runner.request();
+		void runner.request();
+		void runner.request();
+		void runner.request();
 		await flushAsync();
 		task.finish();
 		await flushAsync();
@@ -73,11 +74,11 @@ describe(createCoalescingRunner, () => {
 
 		const task = controlledTask();
 		const runner = createCoalescingRunner(task.task);
-		runner.request();
+		void runner.request();
 		await flushAsync();
 		task.finish();
 		await runner.settled();
-		runner.request();
+		void runner.request();
 		await flushAsync();
 		task.finish();
 		await runner.settled();
@@ -91,7 +92,7 @@ describe(createCoalescingRunner, () => {
 		const task = controlledTask();
 		const runner = createCoalescingRunner(task.task);
 		let isSettled = false;
-		runner.request();
+		void runner.request();
 		const settled = runner.settled().then(() => {
 			isSettled = true;
 			return isSettled;
@@ -105,11 +106,40 @@ describe(createCoalescingRunner, () => {
 		await expect(settled).resolves.toBeTrue();
 	});
 
+	it("should resolve a request with the result of the run it started", async () => {
+		expect.assertions(1);
+
+		const task = controlledTask();
+		const runner = createCoalescingRunner(task.task);
+		const result = runner.request();
+		await flushAsync();
+		task.finish();
+
+		await expect(result).resolves.toBe(1);
+	});
+
+	it("should resolve requests during a run with the one run after it", async () => {
+		expect.assertions(1);
+
+		const task = controlledTask();
+		const runner = createCoalescingRunner(task.task);
+		const first = runner.request();
+		await flushAsync();
+		const second = runner.request();
+		const third = runner.request();
+		task.finish();
+		await flushAsync();
+		task.finish();
+
+		await expect(Promise.all([first, second, third])).resolves.toStrictEqual([1, 2, 2]);
+	});
+
 	it("should settle at once when nothing ran", async () => {
 		expect.assertions(1);
 
 		const runner = createCoalescingRunner(async () => {
 			// Never runs.
+			return 0;
 		});
 
 		await expect(runner.settled()).resolves.toBeUndefined();

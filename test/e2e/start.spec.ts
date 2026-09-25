@@ -81,7 +81,6 @@ describe("forge start", () => {
 			`rojo build default.project.json --output ${PLACE}`,
 			`rojo serve default.project.json --port ${fixture.port}`,
 			"rbxtsc -w",
-			"rojo syncback --help",
 			`rojo syncback default.project.json --input ${PLACE} --non-interactive`,
 			"hook",
 		]);

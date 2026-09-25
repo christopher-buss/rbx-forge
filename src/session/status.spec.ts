@@ -130,6 +130,21 @@ describe(createStatusStore, () => {
 		expect(store.snapshot().services.studio).toStrictEqual({ status: "open" });
 	});
 
+	it("should keep syncback off after a forge sync run in a session without the save watch", () => {
+		expect.assertions(2);
+
+		const { store } = makeStore({ ...START, syncback: false });
+		store.syncbackStarted();
+		const running = store.snapshot().services.syncback.status;
+		store.syncbackFinished({ durationMs: 5, hooks: [], ok: true });
+
+		expect(running).toBe("running");
+		expect(store.snapshot().services.syncback).toStrictEqual({
+			lastRun: { at: AT, durationMs: 5, hooks: [], ok: true },
+			status: "off",
+		});
+	});
+
 	it("should hand out copies", () => {
 		expect.assertions(2);
 

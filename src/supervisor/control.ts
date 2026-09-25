@@ -1,5 +1,6 @@
 import { ForgeError } from "../errors.ts";
 import type { IpcServerOptions } from "../ipc/server.ts";
+import type { SessionSync } from "../session/session-sync.ts";
 import type { StatusStore } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
 
@@ -8,6 +9,7 @@ export interface ControlTarget {
 	sessionId: string;
 	status: Pick<StatusStore, "snapshot">;
 	stop: Pick<StopSource, "request">;
+	sync: Pick<SessionSync, "runAsync">;
 }
 
 /**
@@ -19,10 +21,12 @@ export interface ControlTarget {
  *   `sessionId` param, only that session stops: another one answers
  *   `session_replaced`.
  *
- * `sync` is not served yet; the server answers it as unavailable.
+ * - `sync`: run syncback with its hooks in the session, one run at a time
+ *   with the save watch (spec #28 story 20). Answers once the run ended,
+ *   with what was synced and each hook result, or with the run's failure.
  *
- * @param target - The session's id, status, and stop requests.
- * @returns The `status` and `shutdown` handlers of the session.
+ * @param target - The session's id, status, stop requests, and syncback.
+ * @returns The `status`, `sync`, and `shutdown` handlers of the session.
  */
 export function controlHandlers(target: ControlTarget): IpcServerOptions["handlers"] {
 	return {
@@ -40,5 +44,6 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 			return { accepted: true, sessionId: target.sessionId };
 		},
 		status: () => ({ ...target.status.snapshot() }),
+		sync: async () => target.sync.runAsync(),
 	};
 }

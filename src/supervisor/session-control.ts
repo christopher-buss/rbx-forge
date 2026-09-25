@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { IpcListener } from "../ipc/connection.ts";
 import { startIpcServer } from "../ipc/server.ts";
 import type { Seams } from "../seams/seams.ts";
+import type { SessionSync } from "../session/session-sync.ts";
 import type { SessionStatus, StatusStore } from "../session/status.ts";
 import { createStatusStore, isReady } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
@@ -22,6 +23,8 @@ export interface ControlSetup {
 	port: number;
 	/** The supervisor's stop requests: `shutdown` feeds them. */
 	stop: StopSource;
+	/** Runs `forge sync` through the session body. */
+	sync: Pick<SessionSync, "runAsync">;
 }
 
 /** A session's files, status, and open control endpoint. */
@@ -44,7 +47,7 @@ export type ControlSeams = Pick<
 /**
  * Step 5 of the supervisor (spec #28, "Startup order"): create the session
  * directory with its identity record and token, keep `state.json` up to
- * date, and open the control endpoint (`status`, `shutdown`). Call only
+ * date, and open the control endpoint (`status`, `sync`, `shutdown`). Call only
  * while holding the singleton lock. When the endpoint cannot open, nothing
  * of the session ran, so its files go.
  *
@@ -69,6 +72,7 @@ export async function openSessionAsync(
 			sessionId: setup.identity.sessionId,
 			status,
 			stop: setup.stop,
+			sync: setup.sync,
 		}),
 		token,
 	});
