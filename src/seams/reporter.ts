@@ -18,8 +18,8 @@ export interface OutputStreams {
 export type ReporterEvent =
 	/** The watch-mode compiler finished one compile. */
 	| { diagnostics: Array<Diagnostic>; errors: number; type: "compiled" }
-	| { line: string; service: string; type: "log" }
 	/** One line of a service's log (`forge logs`). */
+	| { line: string; service: string; type: "log" }
 	| { message: string; type: "info" }
 	| { message: string; type: "warning" }
 	| { name: string; status: "failed" | "started" | "succeeded"; type: "step" };
@@ -45,10 +45,10 @@ export interface CommandFailure {
 }
 
 /**
- * Where a run reports progress and its outcome. `output/tty-reporter.ts`
- * writes a readable view; `output/json-reporter.ts` writes one NDJSON object
- * per event and a final `result` object. Unit tests pass a recorder
- * (`test/helpers/seams.ts`).
+ * Where a run reports progress and its outcome. In `output/reporters.ts`,
+ * `createTtyReporter` writes a readable view and `createJsonReporter` writes
+ * one NDJSON object per event and a final `result` object. Unit tests pass a
+ * recorder (`test/helpers/seams.ts`).
  */
 export interface Reporter {
 	/** Report progress. */
