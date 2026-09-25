@@ -116,7 +116,7 @@ both):
 - `napi create-npm-dirs` (CLI 3.10.5) makes `npm/<platform>/package.json` with
   `files` equal to only `forge-native.<platform>.node`. It does not know about
   the reaper binary.
-- On Linux and macOS, `npm pack` keeps the file mode and both npm and pnpm 11
+- On Linux and macOS, `npm pack` keeps the file mode and both npm and pnpm
   install it as packed: 0755 stays executable, 0644 stays not executable.
 
 ## Policy

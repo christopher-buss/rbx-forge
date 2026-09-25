@@ -175,8 +175,8 @@ Tools are pinned in `mise.toml`: `mise install`, then `pnpm install`.
 | `pnpm build:reaper`           | the `forge-reaper` binary, next to the addon    |
 | `pnpm mutation`               | Stryker mutation testing                        |
 
-Git hooks: `mise run install-hk`. See [CONTRIBUTING.md](./CONTRIBUTING.md) and
-[AGENTS.md](./AGENTS.md).
+Git hooks: `hk install --global --mise`. See
+[CONTRIBUTING.md](./CONTRIBUTING.md) and [AGENTS.md](./AGENTS.md).
 
 ## License
 

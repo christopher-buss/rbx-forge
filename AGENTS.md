@@ -54,18 +54,20 @@ commit-msg hook checks the format. Merge commits too (`chore: merge ...`).
 
 ```bash
 pnpm build             # tsdown → dist/{cli,supervisor,index}.mjs
-pnpm build:native      # napi addon + forge-reaper into reaper/target/napi
+pnpm build:all         # build:native, build:reaper, then build
+pnpm build:native      # napi addon into reaper/target/napi
+pnpm build:reaper      # forge-reaper binary next to the addon
 pnpm typecheck         # tsc --build (TypeScript 7 via the @typescript/native alias)
 pnpm lint              # isentinel-lint: oxlint, then ESLint (also Markdown, cspell)
 pnpm knip
 pnpm test:unit         # 100% coverage threshold
-pnpm test:integration  # needs build:native
-pnpm test:e2e          # needs build and build:native
+pnpm test:integration  # needs build:native and build:reaper
+pnpm test:e2e          # needs build:all
 pnpm mutation          # Stryker; the floor only moves up
 cargo test --manifest-path reaper/Cargo.toml
 ```
 
-A fresh worktree needs `pnpm build:native` before integration or e2e tests.
+A fresh worktree needs `pnpm build:all` before integration or e2e tests.
 `pnpm test:other-user` runs only in the CI job that creates a second local user.
 Before a task is done, lint, typecheck, knip, and every test project must pass.
 
