@@ -5,3 +5,14 @@ test/fixtures/rbxtsc/*.txt -text
 
 # Roblox places that Studio or Rojo wrote: binary.
 *.rbxl binary
+
+# Images, fonts, and documents: binary.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
