@@ -62,7 +62,7 @@ const STEP = "open Roblox Studio";
  * @param options - `isBuilt`: the caller already built this place, so it
  *   is opened as it is.
  * @returns The place, the build (or `null`), and the `open` hook results.
- * @rejects {ForgeError} `place_not_found`, `studio_launch_failed`, a build
+ * @rejects {ForgeError} `place_not_found`, `declined`, `studio_launch_failed`, a build
  *   failure from `buildAsync`, or a hook failure.
  */
 export async function openPlaceAsync(
@@ -94,7 +94,7 @@ export async function openPlaceAsync(
  * @param context - The run: project root, seams, and reporter.
  * @param input - The config values the flags set.
  * @returns The place, the build (or `null`), and the `open` hook results.
- * @rejects {ForgeError} `place_not_found`, `studio_launch_failed`, a build
+ * @rejects {ForgeError} `place_not_found`, `declined`, `studio_launch_failed`, a build
  *   failure from `buildAsync`, a hook failure, or a config error.
  */
 export async function runOpenAsync(
@@ -137,14 +137,25 @@ async function shouldBuildAsync(
 		return false;
 	}
 
-	const shouldBuild = await askAsync(context, {
-		ask: async (prompter) => prompter.confirm(`${place} does not exist. Build it now?`, true),
-		unattended: { answer: false },
+	const answer = await askAsync<"build" | "declined" | "unasked">(context, {
+		ask: async (prompter) => {
+			const shouldBuild = await prompter.confirm(
+				`${place} does not exist. Build it now?`,
+				true,
+			);
+			return shouldBuild ? "build" : "declined";
+		},
+		unattended: { answer: "unasked" },
 	});
-	if (!shouldBuild) {
-		throw new ForgeError("place_not_found", `${place} does not exist.`, {
-			hint: 'Build it first: run "forge open --build" or "forge build".',
+	const hint = 'Build it first: run "forge open --build" or "forge build".';
+	if (answer === "declined") {
+		throw new ForgeError("declined", `${place} does not exist, and it was not built.`, {
+			hint,
 		});
+	}
+
+	if (answer === "unasked") {
+		throw new ForgeError("place_not_found", `${place} does not exist.`, { hint });
 	}
 
 	return true;
@@ -157,7 +168,7 @@ async function shouldBuildAsync(
  * @param config - The resolved config.
  * @param target - The place to build.
  * @returns The build, or `null` when none ran.
- * @rejects {ForgeError} `place_not_found`, or a build failure.
+ * @rejects {ForgeError} `place_not_found`, `declined`, or a build failure.
  */
 async function prepareAsync(
 	context: CommandContext,

@@ -205,13 +205,15 @@ describe(runOpenAsync, () => {
 		expect(order).toStrictEqual(["rojo", "studio"]);
 	});
 
-	it("should fail with place_not_found when the user declines the build", async () => {
+	it("should fail with declined when the user declines the build", async () => {
 		expect.assertions(2);
 
 		const { context, order } = makeOpen({ answer: false });
 
 		await expect(runOpenAsync(context, input(NO_BUILD))).rejects.toMatchObject({
-			code: "place_not_found",
+			code: "declined",
+			hint: 'Build it first: run "forge open --build" or "forge build".',
+			message: `${GAME} does not exist, and it was not built.`,
 		});
 		expect(order).toStrictEqual([]);
 	});

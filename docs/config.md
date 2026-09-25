@@ -222,7 +222,8 @@ Options for `forge open` and the session's open step.
 - Flag: `forge open --build` / `--no-build`
 
 Build the place before opening it. When off and the place is missing, forge asks
-at a terminal; a run that cannot ask fails with `place_not_found`.
+at a terminal (answering no fails with `declined`); a run that cannot ask fails
+with `place_not_found`.
 
 #### `open.buildOutputPath`
 
