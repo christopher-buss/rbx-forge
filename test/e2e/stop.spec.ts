@@ -18,7 +18,7 @@ import {
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
 import { makeProject, runBinAsync } from "./run-bin.ts";
-import { makeFixtureAsync } from "./session-fixture.ts";
+import { closedOnRequest, makeFixtureAsync } from "./session-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
 /**
@@ -94,14 +94,9 @@ describe("forge stop", () => {
 		await waitForExitAsync(studio);
 
 		expect(status).toBe(EXIT_SUCCESS);
-		expect(parseResult(stdout).data).toStrictEqual({
-			end: CLOSED_END,
-			forced: false,
-			pid: pidOf(studio),
-			place,
-			recovery: null,
-			stopped: true,
-		});
+		expect(parseResult(stdout).data).toStrictEqual(
+			closedOnRequest({ pid: pidOf(studio), place, stopped: true }),
+		);
 		expect(existsSync(`${place}.lock`)).toBeFalse();
 		expect({
 			isOtherAlive: isProcessAlive(pidOf(other)),
@@ -131,19 +126,23 @@ describe("forge stop", () => {
 		expect(existsSync(`${place}.lock`)).toBeFalse();
 	});
 
-	it("should end a Studio at once once it closed the place, and leave its auto-recovery files to it", async () => {
+	it("should end a Studio at once once it closed the place, and keep auto-recovery files with --recovery keep", async () => {
 		expect.assertions(2);
 
 		const { project, studio } = await makeStudioProjectAsync({
 			FIXTURE_STUDIO_CLOSE: "linger",
 		});
-		const { stdout } = await runBinAsync(["stop", "--json"], project, NATIVE);
+		const { stdout } = await runBinAsync(
+			["stop", "--json", "--recovery", "keep"],
+			project,
+			NATIVE,
+		);
 		await waitForExitAsync(studio);
 
 		expect(parseResult(stdout).data).toMatchObject({
 			end: "lock_released",
 			forced: false,
-			recovery: null,
+			recovery: { mode: "keep" },
 		});
 		expect(isProcessAlive(pidOf(studio))).toBeFalse();
 	});

@@ -73,7 +73,7 @@ export type StoppedBy = "forced_shutdown" | "gone" | "killed" | "shutdown" | "st
  *
  * - `closed`: Studio is gone. `end`: how (see `StudioEnd`). `forced`:
  *   forge ended it with the place open, without a save. `recovery`: what
- *   forge did with its auto-recovery files; `null` unless `forced`.
+ *   forge did with its auto-recovery files; `null` when it ended none.
  * - `failed`: forge could not verify or end it (the error's `code` and
  *   `message`); Studio may still be open.
  * - `kept`: `--keep-studio` left it as it is.

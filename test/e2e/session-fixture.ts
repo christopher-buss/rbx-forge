@@ -13,7 +13,7 @@ import { createServer } from "node:net";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { onTestFinished } from "vitest";
+import { expect, onTestFinished } from "vitest";
 
 import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
 import { createFixtureBinDirectory } from "../helpers/fixture-bin.ts";
@@ -29,6 +29,26 @@ const PATH_NAME = /^path$/i;
 export const ROJO_ONLY = ["start", "--no-open", "--no-compiler", "--json"];
 /** Roles that run as reaper workers; Studio and its launcher do not. */
 export const WORKER_ROLES: ReadonlySet<string> = new Set(["hook", "rbxtsc", "rojo"]);
+
+/**
+ * How a stand-in Studio that closes on the request goes. It exits right
+ * after it removes its lock file: it exits by itself (no recovery), or
+ * forge sees the gap and kills it (recovery runs, and finds no file).
+ *
+ * @param fields - The other fields of the result, the same for both.
+ * @returns A matcher for the whole result of either end.
+ */
+export function closedOnRequest(fields: Record<string, unknown>): unknown {
+	return expect.toBeOneOf([
+		{ ...fields, end: "exited", forced: false, recovery: null },
+		{
+			...fields,
+			end: "lock_released",
+			forced: false,
+			recovery: { deleted: [], mode: "move", moved: [], warnings: [] },
+		},
+	]);
+}
 
 /**
  * The place every session builds. It holds the stand-in's bootstrap

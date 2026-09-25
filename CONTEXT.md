@@ -86,8 +86,7 @@ _Avoid_: place lock, Studio lock
 
 **Auto-recovery file**:\
 `<place>_AutoRecovery_<n>.rbxl` in Studio's AutoSaves folder. Studio deletes it
-only when it closes the place by itself; forge handles the ones of a Studio it
-ended with the place open.\
+only when it closes by itself; forge handles the ones of a Studio it ended.\
 _Avoid_: autosave, backup
 
 ## Control

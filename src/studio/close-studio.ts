@@ -50,9 +50,11 @@ export type StudioEnd = "dialog" | "exited" | "lock_released" | "no_window" | "t
 export type StudioStop =
 	/**
 	 * Studio is gone. `forced`: forge ended it with the place still open,
-	 * so unsaved changes are lost. `recovery`: what forge did with the
-	 * auto-recovery files of a Studio it forced; `null` when Studio closed
-	 * the place by itself.
+	 * so unsaved changes are lost; not after `lock_released`, where the
+	 * place was closed first. `recovery`: what forge did with the
+	 * auto-recovery files of a Studio it killed, also after `lock_released`
+	 * (the kill can come before Studio deletes them); `null` when Studio
+	 * exited by itself.
 	 */
 	| {
 			end: StudioEnd;
@@ -104,6 +106,8 @@ const EXITED: StudioCheck = { status: "exited" };
 interface Ended {
 	end: StudioEnd;
 	forced: boolean;
+	/** Forge killed the process. */
+	killed: boolean;
 }
 
 /**
@@ -122,9 +126,8 @@ interface Ended {
  * its lock file goes (the place is closed; this skips Studio's slow exit),
  * or when a modal dialog blocks it (a place fresh from Rojo always asks to
  * save), or after {@link STUDIO_CLOSE_MS}. A Studio forge ended cannot
- * remove its lock file, so forge does. A Studio forge ended with the place
- * still open (`forced`) leaves auto-recovery files, so forge handles them
- * (`recovery`); a Studio that closed the place did that itself.
+ * remove its lock file, so forge does; and it handles the auto-recovery
+ * files the Studio left (`recovery`).
  *
  * @param seams - The clock, file system, OS, and native addon.
  * @param target - The place, and the Studio forge started, if any.
@@ -172,7 +175,7 @@ export async function closeStudioAsync(
 		end: ended.end,
 		forced: ended.forced,
 		pid: pinned.pid,
-		recovery: ended.forced ? await recoverAsync(seams, pinned, target.place, recovery) : null,
+		recovery: ended.killed ? await recoverAsync(seams, pinned, target.place, recovery) : null,
 		status: "stopped",
 	};
 }
@@ -275,7 +278,7 @@ function killStudio(pinned: PinnedProcess): void {
 
 function killed(pinned: PinnedProcess, end: StudioEnd): Ended {
 	killStudio(pinned);
-	return { end, forced: end !== "lock_released" };
+	return { end, forced: end !== "lock_released", killed: true };
 }
 
 /**
@@ -327,13 +330,15 @@ async function endStudioAsync(
 	{ lockPath, wasLocked }: { lockPath: string; wasLocked: boolean },
 ): Promise<Ended> {
 	if (!askToClose(pinned)) {
-		return pinned.isAlive() ? killed(pinned, "no_window") : { end: "exited", forced: false };
+		return pinned.isAlive()
+			? killed(pinned, "no_window")
+			: { end: "exited", forced: false, killed: false };
 	}
 
 	const deadline = clock.now() + STUDIO_CLOSE_MS;
 	for (;;) {
 		if (!pinned.isAlive()) {
-			return { end: "exited", forced: false };
+			return { end: "exited", forced: false, killed: false };
 		}
 
 		if (wasLocked && !fileSystem.existsSync(lockPath)) {
@@ -353,8 +358,7 @@ async function endStudioAsync(
 }
 
 /**
- * Handle the auto-recovery files of a Studio forge ended with the place
- * open.
+ * Handle the auto-recovery files of a Studio forge ended.
  *
  * @param seams - The clock, file system, and OS.
  * @param pinned - The ended Studio, for its start time.

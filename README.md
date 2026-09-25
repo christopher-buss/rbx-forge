@@ -112,10 +112,10 @@ Studio closes.
 
 ### Auto-recovery
 
-Studio deletes its auto-recovery files only when it closes the place by itself.
-After forge ends a Studio it verified with the place still open (a dialog, the
-time limit, or no window: `forced`), it handles that Studio's auto-recovery
-files, so the next launch does not offer to recover a place forge builds anyway:
+Studio deletes its auto-recovery files only when it closes by itself. After
+forge ends a Studio it verified (a dialog, the time limit, or the kill after the
+lock file went), it handles that Studio's auto-recovery files, so the next
+launch does not offer to recover a place forge builds anyway:
 
 - `move` (the default): move them to `.forge/recovery/<time>_<file>`, and keep
   the 5 newest there. They are normal place files: open one in Studio to get
@@ -124,7 +124,7 @@ files, so the next launch does not offer to recover a place forge builds anyway:
 - `keep`: leave them.
 
 Set the mode with `studio.autoRecovery` in the config, or `--recovery <mode>` on
-`stop` and `down`. forge acts only when it forced a Studio, and only on
+`stop` and `down`. forge acts only when it ended a Studio, and only on
 `<place>_AutoRecovery_<n>.rbxl` files (any case) for the place, written since
 that Studio started (2 seconds of slack). It searches:
 
@@ -227,7 +227,7 @@ The intended flow:
    `message`: Studio may still be open; the session still stops). A `closed`
    Studio has `end`: `exited`, `lock_released` (closed the place, then forge
    ended the process), `dialog`, `timeout`, or `no_window`; `forced: true` when
-   forge ended it without a save; and `recovery` (`null` unless `forced`, or
+   forge ended it without a save; and `recovery` (`null` for `exited`, or
    `mode`, `moved` (`from`, `to`), `deleted`, `warnings`). `forge stop` reports
    the same fields in `data`, with `stopped`. Exit 6 means processes still live
    or the supervisor does not answer: retry with `--force`. Exit 5 means forge

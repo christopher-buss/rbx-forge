@@ -33,7 +33,7 @@ const HOW: Readonly<Record<StudioEnd, string>> = {
  * a close request; forge ends it once it closed the place, at once when a
  * dialog blocks it, and else after {@link STUDIO_CLOSE_MS}, without a save
  * (`closeStudioAsync`). It acts only on a Studio its identity check
- * verifies. The auto-recovery files of a Studio it forced are moved,
+ * verifies. The auto-recovery files of a Studio it ended are moved,
  * deleted, or kept (`studio.autoRecovery`, `--recovery`).
  *
  * @param context - The run: project directory, config loader, file system,
