@@ -26,7 +26,7 @@ interface ProbeRun {
 	processRunner: ReturnType<typeof vi.fn<ProcessRunner>>;
 }
 
-const INSTALLED: Record<string, string> = { "tools/rojo-fork": "" };
+const INSTALLED: Record<string, string> = { "tools/rojo-custom": "" };
 
 function makeProbe(outcome: ProcessOutcome, files = INSTALLED): ProbeRun {
 	const processRunner = vi.fn<ProcessRunner>().mockResolvedValue(outcome);
@@ -86,28 +86,28 @@ describe(requireSyncbackAsync, () => {
 		const { context, processRunner } = makeProbe(exited(0));
 
 		await expect(
-			requireSyncbackAsync(context, { rojoAlias: "rojo-fork" }),
+			requireSyncbackAsync(context, { rojoAlias: "rojo-custom" }),
 		).resolves.toBeUndefined();
 		expect(processRunner).toHaveBeenCalledExactlyOnceWith({
 			args: ["syncback", "--help"],
 			cwd: PROJECT,
 			env: { PATH: TOOLS },
-			file: path.join(TOOLS, "rojo-fork"),
+			file: path.join(TOOLS, "rojo-custom"),
 		});
 	});
 
-	it("should fail with syncback_unsupported naming the fork when Rojo has no syncback", async () => {
+	it("should fail with syncback_unsupported when Rojo has no syncback", async () => {
 		expect.assertions(1);
 
 		const { context } = makeProbe(exited(2));
 
 		await expect(
-			requireSyncbackAsync(context, { rojoAlias: "rojo-fork" }),
+			requireSyncbackAsync(context, { rojoAlias: "rojo-custom" }),
 		).rejects.toMatchObject({
 			code: "syncback_unsupported",
-			hint: "Install the UpliftGames Rojo fork (https://github.com/UpliftGames/rojo/releases), and set rojoAlias to its command if it is not rojo.",
+			hint: "Install Rojo 7.7 or later (https://rojo.space), or set rojoAlias to its command.",
 			message:
-				'Rojo ("rojo-fork") has no syncback command. Syncback needs the UpliftGames Rojo fork.',
+				'Rojo ("rojo-custom") has no syncback command. Syncback needs Rojo 7.7 or later.',
 		} satisfies Partial<ForgeError>);
 	});
 
@@ -116,15 +116,15 @@ describe(requireSyncbackAsync, () => {
 
 		const { context } = makeProbe({
 			errorCode: "EACCES",
-			message: "spawn rojo-fork EACCES",
+			message: "spawn rojo-custom EACCES",
 			type: "spawn_failed",
 		});
 
 		await expect(
-			requireSyncbackAsync(context, { rojoAlias: "rojo-fork" }),
+			requireSyncbackAsync(context, { rojoAlias: "rojo-custom" }),
 		).rejects.toMatchObject({
 			code: "process_failed",
-			message: "Rojo could not start: spawn rojo-fork EACCES",
+			message: "Rojo could not start: spawn rojo-custom EACCES",
 		});
 	});
 
@@ -159,10 +159,13 @@ describe(rojoInvocation, () => {
 		const { context } = makeProbe(exited(0));
 
 		expect(
-			rojoInvocation(context, { rojoAlias: "rojo-fork" }, ["serve", "default.project.json"]),
+			rojoInvocation(context, { rojoAlias: "rojo-custom" }, [
+				"serve",
+				"default.project.json",
+			]),
 		).toStrictEqual({
 			args: ["serve", "default.project.json"],
-			file: path.join(TOOLS, "rojo-fork"),
+			file: path.join(TOOLS, "rojo-custom"),
 		});
 	});
 

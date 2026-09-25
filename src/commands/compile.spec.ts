@@ -145,14 +145,14 @@ describe(runCompileCommandAsync, () => {
 		expect.assertions(1);
 
 		const { context, specs } = makeCompile({
-			file: { rbxts: { args: ["--verbose"], command: "rbxtsc-fork" } },
-			files: { "tools/rbxtsc-fork": "" },
+			file: { rbxts: { args: ["--verbose"], command: "rbxtsc-custom" } },
+			files: { "tools/rbxtsc-custom": "" },
 		});
 		await runCompileCommandAsync(context, INPUT);
 
 		expect(specs[0]).toMatchObject({
 			args: ["--verbose"],
-			file: path.join(TOOLS, "rbxtsc-fork"),
+			file: path.join(TOOLS, "rbxtsc-custom"),
 		});
 	});
 

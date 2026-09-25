@@ -118,7 +118,7 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		name: "syncback",
 		flags: SYNCBACK_FLAGS,
 		run: runSyncbackCommandAsync,
-		summary: "Sync the place file back into the project once (needs the Rojo syncback fork).",
+		summary: "Sync the place file back into the project once (needs Rojo 7.7 or later).",
 	},
 	{
 		name: "typegen",
