@@ -6,9 +6,10 @@
 //!
 //! Takes a shared lock on the lease file, writes the reaper record (`{ pid,
 //! startTime, sessionId, workers: [{ id, pid, startTime }] }`, rewritten
-//! whole on each change and deleted before exit), writes `leased`, and then speaks
-//! the protocol in [`protocol`] on stdin and stdout until `terminate` or
-//! stdin EOF (see [`reaper`]). Diagnostics go to stderr. The host must hold
+//! whole on each change), writes `leased`, and then speaks the protocol in
+//! [`protocol`] on stdin and stdout until `terminate` or stdin EOF (see
+//! [`reaper`]). It exits with the lease held and the record kept, so a
+//! barrier never reads clear while the reaper still runs. Diagnostics go to stderr. The host must hold
 //! the only write end of stdin: its EOF is how the reaper learns that the
 //! host died. On POSIX, `SIGTERM` means the same; on Linux the reaper also
 //! asks for it as its parent-death signal, and is a child subreaper (see
@@ -86,14 +87,6 @@ impl RecordFile {
         std::fs::rename(&temporary, &self.path)
     }
 
-    fn remove(&self) {
-        match std::fs::remove_file(&self.path) {
-            Err(err) if err.kind() != io::ErrorKind::NotFound => {
-                eprintln!("forge-reaper: remove {}: {err}", self.path.display());
-            }
-            _ => {}
-        }
-    }
 }
 
 /// Real workers for one session.
@@ -190,6 +183,8 @@ fn watch_sigterm(inputs: mpsc::Sender<Input>) {
 /// - `reaper-stop`: at `terminate`, and when the host is gone (stdin EOF,
 ///   `SIGTERM`), before the reaper stops anything: a hung reaper that keeps
 ///   its lease and every worker. It still reaps workers that exit.
+/// - `reaper-exit`: once every tree is gone and reported, just before the
+///   reaper exits.
 fn pause(point: &str) {
     let Some(directory) = std::env::var_os("RBX_FORGE_TEST_PAUSE_DIR") else {
         return;
@@ -306,12 +301,18 @@ fn serve(session: &str, lease: &Path, record: &Path) -> ExitCode {
         },
         record,
     };
-    let (platform, _) = Reaper::new(platform, io::stdout(), sender).run(pid, &receiver);
-    platform.record.remove();
-    // The lease ends here for the reaper; workers that inherited it (POSIX)
-    // hold it until they exit.
-    drop(lock);
-    ExitCode::SUCCESS
+    let _ = Reaper::new(platform, io::stdout(), sender).run(pid, &receiver);
+    pause("reaper-exit");
+    exit_holding(&lock)
+}
+
+/// Exit with the lease still held and the record still naming this
+/// process: the OS releases the lease as the process ends, and a scan finds
+/// the recorded reaper (PID and start time) until it has exited. So no
+/// barrier reads clear while the reaper still runs.
+fn exit_holding(_lease: &FileLock) -> ! {
+    let _ = io::Write::flush(&mut io::stdout());
+    std::process::exit(0)
 }
 
 fn main() -> ExitCode {

@@ -13,6 +13,7 @@ import {
 	filesLeft,
 	launch,
 	makeProjectAsync,
+	native,
 	ROJO_ONLY,
 	waitForAsync,
 	waitForReadyAsync,
@@ -47,6 +48,18 @@ async function pausedPidAsync(file: string): Promise<number> {
 		return content === "" ? undefined : content;
 	});
 	return Number(text);
+}
+
+/**
+ * Whether no one holds a lock on the file: take it exclusively, and let go.
+ *
+ * @param file - The file whose lock this probes.
+ * @returns True when the lock was free.
+ */
+function isLockFree(file: string): boolean {
+	const lock = native.tryLockFile(file, "exclusive");
+	lock?.release();
+	return lock !== null;
 }
 
 describe("sessions", () => {
@@ -103,6 +116,41 @@ describe("sessions", () => {
 				...workersOf(project, sessionId).map((record) => record.pid),
 			]),
 		}).toStrictEqual({ files: [], survivors: [] });
+	}, 60_000);
+
+	it("should keep the barrier blocked until the reaper has exited", async () => {
+		expect.assertions(2);
+
+		const project = await makeProjectAsync();
+		const run = launch(project, ROJO_ONLY, { RBX_FORGE_TEST_PAUSE: "reaper-exit" });
+		await waitForReadyAsync(run);
+		const { sessionId } = currentIdentity(project);
+		const directory = path.join(project.forge, "sessions", sessionId);
+		run.stop("SIGINT");
+		const pause = path.join(project.pauses, "reaper-exit.paused");
+		const reaper = await pausedPidAsync(pause);
+		const target = {
+			leasePath: path.join(directory, "workers.lock"),
+			recordPath: path.join(directory, "reaper.json"),
+			sessionId,
+		};
+		const paused = {
+			isLeaseFree: isLockFree(target.leasePath),
+			isReaperAlive: isProcessAlive(reaper),
+			scanned: native.scanSession(target).map(({ pid }) => pid),
+		};
+		rmSync(pause, { force: true });
+		const settled = await run.settled;
+
+		expect(paused).toStrictEqual({
+			isLeaseFree: false,
+			isReaperAlive: true,
+			scanned: [reaper],
+		});
+		expect({ files: filesLeft(project), ok: settled.ok }).toStrictEqual({
+			files: [],
+			ok: true,
+		});
 	}, 60_000);
 
 	it("should start a new session only once every worker of a hard-killed one is gone (C3)", async () => {

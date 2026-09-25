@@ -36,8 +36,9 @@ export interface ReaperOptions {
 	leasePath: string;
 	/**
 	 * The reaper record (`reaper.json`): the reaper keeps its own PID and
-	 * start time and every live worker there, and deletes it before it
-	 * exits. Forced cleanup reads it when the reaper hangs.
+	 * start time and every live worker there, and keeps it when it exits,
+	 * so a scan finds the reaper until it is gone. Forced cleanup reads it
+	 * when the reaper hangs.
 	 */
 	recordPath: string;
 	/** Tags every worker (`RBX_FORGE_SESSION`) and names its jobs. */
