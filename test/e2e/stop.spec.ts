@@ -18,7 +18,7 @@ import {
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
 import { makeProject, runBinAsync } from "./run-bin.ts";
-import { makeFixtureAsync } from "./session-fixture.ts";
+import { closedOnRequest, makeFixtureAsync } from "./session-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
 /**
@@ -94,14 +94,9 @@ describe("forge stop", () => {
 		await waitForExitAsync(studio);
 
 		expect(status).toBe(EXIT_SUCCESS);
-		expect(parseResult(stdout).data).toStrictEqual({
-			end: CLOSED_END,
-			forced: false,
-			pid: pidOf(studio),
-			place,
-			recovery: null,
-			stopped: true,
-		});
+		expect(parseResult(stdout).data).toStrictEqual(
+			closedOnRequest({ pid: pidOf(studio), place, stopped: true }),
+		);
 		expect(existsSync(`${place}.lock`)).toBeFalse();
 		expect({
 			isOtherAlive: isProcessAlive(pidOf(other)),

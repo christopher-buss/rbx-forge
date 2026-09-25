@@ -16,6 +16,14 @@ runs:
         install: true
         install_args: pnpm ${{ inputs.tools }}
 
+    # The global virtual store (pnpm-workspace.yaml) links node_modules into
+    # the store, outside the repository. The Alpine container of the musl
+    # builds mounts only the repository, and on Windows an install from a
+    # restored store fails with "Access is denied". Local installs keep it.
+    - name: Turn off the global virtual store
+      run: echo "pnpm_config_enable_global_virtual_store=false" >> "$GITHUB_ENV"
+      shell: bash
+
     - name: Get pnpm store directory
       run: |
         store_path="$(pnpm store path --silent)"
@@ -25,9 +33,9 @@ runs:
     - name: Cache pnpm store
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+        key: pnpm12-nogvs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
         path: ${{ env.STORE_PATH }}
-        restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-
+        restore-keys: pnpm12-nogvs-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Install dependencies
       run: pnpm install --frozen-lockfile

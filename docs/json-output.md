@@ -69,8 +69,10 @@ A `closed` Studio also has:
 
 - `end`: `exited`, `lock_released` (closed the place, then forge ended the
   process), `dialog`, `timeout`, or `no_window`.
-- `forced: true` when forge ended it without a save.
-- `recovery`: `null`, or `mode`, `moved` (`from`, `to`), `deleted`, `warnings`.
-  See [Auto-recovery](./studio.md#auto-recovery).
+- `forced: true` when forge ended it without a save. It stays `false` after
+  `lock_released`: the place closed first.
+- `recovery`: `null` for `exited`, or `mode`, `moved` (`from`, `to`), `deleted`,
+  `warnings`. forge handles the auto-recovery files after every kill, also after
+  `lock_released`. See [Auto-recovery](./studio.md#auto-recovery).
 
 `forge stop` reports the same fields in `data`, with `stopped`.

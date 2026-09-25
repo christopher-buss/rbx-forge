@@ -436,6 +436,33 @@ describe(runStopAsync, () => {
 		expect(fileSystem.existsSync(file)).toBeFalse();
 	});
 
+	it("should leave the auto-recovery files of a Studio that exited by itself", async () => {
+		expect.assertions(2);
+
+		const saves = path.join(PROJECT, "home", "Documents", "ROBLOX", "AutoSaves");
+		const file = path.join(saves, "game_AutoRecovery_0.rbxl");
+		const project = makeProject({
+			env: { HOME: path.join(PROJECT, "home") },
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			host: { platform: "darwin" },
+			processes: {
+				[STUDIO_PID]: {
+					alive: true,
+					executablePath: STUDIO,
+					startTime: String(LOCK_WRITTEN * 1000),
+				},
+			},
+		});
+		const { fileSystem } = project.context.seams;
+		fileSystem.mkdirSync(saves, { recursive: true });
+		fileSystem.writeFileSync(file, "place");
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { end: "exited", forced: false, recovery: null },
+		});
+		expect(fileSystem.existsSync(file)).toBeTrue();
+	});
+
 	it("should close the session's Studio through its pin", async () => {
 		expect.assertions(2);
 

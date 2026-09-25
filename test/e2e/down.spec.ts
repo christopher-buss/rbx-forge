@@ -18,7 +18,7 @@ import {
 	waitForWorkersAsync,
 } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { IS_MACOS, IS_WINDOWS, makeFixtureAsync } from "./session-fixture.ts";
+import { closedOnRequest, IS_MACOS, IS_WINDOWS, makeFixtureAsync } from "./session-fixture.ts";
 import { runForgeAsync, UP_ROJO_ONLY } from "./up-fixture.ts";
 
 const DOWN = ["down", "--json"];
@@ -126,14 +126,7 @@ describe("forge down", () => {
 				sessionId,
 				status: "stopped",
 				stoppedBy: "studio_closed",
-				studio: {
-					end: CLOSED_END,
-					forced: false,
-					pid: studio,
-					place: fixture.place,
-					recovery: null,
-					status: "closed",
-				},
+				studio: closedOnRequest({ pid: studio, place: fixture.place, status: "closed" }),
 			},
 			ok: true,
 		});

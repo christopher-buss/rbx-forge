@@ -50,8 +50,11 @@ export type StudioEnd = "dialog" | "exited" | "lock_released" | "no_window" | "t
 export type StudioStop =
 	/**
 	 * Studio is gone. `forced`: forge ended it with the place still open,
-	 * so unsaved changes are lost. `recovery`: what forge did with the
-	 * auto-recovery files of a Studio it ended; `null` when it ended none.
+	 * so unsaved changes are lost; not after `lock_released`, where the
+	 * place was closed first. `recovery`: what forge did with the
+	 * auto-recovery files of a Studio it killed, also after `lock_released`
+	 * (the kill can come before Studio deletes them); `null` when Studio
+	 * exited by itself.
 	 */
 	| {
 			end: StudioEnd;
