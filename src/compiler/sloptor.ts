@@ -1,6 +1,6 @@
 import { type } from "arktype";
 
-import type { CompileEvent, Diagnostic, DiagnosticsParser } from "./diagnostics.ts";
+import type { CompileEvent, CompileReport, Diagnostic, DiagnosticsParser } from "./diagnostics.ts";
 import { createDiagnosticsParser } from "./diagnostics.ts";
 
 const jsonText = type("string.json.parse");
@@ -22,25 +22,52 @@ const sloptorDiagnostic = type({
 });
 
 const sloptorEvent = type({ event: "'buildStart'" }).or({
-	diagnostics: sloptorDiagnostic.array(),
-	event: "'buildEnd'",
+	"diagnostics": sloptorDiagnostic.array(),
+	"event": "'buildEnd'",
+	"ok?": "boolean",
 });
+
+/**
+ * The one object `sloptor build --json` prints for a one-shot build. Forge
+ * reads `ok` and `diagnostics`; `version`, `files`, and `durationMs` are
+ * there too.
+ */
+const sloptorResult = type({ diagnostics: sloptorDiagnostic.array(), ok: "boolean" });
 
 /** A line that may be JSON: the rest are rbxtsc text for sure. */
 const JSON_OBJECT_START = /^\s*\{/;
 
+interface OutputState {
+	/** The rbxtsc parser, for every line that is not sloptor's. */
+	parser: DiagnosticsParser;
+	/** The report of a one-shot sloptor result, once one came. */
+	result: CompileReport | undefined;
+}
+
 /**
- * Read watch-mode compiler output line by line as build events. A line that
- * is a JSON object with a string `event` field is a sloptor event; every
- * other line is rbxtsc text for the rbxtsc parser. A trailing `\r` is JSON
- * whitespace, so CRLF output parses as it is.
+ * A parser for the output of rbxtsc or sloptor, found line by line. A JSON
+ * object with a string `event` field is a sloptor watch-mode event
+ * (`sloptor build -w --json`); a JSON object with `ok` and `diagnostics` is
+ * the result of a one-shot `sloptor build --json`; every other line is
+ * rbxtsc text. A trailing `\r` is JSON whitespace, so CRLF output parses as
+ * it is.
  *
- * @returns A reader that gives the build event of each line, or
- *   `undefined` for any other line.
+ * @returns A parser with no diagnostics read. Its `finish` gives the report
+ *   of the last one-shot sloptor result, else what rbxtsc text reported.
  */
-export function createWatchEventReader(): (line: string) => CompileEvent | undefined {
-	const parser = createDiagnosticsParser();
-	return (line) => readLine(parser, line);
+export function createCompilerOutputParser(): DiagnosticsParser {
+	const state: OutputState = { parser: createDiagnosticsParser(), result: undefined };
+	return {
+		finish: () => finish(state),
+		read: (line) => readLine(state, line),
+	};
+}
+
+function finish(state: OutputState): CompileReport {
+	const text = state.parser.finish();
+	const { result } = state;
+	state.result = undefined;
+	return result ?? text;
 }
 
 function toDiagnostic({
@@ -62,31 +89,52 @@ function toDiagnostic({
 	};
 }
 
-function toCompileEvent(event: typeof sloptorEvent.infer): CompileEvent {
-	if (event.event === "buildStart") {
-		return { type: "start" };
-	}
+/**
+ * The report of a sloptor build.
+ *
+ * @param build - Its diagnostics, and whether it succeeded.
+ * @returns The report. A failed build counts at least one error, so it never
+ *   looks clean.
+ */
+function toReport({
+	diagnostics,
+	ok,
+}: {
+	diagnostics: Array<typeof sloptorDiagnostic.infer>;
+	ok?: boolean;
+}): CompileReport {
+	const mapped = diagnostics.map(toDiagnostic);
+	const errors = mapped.filter(({ severity }) => severity === "error").length;
+	return { diagnostics: mapped, errors: ok === false ? Math.max(errors, 1) : errors };
+}
 
-	const diagnostics = event.diagnostics.map(toDiagnostic);
-	const errors = diagnostics.filter(({ severity }) => severity === "error").length;
-	return { report: { diagnostics, errors }, type: "end" };
+function toCompileEvent(event: typeof sloptorEvent.infer): CompileEvent {
+	return event.event === "buildStart"
+		? { type: "start" }
+		: { report: toReport(event), type: "end" };
 }
 
 /**
- * Read one line: a sloptor event, or rbxtsc text.
+ * Read one line: a sloptor event, a sloptor result, or rbxtsc text.
  *
- * @param parser - The rbxtsc parser, for every line that is not an event.
+ * @param state - The parser.
  * @param line - The output line.
  * @returns The build event; `undefined` for other output, and for a sloptor
  *   event forge does not read (such as `watching`) or one with the wrong
  *   fields.
  */
-function readLine(parser: DiagnosticsParser, line: string): CompileEvent | undefined {
+function readLine(state: OutputState, line: string): CompileEvent | undefined {
 	const value = JSON_OBJECT_START.test(line) ? jsonText(line) : undefined;
-	if (!anyEvent.allows(value)) {
-		return parser.read(line);
+	if (anyEvent.allows(value)) {
+		const event = sloptorEvent(value);
+		return event instanceof type.errors ? undefined : toCompileEvent(event);
 	}
 
-	const event = sloptorEvent(value);
-	return event instanceof type.errors ? undefined : toCompileEvent(event);
+	const result = sloptorResult(value);
+	if (result instanceof type.errors) {
+		return state.parser.read(line);
+	}
+
+	state.result = toReport(result);
+	return undefined;
 }

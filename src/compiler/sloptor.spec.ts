@@ -1,12 +1,45 @@
 import { describe, expect, it } from "vitest";
 
-import type { CompileEvent } from "./diagnostics.ts";
-import { createWatchEventReader } from "./sloptor.ts";
+import type { CompileEvent, CompileReport } from "./diagnostics.ts";
+import { createCompilerOutputParser } from "./sloptor.ts";
 
 function readAll(lines: ReadonlyArray<string>): Array<CompileEvent | undefined> {
-	const read = createWatchEventReader();
-	return lines.map((line) => read(line));
+	const parser = createCompilerOutputParser();
+	return lines.map((line) => parser.read(line));
 }
+
+/**
+ * Read every line of a one-shot compile.
+ *
+ * @param lines - The output lines.
+ * @returns What each line gave, then the report.
+ */
+function compileOnce(lines: ReadonlyArray<string>): {
+	events: Array<CompileEvent | undefined>;
+	report: CompileReport;
+} {
+	const parser = createCompilerOutputParser();
+	const events = lines.map((line) => parser.read(line));
+	return { events, report: parser.finish() };
+}
+
+const TS2322 = {
+	code: "TS2322",
+	col: 7,
+	file: "src/a.ts",
+	line: 3,
+	message: "Bad.",
+	severity: "error",
+};
+
+const MAPPED_TS2322 = {
+	code: "TS2322",
+	column: 7,
+	file: "src/a.ts",
+	line: 3,
+	message: "Bad.",
+	severity: "error",
+};
 
 function event(fields: Record<string, unknown>): string {
 	return JSON.stringify(fields);
@@ -14,7 +47,7 @@ function event(fields: Record<string, unknown>): string {
 
 const START = event({ at: "2026-09-25T18:00:00.000Z", changed: [], event: "buildStart" });
 
-describe(createWatchEventReader, () => {
+describe(createCompilerOutputParser, () => {
 	it("should read a sloptor buildStart as a start event", () => {
 		expect.assertions(1);
 
@@ -204,5 +237,88 @@ describe(createWatchEventReader, () => {
 			{ type: "start" },
 			{ report: { diagnostics: [], errors: 0 }, type: "end" },
 		]);
+	});
+
+	it("should count a failed buildEnd with no error diagnostics as one error", () => {
+		expect.assertions(1);
+
+		expect(readAll([event({ diagnostics: [], event: "buildEnd", ok: false })])).toStrictEqual([
+			{ report: { diagnostics: [], errors: 1 }, type: "end" },
+		]);
+	});
+
+	it("should read the result of a one-shot sloptor build as the report", () => {
+		expect.assertions(1);
+
+		const result = event({
+			diagnostics: [TS2322],
+			durationMs: 142,
+			files: 222,
+			ok: false,
+			version: "1.0.0",
+		});
+
+		expect(compileOnce(["warning: no node_modules", `${result}\r`])).toStrictEqual({
+			events: [undefined, undefined],
+			report: { diagnostics: [MAPPED_TS2322], errors: 1 },
+		});
+	});
+
+	it("should count no error for a one-shot result that succeeded with warnings", () => {
+		expect.assertions(1);
+
+		const warning = { ...TS2322, severity: "warning" };
+		const result = event({
+			diagnostics: [warning],
+			durationMs: 1,
+			files: 1,
+			ok: true,
+			version: "1",
+		});
+
+		expect(compileOnce([result]).report).toStrictEqual({
+			diagnostics: [{ ...MAPPED_TS2322, severity: "warning" }],
+			errors: 0,
+		});
+	});
+
+	it("should count a failed one-shot result with no error diagnostics as one error", () => {
+		expect.assertions(1);
+
+		const result = event({ diagnostics: [], durationMs: 1, files: 1, ok: false, version: "1" });
+
+		expect(compileOnce([result]).report).toStrictEqual({ diagnostics: [], errors: 1 });
+	});
+
+	it("should read a JSON line that is not a one-shot result as rbxtsc text", () => {
+		expect.assertions(1);
+
+		expect(
+			compileOnce([
+				"src/a.ts:1:1 - error TS2322: Bad.",
+				event({ diagnostics: "none", ok: false }),
+			]).report,
+		).toStrictEqual({
+			diagnostics: [
+				{
+					code: "TS2322",
+					column: 1,
+					file: "src/a.ts",
+					line: 1,
+					message: 'Bad.\n{"diagnostics":"none","ok":false}',
+					severity: "error",
+				},
+			],
+			errors: 1,
+		});
+	});
+
+	it("should report rbxtsc diagnostics when no one-shot result comes", () => {
+		expect.assertions(1);
+
+		expect(compileOnce(["src/a.ts:3:7 - error TS2322: Bad."]).report).toStrictEqual({
+			diagnostics: [MAPPED_TS2322],
+			errors: 1,
+		});
 	});
 });

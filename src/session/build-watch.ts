@@ -1,5 +1,5 @@
 import type { CompileEvent } from "../compiler/diagnostics.ts";
-import { createWatchEventReader } from "../compiler/sloptor.ts";
+import { createCompilerOutputParser } from "../compiler/sloptor.ts";
 import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
@@ -77,7 +77,7 @@ export function createBuildWatch({ clock, recorder, tracks }: BuildWatchOptions)
 		change: undefined,
 		clock,
 		failure: undefined,
-		parse: createWatchEventReader(),
+		parse: createCompilerOutputParser().read,
 		recorder,
 		tracker: createFreshnessTracker(),
 	};

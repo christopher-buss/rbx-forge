@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -72,6 +72,56 @@ describe("forge compile", () => {
 			},
 		});
 		expect(error!.message).toStartWith("rbxtsc failed with 3 errors (exit code 1):\n");
+	});
+
+	it("should fail with the diagnostics of a one-shot sloptor result", async () => {
+		expect.assertions(3);
+
+		const { forge, log, project } = makeFixture({
+			rbxts: { args: ["build", "--json"], command: "sloptor" },
+		});
+		const output = path.join(project, "sloptor-result.json");
+		const diagnostic = {
+			code: "TS2322",
+			col: 7,
+			file: "src/a.ts",
+			line: 3,
+			message: "Bad.",
+			severity: "error",
+		};
+		const result = {
+			diagnostics: [diagnostic],
+			durationMs: 1,
+			files: 1,
+			ok: false,
+			version: "1",
+		};
+		writeFileSync(output, `${JSON.stringify(result)}\n`);
+		const { status, stdout } = await forge(["compile", "--json"], {
+			FIXTURE_COMPILER_OUTPUT: output,
+			FIXTURE_EXIT_CODE: "1",
+		});
+
+		expect(status).toBe(EXIT_FAILURE);
+		expect(parseResult(stdout).error).toMatchObject({
+			code: "compile_failed",
+			details: {
+				diagnostics: [
+					{
+						code: "TS2322",
+						column: 7,
+						file: "src/a.ts",
+						line: 3,
+						message: "Bad.",
+						severity: "error",
+					},
+				],
+				errors: 1,
+			},
+		});
+		expect(readWorkerLog(log).map(({ args, role }) => ({ args, role }))).toStrictEqual([
+			{ args: ["build", "--json"], role: "sloptor" },
+		]);
 	});
 
 	it("should keep the compiler's output out of NDJSON and colors out of the log", async () => {
