@@ -60,11 +60,10 @@ export async function runCompileCommandAsync(
 
 	const { hooks, value } = await compileAsync(context, config);
 	const warnings = value.diagnostics.length - value.errors;
-	const counts = warnings === 0 ? "no errors" : `no errors and ${plural(warnings, "warning")}`;
 
 	return {
 		data: { ...value, hooks },
-		summary: `Compiled with ${counts}. Full output: ${value.log}`,
+		summary: `Compiled: ${plural(value.errors, "error")}, ${plural(warnings, "warning")}. Full output: ${value.log}`,
 	};
 }
 

@@ -112,14 +112,15 @@ function readHeader(text: string): Diagnostic | undefined {
 		return undefined;
 	}
 
-	const { code = "", message = "", severity } = header;
+	// Every group of a match holds text; `String` only narrows the type.
+	const code = String(header["code"]);
 	return {
 		code: NUMERIC_CODE.test(code) ? `TS${code}` : code,
 		column: located === undefined ? null : Number(located["column"]),
 		file: located?.["file"] ?? null,
 		line: located === undefined ? null : Number(located["line"]),
-		message,
-		severity: severity === "warning" ? "warning" : "error",
+		message: String(header["message"]),
+		severity: header["severity"] === "warning" ? "warning" : "error",
 	};
 }
 

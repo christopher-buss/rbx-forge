@@ -69,8 +69,15 @@ export function openLogFile(
 	};
 }
 
+/**
+ * Shift every rotated file up one place and make the log the newest. Each
+ * rename replaces its target, so the oldest file is overwritten, not kept.
+ *
+ * @param fileSystem - Renames the files.
+ * @param file - The log's path.
+ * @param keep - Rotated files kept.
+ */
 function rotate(fileSystem: FileSystem, file: string, keep: number): void {
-	fileSystem.rmSync(`${file}.${keep}`, { force: true });
 	for (let index = keep - 1; index >= 1; index--) {
 		const from = `${file}.${index}`;
 		if (fileSystem.existsSync(from)) {

@@ -127,7 +127,7 @@ describe(runCompileCommandAsync, () => {
 
 		await expect(runCompileCommandAsync(context, INPUT)).resolves.toStrictEqual({
 			data: { diagnostics: [], durationMs: 3400, errors: 0, hooks: [], log: LOG },
-			summary: `Compiled with no errors. Full output: ${LOG}`,
+			summary: `Compiled: 0 errors, 0 warnings. Full output: ${LOG}`,
 		});
 		// The log test below checks what `onLine` does.
 		expect(specs).toStrictEqual([
@@ -271,24 +271,28 @@ describe(runCompileCommandAsync, () => {
 				],
 				errors: 0,
 			},
-			summary: `Compiled with no errors and 2 warnings. Full output: ${LOG}`,
+			summary: `Compiled: 0 errors, 2 warnings. Full output: ${LOG}`,
 		});
 	});
 
-	it("should name a single warning in the summary", async () => {
+	it("should count errors a compiler reports while it still exits with code 0", async () => {
 		expect.assertions(1);
 
 		const { context } = makeCompile({
 			runs: {
 				rbxtsc: {
 					exitCode: 0,
-					output: ["src/a.ts:2:3 - warning TS roblox-ts: Unused import."],
+					output: [
+						"src/a.ts:2:3 - warning TS roblox-ts: Unused import.",
+						"",
+						"src/b.ts:4:1 - error TS2322: Type 'number' is not assignable to type 'string'.",
+					],
 				},
 			},
 		});
 		const { summary } = await runCompileCommandAsync(context, INPUT);
 
-		expect(summary).toBe(`Compiled with no errors and 1 warning. Full output: ${LOG}`);
+		expect(summary).toBe(`Compiled: 1 error, 1 warning. Full output: ${LOG}`);
 	});
 
 	it("should fail as process_failed when a signal ends the compiler", async () => {
