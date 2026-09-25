@@ -71,14 +71,16 @@ describe(waitForStudioCloseAsync, () => {
 	});
 
 	it("should resolve false when the watch ends before Studio opened the place", async () => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const watch = watching();
-		const closed = waitForStudioCloseAsync(watch.options, LOCK, vi.fn<() => void>());
+		const onOpen = vi.fn<() => void>();
+		const closed = waitForStudioCloseAsync(watch.options, LOCK, onOpen);
 		await flushAsync();
 		watch.abort.abort();
 
 		await expect(closed).resolves.toBeFalse();
+		expect(onOpen).not.toHaveBeenCalled();
 	});
 
 	it("should resolve false when the watch ends while Studio has the place open", async () => {

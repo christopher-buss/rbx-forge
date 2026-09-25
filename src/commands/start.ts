@@ -127,10 +127,12 @@ function resolveServices(
 			compiler === undefined
 				? undefined
 				: {
-						...resolveInvocation(context, compiler.call),
-						id: "compiler",
 						parsesDiagnostics: compiler.parsesDiagnostics,
-						step: `${compiler.call.command} watch`,
+						service: {
+							...resolveInvocation(context, compiler.call),
+							id: "compiler",
+							step: `${compiler.call.command} watch`,
+						},
 					},
 		config,
 		context,

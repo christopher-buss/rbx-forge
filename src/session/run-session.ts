@@ -137,10 +137,7 @@ function createState(): SessionState {
 		abort,
 		ended: promise,
 		finish: (reason) => {
-			if (abort.signal.aborted) {
-				return;
-			}
-
+			// Both do nothing after the first call: the first reason wins.
 			abort.abort();
 			resolve(reason);
 		},

@@ -85,6 +85,26 @@ describe(createCoalescingRunner, () => {
 		expect(task.calls).toStrictEqual(["start 1", "end 1", "start 2", "end 2"]);
 	});
 
+	it("should settle only once the runs are done", async () => {
+		expect.assertions(2);
+
+		const task = controlledTask();
+		const runner = createCoalescingRunner(task.task);
+		let isSettled = false;
+		runner.request();
+		const settled = runner.settled().then(() => {
+			isSettled = true;
+			return isSettled;
+		});
+		await flushAsync();
+
+		expect(isSettled).toBeFalse();
+
+		task.finish();
+
+		await expect(settled).resolves.toBeTrue();
+	});
+
 	it("should settle at once when nothing ran", async () => {
 		expect.assertions(1);
 

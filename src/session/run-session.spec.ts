@@ -145,7 +145,7 @@ describe(runSessionAsync, () => {
 			reason: { signal: "SIGTERM", type: "signal" },
 		});
 		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "terminate 250"]);
-		expect(started[1]).toBeUndefined();
+		expect(started).toStrictEqual([expect.objectContaining({ id: "rojo" }), undefined]);
 	});
 
 	it("should end with failed and terminate the reaper when the body rejects", async () => {
@@ -206,6 +206,26 @@ describe(runSessionAsync, () => {
 		order.push("returned");
 
 		expect(order).toStrictEqual(["first", "late", "returned"]);
+	});
+
+	it("should wait for a body that still runs when the session ends", async () => {
+		expect.assertions(1);
+
+		const order: Array<string> = [];
+		const { outcome, signals } = startSession(async (scope) => {
+			await new Promise((resolve) => {
+				scope.signal.addEventListener("abort", () => {
+					setImmediate(resolve);
+				});
+			});
+			order.push("body");
+		});
+		await flushAsync();
+		signals.fire("SIGINT");
+		await outcome;
+		order.push("returned");
+
+		expect(order).toStrictEqual(["body", "returned"]);
 	});
 
 	it("should stop listening for signals when the reaper cannot launch", async () => {

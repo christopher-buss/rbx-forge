@@ -245,18 +245,81 @@ describe(runStartAsync, () => {
 	});
 
 	it("should run only Rojo with --no-open --no-compiler", async () => {
-		expect.assertions(3);
+		expect.assertions(4);
 
-		const run = await stoppedAsync();
+		const run = await stoppedAsync({ projectType: "rbxts" });
 
 		await expect(run.result).resolves.toStrictEqual({
 			data: { port: 4000, reason: "SIGINT", reports: [] },
 			summary: "Stopped on SIGINT; every process of the session is gone.",
 		});
-		expect(spawnedIds(run.fake)).toStrictEqual([
-			"rojo: serve default.project.json --port 4000",
+		expect(run.fake.launches).toStrictEqual([
+			{ leasePath: path.join(SESSION, "workers.lock"), sessionId: "session-1" },
+		]);
+		expect(run.fake.spawned).toStrictEqual([
+			{
+				id: "rojo",
+				args: ["serve", "default.project.json", "--port", "4000"],
+				cwd: PROJECT,
+				env: { PATH: TOOLS },
+				file: path.join(TOOLS, "rojo"),
+				log: path.join(SESSION, "output", "rojo.log"),
+			},
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
+	});
+
+	it("should report ready once Rojo runs, naming the port", async () => {
+		expect.assertions(1);
+
+		const run = await stoppedAsync();
+		await run.result;
+
+		expect(run.reporter.events.at(-1)).toStrictEqual({
+			message: "Rojo serves default.project.json on port 4000. Press Ctrl+C to stop.",
+			type: "info",
+		});
+	});
+
+	it("should not report ready after a stop signal while the services start", async () => {
+		expect.assertions(1);
+
+		const run: StartRun = startCommand({
+			reaper: {
+				onSpawn: onSpawnOf("rojo", () => {
+					run.signals.fire("SIGINT");
+				}),
+			},
+		});
+		await run.result;
+
+		expect(run.reporter.events.map(({ type }) => type)).toStrictEqual(["step", "step"]);
+	});
+
+	it("should never open Studio after a stop signal during the build", async () => {
+		expect.assertions(2);
+
+		const run: StartRun = startCommand({
+			flags: {},
+			projectType: "rbxts",
+			reaper: {
+				onSpawn: onSpawnOf("start-2", () => {
+					run.signals.fire("SIGINT");
+				}),
+			},
+		});
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+	});
+
+	it("should leave no timer behind once the session ended", async () => {
+		expect.assertions(1);
+
+		const run = await stoppedAsync({ flags: { syncback: true } });
+		await run.result;
+
+		expect(run.clock.pending()).toBe(0);
 	});
 
 	it("should report each step and a ready line", async () => {
@@ -285,7 +348,7 @@ describe(runStartAsync, () => {
 	it("should let open build the place when the session has no compiler", async () => {
 		expect.assertions(2);
 
-		const run = await stoppedAsync({ flags: { compiler: false } });
+		const run = await stoppedAsync({ flags: { compiler: false }, projectType: "rbxts" });
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
@@ -308,6 +371,22 @@ describe(runStartAsync, () => {
 		expect(spawnedIds(run.fake).filter((id) => id.includes("build"))).toStrictEqual([
 			"start-2: build default.project.json --output game.rbxl",
 			"start-3: build default.project.json --output other.rbxl",
+		]);
+	});
+
+	it("should let open build from its own project", async () => {
+		expect.assertions(1);
+
+		const run = await stoppedAsync({
+			file: { open: { projectPath: "place.project.json" } },
+			flags: {},
+			projectType: "rbxts",
+		});
+		await run.result;
+
+		expect(spawnedIds(run.fake).filter((id) => id.includes("build"))).toStrictEqual([
+			"start-2: build default.project.json --output game.rbxl",
+			"start-3: build place.project.json --output game.rbxl",
 		]);
 	});
 
@@ -461,7 +540,7 @@ describe(runStartAsync, () => {
 	});
 
 	it("should write each service's output to its rotated log, without colors", async () => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const run = startCommand({
 			files: { ".forge/logs/rojo.log": "earlier\n", ...TOOL_FILES },
@@ -472,6 +551,12 @@ describe(runStartAsync, () => {
 			"\u001B[32m-listening-\u001B[39m\npartial",
 		);
 		await passAsync(run, OUTPUT_POLL_MS);
+
+		// Read while Rojo runs, not only once it is gone.
+		expect(run.memory.files()[".forge/logs/rojo.log"]).toBe(
+			"earlier\n--- forge start 2026-01-01T00:00:00.000Z ---\n-listening-\n",
+		);
+
 		run.signals.fire("SIGINT");
 		await run.result;
 
@@ -609,6 +694,18 @@ describe("forge start hooks and syncback", () => {
 		await passAsync(run, FILE_POLL_MS);
 		return run;
 	}
+
+	it("should not run syncback on a save without --syncback", async () => {
+		expect.assertions(1);
+
+		const run = await savedAsync({ ...SYNCBACK, flags: ROJO_ONLY });
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"rojo: serve default.project.json --port 4000",
+		]);
+	});
 
 	it("should check Rojo's syncback support before any other step", async () => {
 		expect.assertions(2);

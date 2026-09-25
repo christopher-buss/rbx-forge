@@ -87,9 +87,16 @@ async function pollAsync(
 	return false;
 }
 
-function versionOf(fileSystem: FileSystem, file: string): string {
+/**
+ * What changes when a file is written.
+ *
+ * @param fileSystem - Reads the file's status.
+ * @param file - The place or lock file to look at.
+ * @returns Its modification time and size, or `undefined` when it is missing.
+ */
+function versionOf(fileSystem: FileSystem, file: string): string | undefined {
 	if (!fileSystem.existsSync(file)) {
-		return "missing";
+		return undefined;
 	}
 
 	const { mtimeMs, size } = fileSystem.statSync(file);

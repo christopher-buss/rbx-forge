@@ -8,7 +8,6 @@ import type { CommandContext } from "../commands/context.ts";
 import { openPlaceAsync } from "../commands/open.ts";
 import { createDiagnosticsParser } from "../compiler/diagnostics.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
-import { ForgeError } from "../errors.ts";
 import { logFilePath, openLogFile } from "../output/log-file.ts";
 import type { Invocation } from "../process/command-line.ts";
 import type { SpawnedWorker } from "../reaper/reaper-client.ts";
@@ -35,11 +34,8 @@ export interface ServiceInvocation extends Invocation {
 
 /** Everything one dev session runs with. */
 export interface SessionSetup {
-	/**
-	 * The compiler service, when the plan has one. `parsesDiagnostics`: its
-	 * output is read as roblox-ts diagnostics.
-	 */
-	compiler: (ServiceInvocation & { parsesDiagnostics: boolean }) | undefined;
+	/** The compiler service, when the plan has one. */
+	compiler: undefined | { parsesDiagnostics: boolean; service: ServiceInvocation };
 	config: ResolvedConfig;
 	/** The command's context: project root, environment, seams, reporter. */
 	context: CommandContext;
@@ -85,27 +81,19 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 		const { compiler } = session;
 		if (compiler !== undefined) {
 			const reader = compiler.parsesDiagnostics ? compileReader(session) : undefined;
-			await startServiceAsync(session, scope, compiler, reader);
+			await startServiceAsync(session, scope, compiler.service, reader);
 		}
 
-		requireRunning(scope);
+		// A stop request while the services started: the session is ending.
+		if (scope.signal.aborted) {
+			return;
+		}
+
 		announceReady(session);
 		if (session.plan.syncback) {
 			scope.track(watchSavesForSyncbackAsync(session, scope));
 		}
 	};
-}
-
-/**
- * Throw when the session is ending, so no later step starts.
- *
- * @param scope - The session.
- * @throws {ForgeError} `interrupted` once the session ends.
- */
-function requireRunning(scope: SessionScope): void {
-	if (scope.signal.aborted) {
-		throw new ForgeError("interrupted", "The session stopped before it was ready.");
-	}
 }
 
 /**
@@ -141,7 +129,8 @@ function workerContext(
  * @param session - The config, plan, and context.
  * @param scope - Its reaper and end signal.
  * @returns The place opened in Studio, or `undefined` when none was.
- * @rejects {ForgeError} A step's failure, or `interrupted`.
+ * @rejects A step's failure. A step that the session's end
+ *   stopped fails too; the session has its reason by then.
  */
 async function runStepsAsync(
 	session: SessionSetup,
@@ -153,24 +142,24 @@ async function runStepsAsync(
 		await requireSyncbackAsync(steps, config);
 	}
 
+	// Steps run through the reaper runner, which starts nothing once the
+	// session is ending.
 	if (plan.compile) {
-		requireRunning(scope);
 		await compileAsync(steps, config);
 	}
 
 	if (plan.build) {
-		requireRunning(scope);
 		await buildAsync(steps, config, {
 			project: config.rojoProjectPath,
 			target: { output: config.buildOutputPath, type: "output" },
 		});
 	}
 
-	if (!plan.open) {
+	// Studio starts outside the reaper, so this step checks by itself.
+	if (!plan.open || scope.signal.aborted) {
 		return undefined;
 	}
 
-	requireRunning(scope);
 	// The build above wrote the place `open` would build.
 	const isBuilt =
 		plan.build &&
@@ -198,19 +187,14 @@ async function watchStudioAsync(
 	place: string,
 ): Promise<void> {
 	const { reporter } = session.context;
-	const isClosed = await waitForStudioCloseAsync(
-		watchOptions(session, scope),
-		studioLockPath(place),
-		() => {
-			reporter.emit({
-				message: `Roblox Studio has ${place} open. The session ends when Studio closes it.`,
-				type: "info",
-			});
-		},
-	);
-	if (isClosed) {
-		scope.end({ type: "studio_closed" });
-	}
+	await waitForStudioCloseAsync(watchOptions(session, scope), studioLockPath(place), () => {
+		reporter.emit({
+			message: `Roblox Studio has ${place} open. The session ends when Studio closes it.`,
+			type: "info",
+		});
+	});
+	// A watch that ended first ended with the session, so this does nothing.
+	scope.end({ type: "studio_closed" });
 }
 
 function describeError(error: unknown): string {
@@ -273,6 +257,21 @@ function compileReader(session: SessionSetup): (line: string) => void {
 	};
 }
 
+function ignore(): void {
+	// The timer was aborted; nothing waits for it.
+}
+
+/**
+ * Note when a service's tree is gone.
+ *
+ * @param worker - The service.
+ * @param state - Gets `isRunning: false` once the tree is gone.
+ */
+async function markExitAsync(worker: SpawnedWorker, state: { isRunning: boolean }): Promise<void> {
+	await worker.exited;
+	state.isRunning = false;
+}
+
 /**
  * Read a service's output until its tree is gone.
  *
@@ -285,20 +284,17 @@ async function followUntilExitAsync(
 	worker: SpawnedWorker,
 	follower: OutputFollower,
 ): Promise<void> {
-	for (;;) {
+	const state = { isRunning: true };
+	const exited = markExitAsync(worker, state);
+	while (state.isRunning) {
 		const abort = new AbortController();
-		// Once the tree is gone first, the abort rejects a timer the race
-		// already handles.
-		const timer = clock.sleep(OUTPUT_POLL_MS, abort.signal).then(() => false);
-		const hasExited = await Promise.race([worker.exited.then(() => true), timer]);
+		// Once the tree is gone first, the abort ends the timer.
+		await Promise.race([exited, clock.sleep(OUTPUT_POLL_MS, abort.signal).catch(ignore)]);
 		abort.abort();
-		if (hasExited) {
-			follower.finish();
-			return;
-		}
-
 		follower.read();
 	}
+
+	follower.finish();
 }
 
 /**
@@ -325,22 +321,14 @@ async function startServiceAsync(
 	const startedAt = new Date(clock.now());
 	log.write(`--- forge start ${startedAt.toISOString()} ---`);
 
-	reporter.emit({ name: service.step, status: "started", type: "step" });
-	const { id, args, file } = service;
-	const worker = await scope.startServiceAsync({
-		id,
-		args,
-		cwd,
-		env,
-		file,
-		log: spool,
-		verbatimArguments: service.verbatimArguments === true,
-	});
+	const { step, ...invocation } = service;
+	reporter.emit({ name: step, status: "started", type: "step" });
+	const worker = await scope.startServiceAsync({ ...invocation, cwd, env, log: spool });
 	if (worker === undefined) {
 		return;
 	}
 
-	reporter.emit({ name: service.step, status: "succeeded", type: "step" });
+	reporter.emit({ name: step, status: "succeeded", type: "step" });
 	const follower = followOutput(fileSystem, spool, (line) => {
 		log.write(stripVTControlCharacters(line));
 		onLine?.(line);

@@ -145,7 +145,7 @@ describe(createReaperRunner, () => {
 	});
 
 	it("should give each run its own worker id", async () => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const setup = await setupAsync();
 		const first = setup.runner(SPEC);
@@ -156,6 +156,7 @@ describe(createReaperRunner, () => {
 		await second;
 
 		expect(setup.fake.spawned.map(({ id }) => id)).toStrictEqual(["start-1", "start-2"]);
+		expect(setup.fake.spawned[0]).not.toHaveProperty("verbatimArguments");
 	});
 
 	it("should stop the whole tree at once when the run outlives its timeout", async () => {
@@ -186,7 +187,7 @@ describe(createReaperRunner, () => {
 		await finishAsync(setup, "");
 
 		await expect(outcome).resolves.toMatchObject({ type: "exited" });
-		expect(setup.clock.pending()).toBe(0);
+		expect([setup.clock.pending(), setup.fake.calls]).toStrictEqual([0, ["spawn start-1"]]);
 	});
 
 	it("should report spawn_failed when the reaper rejects the run", async () => {

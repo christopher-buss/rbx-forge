@@ -1,8 +1,9 @@
 import { Buffer } from "node:buffer";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
+import type { FileSystem } from "../seams/file-system.ts";
 import type { OutputFollower } from "./output-follower.ts";
 import { followOutput } from "./output-follower.ts";
 
@@ -75,6 +76,30 @@ describe(followOutput, () => {
 		follower.finish();
 
 		expect(lines).toStrictEqual(["é"]);
+	});
+
+	it("should hand over a character cut off at the end as a replacement character", () => {
+		expect.assertions(1);
+
+		const { append, follower, lines } = follow();
+		append(Buffer.from("é").subarray(0, 1));
+		follower.finish();
+
+		expect(lines).toStrictEqual(["\uFFFD"]);
+	});
+
+	it("should close the file after each read", () => {
+		expect.assertions(1);
+
+		const memory = createMemoryFileSystem({ "out.log": "one\n" });
+		const closeSync = vi.fn<FileSystem["closeSync"]>(memory.fileSystem.closeSync);
+		followOutput(
+			{ ...memory.fileSystem, closeSync },
+			FILE,
+			vi.fn<(line: string) => void>(),
+		).read();
+
+		expect(closeSync).toHaveBeenCalledOnce();
 	});
 
 	it("should read output larger than one chunk", () => {
