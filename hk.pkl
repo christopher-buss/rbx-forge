@@ -1,5 +1,5 @@
-amends "package://github.com/jdx/hk/releases/download/v1.45.0/hk@1.45.0#/Config.pkl"
-import "package://github.com/jdx/hk/releases/download/v1.45.0/hk@1.45.0#/Builtins.pkl"
+amends "package://github.com/jdx/hk/releases/download/v2.2.0/hk@2.2.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.2.0/hk@2.2.0#/Builtins.pkl"
 
 // Activate the "agent" profile when an AI-agent CLI runs the hook (same list
 // as project-halcyon and std-env's `isAgent`). Agents get the heavier build
@@ -12,6 +12,8 @@ profiles = if (
     || read?("env:CODEX_THREAD_ID") != null
     || read?("env:OPENCODE") != null
 ) List("agent") else List()
+
+min_hk_version = "2.2.0"
 
 local guards = new Mapping<String, Step> {
     // `batch = true` keeps each cmd.exe invocation under the 8191-char Windows
@@ -69,14 +71,19 @@ local knip = new Step {
     check = "pnpm knip"
 }
 
+// hk runs these in the fix, check and pre-commit hooks, ahead of each hook's
+// own steps.
+steps {
+    ...guards
+    ["lint"] = lint
+    ["typecheck"] = typecheck
+}
+
 hooks {
     ["pre-commit"] {
         fix = true
         stash = "none"
         steps {
-            ...guards
-            ["lint"] = lint
-            ["typecheck"] = typecheck
             ["build"] = (build) { profiles = List("agent") }
             ["test"] = (test) { profiles = List("agent") }
             ["e2e"] = (e2e) { profiles = List("agent") }
@@ -112,9 +119,6 @@ hooks {
     }
     ["check"] {
         steps {
-            ...guards
-            ["lint"] = lint
-            ["typecheck"] = typecheck
             ["knip"] = knip
             ["build"] = build
             ["test"] = test
