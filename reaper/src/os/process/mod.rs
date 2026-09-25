@@ -170,6 +170,8 @@ mod tests {
     #[test]
     fn a_later_process_has_a_later_start_time() {
         let own = start_time(std::process::id()).unwrap().unwrap();
+        // Linux counts start times in 10 ms clock ticks.
+        std::thread::sleep(std::time::Duration::from_millis(50));
         let mut child = sleeper();
         let theirs = start_time(child.id()).unwrap().unwrap();
         child.kill().unwrap();

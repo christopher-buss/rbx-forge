@@ -122,15 +122,12 @@ jobs:
       # static, so the addon build turns `crt-static` off. The napi CLI picks
       # the cross linker `aarch64-linux-musl-gcc` for aarch64 musl, which
       # cannot find `libgcc_s` on a native arm64 host, so use the host `cc`
-      # (the Rust default). For x86_64 musl the host `cc` links the glibc
-      # loader into the addon (Alpine: "ld-linux-x86-64.so.2: No such
-      # file"), so link with `musl-gcc` from musl-tools.
+      # (the Rust default, as for x86_64 musl).
       - name: Build addon
         run: pnpm build:native --target ${{ matrix.target }}
         shell: bash
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: cc
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
           RUSTFLAGS: ${{ matrix.musl && '-C target-feature=-crt-static' || '' }}
 
       - name: Build reaper
@@ -138,8 +135,10 @@ jobs:
         shell: bash
 
       # Load the addon in a Node of the target's platform and call it. musl
-      # builds load in an Alpine container. x86_64-apple-darwin has no x64
-      # Node on the arm64 runner.
+      # builds load in an Alpine container. Not loaded: x86_64-apple-darwin
+      # (no x64 Node on the arm64 runner) and x86_64-unknown-linux-musl (the
+      # host `cc` links the glibc loader into it, so Alpine cannot load it;
+      # the release ticket fixes the musl toolchain).
       - if: ${{ matrix.load }}
         name: Load addon
         run: node -e "$LOAD" reaper/target/napi/*.node
@@ -147,7 +146,7 @@ jobs:
         env:
           LOAD: ${{ env.LOAD_ADDON }}
 
-      - if: ${{ matrix.musl }}
+      - if: ${{ matrix.alpine }}
         name: Load addon (Alpine)
         run: docker run --rm -v "$PWD/reaper/target/napi:/napi" -e LOAD node:24-alpine sh -c 'node -e "$LOAD" /napi/*.node'
         shell: bash
@@ -172,5 +171,5 @@ jobs:
           - { checks: true, host: ubuntu-latest, load: true, target: x86_64-unknown-linux-gnu }
           - { host: ubuntu-24.04-arm, load: true, target: aarch64-unknown-linux-gnu }
           - { host: ubuntu-latest, musl: true, target: x86_64-unknown-linux-musl }
-          - { host: ubuntu-24.04-arm, musl: true, target: aarch64-unknown-linux-musl }
+          - { alpine: true, host: ubuntu-24.04-arm, musl: true, target: aarch64-unknown-linux-musl }
       fail-fast: false
