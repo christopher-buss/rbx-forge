@@ -19,11 +19,6 @@ export const FORCED_SHUTDOWN_MS = 5000;
 export const KILL_WAIT_MS = 5000;
 /** How often `down` looks at the supervisor again. */
 export const DOWN_POLL_MS = 100;
-/**
- * How long a supervisor that let go of the singleton lock gets to exit: it
- * only writes its result then.
- */
-export const EXIT_WAIT_MS = 2000;
 
 /** A barrier wait nothing aborts. */
 const NEVER = AbortSignal.any([]);
@@ -81,17 +76,17 @@ interface Target {
  * cleans up and deletes only its files. `stopped` needs both:
  *
  * 1. Its supervisor has exited: its pinned process (PID plus start time)
- *    is gone, or the singleton lock is free, which no running supervisor
- *    of this project leaves free (then its pinned process gets
- *    {@link EXIT_WAIT_MS} to exit).
+ *    is gone. A supervisor lets go of the singleton lock before it writes
+ *    its result, and can hang there, so a free lock proves nothing while
+ *    the pinned process runs.
  * 2. Its barrier is clear: its lease is free and a scan finds none of its
  *    processes.
  *
- * Escalation: IPC `shutdown` (wait `timeoutMs`), IPC `shutdown` with
- * `force` (wait {@link FORCED_SHUTDOWN_MS}), then, with `force` only, kill
- * the supervisor through its pin; and, when the barrier stays blocked, with
- * `force` only, a forced cleanup of the session. Its files are deleted only
- * under the singleton lock.
+ * Escalation: IPC `shutdown` (wait `timeoutMs`), IPC `shutdown` with `force`
+ * (wait {@link FORCED_SHUTDOWN_MS}), then, with `force` only, kill the
+ * supervisor through its pin while it holds the singleton lock; and, when the
+ * barrier stays blocked, with `force` only, a forced cleanup of the session.
+ * Its files are deleted only under the singleton lock.
  *
  * @param seams - The clock, file system, transport, and native addon.
  * @param forge - The project's `.forge` files.
@@ -147,48 +142,27 @@ function pinSupervisor(
 }
 
 /**
- * Whether no supervisor of the project holds the singleton lock. Takes it
- * and lets go at once.
+ * Whether a process holds the project's singleton lock. The probe never
+ * creates the lock file.
  *
  * @param seams - The native addon.
  * @param forge - The project's `.forge` files.
- * @returns Whether the lock was free.
+ * @returns Whether the lock is held.
  */
-function isLockFree(seams: Pick<DownSeams, "native">, forge: ForgeFiles): boolean {
-	const lock = seams.native().tryLockFile(forge.lock, "exclusive");
-	lock?.release();
-	return lock !== null;
+function isLockHeld(seams: Pick<DownSeams, "native">, forge: ForgeFiles): boolean {
+	return !seams.native().isLockFree(forge.lock);
 }
 
 /**
  * Condition 1 of {@link stopSessionAsync}: the target's supervisor has
- * exited. A supervisor that let go of the singleton lock is ending, so it
- * gets {@link EXIT_WAIT_MS} to exit; a process that keeps running without
- * the lock is not a supervisor of this project (a stale record whose PID
- * and start time match), and never blocks `down`.
+ * exited.
  *
- * @param seams - The clock and native addon.
  * @param target - The pinned supervisor.
+ * @param target.pin - Its pin; `undefined` when it was gone at the start.
  * @returns Whether it has.
  */
-async function isGoneAsync(
-	seams: Pick<DownSeams, "clock" | "native">,
-	{ forge, pin }: Target,
-): Promise<boolean> {
-	if (pin?.isAlive() !== true) {
-		return true;
-	}
-
-	if (!isLockFree(seams, forge)) {
-		return false;
-	}
-
-	const deadline = seams.clock.now() + EXIT_WAIT_MS;
-	while (pin.isAlive() && seams.clock.now() < deadline) {
-		await seams.clock.sleep(DOWN_POLL_MS);
-	}
-
-	return true;
+function isGone({ pin }: Target): boolean {
+	return pin?.isAlive() !== true;
 }
 
 /**
@@ -241,7 +215,7 @@ async function requestStopAsync(
 	const deadline = seams.clock.now() + waitMs;
 	let isAccepted = await askAsync(seams, target.session, force);
 	for (;;) {
-		if (await isGoneAsync(seams, target)) {
+		if (isGone(target)) {
 			return true;
 		}
 
@@ -256,7 +230,7 @@ async function requestStopAsync(
 
 async function waitGoneAsync(seams: DownSeams, target: Target, waitMs: number): Promise<boolean> {
 	const deadline = seams.clock.now() + waitMs;
-	while (!(await isGoneAsync(seams, target))) {
+	while (!isGone(target)) {
 		if (seams.clock.now() >= deadline) {
 			return false;
 		}
@@ -295,7 +269,7 @@ async function stopSupervisorAsync(
 	target: Target,
 	options: DownOptions,
 ): Promise<StoppedBy> {
-	if (await isGoneAsync(seams, target)) {
+	if (isGone(target)) {
 		return "gone";
 	}
 
@@ -311,7 +285,13 @@ async function stopSupervisorAsync(
 		throw unresponsive(target, false);
 	}
 
-	// Alive, holding the lock, and pinned with its recorded start time.
+	// Kill only a supervisor of this project: pinned with its recorded start
+	// time, and holding the singleton lock. A live process with that PID and
+	// start time but no lock is not one (F6).
+	if (!isLockHeld(seams, target.forge)) {
+		throw unresponsive(target, true);
+	}
+
 	target.pin?.kill();
 	if (await waitGoneAsync(seams, target, KILL_WAIT_MS)) {
 		return "killed";

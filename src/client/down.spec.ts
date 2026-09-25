@@ -15,7 +15,7 @@ import type { Clock } from "../seams/clock.ts";
 import type { IdentityRecord } from "../supervisor/session-files.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
 import type { DownOptions, DownPoint, DownReport } from "./down.ts";
-import { EXIT_WAIT_MS, FORCED_SHUTDOWN_MS, KILL_WAIT_MS, stopSessionAsync } from "./down.ts";
+import { FORCED_SHUTDOWN_MS, KILL_WAIT_MS, stopSessionAsync } from "./down.ts";
 import type { KnownSession } from "./session.ts";
 import { findSession } from "./session.ts";
 
@@ -373,7 +373,6 @@ describe(stopSessionAsync, () => {
 	it.for([
 		["a reused PID (F2)", { startTime: "999" }, false],
 		["a start time mismatch under a held lock (F3)", { startTime: "999" }, true],
-		["a free lock with a stale record (F6)", {}, false],
 	] as const)(
 		"should kill nothing for %s, and report it gone",
 		async ([, supervisor, holdsLock]) => {
@@ -388,7 +387,7 @@ describe(stopSessionAsync, () => {
 		},
 	);
 
-	it("should wait for a supervisor that let go of the lock to exit", async () => {
+	it("should wait for a supervisor that let go of the lock until it exits", async () => {
 		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false });
@@ -396,17 +395,35 @@ describe(stopSessionAsync, () => {
 			world.native.processes.get(SUPERVISOR)!.alive = false;
 		});
 
-		await expect(downAsync(world)).resolves.toMatchObject({ stoppedBy: "gone" });
+		await expect(downAsync(world)).resolves.toMatchObject({ stoppedBy: "shutdown" });
 		expect(world.clock.now()).toBe(300);
 	});
 
-	it("should wait no longer than the exit wait for a live process without the lock (F6)", async () => {
-		expect.assertions(1);
+	it("should never report stopped while a supervisor that let go of the lock still runs", async () => {
+		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false });
-		await downAsync(world);
+		at(world, 2500, () => {
+			world.native.processes.get(SUPERVISOR)!.alive = false;
+		});
 
-		expect(world.clock.now()).toBe(EXIT_WAIT_MS);
+		await expect(downAsync(world)).resolves.toMatchObject({ stoppedBy: "forced_shutdown" });
+		expect(world.clock.now()).toBe(2500);
+	});
+
+	it("should report a live process without the lock unresponsive, and kill nothing with --force (F6)", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld({ holdsLock: false });
+
+		await expect(downAsync(world, { force: true })).rejects.toMatchObject({
+			code: "supervisor_unresponsive",
+			hint: "Check the process, and stop it by hand.",
+		});
+		expect({
+			alive: world.native.processes.get(SUPERVISOR)!.alive,
+			waited: world.clock.now(),
+		}).toStrictEqual({ alive: true, waited: TIMEOUT_MS + FORCED_SHUTDOWN_MS });
 	});
 
 	it("should treat a supervisor it cannot open as gone", async () => {

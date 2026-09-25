@@ -40,10 +40,12 @@ do.
   final barrier (5 s, else `cleanup_in_progress`: the session directory stays
   for the next startup barrier), final state, exit.
 - **`down` proves the stop.** It reports `stopped` only when (a) the target
-  supervisor has exited (its pin is gone, or the singleton lock is free) and (b)
-  the target's barrier is clear. Escalation: IPC `shutdown` (wait `--timeout`,
-  15 s), forced `shutdown` (5 s, ends the workers' grace), then with `--force`
-  only: kill the supervisor through its pin, and forced cleanup when the barrier
+  supervisor has exited (its pin is gone; a supervisor lets go of the singleton
+  lock before it writes its result, so a free lock proves nothing while the pin
+  runs) and (b) the target's barrier is clear. Escalation: IPC `shutdown` (wait
+  `--timeout`, 15 s; asked at least once), forced `shutdown` (5 s, ends the
+  workers' grace), then with `--force` only: kill the supervisor through its pin
+  (only while the singleton lock is held), and forced cleanup when the barrier
   stays blocked. `down` acts only on the session id `.forge/current` named when
   it began; another session at the endpoint gives `session_replaced`.
 - **Evidence, not PIDs.** A process belongs to a session only by its marker, its

@@ -424,14 +424,14 @@ describe("forge down", () => {
 		});
 	});
 
-	it("should kill nothing for a record with a live start time while the lock is free (F6)", async () => {
+	it("should kill nothing for a record with a live start time while the lock is free, and never report it stopped (F6)", async () => {
 		expect.assertions(1);
 
 		const project = await makeProjectAsync();
 
 		await expect(downOnBystanderAsync(project, liveStartTime)).resolves.toMatchObject({
 			isAlive: true,
-			outcome: { ok: true, report: { removed: true, stoppedBy: "gone" } },
+			outcome: { error: { code: "supervisor_unresponsive" }, ok: false },
 		});
 	});
 });
