@@ -1,18 +1,17 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
-import { createFixtureBinDirectory } from "../helpers/fixture-bin.ts";
+import type { FixtureProject } from "../helpers/fixture-project.ts";
+import { makeFixtureProject } from "../helpers/fixture-project.ts";
 import { parseResult } from "../helpers/output.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
-import { isProcessAlive, killWorkers, readWorkerLog } from "../helpers/worker-log.ts";
-import { makeProject, runBinAsync } from "./run-bin.ts";
+import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
 
 const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
-const PATH_NAME = /^path$/i;
 const IS_WINDOWS = process.platform === "win32";
 
 /**
@@ -34,76 +33,20 @@ const PLACE_CONTENT = IS_WINDOWS
 	? `@cd /d "%SystemRoot%" & "${process.execPath}" "${FAKE_WORKER}" studio "%~f0" & exit\r\n`
 	: "fake place\n";
 
-interface Fixture {
-	/** Run `forge` in the project with the fixture binaries alone on PATH. */
-	forge: (
-		argv: Array<string>,
-		variables?: Record<string, string>,
-	) => ReturnType<typeof runBinAsync>;
-	log: string;
+interface Fixture extends FixtureProject {
 	/** The absolute path of {@link PLACE}. */
 	place: string;
-	project: string;
-}
-
-/**
- * This process's environment with PATH replaced (Windows spells it `Path`).
- *
- * @param directory - The only PATH entry.
- * @param variables - Variables to add.
- * @returns The environment for a run.
- */
-function environmentWith(directory: string, variables: Record<string, string>): NodeJS.ProcessEnv {
-	const environment: NodeJS.ProcessEnv = {
-		...process.env,
-		CI: undefined,
-		RBX_FORGE_HOOK_STACK: undefined,
-	};
-	for (const key of Object.keys(environment)) {
-		if (PATH_NAME.test(key)) {
-			delete environment[key];
-		}
-	}
-
-	return { ...environment, ...variables, PATH: directory };
 }
 
 function makeFixture({ hasPlace = false }: { hasPlace?: boolean } = {}): Fixture {
-	const project = makeProject({
-		"default.project.json": JSON.stringify({
-			name: "fixture",
-			tree: { $className: "DataModel" },
-		}),
-		"rbx-forge.config.json": JSON.stringify({ projectType: "luau" }),
+	const fixture = makeFixtureProject({
+		config: { projectType: "luau" },
+		files: hasPlace ? { [PLACE]: PLACE_CONTENT } : {},
+		variables: { FIXTURE_PLACE_CONTENT: PLACE_CONTENT },
 	});
-	const bin = createFixtureBinDirectory(path.join(project, "fixture-bin"));
-	const place = path.join(project, PLACE);
-	mkdirSync(path.dirname(place));
-	if (hasPlace) {
-		writeFileSync(place, PLACE_CONTENT);
-	}
-
-	const log = path.join(project, "workers.ndjson");
-	onTestFinished(() => {
-		killWorkers(readWorkerLog(log));
-	});
-
-	return {
-		forge: async (argv, variables = {}) => {
-			return runBinAsync(
-				argv,
-				project,
-				environmentWith(bin, {
-					FIXTURE_LOG: log,
-					FIXTURE_PLACE_CONTENT: PLACE_CONTENT,
-					...variables,
-				}),
-			);
-		},
-		log,
-		place,
-		project,
-	};
+	const place = path.join(fixture.project, PLACE);
+	mkdirSync(path.dirname(place), { recursive: true });
+	return { ...fixture, place };
 }
 
 /**

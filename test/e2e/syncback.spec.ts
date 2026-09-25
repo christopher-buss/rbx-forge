@@ -1,88 +1,27 @@
-import { writeFileSync } from "node:fs";
 import path from "node:path";
-import process from "node:process";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
-import { createFixtureBinDirectory } from "../helpers/fixture-bin.ts";
+import type { FixtureProject } from "../helpers/fixture-project.ts";
+import { makeFixtureProject } from "../helpers/fixture-project.ts";
 import { parseResult } from "../helpers/output.ts";
-import { killWorkers, readWorkerLog } from "../helpers/worker-log.ts";
-import { makeProject, runBinAsync } from "./run-bin.ts";
+import { readWorkerLog } from "../helpers/worker-log.ts";
 
-const PATH_NAME = /^path$/i;
 const PROBE = { args: ["syncback", "--help"], role: "rojo" };
 const NO_SYNCBACK =
 	"Install the UpliftGames Rojo fork (https://github.com/UpliftGames/rojo/releases), and set rojoAlias to its command if it is not rojo.";
 
-interface Fixture {
-	/** Run `forge` in the project with the fixture binaries first on PATH. */
-	forge: (
-		argv: Array<string>,
-		variables?: Record<string, string>,
-	) => ReturnType<typeof runBinAsync>;
-	/** The NDJSON file every fixture process appends a record to. */
-	log: string;
-	project: string;
-}
-
 /**
- * This process's environment with PATH replaced. Windows spells the name
- * `Path`, and two spellings of one variable would both reach the child.
- *
- * @param directory - The only PATH entry.
- * @param variables - Variables to add.
- * @returns The environment for a run.
- */
-function environmentWith(directory: string, variables: Record<string, string>): NodeJS.ProcessEnv {
-	const environment: NodeJS.ProcessEnv = {
-		...process.env,
-		CI: undefined,
-		RBX_FORGE_HOOK_STACK: undefined,
-	};
-	for (const key of Object.keys(environment)) {
-		if (PATH_NAME.test(key)) {
-			delete environment[key];
-		}
-	}
-
-	return { ...environment, ...variables, PATH: directory };
-}
-
-/**
- * A project with a config, a Rojo project, and a place file, with fake rojo
- * and hook binaries on PATH.
+ * A Luau project with a place file, with fake rojo and hook binaries on PATH.
  *
  * @param config - The config file's content besides `projectType`.
  * @returns The project and a way to run forge in it.
  */
-function makeFixture(config: object = {}): Fixture {
-	const project = makeProject();
-	const files: Record<string, string> = {
-		"default.project.json": JSON.stringify({ name: "fixture", tree: {} }),
-		"game.rbxl": "fake place\n",
-		"rbx-forge.config.json": JSON.stringify({ projectType: "luau", ...config }),
-	};
-	for (const [name, content] of Object.entries(files)) {
-		writeFileSync(path.join(project, name), content);
-	}
-
-	const bin = createFixtureBinDirectory(path.join(project, "fixture-bin"));
-	const log = path.join(project, "workers.ndjson");
-	onTestFinished(() => {
-		killWorkers(readWorkerLog(log));
+function makeFixture(config: object = {}): FixtureProject {
+	return makeFixtureProject({
+		config: { projectType: "luau", ...config },
+		files: { "game.rbxl": "fake place\n" },
 	});
-
-	return {
-		forge: async (argv, variables = {}) => {
-			return runBinAsync(
-				argv,
-				project,
-				environmentWith(bin, { FIXTURE_LOG: log, ...variables }),
-			);
-		},
-		log,
-		project,
-	};
 }
 
 function ran(log: string): Array<{ args: Array<string>; role: string }> {
