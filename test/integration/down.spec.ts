@@ -142,6 +142,27 @@ async function exitedPidAsync(): Promise<number> {
 }
 
 /**
+ * A pause that notes, at `down`'s delete point, whether a file exists.
+ *
+ * @param file - The file to look for.
+ * @returns The pause, and what it saw.
+ */
+function existenceAtDelete(file: string): {
+	existed: Array<boolean>;
+	pause: NonNullable<DownOptions["pause"]>;
+} {
+	const existed: Array<boolean> = [];
+	return {
+		existed,
+		pause: async (point) => {
+			if (point === "delete") {
+				existed.push(existsSync(file));
+			}
+		},
+	};
+}
+
+/**
  * A pause that starts a replacement session at `point`, once, and waits
  * until it is ready and its Rojo has started.
  *
@@ -364,6 +385,21 @@ describe("forge down", () => {
 		await expect(waitForDeathAsync([pid])).resolves.toStrictEqual([]);
 		expect(workersOf(project, sessionId)).toStrictEqual([]);
 	}, 90_000);
+
+	it("should probe the barrier without creating a file in the session", async () => {
+		expect.assertions(1);
+
+		const project = await makeProjectAsync();
+		// A session whose supervisor died before its reaper took a lease.
+		stageRecord(project, "stale", { pid: await exitedPidAsync(), processStartTime: "1" });
+		const atDelete = existenceAtDelete(
+			path.join(project.forge, "sessions", "stale", "workers.lock"),
+		);
+
+		await downAsync(project, { ...SHORT, pause: atDelete.pause });
+
+		expect(atDelete.existed).toStrictEqual([false]);
+	});
 
 	it("should kill nothing for a record whose PID another process reused (F2)", async () => {
 		expect.assertions(1);

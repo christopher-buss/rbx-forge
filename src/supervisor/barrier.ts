@@ -195,22 +195,17 @@ function pidsOf(seams: Pick<LockSeams, "native">, target: SessionTarget): Array<
 }
 
 /**
- * Whether the barrier is clear now: the lease is free (taken exclusively,
- * then let go) and the scan finds no process of the session.
+ * Whether the barrier is clear now: the lease is free and the scan finds
+ * no process of the session. The probe never creates the lease, so it
+ * never races the delete of the session's directory (`down` probes
+ * without the singleton lock).
  *
  * @param seams - The native addon.
  * @param target - The session.
  * @returns Whether it is clear.
  */
 function isClear(seams: Pick<LockSeams, "native">, target: SessionTarget): boolean {
-	const lease = seams.native().tryLockFile(target.leasePath, "exclusive");
-	if (lease === null) {
-		return false;
-	}
-
-	// Windows cannot delete a file that is open, so let go at once.
-	lease.release();
-	return pidsOf(seams, target).length === 0;
+	return seams.native().isLockFree(target.leasePath) && pidsOf(seams, target).length === 0;
 }
 
 function stillAlive(sessionId: string, directory: string, pids: Array<number>): ForgeError {

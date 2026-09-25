@@ -58,6 +58,28 @@ impl FileLock {
         }
     }
 
+    /// Whether no one holds a lock on `path` now: takes an exclusive lock
+    /// and lets go at once. Never creates the file, and a missing file is
+    /// free, so a probe never races the delete of a session directory: on
+    /// Windows the file is opened sharing delete, and the handle is closed
+    /// before this returns.
+    ///
+    /// # Errors
+    ///
+    /// When the file cannot be opened or the OS cannot lock it.
+    pub fn is_free(path: &Path) -> io::Result<bool> {
+        let file = match OpenOptions::new().read(true).open(path) {
+            Ok(file) => file,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(true),
+            Err(err) => return Err(err),
+        };
+        match file.try_lock() {
+            Ok(()) => Ok(true),
+            Err(TryLockError::WouldBlock) => Ok(false),
+            Err(TryLockError::Error(err)) => Err(err),
+        }
+    }
+
     /// The locked file's descriptor. A process that inherits it shares the
     /// lock (`flock` belongs to the open file), so the lock lives until every
     /// holder has closed it.
@@ -110,6 +132,28 @@ mod tests {
         drop(acquire(&path, LockMode::Exclusive));
 
         assert!(acquire(&path, LockMode::Exclusive).is_some());
+    }
+
+    #[test]
+    fn a_probe_sees_every_held_lock_and_releases_its_own() {
+        let path = lock_path("probe");
+        let shared = acquire(&path, LockMode::Shared);
+        assert!(!FileLock::is_free(&path).unwrap());
+        drop(shared);
+        let exclusive = acquire(&path, LockMode::Exclusive);
+        assert!(!FileLock::is_free(&path).unwrap());
+        drop(exclusive);
+
+        assert!(FileLock::is_free(&path).unwrap());
+        assert!(acquire(&path, LockMode::Exclusive).is_some());
+    }
+
+    #[test]
+    fn a_probe_of_a_missing_file_is_free_and_creates_nothing() {
+        let path = lock_path("probe-missing").with_file_name("missing.lock");
+
+        assert!(FileLock::is_free(&path).unwrap());
+        assert!(!path.exists());
     }
 
     #[test]

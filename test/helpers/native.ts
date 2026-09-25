@@ -75,6 +75,7 @@ export function createFakeNative(processes: Record<number, FakeProcess> = {}): F
 	return {
 		addon: {
 			...sessionMembers(sessions, cleanups),
+			isLockFree: (path) => !locks.has(path),
 			nativeVersion: () => "0.0.0",
 			pinProcess: (pid) => {
 				const entry = table.get(pid);

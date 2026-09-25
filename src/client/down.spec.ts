@@ -238,30 +238,30 @@ function otherSessionAtDelete(
 }
 
 /**
- * A lock call that cannot read the lease; with `isDeleted`, the supervisor
+ * A lock probe that cannot read the lease; with `isDeleted`, the supervisor
  * deletes the session first, as when its final barrier ends meanwhile.
  *
  * @param world - The project.
  * @param isDeleted - Whether the session is gone by then.
- * @returns The addon's lock call, failing for the lease only.
+ * @returns The addon's lock probe, failing for the lease only.
  */
-function failingLeaseRead(world: World, isDeleted: boolean): NativeAddon["tryLockFile"] {
-	const { tryLockFile } = world.native.addon;
-	return (file, mode) => {
+function failingLeaseRead(world: World, isDeleted: boolean): NativeAddon["isLockFree"] {
+	const { isLockFree } = world.native.addon;
+	return (file) => {
 		if (file !== FILES.lease) {
-			return tryLockFile(file, mode);
+			return isLockFree(file);
 		}
 
 		if (isDeleted) {
 			world.exit();
 		}
 
-		throw new Error("tryLockFile: denied");
+		throw new Error("isLockFree: denied");
 	};
 }
 
 function failLeaseRead(world: World, isDeleted: boolean): void {
-	world.native.addon.tryLockFile = failingLeaseRead(world, isDeleted);
+	world.native.addon.isLockFree = failingLeaseRead(world, isDeleted);
 }
 
 async function unlockAsync(world: World): Promise<void> {
@@ -546,7 +546,7 @@ describe(stopSessionAsync, () => {
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
 		failLeaseRead(world, false);
 
-		await expect(downAsync(world)).rejects.toThrow("tryLockFile: denied");
+		await expect(downAsync(world)).rejects.toThrow("isLockFree: denied");
 	});
 
 	it("should keep the files while another session holds the lock (C12)", async () => {

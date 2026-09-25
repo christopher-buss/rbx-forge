@@ -86,6 +86,19 @@ pub fn try_lock_file(path: String, mode: LockMode) -> Result<Option<FileLock>> {
         .map_err(|err| to_napi(&format!("lock {path}"), &err))
 }
 
+/// Whether no one holds a lock on `path` now (a barrier's lease probe).
+/// Takes an exclusive lock and lets go at once. Never creates the file: a
+/// missing file is free.
+///
+/// # Errors
+///
+/// When the file cannot be opened or locked.
+#[napi]
+pub fn is_lock_free(path: String) -> Result<bool> {
+    os::lock::FileLock::is_free(Path::new(&path))
+        .map_err(|err| to_napi(&format!("probe the lock {path}"), &err))
+}
+
 /// A process held by identity (Windows handle, Linux pidfd, macOS PID and
 /// start time). Every method acts on the pinned process or reports that it
 /// exited; none reaches a process that reused the PID.

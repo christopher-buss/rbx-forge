@@ -174,6 +174,14 @@ export interface NativeAddon {
 	 * left. Unverifiable targets are reported, never killed.
 	 */
 	forceCleanup: (target: SessionTarget, boundMs: number) => Promise<CleanupReport>;
+	/**
+	 * Whether no one holds a lock on `path` now: takes an exclusive lock and
+	 * lets go at once. Never creates the file, and a missing file is free,
+	 * so a probe never races the delete of its directory.
+	 *
+	 * @throws When the file cannot be opened or locked.
+	 */
+	isLockFree: (path: string) => boolean;
 	/** Version of the native crate. */
 	nativeVersion: () => string;
 	/** Pin the live process with this PID, or `null` when there is none. */

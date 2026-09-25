@@ -167,9 +167,13 @@ both):
   leaders that still die after their job closed. The calling process and its
   ancestors never count.
 - **Barriers (#42).** A barrier is clear when the lease can be taken exclusively
-  and a scan finds no process of the session. Startup waits `graceMs + 15 s` per
-  old session, then fails with `previous_generation_alive` and the PIDs. The
-  final barrier waits 5 s, then fails with `cleanup_in_progress`.
+  and a scan finds no process of the session. The probe (`isLockFree`) never
+  creates the lease, so `down`, which probes without the singleton lock, never
+  races the delete of a session directory. The reaper exits with its lease held
+  and its record kept, so no barrier reads clear while it still runs. Startup
+  waits `graceMs + 15 s` per old session, then fails with
+  `previous_generation_alive` and the PIDs. The final barrier waits 5 s, then
+  fails with `cleanup_in_progress`.
 - **Forced cleanup (#42).** `start --force` (and the host's last escalation
   step) runs it in the addon on a libuv thread. POSIX: each pass pins every
   member, reads its evidence again through the pin, and kills it, deepest in the
