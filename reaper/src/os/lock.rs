@@ -24,8 +24,9 @@ pub enum LockMode {
 /// A held lock. Dropping it releases the lock.
 #[derive(Debug)]
 pub struct FileLock {
-    // Held only to keep the lock; closing the file releases it.
-    _file: File,
+    // Held to keep the lock; closing the file releases it.
+    #[cfg_attr(windows, expect(dead_code, reason = "only POSIX reads the descriptor"))]
+    file: File,
 }
 
 impl FileLock {
@@ -51,10 +52,19 @@ impl FileLock {
         };
 
         match result {
-            Ok(()) => Ok(Some(Self { _file: file })),
+            Ok(()) => Ok(Some(Self { file })),
             Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Error(err)) => Err(err),
         }
+    }
+
+    /// The locked file's descriptor. A process that inherits it shares the
+    /// lock (`flock` belongs to the open file), so the lock lives until every
+    /// holder has closed it.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn raw_fd(&self) -> std::os::fd::RawFd {
+        std::os::fd::AsRawFd::as_raw_fd(&self.file)
     }
 }
 

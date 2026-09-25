@@ -8,6 +8,7 @@
 //! error. "Not there" outcomes (a lock held by someone else, a PID with no
 //! live process) are `null`, not errors.
 
+#[allow(dead_code, reason = "the worker layer serves only the reaper binary")]
 mod os;
 
 use std::path::Path;
@@ -143,6 +144,20 @@ impl PinnedProcess {
         self.inner
             .kill()
             .map_err(|err| to_napi(&format!("kill process {}", self.pid()), &err))
+    }
+
+    /// Force-kill the process group the pinned process leads (POSIX). On
+    /// Windows, where jobs own trees, it kills the process only. `false`
+    /// when it had already exited.
+    ///
+    /// # Errors
+    ///
+    /// When the OS refuses the kill.
+    #[napi]
+    pub fn kill_group(&self) -> Result<bool> {
+        self.inner
+            .kill_group()
+            .map_err(|err| to_napi(&format!("kill group of process {}", self.pid()), &err))
     }
 
     /// Block until the process exits or `timeout_ms` passes. `true` once it

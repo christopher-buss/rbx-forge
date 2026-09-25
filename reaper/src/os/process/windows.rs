@@ -162,6 +162,10 @@ impl Pin {
         Ok(true)
     }
 
+    pub fn kill_group(&self) -> io::Result<bool> {
+        self.kill()
+    }
+
     pub fn wait_for_exit(&self, timeout: Duration) -> io::Result<bool> {
         self.0.wait(timeout)
     }

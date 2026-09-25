@@ -6,6 +6,8 @@
 //!   holder dies.
 //! - [`process`]: OS process start times and pinned process handles, so a
 //!   kill never reaches a process that reused a PID.
+//! - [`worker`]: one job or process group per worker (reaper binary only).
 
 pub mod lock;
 pub mod process;
+pub mod worker;

@@ -178,6 +178,26 @@ impl Pin {
         }
     }
 
+    pub fn kill_group(&self) -> io::Result<bool> {
+        if self.wait(Duration::ZERO)? {
+            return Ok(false);
+        }
+
+        let raw_pid = libc::pid_t::try_from(self.pid).map_err(io::Error::other)?;
+        // SAFETY: plain call. The pidfd shows the leader unreaped, so the
+        // group id still names its group.
+        if unsafe { libc::kill(-raw_pid, libc::SIGKILL) } != 0 {
+            let err = io::Error::last_os_error();
+            return if err.raw_os_error() == Some(libc::ESRCH) {
+                Ok(false)
+            } else {
+                Err(err)
+            };
+        }
+
+        Ok(true)
+    }
+
     pub fn wait_for_exit(&self, timeout: Duration) -> io::Result<bool> {
         self.wait(timeout)
     }

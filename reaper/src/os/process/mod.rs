@@ -121,6 +121,19 @@ impl PinnedProcess {
         self.pin.kill()
     }
 
+    /// Force-kill the process group the pinned process leads (`SIGKILL` to
+    /// the group; the live leader pins the group id). Windows has no groups
+    /// to kill: there it kills the process only, as [`Self::kill`].
+    ///
+    /// Returns `Ok(false)` when the process had already exited.
+    ///
+    /// # Errors
+    ///
+    /// When the OS refuses the kill.
+    pub fn kill_group(&self) -> io::Result<bool> {
+        self.pin.kill_group()
+    }
+
     /// Wait until the pinned process exits.
     ///
     /// Returns `Ok(false)` when it still runs after `timeout`.
@@ -223,5 +236,33 @@ mod tests {
         child.wait().unwrap();
 
         assert!(!exited);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_group_ends_every_member_of_the_group() {
+        use std::os::unix::process::CommandExt;
+
+        let mut leader = Command::new("sh")
+            .args(["-c", "sleep 60 & echo $!; wait"])
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(leader.stdout.take().unwrap()),
+            &mut line,
+        )
+        .unwrap();
+        let member = PinnedProcess::open(line.trim().parse().unwrap())
+            .unwrap()
+            .unwrap();
+        let pinned = PinnedProcess::open(leader.id()).unwrap().unwrap();
+
+        assert!(pinned.kill_group().unwrap());
+        leader.wait().unwrap();
+        assert!(member.wait_for_exit(Duration::from_secs(10)).unwrap());
     }
 }
