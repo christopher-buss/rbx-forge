@@ -19,6 +19,12 @@
  *   file when unset.
  * - `FIXTURE_COMPILER_OUTPUT`: a file whose bytes a one-shot `rbxtsc` writes
  *   to stdout before it exits, such as recorded compiler output.
+ * - `FIXTURE_PLACE_CONTENT`: what `rojo build` writes to its output (default
+ *   `fake place`).
+ *
+ * The `open` and `xdg-open` roles stand in for the platform launcher: they
+ * start a detached `studio` with their arguments and exit at once, as the
+ * real launchers hand a file to its app. A `studio` stays alive until killed.
  *
  * Markers (`RBX_FORGE_SESSION`, `RBX_FORGE_WORKER`) are recorded as seen and
  * inherited by every grandchild unchanged.
@@ -134,7 +140,7 @@ function runRojo(): void {
 	const outputIndex = ARGS.findIndex((argument) => argument === "--output" || argument === "-o");
 	const output = outputIndex === -1 ? undefined : ARGS[outputIndex + 1];
 	if (command === "build" && output !== undefined) {
-		writeFileSync(output, "fake place\n");
+		writeFileSync(output, env["FIXTURE_PLACE_CONTENT"] ?? "fake place\n");
 	}
 
 	const sourcemap = env["FIXTURE_SOURCEMAP"];
@@ -160,6 +166,20 @@ function runCompiler(): void {
 	exitOnce();
 }
 
+function runLauncher(): void {
+	exitOnce();
+	if (process.exitCode !== 0) {
+		return;
+	}
+
+	const studio = spawn(process.execPath, [import.meta.filename, "studio", ...ARGS], {
+		detached: true,
+		stdio: "ignore",
+		windowsHide: true,
+	});
+	studio.unref();
+}
+
 function runHook(): void {
 	if (env["FIXTURE_HANG"] === "1") {
 		stayAlive();
@@ -174,12 +194,18 @@ ignoreSignals();
 record();
 
 switch (ROLE) {
-	case "grandchild": {
+	case "grandchild":
+	case "studio": {
 		setInterval(doNothing, KEEP_ALIVE_MS);
 		break;
 	}
 	case "hook": {
 		runHook();
+		break;
+	}
+	case "open":
+	case "xdg-open": {
+		runLauncher();
 		break;
 	}
 	case "rbxtsc": {

@@ -3,6 +3,7 @@ import { runCompileCommandAsync } from "../commands/compile.ts";
 import { runConfigAsync } from "../commands/config.ts";
 import type { CommandRun } from "../commands/context.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
+import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
 import { runStopAsync } from "../commands/stop.ts";
 import { runSyncbackCommandAsync, SYNCBACK_FLAGS } from "../commands/syncback.ts";
 import { runTypegenCommandAsync, TYPEGEN_FLAGS } from "../commands/typegen.ts";
@@ -43,6 +44,12 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		flags: [],
 		run: runCompileCommandAsync,
 		summary: "Compile the roblox-ts project once and report its errors (rbxts only).",
+	},
+	{
+		name: "open",
+		flags: OPEN_FLAGS,
+		run: runOpenAsync,
+		summary: "Open the place in Roblox Studio, building it first when configured or asked.",
 	},
 	{
 		name: "stop",

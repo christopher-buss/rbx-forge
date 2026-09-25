@@ -23,6 +23,8 @@ export interface FakeChild {
 	/** Signals sent through the process's own `kill`, in order. */
 	kills: Array<NodeJS.Signals>;
 	pid: number | undefined;
+	/** False once forge called `unref`, letting it exit before the child. */
+	referenced: boolean;
 	stderr: PassThrough;
 	stdout: PassThrough;
 }
@@ -105,6 +107,28 @@ function emitLater(
 }
 
 /**
+ * The members of the object `spawn` returns, besides its events.
+ *
+ * @param child - The test's handle, which the members update.
+ * @returns `kill`, `unref`, the pid, and the streams.
+ */
+function processMembers(child: FakeChild): object {
+	return {
+		kill: (signal: NodeJS.Signals) => {
+			child.kills.push(signal);
+			child.close(null, signal);
+			return true;
+		},
+		pid: child.pid,
+		stderr: child.stderr,
+		stdout: child.stdout,
+		unref: () => {
+			child.referenced = false;
+		},
+	};
+}
+
+/**
  * A fake child process and the object `spawn` returns for it.
  *
  * @param pid - Its pid.
@@ -125,21 +149,12 @@ function makeFakeChild(pid: number): { child: FakeChild; spawned: EventEmitter }
 		},
 		kills: [],
 		pid,
+		referenced: true,
 		stderr,
 		stdout,
 	};
-	const spawned = Object.assign(emitter, {
-		kill: (signal: NodeJS.Signals) => {
-			child.kills.push(signal);
-			child.close(null, signal);
-			return true;
-		},
-		pid,
-		stderr,
-		stdout,
-	});
 
-	return { child, spawned };
+	return { child, spawned: Object.assign(emitter, processMembers(child)) };
 }
 
 function doNothing(): void {
