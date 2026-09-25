@@ -147,18 +147,19 @@ The intended flow:
 
 Tools are pinned in `mise.toml`: `mise install`, then `pnpm install`.
 
-| Script                        | What it runs                                        |
-| ----------------------------- | --------------------------------------------------- |
-| `pnpm build`                  | tsdown bundle of the CLI into `dist/`               |
-| `pnpm typecheck`              | `tsc --build` with TypeScript 7                     |
-| `pnpm lint` / `pnpm lint:fix` | oxlint, then ESLint (`isentinel-lint`)              |
-| `pnpm knip`                   | unused files, exports, and dependencies             |
-| `pnpm test:unit`              | unit project with 100% coverage                     |
-| `pnpm test:integration`       | real processes (run `build:native`, `build:reaper`) |
-| `pnpm test:e2e`               | the built CLI as a subprocess (run `build` first)   |
-| `pnpm build:native`           | the Rust crate in `reaper/` through napi-rs         |
-| `pnpm build:reaper`           | the `forge-reaper` binary, next to the addon        |
-| `pnpm mutation`               | Stryker mutation testing                            |
+| Script                        | What it runs                                    |
+| ----------------------------- | ----------------------------------------------- |
+| `pnpm build`                  | tsdown bundle of the CLI into `dist/`           |
+| `pnpm build:all`              | `build:native`, `build:reaper`, then `build`    |
+| `pnpm typecheck`              | `tsc --build` with TypeScript 7                 |
+| `pnpm lint` / `pnpm lint:fix` | oxlint, then ESLint (`isentinel-lint`)          |
+| `pnpm knip`                   | unused files, exports, and dependencies         |
+| `pnpm test:unit`              | unit project with 100% coverage                 |
+| `pnpm test:integration`       | real processes (run `build:all` first)          |
+| `pnpm test:e2e`               | the built CLI as a subprocess (run `build:all`) |
+| `pnpm build:native`           | the Rust crate in `reaper/` through napi-rs     |
+| `pnpm build:reaper`           | the `forge-reaper` binary, next to the addon    |
+| `pnpm mutation`               | Stryker mutation testing                        |
 
 Git hooks: `mise run install-hk`. See [CONTRIBUTING.md](./CONTRIBUTING.md) and
 [AGENTS.md](./AGENTS.md).

@@ -70,7 +70,7 @@ The Rojo command, for example a pinned or wrapped Rojo.
 
 ```ts
 defineConfig({
-	rojoAlias: "rojo-7.7",
+	rojoAlias: "rojo-quenty",
 });
 ```
 
