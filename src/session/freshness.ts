@@ -1,5 +1,6 @@
-import type { LastBuild } from "../session/status.ts";
-import type { CompileEvent, CompileReport } from "./diagnostics.ts";
+import type { CompileEvent, CompileReport } from "../compiler/diagnostics.ts";
+import type { LastBuild } from "./status.ts";
+import { isoTime } from "./status.ts";
 
 /**
  * The quiet window: how long no compile may start before a build counts as
@@ -8,12 +9,6 @@ import type { CompileEvent, CompileReport } from "./diagnostics.ts";
  * margin.
  */
 export const QUIET_WINDOW_MS = 750;
-
-/**
- * What the watch-mode compiler did: a compile started or ended, or it wrote
- * any other output. An adapter turns a compiler's output into these.
- */
-export type BuildEvent = CompileEvent | { type: "output" };
 
 /**
  * What the watch-mode compiler is doing, from its build events and the time.
@@ -33,11 +28,12 @@ export interface FreshnessTracker {
 	freshAt: (since: number) => number | undefined;
 	lastBuild: () => LastBuild | undefined;
 	/**
-	 * Record one event.
+	 * Record one event: a compile's start or end, or `undefined` for any
+	 * other output. An adapter turns a compiler's output into these.
 	 *
 	 * @returns The build an end event ended, else `undefined`.
 	 */
-	record: (event: BuildEvent, now: number) => LastBuild | undefined;
+	record: (event: CompileEvent | undefined, now: number) => LastBuild | undefined;
 	/**
 	 * When {@link FreshnessTracker.tick} ends a compile that no event ends:
 	 * `undefined` unless an end event left start events unanswered.
@@ -54,15 +50,18 @@ export interface FreshnessTracker {
 }
 
 interface TrackerState {
-	/** When the compiler last went idle: the start of the quiet window. */
+	/**
+	 * When the compiler last went idle (the last end event, or when merged
+	 * start events settled): the start of the quiet window.
+	 */
 	idleSince: number;
 	lastBuild: LastBuild | undefined;
 	lastEventAt: number;
-	/** How many of `starts` came before the last end event. */
-	leftover: number;
 	longestMs: number;
 	/** The times of the start events with no end event yet, oldest first. */
 	starts: Array<number>;
+	/** The last end event left start events open: they may be merged. */
+	unsettled: boolean;
 }
 
 /**
@@ -71,7 +70,7 @@ interface TrackerState {
  * a compile for a save during a compile and fold several of them into one
  * trailing compile, so an end event can leave start events that no end event
  * answers: those count as merged once no event comes for twice the longest
- * compile (at least one quiet window).
+ * compile (at least one quiet window), or once a new start event comes.
  *
  * @returns A tracker with no build.
  */
@@ -80,9 +79,9 @@ export function createFreshnessTracker(): FreshnessTracker {
 		idleSince: 0,
 		lastBuild: undefined,
 		lastEventAt: 0,
-		leftover: 0,
 		longestMs: 0,
 		starts: [],
+		unsettled: false,
 	};
 	return {
 		building: () => state.starts.length > 0,
@@ -102,11 +101,6 @@ function freshAt(state: TrackerState, since: number): number | undefined {
 	return Math.max(since, state.idleSince) + QUIET_WINDOW_MS;
 }
 
-function iso(ms: number): string {
-	const time = new Date(ms);
-	return time.toISOString();
-}
-
 /**
  * End the oldest compile at an end event.
  *
@@ -117,28 +111,45 @@ function iso(ms: number): string {
  */
 function finish(state: TrackerState, report: CompileReport, now: number): LastBuild {
 	const startedAt = state.starts.shift() ?? now;
-	state.leftover = state.starts.length;
+	state.unsettled = state.starts.length > 0;
 	state.longestMs = Math.max(state.longestMs, now - startedAt);
-	if (state.starts.length === 0) {
+	if (!state.unsettled) {
 		state.idleSince = now;
 	}
 
-	const build = { ...report, at: iso(now), startedAt: iso(startedAt) };
+	const build = { ...report, at: isoTime(now), startedAt: isoTime(startedAt) };
 	state.lastBuild = build;
 	return build;
 }
 
-function record(state: TrackerState, event: BuildEvent, now: number): LastBuild | undefined {
+function record(
+	state: TrackerState,
+	event: CompileEvent | undefined,
+	now: number,
+): LastBuild | undefined {
 	state.lastEventAt = now;
-	if (event.type === "start") {
-		state.starts.push(now);
-	}
+	switch (event?.type) {
+		case "end": {
+			return finish(state, event.report, now);
+		}
+		case "start": {
+			// Open start events the last end event left were merged into it.
+			if (state.unsettled) {
+				state.starts = [];
+				state.unsettled = false;
+			}
 
-	return event.type === "end" ? finish(state, event.report, now) : undefined;
+			state.starts.push(now);
+			return undefined;
+		}
+		case undefined: {
+			return undefined;
+		}
+	}
 }
 
 function settleAt(state: TrackerState): number | undefined {
-	if (state.leftover === 0) {
+	if (!state.unsettled) {
 		return undefined;
 	}
 
@@ -152,7 +163,7 @@ function tick(state: TrackerState, now: number): boolean {
 	}
 
 	state.starts = [];
-	state.leftover = 0;
-	state.idleSince = now;
+	state.unsettled = false;
+	state.idleSince = bound;
 	return true;
 }

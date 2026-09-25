@@ -1,4 +1,5 @@
 import type { FlagDefinition, FlagValues } from "../cli/flags.ts";
+import { readCountFlag } from "../cli/flags.ts";
 import { fetchStatusAsync, findSession } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
@@ -22,6 +23,9 @@ export const STATUS_FLAGS: ReadonlyArray<FlagDefinition> = [
 ];
 
 const NO_INPUT: CommandInput = { config: {}, flags: {} };
+
+/** The longest `--timeout`: a timer waits at most 2^31 - 1 ms. */
+const MAX_WAIT_MS = 2_147_000_000;
 
 /**
  * `forge status`: the state of the project's running session: each service's
@@ -76,15 +80,7 @@ function waitOf(flags: FlagValues): number | undefined {
 		return FRESH_BUILD_TIMEOUT_MS;
 	}
 
-	const ms = typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
-	if (!Number.isFinite(ms) || ms < 0) {
-		throw new ForgeError(
-			"usage",
-			`--timeout takes a number of milliseconds, not "${String(value)}".`,
-		);
-	}
-
-	return ms;
+	return readCountFlag("timeout", value, "milliseconds", MAX_WAIT_MS);
 }
 
 function plural(count: number, noun: string): string {

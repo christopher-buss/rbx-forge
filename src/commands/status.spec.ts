@@ -184,6 +184,10 @@ describe(runStatusAsync, () => {
 		[{ timeout: "-1", wait: true }, '--timeout takes a number of milliseconds, not "-1".'],
 		[{ timeout: " ", wait: true }, '--timeout takes a number of milliseconds, not " ".'],
 		[{ timeout: true, wait: true }, '--timeout takes a number of milliseconds, not "true".'],
+		[
+			{ timeout: "3000000000", wait: true },
+			'--timeout takes a number of milliseconds, not "3000000000".',
+		],
 	] as const)("should fail with usage for the flags %j", async ([flags, message]) => {
 		expect.assertions(1);
 

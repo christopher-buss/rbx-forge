@@ -1,4 +1,5 @@
 import type { FlagDefinition, FlagValues } from "../cli/flags.ts";
+import { readCountFlag } from "../cli/flags.ts";
 import type { DownStudio, StoppedBy } from "../client/down.ts";
 import { DOWN_TIMEOUT_MS, stopSessionAsync } from "../client/down.ts";
 import { findSession } from "../client/session.ts";
@@ -159,13 +160,5 @@ function timeoutOf(value: FlagValues[string]): number {
 		return DOWN_TIMEOUT_MS;
 	}
 
-	const seconds = typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
-	if (!Number.isFinite(seconds) || seconds < 0) {
-		throw new ForgeError(
-			"usage",
-			`--timeout takes a number of seconds, not "${String(value)}".`,
-		);
-	}
-
-	return seconds * 1000;
+	return readCountFlag("timeout", value, "seconds") * 1000;
 }

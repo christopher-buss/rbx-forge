@@ -2,10 +2,10 @@ import type { Mock } from "vitest";
 import { describe, expect, it, vi } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
-import { QUIET_WINDOW_MS } from "../compiler/freshness.ts";
 import { ForgeError } from "../errors.ts";
 import type { BuildWatch } from "./build-watch.ts";
 import { createBuildWatch } from "./build-watch.ts";
+import { QUIET_WINDOW_MS } from "./freshness.ts";
 import type { StatusRecorder } from "./status.ts";
 
 const START = "[10:00:00] Starting compilation in watch mode...";
@@ -95,13 +95,16 @@ describe(createBuildWatch, () => {
 		await lineAsync("compiling as game..");
 		await lineAsync(FOUND);
 
-		expect(recorder.building.mock.calls).toStrictEqual([[true], [false]]);
-		expect(recorder.compiled).toHaveBeenCalledExactlyOnceWith({
-			at: "1970-01-01T00:00:00.400Z",
-			diagnostics: [],
-			errors: 0,
-			startedAt: "1970-01-01T00:00:00.000Z",
-		});
+		expect(recorder.building.mock.calls).toStrictEqual([[true]]);
+		expect(recorder.compiled).toHaveBeenCalledExactlyOnceWith(
+			{
+				at: "1970-01-01T00:00:00.400Z",
+				diagnostics: [],
+				errors: 0,
+				startedAt: "1970-01-01T00:00:00.000Z",
+			},
+			false,
+		);
 	});
 
 	it("should return the build that ended a line, and nothing for other lines", () => {
@@ -162,6 +165,7 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).resolves.toBeUndefined();
 		expect(recorder.compiled).toHaveBeenLastCalledWith(
 			expect.objectContaining({ at: "1970-01-01T00:00:06.050Z" }),
+			false,
 		);
 	});
 
@@ -262,17 +266,31 @@ describe(createBuildWatch, () => {
 	});
 
 	it("should fail every wait, now and later, once the compiler exits", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
-		const { lineAsync, wait, watch } = await builtAsync();
+		const { lineAsync, recorder, wait, watch } = await builtAsync();
 		const waiting = wait();
 		await lineAsync(CHANGE);
 		watch.fail(new ForgeError("service_failed", "The compiler exited."));
 		// The first failure wins.
 		watch.close();
 
+		// The compile that ran ends with the compiler.
+		expect(recorder.building.mock.lastCall).toStrictEqual([false]);
 		await expect(waiting.wait).rejects.toMatchObject({ code: "service_failed" });
 		await expect(wait().wait).rejects.toMatchObject({ code: "service_failed" });
+	});
+
+	it("should tell when the quiet window is longer than the wait", async () => {
+		expect.assertions(1);
+
+		const { advanceAsync, wait } = await builtAsync();
+		const waiting = wait(0);
+		await advanceAsync(0);
+
+		await expect(waiting.wait).rejects.toThrow(
+			`the quiet window (${QUIET_WINDOW_MS} ms) is longer than the wait`,
+		);
 	});
 
 	it("should fail every wait with not_running once the session stops", async () => {

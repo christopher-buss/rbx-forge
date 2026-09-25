@@ -100,8 +100,11 @@ export interface SessionStatus {
 export interface StatusRecorder {
 	/** The watch-mode compiler started a compile, or has none running. */
 	building: (isBuilding: boolean) => void;
-	/** The watch-mode compiler finished a compile. */
-	compiled: (build: LastBuild) => void;
+	/**
+	 * The watch-mode compiler finished a compile. `isBuilding`: another one
+	 * still runs.
+	 */
+	compiled: (build: LastBuild, isBuilding: boolean) => void;
 	/**
 	 * A service's worker started (`ready` or, for a compiler that reports
 	 * compiles, `starting`) or its tree is gone.
@@ -153,6 +156,11 @@ export interface StatusStart {
  */
 export function isReady(status: SessionStatus): boolean {
 	return status.phase === "ready";
+}
+
+export function isoTime(ms: number): string {
+	const time = new Date(ms);
+	return time.toISOString();
 }
 
 /**
@@ -207,11 +215,6 @@ function initialStatus(start: StatusStart): SessionStatus {
 	};
 }
 
-function isoTime(ms: number): string {
-	const time = new Date(ms);
-	return time.toISOString();
-}
-
 /**
  * The recorder half of a store: each call changes `status` in place.
  *
@@ -233,8 +236,8 @@ function createRecorder(
 			status.services.compiler.building = isBuilding;
 			changed();
 		},
-		compiled: (lastBuild) => {
-			status.services.compiler = { ...status.services.compiler, lastBuild, status: "ready" };
+		compiled: (lastBuild, isBuilding) => {
+			status.services.compiler = { building: isBuilding, lastBuild, status: "ready" };
 			changed();
 		},
 		service: (id, serviceStatus) => {

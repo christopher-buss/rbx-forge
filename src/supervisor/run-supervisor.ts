@@ -285,10 +285,9 @@ async function runOpenSessionAsync(
 	session: OwnSession,
 	cleanups: Array<ForcedCleanup>,
 ): Promise<CommandResult> {
-	const { builds, config, files, forge, status } = session;
+	const { config, files, forge, status } = session;
 	const { end, reason } = await runSessionOnceAsync(seams, options, session);
 	status.phase("stopping");
-	builds.close();
 	const { escalation } = end;
 	if (escalation !== undefined) {
 		reporter.emit({ message: ESCALATIONS[escalation], type: "warning" });
@@ -305,7 +304,7 @@ async function runOpenSessionAsync(
 }
 
 /**
- * What the control channel needs to know of the session's plan.
+ * What the control channel knows of the session's services.
  *
  * @param services - The plan and the resolved compiler.
  * @returns What the session runs, and whether it reads builds.
@@ -313,12 +312,10 @@ async function runOpenSessionAsync(
 function controlPlan({
 	compiler,
 	plan,
-}: Pick<OwnSession["services"], "compiler" | "plan">): ControlSetup["plan"] {
+}: OwnSession["services"]): Pick<ControlSetup, "plan" | "readsBuilds"> {
 	return {
-		builds: compiler?.parsesDiagnostics === true,
-		compiler: compiler !== undefined,
-		open: plan.open,
-		syncback: plan.syncback,
+		plan: { ...plan, compiler: compiler !== undefined },
+		readsBuilds: compiler?.parsesDiagnostics === true,
 	};
 }
 
@@ -354,11 +351,11 @@ async function runLockedAsync(
 
 	const sync = createSessionSync();
 	const { builds, files, status, ...control } = await openSessionAsync(seams, {
+		...controlPlan(services),
 		forge,
 		identity: identityOf(context, config, options.version),
 		onReady: options.onReady,
 		pause: async () => options.pause("control", options.stop.signal),
-		plan: controlPlan(services),
 		port: config.rojoPort,
 		stop: options.stop,
 		sync,

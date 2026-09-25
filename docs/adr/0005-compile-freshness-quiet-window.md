@@ -24,8 +24,9 @@ output every 250 ms.
   lines and summary lines do not always pair. Each summary line ends the oldest
   open compile. Start lines that a summary line leaves open count as merged once
   no output comes for twice the longest compile so far (at least one quiet
-  window). A compile that runs silently for longer than that can show as done
-  too soon; `--timeout` bounds every other case.
+  window), or once a new start line comes. A compile that runs silently for
+  longer than that can show as done too soon; `--timeout` bounds every other
+  case.
 - **No compiler to read.** A session with no roblox-ts compiler (Luau, or
   `--no-compiler`) answers at once. A session that is still starting waits for
   its first build.

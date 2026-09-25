@@ -60,7 +60,7 @@ describe(createStatusStore, () => {
 		const { onChange, store } = makeStore();
 		store.service("rojo", "ready");
 		const withRojo = store.snapshot().phase;
-		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT });
+		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, false);
 
 		expect(withRojo).toBe("starting");
 		expect(store.snapshot().services.compiler).toStrictEqual({
@@ -71,15 +71,15 @@ describe(createStatusStore, () => {
 		expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "ready" }));
 	});
 
-	it("should tell while a compile runs, and keep it across its build", () => {
+	it("should tell while a compile runs, and whether one still runs after a build", () => {
 		expect.assertions(3);
 
 		const { onChange, store } = makeStore();
 		store.building(true);
 		const building = store.snapshot().services.compiler;
-		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT });
+		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, true);
 		const isStillBuilding = store.snapshot().services.compiler.building;
-		store.building(false);
+		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, false);
 
 		expect(building).toStrictEqual({ building: true, status: "starting" });
 		expect(isStillBuilding).toBeTrue();
@@ -128,7 +128,7 @@ describe(createStatusStore, () => {
 		expect.assertions(1);
 
 		const { store } = makeStore();
-		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT });
+		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, false);
 
 		expect(store.snapshot().phase).toBe("starting");
 	});
@@ -200,22 +200,24 @@ describe(parseStatus, () => {
 		expect.assertions(3);
 
 		const { store } = makeStore();
-		store.compiled({
-			at: AT,
-			diagnostics: [
-				{
-					code: "TS1",
-					column: 2,
-					file: "src/a.ts",
-					line: 1,
-					message: "m",
-					severity: "error",
-				},
-			],
-			errors: 1,
-			startedAt: AT,
-		});
-		store.building(true);
+		store.compiled(
+			{
+				at: AT,
+				diagnostics: [
+					{
+						code: "TS1",
+						column: 2,
+						file: "src/a.ts",
+						line: 1,
+						message: "m",
+						severity: "error",
+					},
+				],
+				errors: 1,
+				startedAt: AT,
+			},
+			true,
+		);
 		store.syncbackFinished({
 			durationMs: 1,
 			error: { code: "hook_failed", message: "m" },

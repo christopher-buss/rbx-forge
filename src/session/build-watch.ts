@@ -1,9 +1,10 @@
 import type { DiagnosticsParser } from "../compiler/diagnostics.ts";
 import { createDiagnosticsParser } from "../compiler/diagnostics.ts";
-import type { BuildEvent, FreshnessTracker } from "../compiler/freshness.ts";
-import { createFreshnessTracker } from "../compiler/freshness.ts";
 import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
+import { settlesWithinAsync } from "../seams/clock.ts";
+import type { FreshnessTracker } from "./freshness.ts";
+import { createFreshnessTracker, QUIET_WINDOW_MS } from "./freshness.ts";
 import type { LastBuild, StatusRecorder } from "./status.ts";
 
 /** How long `forge status --wait` waits for a fresh build by default. */
@@ -14,8 +15,8 @@ export interface BuildWatch {
 	/** The session is stopping: every wait fails with `not_running`. */
 	close: () => void;
 	/**
-	 * Every wait, now and later, fails with `error`. The first failure
-	 * wins.
+	 * Every wait, now and later, fails with `error`, and no compile runs any
+	 * more. The first failure wins.
 	 */
 	fail: (error: ForgeError) => void;
 	/**
@@ -50,17 +51,17 @@ export interface BuildWatchOptions {
 
 /** One build watch's parts. */
 interface Watch {
-	/** Resolves on the next line or failure; then a new one takes its place. */
-	change: PromiseWithResolvers<void>;
+	/**
+	 * Resolves on the next line or failure, while a wait listens; a new one
+	 * takes its place.
+	 */
+	change: PromiseWithResolvers<void> | undefined;
 	clock: Clock;
 	failure: ForgeError | undefined;
 	parser: DiagnosticsParser;
 	recorder: BuildWatchOptions["recorder"];
 	tracker: FreshnessTracker;
 }
-
-/** An output line that neither starts nor ends a compile. */
-const OUTPUT: BuildEvent = { type: "output" };
 
 /**
  * Watch the builds of a session's roblox-ts compiler, for a status wait: its
@@ -71,7 +72,7 @@ const OUTPUT: BuildEvent = { type: "output" };
  */
 export function createBuildWatch({ clock, recorder, tracks }: BuildWatchOptions): BuildWatch {
 	const watch: Watch = {
-		change: Promise.withResolvers(),
+		change: undefined,
 		clock,
 		failure: undefined,
 		parser: createDiagnosticsParser(),
@@ -87,7 +88,7 @@ export function createBuildWatch({ clock, recorder, tracks }: BuildWatchOptions)
 		},
 		read: (line) => read(watch, line),
 		tick: () => {
-			tick(watch);
+			tick(watch, clock.now());
 		},
 		waitAsync: async (timeoutMs) => {
 			if (tracks) {
@@ -98,12 +99,20 @@ export function createBuildWatch({ clock, recorder, tracks }: BuildWatchOptions)
 }
 
 function changed(watch: Watch): void {
-	watch.change.resolve();
-	watch.change = Promise.withResolvers();
+	watch.change?.resolve();
+	watch.change = undefined;
 }
 
 function fail(watch: Watch, error: ForgeError): void {
-	watch.failure ??= error;
+	if (watch.failure !== undefined) {
+		return;
+	}
+
+	watch.failure = error;
+	if (watch.tracker.building()) {
+		watch.recorder.building(false);
+	}
+
 	changed(watch);
 }
 
@@ -113,44 +122,26 @@ function stopping(): ForgeError {
 	});
 }
 
-function tick(watch: Watch): void {
-	if (watch.tracker.tick(watch.clock.now())) {
+function tick(watch: Watch, now: number): void {
+	if (watch.tracker.tick(now)) {
 		watch.recorder.building(false);
 	}
 }
 
 function read(watch: Watch, line: string): LastBuild | undefined {
 	const { clock, parser, recorder, tracker } = watch;
-	tick(watch);
+	const now = clock.now();
+	tick(watch, now);
 	const wasBuilding = tracker.building();
-	const build = tracker.record(parser.read(line) ?? OUTPUT, clock.now());
+	const build = tracker.record(parser.read(line), now);
 	if (build !== undefined) {
-		recorder.compiled(build);
-	}
-
-	if (tracker.building() !== wasBuilding) {
+		recorder.compiled(build, tracker.building());
+	} else if (tracker.building() !== wasBuilding) {
 		recorder.building(!wasBuilding);
 	}
 
 	changed(watch);
 	return build;
-}
-
-function ignore(): void {
-	// The timer was aborted; nothing waits for it.
-}
-
-/**
- * Sleep until `ms` passed or the watch changes.
- *
- * @param watch - Its clock and change signal.
- * @param ms - The longest sleep.
- */
-async function sleepUntilChangeAsync(watch: Watch, ms: number): Promise<void> {
-	const abort = new AbortController();
-	const timer = watch.clock.sleep(ms, abort.signal).catch(ignore);
-	await Promise.race([watch.change.promise, timer]);
-	abort.abort();
 }
 
 function timedOut(tracker: FreshnessTracker, timeoutMs: number): ForgeError {
@@ -160,6 +151,8 @@ function timedOut(tracker: FreshnessTracker, timeoutMs: number): ForgeError {
 		why = "a compile still runs";
 	} else if (tracker.lastBuild() === undefined) {
 		why = "the first compile has not ended";
+	} else if (timeoutMs < QUIET_WINDOW_MS) {
+		why = `the quiet window (${QUIET_WINDOW_MS} ms) is longer than the wait`;
 	}
 
 	return new ForgeError("compile_timeout", `No fresh build within ${timeoutMs} ms: ${why}.`, {
@@ -185,8 +178,8 @@ async function waitFreshAsync(watch: Watch, timeoutMs: number): Promise<void> {
 			throw watch.failure;
 		}
 
-		tick(watch);
 		const now = clock.now();
+		tick(watch, now);
 		const freshAt = tracker.freshAt(since);
 		if (freshAt !== undefined && now >= freshAt) {
 			return;
@@ -197,6 +190,7 @@ async function waitFreshAsync(watch: Watch, timeoutMs: number): Promise<void> {
 		}
 
 		const wakeAt = Math.min(freshAt ?? deadline, tracker.settleAt() ?? deadline, deadline);
-		await sleepUntilChangeAsync(watch, wakeAt - now);
+		watch.change ??= Promise.withResolvers();
+		await settlesWithinAsync(clock, watch.change.promise, wakeAt - now);
 	}
 }

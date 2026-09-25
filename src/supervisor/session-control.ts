@@ -24,13 +24,12 @@ export interface ControlSetup {
 	 * endpoint does not.
 	 */
 	pause: () => Promise<void>;
-	/**
-	 * What the session runs, for its first status. `builds`: it reads its
-	 * compiler's builds (roblox-ts).
-	 */
-	plan: { builds: boolean; compiler: boolean; open: boolean; syncback: boolean };
+	/** What the session runs, for its first status. */
+	plan: { compiler: boolean; open: boolean; syncback: boolean };
 	/** The fixed Rojo port. */
 	port: number;
+	/** The session reads its compiler's builds (roblox-ts). */
+	readsBuilds: boolean;
 	/** The supervisor's stop requests: `shutdown` feeds them. */
 	stop: StopSource;
 	/** Runs `forge sync` through the session body. */
@@ -93,7 +92,6 @@ export async function openSessionAsync(
 	return {
 		builds,
 		closeAsync: async () => {
-			builds.close();
 			await server.closeAsync();
 		},
 		files,
@@ -151,13 +149,11 @@ function firstStatus({
 	port,
 }: ControlSetup): Parameters<typeof createStatusStore>[0] {
 	return {
-		compiler: plan.compiler,
-		open: plan.open,
+		...plan,
 		pid: identity.pid,
 		port,
 		sessionId: identity.sessionId,
 		startedAt: identity.startedAt,
-		syncback: plan.syncback,
 	};
 }
 
@@ -185,8 +181,8 @@ function createSessionStatus(
 }
 
 /**
- * The session's status and builds. A stop request marks it `stopping` and
- * fails every wait for a build.
+ * The session's status and builds. Once the session is `stopping` (a stop
+ * request, or its end), every wait for a build fails.
  *
  * @param seams - The clock and file system.
  * @param setup - The identity, plan, port, stop requests, and `onReady`.
@@ -198,16 +194,22 @@ function createSessionState(
 	setup: ControlSetup,
 	stateFile: string,
 ): { builds: BuildWatch; status: StatusStore } {
-	const status = createSessionStatus(seams, setup, stateFile);
+	const store = createSessionStatus(seams, setup, stateFile);
 	const builds = createBuildWatch({
 		clock: seams.clock,
-		recorder: status,
-		tracks: setup.plan.builds,
+		recorder: store,
+		tracks: setup.readsBuilds,
 	});
+	const status: StatusStore = {
+		...store,
+		phase: (phase) => {
+			store.phase(phase);
+			builds.close();
+		},
+	};
 	// The stop source lives as long as this supervisor: no removal needed.
 	setup.stop.onStop(() => {
 		status.phase("stopping");
-		builds.close();
 	});
 	return { builds, status };
 }

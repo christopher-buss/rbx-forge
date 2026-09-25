@@ -11,6 +11,7 @@ import { logFilePath, openLogFile } from "../output/log-file.ts";
 import type { Invocation } from "../process/command-line.ts";
 import type { SpawnedWorker } from "../reaper/reaper-client.ts";
 import type { Clock } from "../seams/clock.ts";
+import { settlesWithinAsync } from "../seams/clock.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
 import type { BuildWatch } from "./build-watch.ts";
@@ -53,6 +54,16 @@ export interface SessionSetup {
 	sync: Pick<SessionSync, "attach" | "close">;
 }
 
+/** How the session body follows one service. */
+interface ServiceHooks {
+	/** Its status once it runs. */
+	initial: "ready" | "starting";
+	/** Gets each output line. */
+	onLine?: ((line: string) => void) | undefined;
+	/** Called once its tree is gone. */
+	onStopped?: (() => void) | undefined;
+}
+
 /** The place the session opened, and the Studio it started. */
 interface OpenedStudio {
 	place: string;
@@ -63,6 +74,11 @@ interface OpenedStudio {
 export const OUTPUT_POLL_MS = 250;
 /** How often the session looks at the place and Studio's lock file. */
 export const FILE_POLL_MS = 500;
+
+/** A promise that never settles: a pause that only time or a signal ends. */
+const NEVER = new Promise<void>(() => {
+	// Never resolves.
+});
 
 /** How often the session checks whether Rojo listens on its port. */
 const ROJO_LISTEN_POLL_MS = 100;
@@ -141,23 +157,30 @@ function noSaveWatch(): void {
 }
 
 /**
- * Read the watch-mode compiler's output as builds, and report each one.
+ * Read the watch-mode compiler's output as builds, and report each one. Once
+ * the compiler stops, every wait for a build fails.
  *
  * @param session - The session's builds and reporter.
- * @returns Reads one line.
+ * @returns What its service reads each line with, and does once it stopped.
  */
-function compileReader(session: SessionSetup): (line: string) => void {
-	return (line) => {
-		const build = session.builds.read(line);
-		if (build !== undefined) {
-			const { diagnostics, errors } = build;
-			session.context.reporter.emit({ diagnostics, errors, type: "compiled" });
-		}
+function compileReader(session: SessionSetup): Pick<ServiceHooks, "onLine" | "onStopped"> {
+	return {
+		onLine: (line) => {
+			const build = session.builds.read(line);
+			if (build !== undefined) {
+				const { diagnostics, errors } = build;
+				session.context.reporter.emit({ diagnostics, errors, type: "compiled" });
+			}
+		},
+		onStopped: () => {
+			session.builds.fail(
+				new ForgeError("service_failed", "The compiler stopped, so no build comes.", {
+					details: { reason: "service_failed:compiler" },
+					hint: `Its output is in ${logFilePath(session.context.cwd, "compiler")}.`,
+				}),
+			);
+		},
 	};
-}
-
-function ignore(): void {
-	// The timer was aborted; nothing waits for it.
 }
 
 /**
@@ -186,10 +209,7 @@ async function followUntilExitAsync(
 	const state = { isRunning: true };
 	const exited = markExitAsync(worker, state);
 	while (state.isRunning) {
-		const abort = new AbortController();
-		// Once the tree is gone first, the abort ends the timer.
-		await Promise.race([exited, clock.sleep(OUTPUT_POLL_MS, abort.signal).catch(ignore)]);
-		abort.abort();
+		await settlesWithinAsync(clock, exited, OUTPUT_POLL_MS);
 		follower.read();
 	}
 
@@ -197,28 +217,30 @@ async function followUntilExitAsync(
 }
 
 /**
- * Read a service's output until its tree is gone, then mark it stopped. A
- * stopped compiler fails every wait for a build.
+ * Read a service's output until its tree is gone, then mark it stopped.
  *
- * @param session - Its status and builds.
+ * @param session - Its status.
  * @param id - Which service: its entry in the status.
- * @param watch - The clock, the service's worker, and its output reader.
+ * @param watch - The clock, the service's worker, its output reader, and
+ *   what to do once it stopped.
  */
 async function followServiceAsync(
 	session: SessionSetup,
 	id: ServiceInvocation["id"],
-	{ clock, follower, worker }: { clock: Clock; follower: OutputFollower; worker: SpawnedWorker },
+	{
+		clock,
+		follower,
+		onStopped,
+		worker,
+	}: Pick<ServiceHooks, "onStopped"> & {
+		clock: Clock;
+		follower: OutputFollower;
+		worker: SpawnedWorker;
+	},
 ): Promise<void> {
 	await followUntilExitAsync(clock, worker, follower);
 	session.status.service(id, "stopped");
-	if (id === "compiler") {
-		session.builds.fail(
-			new ForgeError("service_failed", "The compiler stopped, so no build comes.", {
-				details: { reason: "service_failed:compiler" },
-				hint: `Its output is in ${logFilePath(session.context.cwd, "compiler")}.`,
-			}),
-		);
-	}
+	onStopped?.();
 }
 
 /**
@@ -228,17 +250,14 @@ async function followServiceAsync(
  * @param session - The context and the session directory.
  * @param scope - Starts the service and tracks its output.
  * @param service - The resolved service.
- * @param options - Its status once it runs, and what else gets each output
- *   line.
+ * @param hooks - Its status once it runs, what else gets each output line,
+ *   and what to do once it stopped.
  */
 async function startServiceAsync(
 	session: SessionSetup,
 	scope: SessionScope,
 	service: ServiceInvocation,
-	{
-		initial,
-		onLine,
-	}: { initial: "ready" | "starting"; onLine?: ((line: string) => void) | undefined },
+	{ initial, onLine, onStopped }: ServiceHooks,
 ): Promise<void> {
 	const { cwd, env, reporter, seams } = session.context;
 	const { clock, fileSystem } = seams;
@@ -262,7 +281,7 @@ async function startServiceAsync(
 		log.write(stripVTControlCharacters(line));
 		onLine?.(line);
 	});
-	scope.track(followServiceAsync(session, service.id, { clock, follower, worker }));
+	scope.track(followServiceAsync(session, service.id, { clock, follower, onStopped, worker }));
 }
 
 /**
@@ -276,11 +295,10 @@ async function startServicesAsync(session: SessionSetup, scope: SessionScope): P
 	await startServiceAsync(session, scope, session.rojo, { initial: "starting" });
 	const { compiler } = session;
 	if (compiler !== undefined) {
-		const reader = compiler.parsesDiagnostics ? compileReader(session) : undefined;
-		await startServiceAsync(session, scope, compiler.service, {
-			initial: reader === undefined ? "ready" : "starting",
-			onLine: reader,
-		});
+		const hooks: ServiceHooks = compiler.parsesDiagnostics
+			? { ...compileReader(session), initial: "starting" }
+			: { initial: "ready" };
+		await startServiceAsync(session, scope, compiler.service, hooks);
 	}
 }
 
@@ -378,10 +396,7 @@ async function settleSyncbackAsync(
 	clock: Clock,
 	flushSyncbackAsync: () => Promise<void>,
 ): Promise<void> {
-	const abort = new AbortController();
-	const bound = clock.sleep(STUDIO_CLOSED_SYNCBACK_MS, abort.signal).catch(ignore);
-	await Promise.race([flushSyncbackAsync(), bound]);
-	abort.abort();
+	await settlesWithinAsync(clock, flushSyncbackAsync(), STUDIO_CLOSED_SYNCBACK_MS);
 }
 
 /**
@@ -466,7 +481,8 @@ async function waitForRojoAsync(session: SessionSetup, scope: SessionScope): Pro
 			);
 		}
 
-		await clock.sleep(ROJO_LISTEN_POLL_MS, scope.signal).catch(ignore);
+		// The session's end ends the pause early.
+		await settlesWithinAsync(clock, NEVER, ROJO_LISTEN_POLL_MS, scope.signal);
 	}
 
 	return false;

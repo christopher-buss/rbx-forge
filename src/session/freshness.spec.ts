@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type { Diagnostic } from "./diagnostics.ts";
-import type { BuildEvent, FreshnessTracker } from "./freshness.ts";
+import type { CompileEvent, Diagnostic } from "../compiler/diagnostics.ts";
+import type { FreshnessTracker } from "./freshness.ts";
 import { createFreshnessTracker, QUIET_WINDOW_MS } from "./freshness.ts";
+import { isoTime as iso } from "./status.ts";
+
+type BuildEvent = CompileEvent | undefined;
 
 const START: BuildEvent = { type: "start" };
 const CHANGE: BuildEvent = { type: "start" };
 const FOUND: BuildEvent = { report: { diagnostics: [], errors: 0 }, type: "end" };
-const OUTPUT: BuildEvent = { type: "output" };
+/** Output that neither starts nor ends a compile. */
+const OUTPUT: BuildEvent = undefined;
 const DIAGNOSTIC: Diagnostic = {
 	code: "TS1005",
 	column: 1,
@@ -16,11 +20,6 @@ const DIAGNOSTIC: Diagnostic = {
 	message: "';' expected.",
 	severity: "error",
 };
-
-function iso(ms: number): string {
-	const time = new Date(ms);
-	return time.toISOString();
-}
 
 /**
  * Feed timed events to one tracker.
@@ -178,6 +177,23 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.tick(bound)).toBeTrue();
 		expect(tracker.building()).toBeFalse();
 		expect(tracker.freshAt(900)).toBe(bound + QUIET_WINDOW_MS);
+	});
+
+	it("should count open start events as merged once a new compile starts", () => {
+		expect.assertions(2);
+
+		const tracker = feed([
+			[0, START],
+			[400, FOUND],
+			[1000, CHANGE],
+			[1200, CHANGE],
+			[1400, FOUND],
+			[3000, CHANGE],
+			[3300, FOUND],
+		]);
+
+		expect(tracker.building()).toBeFalse();
+		expect(tracker.lastBuild()).toMatchObject({ at: iso(3300), startedAt: iso(3000) });
 	});
 
 	it("should wait twice the longest compile for merged start events", () => {
