@@ -8,7 +8,7 @@ import { createFilePause, neverPauseAsync, parsePausePoints, PAUSE_POLL_MS } fro
 
 /** A signal that never aborts. */
 const NEVER_ABORTS = AbortSignal.any([]);
-const DIRECTORY = path.join(PROJECT, "pauses");
+const DIRECTORY = path.join(PROJECT, "test", "pauses");
 const PAUSED = path.join(DIRECTORY, "lock.paused");
 
 function makePause(points: ReadonlyArray<string>) {
@@ -53,7 +53,7 @@ describe(createFilePause, () => {
 		manual.advance(PAUSE_POLL_MS);
 		await flushAsync();
 
-		expect([memory.files()["pauses/lock.paused"], isDone]).toStrictEqual(["77", false]);
+		expect([memory.files()["test/pauses/lock.paused"], isDone]).toStrictEqual(["77", false]);
 
 		memory.fileSystem.rmSync(PAUSED);
 		manual.advance(PAUSE_POLL_MS);
@@ -73,7 +73,10 @@ describe(createFilePause, () => {
 		abort.abort();
 
 		await expect(paused).resolves.toBeUndefined();
-		expect([manual.pending(), memory.files()["pauses/lock.paused"]]).toStrictEqual([0, "77"]);
+		expect([manual.pending(), memory.files()["test/pauses/lock.paused"]]).toStrictEqual([
+			0,
+			"77",
+		]);
 	});
 });
 

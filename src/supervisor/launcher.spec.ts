@@ -54,13 +54,13 @@ describe(createSupervisorLauncher, () => {
 		expect.assertions(2);
 
 		const { child, onEvent, run } = launch();
-		child.stdout.write("not a message\n");
 		child.stdout.write(
 			encodeMessage({ event: { message: "hi", type: "info" }, type: "event" }),
 		);
 		child.stdout.write(
 			encodeMessage({ data: { a: 1 }, ok: true, summary: "done", type: "result" }),
 		);
+		child.stdout.write("not a message\n");
 		await flushAsync();
 		child.close(0);
 

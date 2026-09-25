@@ -960,7 +960,10 @@ describe("forge start session files", () => {
 		const run = startCommand();
 		run.native.addon.tryLockFile(SINGLETON, "exclusive");
 
-		await expect(run.result).rejects.toMatchObject({ code: "session_running" });
+		await expect(run.result).rejects.toMatchObject({
+			code: "session_running",
+			hint: "Stop it first (Ctrl+C in its terminal), then start again.",
+		});
 		expect(run.fake.launches).toStrictEqual([]);
 		expect(Object.keys(run.memory.files())).not.toContain(".forge/current");
 	});
@@ -989,7 +992,7 @@ describe("forge start session files", () => {
 				data: { reason: "SIGTERM", reports: [] },
 				summary: "Stopped on SIGTERM before the session started; nothing ran.",
 			});
-			expect(run.fake.launches).toStrictEqual([]);
+			expect([run.fake.launches, run.isPortFreeAsync.mock.calls]).toStrictEqual([[], []]);
 			expect([run.native.locks.size, run.memory.files()[".forge/current"]]).toStrictEqual([
 				0,
 				undefined,
@@ -1034,7 +1037,10 @@ describe("forge start session files", () => {
 		// The default grace time (3 s) plus the 15 s margin, and one poll.
 		await passAsync(run, 18_250);
 
-		await expect(caught).resolves.toMatchObject({ code: "previous_generation_alive" });
+		await expect(caught).resolves.toMatchObject({
+			code: "previous_generation_alive",
+			hint: `Wait for them to exit, or stop them, then start again. Their session files are in ${path.dirname(OLD_LEASE)}.`,
+		});
 		expect(run.fake.launches).toStrictEqual([]);
 	});
 
@@ -1046,8 +1052,10 @@ describe("forge start session files", () => {
 		await flushAsync();
 		run.signals.fire("SIGINT");
 
-		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
-		expect(Object.keys(run.memory.files())).not.toContain(".forge/current");
+		await expect(run.result).resolves.toMatchObject({
+			summary: "Stopped on SIGINT before the session started; nothing ran.",
+		});
+		expect(run.fake.launches).toStrictEqual([]);
 	});
 
 	it("should fail with cleanup_in_progress and keep the session while its lease stays held", async () => {

@@ -169,9 +169,9 @@ export interface ForgeErrorOptions {
 	 * Machine-readable facts about the failure, such as hook results. The
 	 * `--json` result carries them as `error.details`.
 	 */
-	details?: Readonly<Record<string, unknown>>;
+	details?: Readonly<Record<string, unknown>> | undefined;
 	/** One line that tells the user what to do next. */
-	hint?: string;
+	hint?: string | undefined;
 }
 
 /**

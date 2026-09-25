@@ -66,12 +66,17 @@ describe(parseSessionRequest, () => {
 	it("should fail with internal_error on a config layer the schema rejects", () => {
 		expect.assertions(1);
 
-		const text = JSON.stringify({ compiler: true, config: { rojoPort: "x" }, open: true });
+		const config = { gracefulTimeoutMs: "y", rojoPort: "x" };
+		const text = JSON.stringify({ compiler: true, config, open: true });
 		const error = catchForgeError(() => parseSessionRequest(text));
 
 		expect([error.code, error.message]).toStrictEqual([
 			"internal_error",
-			"The session request's config is invalid:\nrojoPort: rojoPort must be a number (was a string)",
+			[
+				"The session request's config is invalid:",
+				"gracefulTimeoutMs: gracefulTimeoutMs must be a number (was a string)",
+				"rojoPort: rojoPort must be a number (was a string)",
+			].join("\n"),
 		]);
 	});
 });

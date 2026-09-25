@@ -107,7 +107,7 @@ export function encodeSessionRequest(request: SessionRequest): string {
  *   writes it.
  */
 export function parseSessionRequest(text: string | undefined): SessionRequest {
-	const parsed = requestSchema(text ?? "");
+	const parsed = requestSchema(text);
 	if (parsed instanceof type.errors) {
 		throw new ForgeError(
 			INTERNAL_ERROR,
@@ -201,10 +201,7 @@ export function createChannelReporter(write: (text: string) => void): Reporter {
  * @returns The same error; an unknown code becomes `internal_error`.
  */
 export function failureError({ code, details, hint, message }: SupervisorFailure): ForgeError {
-	return new ForgeError(isErrorCode(code) ? code : INTERNAL_ERROR, message, {
-		...(details === undefined ? {} : { details }),
-		...(hint === undefined ? {} : { hint }),
-	});
+	return new ForgeError(isErrorCode(code) ? code : INTERNAL_ERROR, message, { details, hint });
 }
 
 function isErrorCode(code: string): code is ForgeErrorCode {
