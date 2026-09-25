@@ -10,4 +10,6 @@
 
 pub mod lock;
 pub mod process;
+#[cfg(windows)]
+pub mod win;
 pub mod worker;

@@ -57,8 +57,77 @@ export interface PinnedProcess {
 	waitForExit: (timeoutMs: number) => boolean;
 }
 
+/** What {@link NativePipeConnection.readLine} read. */
+export interface NativeLineRead {
+	kind: "closed" | "line" | "timed_out" | "too_long";
+	/** The line, without its newline, when `kind` is `line`. */
+	line?: string | undefined;
+}
+
+/** One client of a {@link NativePipeServer} (Windows). */
+export interface NativePipeConnection {
+	/** Close it; a pending read or write ends at once. */
+	close: () => void;
+	/** Read one line of at most `maxBytes`, waiting at most `timeoutMs`. */
+	readLine: (maxBytes: number, timeoutMs: number) => Promise<NativeLineRead>;
+	/**
+	 * Write `text`, waiting at most `timeoutMs`.
+	 *
+	 * @returns `false` when the client left or the time passed first.
+	 */
+	write: (text: string, timeoutMs: number) => Promise<boolean>;
+}
+
+/** One access control entry of a {@link NativeSecurity}. */
+export interface NativeAce {
+	kind: "allow" | "deny" | "other";
+	mask: number;
+	/** `S-1-5-...`; empty for `other`. */
+	sid: string;
+}
+
+/** The owner and DACL of a Windows object. */
+export interface NativeSecurity {
+	aces: Array<NativeAce>;
+	owner: string;
+	/** Inheritance from the parent is off. */
+	protected: boolean;
+}
+
+/**
+ * The server end of a named pipe (Windows): every instance has an
+ * owner-only DACL and rejects remote clients (ADR 0001, "Pipe security").
+ */
+export interface NativePipeServer {
+	/** Wait for the next client; `null` once the server is closed. */
+	accept: () => Promise<NativePipeConnection | null>;
+	/** Stop listening; a pending `accept` resolves `null`. */
+	close: () => void;
+	/** The pipe's owner and DACL. */
+	security: () => NativeSecurity;
+}
+
+/** What {@link NativeAddon.spawnDetached} starts. */
+export interface DetachedSpawn {
+	args: Array<string>;
+	cwd: string;
+	/** The whole environment of the new process. */
+	env: Record<string, string>;
+	/** A file its stdout and stderr append to; `NUL` when missing. */
+	output?: string;
+	/** The executable's full path. */
+	program: string;
+}
+
 /** The addon's exports. */
 export interface NativeAddon {
+	/**
+	 * Windows only: create the pipe at `path` (`\\.\pipe\<name>`) and its
+	 * first instance.
+	 *
+	 * @throws When an instance of the name already exists (access denied).
+	 */
+	createPipeServer?: (path: string, rejectRemote: boolean) => NativePipeServer;
 	/** Version of the native crate. */
 	nativeVersion: () => string;
 	/** Pin the live process with this PID, or `null` when there is none. */
@@ -71,6 +140,13 @@ export interface NativeAddon {
 	 */
 	processStartTime: (pid: number) => null | string;
 	/**
+	 * Windows only: start a process outside this process's job
+	 * (`CREATE_BREAKAWAY_FROM_JOB`), with no console and stdin from `NUL`.
+	 *
+	 * @returns Its PID, or `null` when the job forbids breakaway.
+	 */
+	spawnDetached?: (spawn: DetachedSpawn) => null | number;
+	/**
 	 * Lock `path` without waiting; creates the file when missing and never
 	 * changes its content. Lock files should hold no data: Windows blocks
 	 * reads of a locked file.
@@ -78,6 +154,13 @@ export interface NativeAddon {
 	 * @returns The lock, or `null` when another holder's lock conflicts.
 	 */
 	tryLockFile: (path: string, mode: LockMode) => FileLock | null;
+	/**
+	 * Windows only: create a new file that only the current user can open,
+	 * holding `contents`. It never exists with another DACL.
+	 *
+	 * @throws When the file exists or cannot be written.
+	 */
+	writePrivateFile?: (path: string, contents: string) => void;
 }
 
 /**

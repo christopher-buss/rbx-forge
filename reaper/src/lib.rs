@@ -10,6 +10,8 @@
 
 #[allow(dead_code, reason = "the worker layer serves only the reaper binary")]
 mod os;
+#[cfg(windows)]
+mod windows_exports;
 
 use std::path::Path;
 use std::time::Duration;
