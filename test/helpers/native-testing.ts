@@ -90,10 +90,24 @@ export function exists(file: string): boolean {
  *
  * @returns A pipe path or socket path nothing else uses.
  */
+function shortDirectory(): string {
+	if (process.platform === "win32") {
+		return makeTemporaryDirectory();
+	}
+
+	const directory = nodeFs.mkdtempSync("/tmp/rbx-forge-");
+	onTestFinished(() => {
+		nodeFs.rmSync(directory, { force: true, recursive: true });
+	});
+	return directory;
+}
+
 function freshEndpoint(): string {
 	return endpointFor({
 		buildOutputPath: randomUUID(),
-		env: { XDG_RUNTIME_DIR: makeTemporaryDirectory() },
+		// Short on every OS: a macOS temporary directory is too deep for a
+		// socket.
+		env: { XDG_RUNTIME_DIR: shortDirectory() },
 		platform: process.platform,
 		projectRoot: path.resolve("/forge-test"),
 		userId: process.getuid?.(),

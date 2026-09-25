@@ -227,7 +227,8 @@ jobs:
       - if: runner.os == 'Windows'
         name: Create a second local user (Windows)
         run: |
-          $password = "Fo!" + [guid]::NewGuid().ToString("N") + "aZ9"
+          # At most 14 characters: net user asks before it takes a longer one.
+          $password = "Fo!" + [guid]::NewGuid().ToString("N").Substring(0, 8) + "aZ9"
           Write-Output "::add-mask::$password"
           net user forge-other $password /add
           "RBX_FORGE_OTHER_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { EndpointInput } from "./endpoint.ts";
-import { endpointFor, endpointKey } from "./endpoint.ts";
+import { endpointFor, endpointKey, MAX_SOCKET_PATH } from "./endpoint.ts";
 
 const POSIX: EndpointInput = {
 	buildOutputPath: "game.rbxl",
@@ -43,5 +43,19 @@ describe(endpointFor, () => {
 			`/var/folders/x/T/rbx-forge-1000-${KEY}/ctl.sock`,
 		);
 		expect(endpointFor(POSIX)).toBe(`/tmp/rbx-forge-1000-${KEY}/ctl.sock`);
+	});
+
+	it("should fall back to /tmp when the socket path would be too long", () => {
+		expect.assertions(2);
+
+		// `<runtime>/rbx-forge-1000-<key>/ctl.sock` adds 41 bytes.
+		const longest = `/${"r".repeat(MAX_SOCKET_PATH - 42)}`;
+
+		expect(endpointFor({ ...POSIX, env: { TMPDIR: longest } })).toBe(
+			`${longest}/rbx-forge-1000-${KEY}/ctl.sock`,
+		);
+		expect(endpointFor({ ...POSIX, env: { TMPDIR: `${longest}r` } })).toBe(
+			`/tmp/rbx-forge-1000-${KEY}/ctl.sock`,
+		);
 	});
 });
