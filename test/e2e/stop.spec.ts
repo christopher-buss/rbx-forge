@@ -131,23 +131,19 @@ describe("forge stop", () => {
 		expect(existsSync(`${place}.lock`)).toBeFalse();
 	});
 
-	it("should end a Studio at once once it closed the place, and keep auto-recovery files with --recovery keep", async () => {
+	it("should end a Studio at once once it closed the place, and leave its auto-recovery files to it", async () => {
 		expect.assertions(2);
 
 		const { project, studio } = await makeStudioProjectAsync({
 			FIXTURE_STUDIO_CLOSE: "linger",
 		});
-		const { stdout } = await runBinAsync(
-			["stop", "--json", "--recovery", "keep"],
-			project,
-			NATIVE,
-		);
+		const { stdout } = await runBinAsync(["stop", "--json"], project, NATIVE);
 		await waitForExitAsync(studio);
 
 		expect(parseResult(stdout).data).toMatchObject({
 			end: "lock_released",
 			forced: false,
-			recovery: { mode: "keep" },
+			recovery: null,
 		});
 		expect(isProcessAlive(pidOf(studio))).toBeFalse();
 	});

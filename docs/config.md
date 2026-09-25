@@ -256,11 +256,11 @@ Options for the Roblox Studio that `stop` and `down` close.
 - Default: `"move"`
 - Flag: `forge stop --recovery <mode>` / `forge down --recovery <mode>`
 
-What forge does with the auto-recovery files of a Studio it ended: `move` them
-to `.forge/recovery/` (the 5 newest stay), `delete` them, or `keep` them in
-Studio's AutoSaves folder, where the next launch offers to recover them. See the
-README, "Auto-recovery". `down` also runs when the config file is missing or
-invalid: then only `--recovery` and the default count.
+What forge does with the auto-recovery files of a Studio it ended with the place
+open (`forced`): `move` them to `.forge/recovery/` (the 5 newest stay), `delete`
+them, or `keep` them in Studio's AutoSaves folder, where the next launch offers
+to recover them. See the README, "Auto-recovery". `down` also runs when the
+config file is missing or invalid: then only `--recovery` and the default count.
 
 ```ts
 defineConfig({
