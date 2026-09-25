@@ -179,6 +179,15 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.freshAt(900)).toBe(bound + QUIET_WINDOW_MS);
 	});
 
+	it("should have nothing to settle before any event", () => {
+		expect.assertions(2);
+
+		const tracker = createFreshnessTracker();
+
+		expect(tracker.settleAt()).toBeUndefined();
+		expect(tracker.tick(1_000_000)).toBeFalse();
+	});
+
 	it("should never settle the first compile, however long it runs", () => {
 		expect.assertions(2);
 
