@@ -2,6 +2,7 @@ import { BUILD_FLAGS, runBuildCommandAsync } from "../commands/build.ts";
 import { runCompileCommandAsync } from "../commands/compile.ts";
 import { runConfigAsync } from "../commands/config.ts";
 import type { CommandRun } from "../commands/context.ts";
+import { DOWN_FLAGS, runDownAsync } from "../commands/down.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
 import { LOG_NAMES, LOGS_FLAGS, runLogsAsync } from "../commands/logs.ts";
 import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
@@ -80,6 +81,13 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		run: runStatusAsync,
 		summary:
 			"Show the running session: each service, the Rojo port, the last compile with its diagnostics, and the last syncback with its hooks.",
+	},
+	{
+		name: "down",
+		flags: DOWN_FLAGS,
+		run: runDownAsync,
+		summary:
+			"Stop the running session, and report stopped only once its supervisor and every process of it are gone.",
 	},
 	{
 		name: "logs",
