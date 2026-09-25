@@ -22,7 +22,11 @@ process.exitCode = await runCliAsync(process.argv.slice(2), {
 			process.stdout.write(text);
 		},
 	},
-	seams: createNodeSeams({ input: process.stdin, output: process.stdout }),
+	seams: createNodeSeams({
+		input: process.stdin,
+		nativeDirectory: process.env["RBX_FORGE_NATIVE_DIR"],
+		output: process.stdout,
+	}),
 	terminal: {
 		stdinIsTty: process.stdin.isTTY,
 		stdoutIsTty: process.stdout.isTTY,
