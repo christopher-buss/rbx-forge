@@ -1,0 +1,79 @@
+# Throwaway: runs the ticket #36 spike measurements on hosted runners.
+# Removed from the branch once the ADR records the results.
+name: Spike 36
+
+on:
+  push:
+    branches:
+      - ticket/36-native-spike
+    paths:
+      - .github/workflows/spike-36.yaml
+      - spikes/**
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: Measure (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build spike
+        run: cargo build --release --manifest-path spikes/36-native/Cargo.toml
+        shell: bash
+
+      - if: ${{ runner.os != 'Windows' }}
+        name: Environment scan
+        run: |
+          uname -a
+          sw_vers || true
+          spikes/36-native/target/release/spike36 envscan
+        shell: bash
+
+      - if: ${{ runner.os != 'Windows' }}
+        name: Executable bit through npm pack and install
+        run: |
+          set -x
+          root=$(mktemp -d)
+          for mode in 755 644; do
+            pkg="$root/pkg-$mode"
+            mkdir -p "$pkg"
+            printf '#!/bin/sh\necho ok\n' > "$pkg/forge-reaper"
+            chmod "$mode" "$pkg/forge-reaper"
+            printf '{"name":"spike-exec-%s","version":"1.0.0","files":["forge-reaper"]}' "$mode" > "$pkg/package.json"
+            (cd "$pkg" && npm pack --silent)
+            tar tvzf "$pkg/spike-exec-$mode-1.0.0.tgz"
+            for pm in npm pnpm; do
+              consumer="$root/consumer-$mode-$pm"
+              mkdir -p "$consumer"
+              echo '{"name":"c","version":"1.0.0"}' > "$consumer/package.json"
+              if [ "$pm" = npm ]; then
+                (cd "$consumer" && npm install --silent "$pkg/spike-exec-$mode-1.0.0.tgz")
+              else
+                (cd "$consumer" && npx --yes pnpm@11 add "$pkg/spike-exec-$mode-1.0.0.tgz" >/dev/null)
+              fi
+              echo "RESULT packed_mode=$mode pm=$pm installed=$(ls -lL "$consumer/node_modules/spike-exec-$mode/forge-reaper" | cut -c1-10)"
+            done
+          done
+        shell: bash
+
+      - if: ${{ runner.os == 'Windows' }}
+        name: Breakaway probe (runner step shell)
+        run: |
+          spikes/36-native/target/release/spike36.exe probe - 5
+          spikes/36-native/target/release/spike36.exe synthetic
+        shell: bash
+
+      - if: ${{ runner.os == 'Windows' }}
+        name: Pipe remote rejection
+        run: |
+          Get-Service LanmanServer | Format-Table Name,Status,StartType
+          spikes/36-native/target/release/spike36.exe pipe
+        shell: pwsh
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        os: [macos-latest, macos-15-intel, ubuntu-latest, windows-latest]
+      fail-fast: false
