@@ -55,6 +55,11 @@
 		"typecheck": "tsc --build",
 		"watch": "tsdown --watch"
 	},
+	"dependencies": {
+		"arktype": "catalog:runtime",
+		"c12": "catalog:runtime",
+		"jiti": "catalog:runtime"
+	},
 	"devDependencies": {
 		"@isentinel/eslint-config": "catalog:lint",
 		"@isentinel/tsconfig": "catalog:tsc",
@@ -74,8 +79,8 @@
 		"eslint-plugin-pnpm": "catalog:lint",
 		"eslint_d": "catalog:lint",
 		"jest-extended": "catalog:test",
-		"jiti": "catalog:lint",
 		"knip": "catalog:lint",
+		"memfs": "catalog:test",
 		"oxlint": "catalog:lint",
 		"oxlint-tsgolint": "catalog:lint",
 		"publint": "catalog:lint",
