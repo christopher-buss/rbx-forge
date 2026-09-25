@@ -9,6 +9,8 @@ import { renderCommandHelp, renderHelp } from "./help.ts";
 const ALL_FLAGS = [...GLOBAL_FLAGS, ...COMMANDS.flatMap(({ flags }) => flags)];
 
 const GLOBAL_PAGE_LINES = renderHelp(COMMANDS).split("\n");
+/** The command column is as wide as the longest command name. */
+const NAME_WIDTH = Math.max(...COMMANDS.map(({ name }) => name.length));
 const COMMAND_FLAGS = COMMANDS.flatMap((command) => {
 	return [...command.flags, ...GLOBAL_FLAGS].map((flag) => ({ command, flag }));
 });
@@ -17,7 +19,7 @@ describe(renderHelp, () => {
 	it.for(COMMANDS)("should list the $name command with its summary", ({ name, summary }) => {
 		expect.assertions(1);
 
-		expect(GLOBAL_PAGE_LINES).toContain(`  ${name.padEnd(6)}  ${summary}`);
+		expect(GLOBAL_PAGE_LINES).toContain(`  ${name.padEnd(NAME_WIDTH)}  ${summary}`);
 	});
 
 	it.for(GLOBAL_FLAGS)("should list the global flag --$name", ({ name }) => {

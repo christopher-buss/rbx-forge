@@ -30,6 +30,18 @@ export function rojoBuildArgs(project: string, target: BuildTarget): RojoArgs {
 }
 
 /**
+ * The arguments of `rojo sourcemap`, with every instance, not only scripts
+ * and their ancestors.
+ *
+ * @param project - The Rojo project file.
+ * @param output - The JSON file to write.
+ * @returns Arguments after the Rojo command.
+ */
+export function rojoSourcemapArgs(project: string, output: string): RojoArgs {
+	return ["sourcemap", project, "--output", output, "--include-non-scripts"];
+}
+
+/**
  * Run a Rojo subcommand with the configured Rojo command, as a step.
  *
  * @param context - The run: project root, seams, and reporter.
