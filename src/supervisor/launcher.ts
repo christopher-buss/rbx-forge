@@ -44,7 +44,7 @@ export type SupervisorLauncher = (launch: SupervisorLaunch) => SupervisorRun;
 /** What the launcher spawns with. */
 export interface SupervisorBackend {
 	childProcess: ChildProcessRunner;
-	host: Pick<Host, "execPath" | "platform">;
+	host: Pick<Host, "execPath">;
 }
 
 type SupervisorProcess = ChildProcessByStdio<Writable, Readable, Readable>;
@@ -60,8 +60,11 @@ type ResultMessage = Extract<SupervisorMessage, { type: "result" }>;
  * from the supervisor's creation, so no moment exists in which a session
  * runs without its owner.
  *
- * On POSIX the supervisor runs in its own session, so a terminal's signals
- * reach only `start`, which passes them on. On Windows it shares the console.
+ * The supervisor is detached: on POSIX it runs in its own session, so a
+ * terminal's signals reach only `start`, which passes them on. On Windows it
+ * runs without a console and outside the job Node puts its children in
+ * (kill-on-close), so it outlives a killed `start` long enough to stop the
+ * session in order. It uses no job breakaway.
  *
  * @param backend - The spawn seam and host.
  * @param entry - Path of the supervisor entry script.
@@ -77,7 +80,7 @@ export function createSupervisorLauncher(
 			[entry, encodeSessionRequest(request)],
 			{
 				cwd,
-				detached: backend.host.platform !== "win32",
+				detached: true,
 				env,
 				stdio: ["pipe", "pipe", "pipe"],
 				windowsHide: true,

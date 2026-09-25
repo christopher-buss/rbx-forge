@@ -4,7 +4,8 @@
  * `test/helpers/fixture-bin.ts` pass it. Environment variables shape the
  * process tree, so a test builds any tree without extra files:
  *
- * - `FIXTURE_LOG`: NDJSON file; every process appends one `start` record.
+ * - `FIXTURE_LOG`: NDJSON file; every process appends one `start` record,
+ *   with the time it started (`at`, milliseconds since the Unix epoch).
  * - `FIXTURE_GRANDCHILDREN`: number of grandchildren a long-running role
  *   spawns. Grandchildren stay alive and spawn nothing.
  * - `FIXTURE_DETACH=1`: grandchildren start detached (own process group /
@@ -20,6 +21,8 @@
  *   SIGINT, SIGTERM, SIGHUP, and SIGBREAK.
  * - `FIXTURE_EXIT_CODE`: exit code of a one-shot run (default 0).
  * - `FIXTURE_HANG=1`: a hook stays alive instead of exiting.
+ * - `FIXTURE_HANG_ROLE`: a one-shot run of this role (such as `rbxtsc` for a
+ *   compile, `rojo` for a build) stays alive instead of exiting.
  * - `FIXTURE_EXIT_AFTER_MS`: a long-running role exits on its own after this
  *   long, with `FIXTURE_EXIT_CODE`. Its grandchildren stay alive.
  * - `FIXTURE_EXIT_ROLE`: only this role exits after `FIXTURE_EXIT_AFTER_MS`.
@@ -64,6 +67,7 @@ function record(): void {
 
 	const entry = {
 		args: ARGS,
+		at: Date.now(),
 		event: "start",
 		markers: { session: env["RBX_FORGE_SESSION"], worker: env["RBX_FORGE_WORKER"] },
 		pid: process.pid,
@@ -157,6 +161,11 @@ function stayAlive(): void {
 }
 
 function exitOnce(): void {
+	if (env["FIXTURE_HANG_ROLE"] === ROLE) {
+		stayAlive();
+		return;
+	}
+
 	process.exitCode = Number(env["FIXTURE_EXIT_CODE"] ?? "0");
 }
 

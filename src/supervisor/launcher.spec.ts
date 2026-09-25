@@ -9,11 +9,11 @@ import { createSupervisorLauncher } from "./launcher.ts";
 
 const REQUEST = { compiler: true, config: {}, open: false };
 
-function launch(platform: NodeJS.Platform = "linux") {
+function launch() {
 	const spawner = createFakeSpawner();
 	const onEvent = vi.fn<(event: ReporterEvent) => void>();
 	const run: SupervisorRun = createSupervisorLauncher(
-		{ childProcess: spawner.runner, host: { execPath: "/node", platform } },
+		{ childProcess: spawner.runner, host: { execPath: "/node" } },
 		"/forge/dist/supervisor.mjs",
 	)({ cwd: "/project", env: { PATH: "/bin" }, onEvent, request: REQUEST });
 	const child: FakeChild = spawner.children[0]!;
@@ -32,7 +32,7 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(createSupervisorLauncher, () => {
-	it("should run the entry with Node, the request, piped streams, in its own session on POSIX", () => {
+	it("should run the entry detached with Node, the request, and piped streams", () => {
 		expect.assertions(1);
 
 		const { call } = launch();
@@ -48,12 +48,6 @@ describe(createSupervisorLauncher, () => {
 				windowsHide: true,
 			},
 		});
-	});
-
-	it("should keep the supervisor in the console on Windows", () => {
-		expect.assertions(1);
-
-		expect(launch("win32").call.options).toMatchObject({ detached: false });
 	});
 
 	it("should relay events and resolve with the result once the supervisor exits", async () => {

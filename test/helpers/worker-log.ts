@@ -5,6 +5,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 /** One `start` record a fake worker appends to `FIXTURE_LOG`. */
 export interface WorkerRecord {
 	args: Array<string>;
+	/** When the process started, in milliseconds since the Unix epoch. */
+	at: number;
 	event: "start";
 	markers: { session?: string; worker?: string };
 	pid: number;
