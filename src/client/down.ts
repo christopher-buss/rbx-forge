@@ -222,7 +222,8 @@ async function askAsync(
 }
 
 /**
- * Ask the target to stop until it accepts, and wait until it is gone.
+ * Ask the target to stop until it accepts, and wait until it is gone. It
+ * asks at least once, also with no wait (`--timeout 0`).
  *
  * @param seams - The clock, transport, and native addon.
  * @param target - The session and its pinned supervisor.
@@ -238,7 +239,7 @@ async function requestStopAsync(
 	waitMs: number,
 ): Promise<boolean> {
 	const deadline = seams.clock.now() + waitMs;
-	let isAccepted = false;
+	let isAccepted = await askAsync(seams, target.session, force);
 	for (;;) {
 		if (await isGoneAsync(seams, target)) {
 			return true;
@@ -248,8 +249,8 @@ async function requestStopAsync(
 			return false;
 		}
 
-		isAccepted ||= await askAsync(seams, target.session, force);
 		await seams.clock.sleep(DOWN_POLL_MS);
+		isAccepted ||= await askAsync(seams, target.session, force);
 	}
 }
 

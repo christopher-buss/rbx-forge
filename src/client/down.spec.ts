@@ -15,13 +15,7 @@ import type { Clock } from "../seams/clock.ts";
 import type { IdentityRecord } from "../supervisor/session-files.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
 import type { DownOptions, DownPoint, DownReport } from "./down.ts";
-import {
-	DOWN_POLL_MS,
-	EXIT_WAIT_MS,
-	FORCED_SHUTDOWN_MS,
-	KILL_WAIT_MS,
-	stopSessionAsync,
-} from "./down.ts";
+import { EXIT_WAIT_MS, FORCED_SHUTDOWN_MS, KILL_WAIT_MS, stopSessionAsync } from "./down.ts";
 import type { KnownSession } from "./session.ts";
 import { findSession } from "./session.ts";
 
@@ -306,6 +300,18 @@ describe(stopSessionAsync, () => {
 		expect(world.asked).toStrictEqual([{ sessionId: "s1" }]);
 	});
 
+	it("should ask for a graceful shutdown once even with no wait", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		await serveAsync(world, exitOnShutdown);
+
+		await expect(downAsync(world, { timeoutMs: 0 })).resolves.toMatchObject({
+			stoppedBy: "shutdown",
+		});
+		expect(world.asked).toStrictEqual([{ sessionId: "s1" }]);
+	});
+
 	it("should force the shutdown once the wait passed", async () => {
 		expect.assertions(3);
 
@@ -314,7 +320,7 @@ describe(stopSessionAsync, () => {
 
 		await expect(downAsync(world)).resolves.toMatchObject({ stoppedBy: "forced_shutdown" });
 		expect(world.asked).toStrictEqual([{ sessionId: "s1" }, { force: true, sessionId: "s1" }]);
-		expect(world.clock.now()).toBe(TIMEOUT_MS + DOWN_POLL_MS);
+		expect(world.clock.now()).toBe(TIMEOUT_MS);
 	});
 
 	it("should report supervisor_unresponsive and kill nothing without --force (C14)", async () => {
