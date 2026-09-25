@@ -1,0 +1,32 @@
+name: Setup
+description: Install mise tools, restore the pnpm store, and install dependencies
+
+inputs:
+  tools:
+    description: Space-separated mise tools to install (from mise.toml)
+    required: false
+    default: node
+
+runs:
+  using: composite
+  steps:
+    - name: Setup mise
+      uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      with:
+        install: true
+        install_args: ${{ inputs.tools }}
+
+    - name: Get pnpm store directory
+      run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+      shell: bash
+
+    - name: Cache pnpm store
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+        path: ${{ env.STORE_PATH }}
+        restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      shell: bash
