@@ -6,10 +6,11 @@ import { describe, expect, it, vi } from "vitest";
 import packageJson from "../../package.json" with { type: "json" };
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
-import type { NativeHost } from "./load.ts";
-import { createNativeLoader, nativeTarget, readHost } from "./load.ts";
+import type { NativeHost, ReaperLocateOptions } from "./load.ts";
+import { createNativeLoader, createReaperLocator, nativeTarget, readHost } from "./load.ts";
 
 const WINDOWS: NativeHost = { arch: "x64", libc: undefined, platform: "win32" };
+const LINUX: NativeHost = { arch: "x64", libc: "gnu", platform: "linux" };
 
 /** Rust target triple (`package.json#napi.targets`) to Node host. */
 const HOSTS_BY_TRIPLE: Record<string, NativeHost> = {
@@ -214,5 +215,117 @@ describe(createNativeLoader, () => {
 			"@rbx-forge/native-win32-x64-msvc is not the rbx-forge native addon.",
 		);
 		expect(error.hint).toStartWith("Reinstall rbx-forge");
+	});
+});
+
+describe(createReaperLocator, () => {
+	function makeLocator(options: Partial<ReaperLocateOptions> = {}): () => string {
+		return createReaperLocator({
+			directory: undefined,
+			isExecutable: () => true,
+			readHost: () => WINDOWS,
+			resolveModule: (id) => path.resolve("/modules", id),
+			...options,
+		});
+	}
+
+	it("should find forge-reaper.exe next to the platform package's manifest", () => {
+		expect.assertions(2);
+
+		const resolveModule = vi.fn<(id: string) => string>((id) => path.resolve("/modules", id));
+
+		expect(makeLocator({ resolveModule })()).toBe(
+			path.resolve("/modules/@rbx-forge/native-win32-x64-msvc/forge-reaper.exe"),
+		);
+		expect(resolveModule).toHaveBeenCalledExactlyOnceWith(
+			"@rbx-forge/native-win32-x64-msvc/package.json",
+		);
+	});
+
+	it("should find forge-reaper without an extension off Windows, in a given directory", () => {
+		expect.assertions(1);
+
+		const directory = path.resolve("/native");
+
+		expect(makeLocator({ directory, readHost: () => LINUX })()).toBe(
+			path.join(directory, "forge-reaper"),
+		);
+	});
+
+	it("should fail with reaper_unavailable on a host with no build", () => {
+		expect.assertions(2);
+
+		const error = catchForgeError(
+			makeLocator({
+				readHost: () => {
+					return { arch: "ia32", libc: undefined, platform: "win32" };
+				},
+			}),
+		);
+
+		expect(error.code).toBe("reaper_unavailable");
+		expect(error.message).toBe("rbx-forge has no reaper for win32-ia32.");
+	});
+
+	it("should fail with reaper_unavailable when the platform package is missing", () => {
+		expect.assertions(4);
+
+		const cause = new Error("Cannot find module");
+		const error = catchForgeError(
+			makeLocator({
+				resolveModule: () => {
+					throw cause;
+				},
+			}),
+		);
+
+		expect(error.code).toBe("reaper_unavailable");
+		expect(error.message).toBe(
+			"Could not find @rbx-forge/native-win32-x64-msvc/package.json: Cannot find module",
+		);
+		expect(error.hint).toBe(
+			"Reinstall rbx-forge with optional dependencies, or run `pnpm build:reaper` and set RBX_FORGE_NATIVE_DIR.",
+		);
+		expect(error.cause).toBe(cause);
+	});
+
+	it("should report a thrown value that is not an error", () => {
+		expect.assertions(1);
+
+		const locate = makeLocator({
+			resolveModule: () => {
+				// oxlint-disable-next-line typescript/only-throw-error -- a resolver may throw anything
+				throw "no resolve";
+			},
+		});
+
+		expect(catchForgeError(locate).message).toBe(
+			"Could not find @rbx-forge/native-win32-x64-msvc/package.json: no resolve",
+		);
+	});
+
+	it("should fail with reaper_unavailable when the binary is missing or cannot run", () => {
+		expect.assertions(3);
+
+		const directory = path.resolve("/native");
+		const isExecutable = vi.fn<(file: string) => boolean>().mockReturnValue(false);
+		const error = catchForgeError(makeLocator({ directory, isExecutable }));
+
+		expect(error.message).toBe(
+			`${path.join(directory, "forge-reaper.exe")} is missing or cannot run.`,
+		);
+		expect(error.hint).toStartWith("Reinstall rbx-forge");
+		expect(isExecutable).toHaveBeenCalledExactlyOnceWith(
+			path.join(directory, "forge-reaper.exe"),
+		);
+	});
+
+	it("should read the host only when it looks up", () => {
+		expect.assertions(1);
+
+		const readHostSpy = vi.fn<() => NativeHost>(() => WINDOWS);
+		makeLocator({ readHost: readHostSpy });
+
+		expect(readHostSpy).not.toHaveBeenCalled();
 	});
 });

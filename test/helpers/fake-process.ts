@@ -16,6 +16,8 @@ export interface SpawnCall {
 export interface FakeChild {
 	/** End the process: its streams end, then `exit` and `close` fire. */
 	close: (exitCode: null | number, signal?: NodeJS.Signals | null) => void;
+	/** Fail as a spawn or kill failure does: only `error` fires. */
+	error: (error: Error) => void;
 	/**
 	 * End the process while a descendant keeps its pipes: only `exit` fires.
 	 */
@@ -24,6 +26,8 @@ export interface FakeChild {
 	kills: Array<NodeJS.Signals>;
 	pid: number | undefined;
 	stderr: PassThrough;
+	/** What the code under test wrote to the process's stdin. */
+	stdin: PassThrough;
 	stdout: PassThrough;
 }
 
@@ -104,6 +108,10 @@ function emitLater(
 	});
 }
 
+function makeStreams(): Pick<FakeChild, "stderr" | "stdin" | "stdout"> {
+	return { stderr: new PassThrough(), stdin: new PassThrough(), stdout: new PassThrough() };
+}
+
 /**
  * A fake child process and the object `spawn` returns for it.
  *
@@ -112,21 +120,22 @@ function emitLater(
  */
 function makeFakeChild(pid: number): { child: FakeChild; spawned: EventEmitter } {
 	const emitter = new EventEmitter();
-	const stdout = new PassThrough();
-	const stderr = new PassThrough();
+	const streams = makeStreams();
 	const child: FakeChild = {
 		close: (exitCode, signal = null) => {
-			stdout.end();
-			stderr.end();
+			streams.stdout.end();
+			streams.stderr.end();
 			emitLater(emitter, ["exit", "close"], [exitCode, signal]);
+		},
+		error: (error) => {
+			emitLater(emitter, ["error"], [error]);
 		},
 		exit: (exitCode, signal = null) => {
 			emitLater(emitter, ["exit"], [exitCode, signal]);
 		},
 		kills: [],
 		pid,
-		stderr,
-		stdout,
+		...streams,
 	};
 	const spawned = Object.assign(emitter, {
 		kill: (signal: NodeJS.Signals) => {
@@ -135,8 +144,7 @@ function makeFakeChild(pid: number): { child: FakeChild; spawned: EventEmitter }
 			return true;
 		},
 		pid,
-		stderr,
-		stdout,
+		...streams,
 	});
 
 	return { child, spawned };

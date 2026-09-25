@@ -6,6 +6,8 @@ export interface FakeProcess {
 	executablePath: string;
 	/** It exits right after it is pinned, before any query on the pin. */
 	exitsAfterPin?: boolean;
+	/** Set once `killGroup` ran on one of its pins. */
+	groupKilled?: boolean;
 	/** `kill` leaves it running (a process the OS cannot end in time). */
 	ignoresKill?: boolean;
 	/** `pinProcess` throws this message (for example, access denied). */
@@ -57,13 +59,19 @@ function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 		entry.alive = false;
 	}
 
+	function kill(): boolean {
+		const wasAlive = entry.alive;
+		entry.alive = entry.ignoresKill === true && wasAlive;
+		return wasAlive;
+	}
+
 	return {
 		executablePath: () => (entry.alive ? entry.executablePath : null),
 		isAlive: () => entry.alive,
-		kill: () => {
-			const wasAlive = entry.alive;
-			entry.alive = entry.ignoresKill === true && wasAlive;
-			return wasAlive;
+		kill,
+		killGroup: () => {
+			entry.groupKilled = true;
+			return kill();
 		},
 		pid,
 		startTime: String(pid),

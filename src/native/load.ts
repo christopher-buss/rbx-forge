@@ -31,6 +31,21 @@ export interface NativeLoadOptions {
 	requireModule: (id: string) => unknown;
 }
 
+/** How {@link createReaperLocator} finds the `forge-reaper` binary. */
+export interface ReaperLocateOptions {
+	/**
+	 * A directory that holds `forge-reaper` (`.exe` on Windows), used in
+	 * place of the platform package: the same directory as the addon's.
+	 */
+	directory: string | undefined;
+	/** Whether a file exists and may run. */
+	isExecutable: (file: string) => boolean;
+	/** Read the host facts; called only when the reaper is looked up. */
+	readHost: () => NativeHost;
+	/** Resolve a module id to its file (`require.resolve`). */
+	resolveModule: (id: string) => string;
+}
+
 /**
  * Every native build, named as napi names them: `@rbx-forge/native-<target>`
  * holds `forge-native.<target>.node`. One per `package.json#napi.targets`.
@@ -49,6 +64,8 @@ const TARGETS: ReadonlySet<string> = new Set([
 const PACKAGE_PREFIX = "@rbx-forge/native-";
 const LOAD_HINT =
 	"Reinstall rbx-forge with optional dependencies, or run `pnpm build:native` and set RBX_FORGE_NATIVE_DIR.";
+const REAPER_HINT =
+	"Reinstall rbx-forge with optional dependencies, or run `pnpm build:reaper` and set RBX_FORGE_NATIVE_DIR.";
 
 /** Enough of the addon's shape to tell it from another module. */
 const addonShape = type({
@@ -106,6 +123,40 @@ export function createNativeLoader(options: NativeLoadOptions): NativeLoader {
 	};
 }
 
+/**
+ * Make the lookup for the `forge-reaper` binary. The platform package holds
+ * it next to its `package.json` (ADR 0001). The lookup never changes file
+ * modes: pnpm hard-links package files from its store.
+ *
+ * @param options - The directory, host reader, resolver, and file check.
+ * @returns A function that returns the binary's path.
+ */
+export function createReaperLocator(options: ReaperLocateOptions): () => string {
+	return () => {
+		const host = options.readHost();
+		const target = nativeTarget(host);
+		if (target === undefined) {
+			throw new ForgeError(
+				"reaper_unavailable",
+				`rbx-forge has no reaper for ${host.platform}-${host.arch}.`,
+			);
+		}
+
+		const directory = options.directory ?? packageDirectory(options, target);
+		const file = path.join(
+			directory,
+			host.platform === "win32" ? "forge-reaper.exe" : "forge-reaper",
+		);
+		if (!options.isExecutable(file)) {
+			throw new ForgeError("reaper_unavailable", `${file} is missing or cannot run.`, {
+				hint: REAPER_HINT,
+			});
+		}
+
+		return file;
+	};
+}
+
 function loadAddon({ directory, readHost: hostOf, requireModule }: NativeLoadOptions): NativeAddon {
 	const host = hostOf();
 	const target = nativeTarget(host);
@@ -140,4 +191,17 @@ function loadAddon({ directory, readHost: hostOf, requireModule }: NativeLoadOpt
 
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- `addonShape` checked the exports; their signatures come from `reaper/src/lib.rs`.
 	return loaded as unknown as NativeAddon;
+}
+
+function packageDirectory(options: ReaperLocateOptions, target: string): string {
+	const id = `${PACKAGE_PREFIX}${target}/package.json`;
+	try {
+		return path.dirname(options.resolveModule(id));
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		throw new ForgeError("reaper_unavailable", `Could not find ${id}: ${reason}`, {
+			cause: err,
+			hint: REAPER_HINT,
+		});
+	}
 }

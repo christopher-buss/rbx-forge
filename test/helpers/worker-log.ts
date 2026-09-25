@@ -80,6 +80,27 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 /**
+ * Wait until none of `pids` is alive.
+ *
+ * @param pids - Processes that should die.
+ * @param timeoutMs - Give up after this long.
+ * @returns The PIDs still alive at the end: empty when all died.
+ */
+export async function waitForDeathAsync(
+	pids: ReadonlyArray<number>,
+	timeoutMs = 10_000,
+): Promise<Array<number>> {
+	const deadline = Date.now() + timeoutMs;
+	let alive = pids.filter(isProcessAlive);
+	while (alive.length > 0 && Date.now() < deadline) {
+		await sleep(POLL_MS);
+		alive = alive.filter(isProcessAlive);
+	}
+
+	return alive;
+}
+
+/**
  * Force-kill every recorded worker. Safe on already-dead PIDs.
  *
  * @param records - Workers to kill.

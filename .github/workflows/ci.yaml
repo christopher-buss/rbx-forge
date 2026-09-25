@@ -53,6 +53,10 @@ jobs:
       - name: Build native addon
         run: pnpm build:native
 
+      # Next to the addon: integration and e2e tests run the real reaper.
+      - name: Build reaper
+        run: pnpm build:reaper
+
       - name: Native tests
         run: cargo test --manifest-path reaper/Cargo.toml
 

@@ -37,6 +37,14 @@ export interface PinnedProcess {
 	 * @returns `false` when it had already exited.
 	 */
 	kill: () => boolean;
+	/**
+	 * Force-kill the process group the pinned process leads (POSIX); the
+	 * live leader pins the group id. On Windows, where jobs own trees, it
+	 * kills the process only.
+	 *
+	 * @returns `false` when it had already exited.
+	 */
+	killGroup: () => boolean;
 	/** The PID the process had when it was pinned. */
 	readonly pid: number;
 	/** The start time read when it was pinned (see `processStartTime`). */

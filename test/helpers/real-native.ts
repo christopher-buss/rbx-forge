@@ -23,6 +23,14 @@ export const NATIVE_DIRECTORY: string = path.join(
 	"napi",
 );
 
+/**
+ * Where `pnpm build:reaper` puts the reaper binary, next to the addon.
+ */
+export const REAPER_PATH: string = path.join(
+	NATIVE_DIRECTORY,
+	process.platform === "win32" ? "forge-reaper.exe" : "forge-reaper",
+);
+
 /** Keeps a process alive until it is killed. */
 const KEEP_ALIVE = "setInterval(() => {}, 60_000);";
 

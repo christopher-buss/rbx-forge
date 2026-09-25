@@ -120,7 +120,8 @@ pub enum Event {
         id: String,
         report: Report,
     },
-    /// Every worker the reaper ever spawned, in spawn order.
+    /// Every worker the reaper ever spawned, in the order their trees
+    /// emptied.
     Terminated {
         reports: Vec<FinalReport>,
     },
