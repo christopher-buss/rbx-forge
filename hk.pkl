@@ -1,9 +1,6 @@
 amends "package://github.com/jdx/hk/releases/download/v2.2.0/hk@2.2.0#/Config.pkl"
 import "package://github.com/jdx/hk/releases/download/v2.2.0/hk@2.2.0#/Builtins.pkl"
 
-// Activate the "agent" profile when an AI-agent CLI runs the hook (same list
-// as project-halcyon and std-env's `isAgent`). Agents get the heavier build
-// and test gates; people keep a fast commit.
 profiles = if (
        read?("env:AI_AGENT") != null
     || read?("env:CLAUDECODE") != null
@@ -71,8 +68,6 @@ local knip = new Step {
     check = "pnpm knip"
 }
 
-// hk runs these in the fix, check and pre-commit hooks, ahead of each hook's
-// own steps.
 steps {
     ...guards
     ["lint"] = lint
