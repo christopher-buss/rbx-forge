@@ -1,13 +1,20 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
+import process from "node:process";
 import { describe, expect, it, vi } from "vitest";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import type { NativeHost, ReaperLocateOptions } from "./load.ts";
-import { createNativeLoader, createReaperLocator, nativeTarget, readHost } from "./load.ts";
+import {
+	createNativeLoader,
+	createReaperLocator,
+	isExecutableFile,
+	nativeTarget,
+	readHost,
+} from "./load.ts";
 
 const WINDOWS: NativeHost = { arch: "x64", libc: undefined, platform: "win32" };
 const LINUX: NativeHost = { arch: "x64", libc: "gnu", platform: "linux" };
@@ -215,6 +222,15 @@ describe(createNativeLoader, () => {
 			"@rbx-forge/native-win32-x64-msvc is not the rbx-forge native addon.",
 		);
 		expect(error.hint).toStartWith("Reinstall rbx-forge");
+	});
+});
+
+describe(isExecutableFile, () => {
+	it("should accept the Node executable and refuse a missing file", () => {
+		expect.assertions(2);
+
+		expect(isExecutableFile(process.execPath)).toBeTrue();
+		expect(isExecutableFile(path.join(process.execPath, "no-such-file"))).toBeFalse();
 	});
 });
 

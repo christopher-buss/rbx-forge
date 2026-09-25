@@ -4,7 +4,9 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
+import { REAPER_PATH } from "../../test/helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../../test/helpers/temporary-directory.ts";
+import { nodeNetwork } from "./network.ts";
 import { createNodeSeams } from "./node-seams.ts";
 
 function makeSeams(nativeDirectory?: string): ReturnType<typeof createNodeSeams> {
@@ -75,6 +77,53 @@ describe(createNodeSeams, () => {
 		expect(error.message).toStartWith(
 			`Could not load ${path.join(directory, "forge-native.")}`,
 		);
+	});
+
+	it("should look for the reaper next to the addon in the given directory", async () => {
+		expect.assertions(1);
+
+		const directory = makeTemporaryDirectory();
+		const binary = path.join(directory, path.basename(REAPER_PATH));
+		const launch = makeSeams(directory).reaper({ leasePath: "l", sessionId: "s" });
+
+		await expect(launch).rejects.toMatchObject({
+			code: "reaper_unavailable",
+			message: `${binary} is missing or cannot run.`,
+		});
+	});
+
+	it("should look for the reaper in the platform package without a directory", async () => {
+		expect.assertions(2);
+
+		// No platform package is installed in this repository.
+		const launch = makeSeams().reaper({ leasePath: "l", sessionId: "s" });
+
+		await expect(launch).rejects.toMatchObject({ code: "reaper_unavailable" });
+		await expect(launch).rejects.toThrow(/^Could not find @rbx-forge\/native-/);
+	});
+
+	it("should make random session ids", () => {
+		expect.assertions(2);
+
+		const { randomId } = makeSeams();
+
+		expect(randomId()).toMatch(/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[\da-f]{4}-[\da-f]{12}$/);
+		expect(randomId()).not.toBe(randomId());
+	});
+
+	it("should probe ports and listen for signals on this process", () => {
+		expect.assertions(2);
+
+		const { network, signals } = makeSeams();
+		const before = process.listenerCount("SIGINT");
+		const remove = signals.onStop(() => {
+			// Never called: the listener is removed at once.
+		});
+		const during = process.listenerCount("SIGINT");
+		remove();
+
+		expect(network).toBe(nodeNetwork);
+		expect([during - before, process.listenerCount("SIGINT")]).toStrictEqual([1, before]);
 	});
 
 	it("should tell the time", () => {

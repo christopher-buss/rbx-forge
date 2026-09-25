@@ -15,7 +15,8 @@ export default {
 		"coverage",
 		"dist",
 		"out-tsc",
-		"reaper",
+		// The Rust crate only; `src/reaper` is TypeScript and is mutated.
+		"/reaper",
 		"reports",
 	],
 	ignoreStatic: true,

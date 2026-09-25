@@ -1,11 +1,14 @@
 import type { NativeLoader } from "../native/addon.ts";
 import type { ProcessRunner } from "../process/process-runner.ts";
+import type { ReaperLauncher } from "../reaper/reaper-client.ts";
 import type { ChildProcessRunner } from "./child-process.ts";
 import type { Clock } from "./clock.ts";
 import type { ConfigLoader } from "./config-loader.ts";
 import type { FileSystem } from "./file-system.ts";
 import type { Host } from "./host.ts";
+import type { Network } from "./network.ts";
 import type { Prompter } from "./prompter.ts";
+import type { Signals } from "./signals.ts";
 
 /**
  * Environment variables, read once at the CLI entry. No other module reads
@@ -31,10 +34,16 @@ export interface Seams {
 	host: Host;
 	/** The `@rbx-forge/native` addon, loaded on first use. */
 	native: NativeLoader;
+	network: Network;
 	/**
 	 * Runs tools and hooks to completion. Built from `childProcess` today;
 	 * the native reaper replaces it without changing its callers.
 	 */
 	processRunner: ProcessRunner;
 	prompter: Prompter;
+	/** A new random id, such as a session id. */
+	randomId: () => string;
+	/** Starts a session's `forge-reaper`, which owns its workers. */
+	reaper: ReaperLauncher;
+	signals: Signals;
 }

@@ -1,7 +1,8 @@
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
-import type { ToolSuccess } from "../process/run-tool.ts";
-import { runToolAsync } from "../process/run-tool.ts";
+import type { Invocation } from "../process/command-line.ts";
+import type { ToolCall, ToolSuccess } from "../process/run-tool.ts";
+import { resolveInvocation, runToolAsync } from "../process/run-tool.ts";
 
 /** Where `rojo build` writes. */
 export type BuildTarget =
@@ -43,12 +44,46 @@ export async function runRojoAsync(
 	config: Pick<ResolvedConfig, "rojoAlias">,
 	args: RojoArgs,
 ): Promise<ToolSuccess> {
-	return runToolAsync(context, {
+	return runToolAsync(context, rojoCall(config, args));
+}
+
+/**
+ * The arguments of `rojo serve` on a fixed port. Rojo fails when the port is
+ * busy; it never picks another (#27).
+ *
+ * @param project - The Rojo project file.
+ * @param port - The port to serve on.
+ * @returns Arguments after the Rojo command.
+ */
+export function rojoServeArgs(project: string, port: number): RojoArgs {
+	return ["serve", project, "--port", String(port)];
+}
+
+/**
+ * What starts a Rojo subcommand with the configured Rojo command, for a
+ * worker that outlives one step, such as `rojo serve`.
+ *
+ * @param context - The project root, environment, and seams.
+ * @param config - Holds `rojoAlias`.
+ * @param args - The subcommand and its arguments.
+ * @returns The executable and arguments to spawn.
+ * @throws `rojo_missing` when Rojo is not installed.
+ */
+export function rojoInvocation(
+	context: Pick<CommandContext, "cwd" | "env" | "seams">,
+	config: Pick<ResolvedConfig, "rojoAlias">,
+	args: RojoArgs,
+): Invocation {
+	return resolveInvocation(context, rojoCall(config, args));
+}
+
+function rojoCall(config: Pick<ResolvedConfig, "rojoAlias">, args: RojoArgs): ToolCall {
+	return {
 		args,
 		command: config.rojoAlias,
 		label: "Rojo",
 		missing: "rojo_missing",
 		missingHint: MISSING_HINT,
 		step: `rojo ${args[0]}`,
-	});
+	};
 }

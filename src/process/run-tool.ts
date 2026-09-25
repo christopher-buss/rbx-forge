@@ -1,6 +1,7 @@
 import type { CommandContext } from "../commands/context.ts";
 import type { ForgeErrorCode } from "../errors.ts";
 import { ForgeError } from "../errors.ts";
+import type { Invocation } from "./command-line.ts";
 import type { ProcessOutcome } from "./process-runner.ts";
 import { resolveTool, toolInvocation } from "./resolve-tool.ts";
 
@@ -19,6 +20,12 @@ export interface ToolCall {
 	step: string;
 }
 
+/** What {@link resolveInvocation} needs of a {@link ToolCall}. */
+export type ResolvableTool = Pick<
+	ToolCall,
+	"args" | "command" | "label" | "missing" | "missingHint"
+>;
+
 /** A tool run that exited with code 0. */
 export interface ToolSuccess {
 	durationMs: number;
@@ -27,6 +34,28 @@ export interface ToolSuccess {
 
 /** Output lines a failure message repeats. */
 const MESSAGE_TAIL_LINES = 20;
+
+/**
+ * Resolve a tool (`process/resolve-tool.ts`) to what starts it, for a run
+ * that is not {@link runToolAsync}'s, such as a session worker.
+ *
+ * @param context - The project root, environment, and seams.
+ * @param call - The tool and its arguments.
+ * @returns The executable and arguments to spawn.
+ * @throws {ForgeError} `call.missing` when the tool is not installed.
+ */
+export function resolveInvocation(
+	{ cwd, env, seams }: Pick<CommandContext, "cwd" | "env" | "seams">,
+	call: ResolvableTool,
+): Invocation {
+	const lookup = { cwd, env, fileSystem: seams.fileSystem, host: seams.host };
+	const tool = resolveTool(call.command, lookup);
+	if (tool === undefined) {
+		throw missingError(call);
+	}
+
+	return toolInvocation(tool, call.args, lookup);
+}
 
 /**
  * Resolve a tool (`process/resolve-tool.ts`), run it in the project root, and
@@ -38,29 +67,18 @@ const MESSAGE_TAIL_LINES = 20;
  * @rejects {ForgeError} `call.missing` when the tool is not installed, or
  *   `process_failed` when it fails.
  */
-export async function runToolAsync(
-	{ cwd, env, reporter, seams }: CommandContext,
-	call: ToolCall,
-): Promise<ToolSuccess> {
-	const lookup = { cwd, env, fileSystem: seams.fileSystem, host: seams.host };
-	const tool = resolveTool(call.command, lookup);
-	if (tool === undefined) {
-		throw missingError(call);
-	}
-
+export async function runToolAsync(context: CommandContext, call: ToolCall): Promise<ToolSuccess> {
+	const { cwd, env, reporter, seams } = context;
+	const invocation = resolveInvocation(context, call);
 	reporter.emit({ name: call.step, status: "started", type: "step" });
-	const outcome = await seams.processRunner({
-		...toolInvocation(tool, call.args, lookup),
-		cwd,
-		env,
-	});
+	const outcome = await seams.processRunner({ ...invocation, cwd, env });
 	const isOk = outcome.type === "exited" && outcome.exitCode === 0;
 	reporter.emit({ name: call.step, status: isOk ? "succeeded" : "failed", type: "step" });
 
 	return checkOutcome(call, outcome);
 }
 
-function missingError(call: ToolCall): ForgeError {
+function missingError(call: ResolvableTool): ForgeError {
 	return new ForgeError(
 		call.missing,
 		`${call.label} ("${call.command}") is not installed: it is not a bin of a project dependency or on PATH.`,

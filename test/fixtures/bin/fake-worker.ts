@@ -13,6 +13,8 @@
  *   SIGINT, SIGTERM, SIGHUP, and SIGBREAK.
  * - `FIXTURE_EXIT_CODE`: exit code of a one-shot run (default 0).
  * - `FIXTURE_HANG=1`: a hook stays alive instead of exiting.
+ * - `FIXTURE_EXIT_AFTER_MS`: a long-running role exits on its own after this
+ *   long, with `FIXTURE_EXIT_CODE`. Its grandchildren stay alive.
  *
  * Markers (`RBX_FORGE_SESSION`, `RBX_FORGE_WORKER`) are recorded as seen and
  * inherited by every grandchild unchanged.
@@ -79,6 +81,12 @@ function spawnGrandchildren(): void {
 function stayAlive(): void {
 	spawnGrandchildren();
 	setInterval(doNothing, KEEP_ALIVE_MS);
+	const exitAfter = env["FIXTURE_EXIT_AFTER_MS"];
+	if (exitAfter !== undefined) {
+		setTimeout(() => {
+			process.exit(Number(env["FIXTURE_EXIT_CODE"] ?? "0"));
+		}, Number(exitAfter));
+	}
 }
 
 function exitOnce(): void {

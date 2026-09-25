@@ -9,7 +9,12 @@ import { createFakeNative } from "../../test/helpers/native.ts";
 import { ForgeError } from "../errors.ts";
 import type { WorkerReport, WorkerSpec } from "./protocol.ts";
 import type { Reaper } from "./reaper-client.ts";
-import { launchReaperAsync, ORPHAN_WAIT_MS, TERMINATE_MARGIN_MS } from "./reaper-client.ts";
+import {
+	createReaperLauncher,
+	launchReaperAsync,
+	ORPHAN_WAIT_MS,
+	TERMINATE_MARGIN_MS,
+} from "./reaper-client.ts";
 
 const OPTIONS = { file: "/bin/forge-reaper", leasePath: "/p/workers.lock", sessionId: "s-1" };
 const WORKER: WorkerSpec = { id: "rojo", args: ["serve"], cwd: "/p", env: {}, file: "/bin/rojo" };
@@ -411,5 +416,49 @@ describe("reaper end", () => {
 			reports: [{ id: "rojo", report: REPORT }],
 			terminated: false,
 		});
+	});
+});
+
+describe(createReaperLauncher, () => {
+	function makeLauncher(locate: () => string): {
+		launch: ReturnType<typeof createReaperLauncher>;
+		spawner: ReturnType<typeof createFakeSpawner>;
+	} {
+		const spawner = createFakeSpawner((child) => {
+			child.stdout.write('{"type":"leased","pid":3}\n');
+		});
+		const launch = createReaperLauncher(
+			{
+				childProcess: spawner.runner,
+				clock: createManualClock().clock,
+				host: { platform: "linux" },
+				native: () => createFakeNative().addon,
+			},
+			locate,
+		);
+		return { launch, spawner };
+	}
+
+	it("should launch the binary it finds", async () => {
+		expect.assertions(2);
+
+		const { launch, spawner } = makeLauncher(() => "/native/forge-reaper");
+
+		await expect(launch({ leasePath: "/l", sessionId: "s" })).resolves.toMatchObject({
+			pid: 3,
+		});
+		expect(spawner.calls.map(({ file }) => file)).toStrictEqual(["/native/forge-reaper"]);
+	});
+
+	it("should start nothing when no binary is found", async () => {
+		expect.assertions(2);
+
+		const error = new ForgeError("reaper_unavailable", "missing");
+		const { launch, spawner } = makeLauncher(() => {
+			throw error;
+		});
+
+		await expect(launch({ leasePath: "/l", sessionId: "s" })).rejects.toBe(error);
+		expect(spawner.calls).toStrictEqual([]);
 	});
 });

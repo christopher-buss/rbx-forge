@@ -6,10 +6,12 @@ import { vi } from "vitest";
 
 import type { CommandContext } from "../../src/commands/context.ts";
 import type { ProcessRunner } from "../../src/process/process-runner.ts";
+import type { ReaperLauncher } from "../../src/reaper/reaper-client.ts";
 import type { Clock } from "../../src/seams/clock.ts";
 import type { ConfigLoader } from "../../src/seams/config-loader.ts";
 import type { FileSystem } from "../../src/seams/file-system.ts";
 import type { Host } from "../../src/seams/host.ts";
+import type { Network } from "../../src/seams/network.ts";
 import type { Prompter } from "../../src/seams/prompter.ts";
 import type {
 	CommandFailure,
@@ -18,6 +20,7 @@ import type {
 	ReporterEvent,
 } from "../../src/seams/reporter.ts";
 import type { Seams } from "../../src/seams/seams.ts";
+import type { Signals } from "../../src/seams/signals.ts";
 
 /** The project directory of every in-memory test project. */
 export const PROJECT: string = path.resolve("/project");
@@ -78,11 +81,15 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 			platform: "linux",
 		},
 		native: unreachable("native addon"),
+		network: { isPortFreeAsync: vi.fn<Network["isPortFreeAsync"]>(unreachable("network")) },
 		processRunner: vi.fn<ProcessRunner>(unreachable("process runner")),
 		prompter: {
 			choose: vi.fn<Prompter["choose"]>(unreachable("prompter")),
 			confirm: vi.fn<Prompter["confirm"]>(unreachable("prompter")),
 		},
+		randomId: vi.fn<() => string>(unreachable("random id")),
+		reaper: vi.fn<ReaperLauncher>(unreachable("reaper")),
+		signals: { onStop: vi.fn<Signals["onStop"]>(unreachable("signals")) },
 		...overrides,
 	};
 }

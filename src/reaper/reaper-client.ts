@@ -86,6 +86,14 @@ export interface Reaper {
 	terminateAsync: (graceMs: number) => Promise<ReaperEnd>;
 }
 
+/**
+ * Starts one session's reaper: {@link launchReaperAsync} with the binary
+ * found for this host.
+ */
+export type ReaperLauncher = (
+	options: Pick<ReaperOptions, "leasePath" | "sessionId">,
+) => Promise<Reaper>;
+
 /** Extra time the reaper gets at each step of `terminateAsync`. */
 export const TERMINATE_MARGIN_MS = 5000;
 /** How long the host waits for a worker it killed after the reaper died. */
@@ -163,6 +171,18 @@ export async function launchReaperAsync(
 	}
 
 	return makeReaper(session, ended, pid);
+}
+
+/**
+ * Make the launcher the seams hand to commands.
+ *
+ * @param backend - The spawn seam, clock, host, and native addon.
+ * @param locate - Finds the `forge-reaper` binary; throws
+ *   `reaper_unavailable` when it is missing.
+ * @returns A launcher that finds the binary on every launch.
+ */
+export function createReaperLauncher(backend: ReaperBackend, locate: () => string): ReaperLauncher {
+	return async (options) => launchReaperAsync(backend, { ...options, file: locate() });
 }
 
 function ignore(): void {

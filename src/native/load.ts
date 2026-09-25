@@ -1,4 +1,5 @@
 import { type } from "arktype";
+import { accessSync, constants } from "node:fs";
 import path from "node:path";
 
 import { ForgeError } from "../errors.ts";
@@ -155,6 +156,22 @@ export function createReaperLocator(options: ReaperLocateOptions): () => string 
 
 		return file;
 	};
+}
+
+/**
+ * Whether a file exists and the OS lets this user run it. On Windows, where
+ * there is no execute bit, whether it exists.
+ *
+ * @param file - The path to check.
+ * @returns `true` when it may run.
+ */
+export function isExecutableFile(file: string): boolean {
+	try {
+		accessSync(file, constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 function loadAddon({ directory, readHost: hostOf, requireModule }: NativeLoadOptions): NativeAddon {
