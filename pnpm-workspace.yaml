@@ -1,11 +1,11 @@
-# Settings and catalogs only. No `packages:` list: this repository is a single
-# package.
 autoInstallPeers: true
 catalogMode: prefer
 cleanupUnusedCatalogs: true
 dedupePeers: true
+enableGlobalVirtualStore: true
 enablePrePostScripts: true
 minimumReleaseAge: 1440 # 1 day
+
 minimumReleaseAgeExclude:
   - "@isentinel/eslint-config"
 
@@ -21,8 +21,6 @@ trustPolicyIgnoreAfter: 10080 # 7 days
 
 updateConfig:
   ignoreDependencies:
-    # Held below 6.1 by the typescript-eslint peer range. See
-    # docs/dependency-exceptions.md.
     - typescript
 
 overrides:
@@ -35,8 +33,6 @@ overrides:
   "@typescript-eslint/utils": 8.70.1
 
 patchedDependencies:
-  # vitest 5 matches test name patterns against " > "-joined names; also
-  # reports test locations. Same patch as project-halcyon.
   "@stryker-mutator/vitest-runner@10.0.0": patches/@stryker-mutator__vitest-runner@10.0.0.patch
 
 catalogs:
