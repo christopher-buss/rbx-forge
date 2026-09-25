@@ -722,6 +722,38 @@ describe(runSupervisorAsync, () => {
 		).toStrictEqual([]);
 	});
 
+	it("should stop without escalating when every worker stops in time (L1)", async () => {
+		expect.assertions(2);
+
+		const run = await stoppedAsync();
+		const { data } = await run.result;
+
+		expect(Object.keys(data)).not.toContain("escalation");
+		expect(run.reporter.events.filter(({ type }) => type === "warning")).toStrictEqual([]);
+	});
+
+	it.for([
+		[
+			"stdin_closed",
+			"The reaper did not stop within the grace time; forge closed its stdin, so it forced every tree.",
+		],
+		[
+			"forced_cleanup",
+			"The reaper did not stop, even after its stdin closed; forge cleaned up the session by force.",
+		],
+	] as const)(
+		"should warn and report when the reaper's end escalated to %s",
+		async ([escalation, message]) => {
+			expect.assertions(2);
+
+			const end: ReaperEnd = { escalation, reports: [], terminated: false };
+			const run = await stoppedAsync({ reaper: { end } });
+
+			await expect(run.result).resolves.toMatchObject({ data: { escalation } });
+			expect(run.reporter.events).toContainEqual({ message, type: "warning" });
+		},
+	);
+
 	it("should fail with cleanup_in_progress when a worker outlived the wait", async () => {
 		expect.assertions(2);
 

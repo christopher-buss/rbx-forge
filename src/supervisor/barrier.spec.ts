@@ -4,13 +4,8 @@ import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { FakeSessionProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
-import {
-	clearOldSessionsAsync,
-	FORCED_CLEANUP_MS,
-	SETTLE_MS,
-	targetOf,
-	waitForBarrierAsync,
-} from "./barrier.ts";
+import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
+import { clearOldSessionsAsync, SETTLE_MS, targetOf, waitForBarrierAsync } from "./barrier.ts";
 import type { LockSeams } from "./locks.ts";
 import { LEASE_POLL_MS } from "./locks.ts";
 import { forgeFiles, sessionFiles } from "./session-files.ts";

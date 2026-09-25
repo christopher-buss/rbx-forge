@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 
 import { ForgeError } from "../errors.ts";
-import type { NativeLoader } from "../native/addon.ts";
+import type { NativeLoader, SessionTarget } from "../native/addon.ts";
 import { keepTail } from "../process/stream-tail.ts";
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Clock } from "../seams/clock.ts";
@@ -55,6 +55,10 @@ export interface SpawnedWorker {
 
 /** How a reaper ended. */
 export interface ReaperEnd {
+	/**
+	 * How far `terminateAsync` escalated; unset when the reaper was on time.
+	 */
+	escalation?: "forced_cleanup" | "stdin_closed";
 	/** Every worker's final report, in the order their trees emptied. */
 	reports: Array<FinalReport>;
 	/**
@@ -88,7 +92,7 @@ export interface Reaper {
 	 * End the reaper: it rejects later spawns, stops every worker with
 	 * `graceMs`, and exits. When it does not exit within `graceMs` plus
 	 * {@link TERMINATE_MARGIN_MS}, the host closes its stdin; after one more
-	 * margin, the host kills it and its workers.
+	 * margin, it cleans up the session by force and kills a reaper left.
 	 */
 	terminateAsync: (graceMs: number) => Promise<ReaperEnd>;
 }
@@ -106,6 +110,8 @@ export type ReaperLauncher = (options: ReaperLaunch) => Promise<Reaper>;
 export const TERMINATE_MARGIN_MS = 5000;
 /** How long the host waits for a worker it killed after the reaper died. */
 export const ORPHAN_WAIT_MS = 2000;
+/** The bound of one forced cleanup (spec #28: the forced-stop loop, 10 s). */
+export const FORCED_CLEANUP_MS = 10_000;
 
 type ReaperProcess = ChildProcessByStdio<Writable, Readable, Readable>;
 
@@ -124,6 +130,8 @@ interface LiveWorker {
 interface Session {
 	backend: ReaperBackend;
 	child: ReaperProcess;
+	/** The session's id, lease, and record, for forced cleanup. */
+	cleanup: SessionTarget;
 	/** The reaper process has exited; nothing more reaches it. */
 	closed: boolean;
 	live: Map<string, LiveWorker>;
@@ -157,6 +165,11 @@ export async function launchReaperAsync(
 	const session: Session = {
 		backend,
 		child,
+		cleanup: {
+			leasePath: options.leasePath,
+			recordPath: options.recordPath,
+			sessionId: options.sessionId,
+		},
 		closed: false,
 		live: new Map(),
 		pending: new Map(),
@@ -413,11 +426,23 @@ async function terminateAsync(
 
 	// stdin EOF: the reaper forces every tree without grace.
 	session.child.stdin.end();
-	if (!(await settlesWithinAsync(clock, ended, TERMINATE_MARGIN_MS))) {
+	if (await settlesWithinAsync(clock, ended, TERMINATE_MARGIN_MS)) {
+		return { ...(await ended), escalation: "stdin_closed" };
+	}
+
+	// Forced cleanup: workers leaf first, the reaper last.
+	try {
+		await session.backend.native().forceCleanup(session.cleanup, FORCED_CLEANUP_MS);
+	} catch {
+		// The kill below does the rest; the final barrier reports what is left.
+	}
+
+	// The cleanup kills the reaper last; give its exit a moment to arrive.
+	if (!(await settlesWithinAsync(clock, ended, ORPHAN_WAIT_MS))) {
 		session.child.kill("SIGKILL");
 	}
 
-	return ended;
+	return { ...(await ended), escalation: "forced_cleanup" };
 }
 
 function makeReaper(session: Session, ended: Promise<ReaperEnd>, pid: number): Reaper {

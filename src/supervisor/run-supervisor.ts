@@ -7,6 +7,7 @@ import { ForgeError } from "../errors.ts";
 import { logFilePath } from "../output/log-file.ts";
 import { resolveInvocation } from "../process/run-tool.ts";
 import type { FinalReport, WorkerReport } from "../reaper/protocol.ts";
+import type { ReaperEnd } from "../reaper/reaper-client.ts";
 import { rojoInvocation, rojoServeArgs } from "../rojo/rojo.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
@@ -18,21 +19,21 @@ import { runSessionAsync } from "../session/run-session.ts";
 import type { SessionSetup } from "../session/session-body.ts";
 import { createSessionBody } from "../session/session-body.ts";
 import type { StopRequest, StopSource } from "../session/stop-source.ts";
-import type { ForcedCleanup } from "./barrier.ts";
-import {
-	clearOldSessionsAsync,
-	OLD_SESSION_MARGIN_MS,
-	SETTLE_MS,
-	waitForBarrierAsync,
-} from "./barrier.ts";
+import type { ClearOptions, ForcedCleanup } from "./barrier.ts";
+import { clearOldSessionsAsync, finalBarrierAsync, OLD_SESSION_MARGIN_MS } from "./barrier.ts";
 import type { SessionRequest } from "./channel.ts";
 import { endpointFor } from "./endpoint.ts";
 import { acquireSingleton } from "./locks.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "./session-files.ts";
 import { createSession, forgeFiles, removeSession } from "./session-files.ts";
 
-/** The final barrier always runs to its bound. */
-const NEVER_ABORTS = AbortSignal.any([]);
+/** The warning for each escalation of the reaper's end. */
+const ESCALATIONS: Readonly<Record<NonNullable<ReaperEnd["escalation"]>, string>> = {
+	forced_cleanup:
+		"The reaper did not stop, even after its stdin closed; forge cleaned up the session by force.",
+	stdin_closed:
+		"The reaper did not stop within the grace time; forge closed its stdin, so it forced every tree.",
+};
 
 /** What a supervisor runs with besides the command context. */
 export interface SupervisorOptions {
@@ -187,7 +188,12 @@ function serviceFailed(
 function endedResult(
 	reason: SessionEndReason,
 	cwd: string,
-	data: { cleanups?: Array<ForcedCleanup>; port: number; reports: Array<FinalReport> },
+	data: {
+		cleanups?: Array<ForcedCleanup>;
+		escalation?: ReaperEnd["escalation"];
+		port: number;
+		reports: Array<FinalReport>;
+	},
 ): CommandResult {
 	switch (reason.type) {
 		case "failed": {
@@ -250,47 +256,6 @@ async function runSessionOnceAsync(
 	}
 }
 
-function survivorsOf(reports: ReadonlyArray<FinalReport>): Array<string> {
-	return reports.filter(({ report }) => report.incomplete).map(({ id }) => id);
-}
-
-/**
- * Step 7 of {@link runSupervisorAsync}: the final barrier. The session's
- * files go once its barrier is clear and every tree was reported empty;
- * otherwise they stay, so the next session's barrier waits.
- *
- * @param seams - The clock, file system, and native addon.
- * @param session - The session's files.
- * @param reports - Every worker's report.
- * @rejects {ForgeError} `cleanup_in_progress` when a process of the session
- *   outlived the wait.
- */
-async function finalBarrierAsync(
-	seams: CommandContext["seams"],
-	{ files, forge }: Pick<OwnSession, "files" | "forge">,
-	reports: Array<FinalReport>,
-): Promise<void> {
-	const survivors = survivorsOf(reports);
-	const barrier = await waitForBarrierAsync(seams, files, SETTLE_MS, NEVER_ABORTS);
-	// The final barrier never aborts.
-	assert(barrier !== undefined);
-	if (!barrier.clear || survivors.length > 0) {
-		const names = survivors.length > 0 ? survivors.join(", ") : "the session";
-		const { pids } = barrier;
-		const named = pids.length > 0 ? ` (PIDs ${pids.join(", ")})` : "";
-		throw new ForgeError(
-			"cleanup_in_progress",
-			`Processes of ${names} were still alive when forge stopped waiting${named}.`,
-			{
-				details: { pids, reports, sessionId: files.sessionId },
-				hint: "Check for them, and stop them by hand.",
-			},
-		);
-	}
-
-	removeSession(seams.fileSystem, forge, files.sessionId);
-}
-
 /**
  * The identity record of this supervisor.
  *
@@ -334,6 +299,37 @@ async function requireFreePortAsync(network: Network, port: number): Promise<voi
 }
 
 /**
+ * Step 3 of {@link runSupervisorAsync}: the startup barrier, with a warning
+ * for each old session `--force` cleaned up.
+ *
+ * @param context - The seams and reporter.
+ * @param config - The resolved config, for the bound.
+ * @param forge - The project's `.forge` files.
+ * @param options - `--force`, and the stop signal.
+ * @returns Every forced cleanup.
+ * @rejects As `clearOldSessionsAsync`.
+ */
+async function clearOldAsync(
+	{ reporter, seams }: CommandContext,
+	config: ResolvedConfig,
+	forge: ForgeFiles,
+	options: Pick<ClearOptions, "force" | "signal">,
+): Promise<Array<ForcedCleanup>> {
+	const cleanups = await clearOldSessionsAsync(seams, forge, {
+		...options,
+		boundMs: config.gracefulTimeoutMs + OLD_SESSION_MARGIN_MS,
+	});
+	for (const { killed, sessionId } of cleanups) {
+		reporter.emit({
+			message: `--force killed ${killed.length} processes of the earlier session ${sessionId}.`,
+			type: "warning",
+		});
+	}
+
+	return cleanups;
+}
+
+/**
  * Steps 3 to 7 of {@link runSupervisorAsync}, under the singleton lock.
  *
  * @param context - The project root, environment, and seams.
@@ -353,18 +349,10 @@ async function runLockedAsync(
 	}: Pick<OwnSession, "config" | "forge" | "services"> & { force: boolean },
 ): Promise<CommandResult> {
 	const { cwd, reporter, seams } = context;
-	const cleanups = await clearOldSessionsAsync(seams, forge, {
-		boundMs: config.gracefulTimeoutMs + OLD_SESSION_MARGIN_MS,
+	const cleanups = await clearOldAsync(context, config, forge, {
 		force,
 		signal: options.stop.signal,
 	});
-	for (const { killed, sessionId } of cleanups) {
-		reporter.emit({
-			message: `--force killed ${killed.length} processes of the earlier session ${sessionId}.`,
-			type: "warning",
-		});
-	}
-
 	await requireFreePortAsync(seams.network, config.rojoPort);
 	const late = stopped(options.stop);
 	if (late !== undefined) {
@@ -375,11 +363,17 @@ async function runLockedAsync(
 	const files = createSession(seams.fileSystem, forge, identity, seams.randomId());
 	const session = { config, files, forge, services };
 	const { end, reason } = await runSessionOnceAsync(seams, options, session);
-	await finalBarrierAsync(seams, session, end.reports);
+	const { escalation } = end;
+	if (escalation !== undefined) {
+		reporter.emit({ message: ESCALATIONS[escalation], type: "warning" });
+	}
+
+	await finalBarrierAsync(seams, forge, files, end.reports);
 	return endedResult(reason, cwd, {
 		port: config.rojoPort,
 		reports: end.reports,
 		...(cleanups.length > 0 ? { cleanups } : {}),
+		...(escalation === undefined ? {} : { escalation }),
 	});
 }
 

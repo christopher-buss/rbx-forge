@@ -11,6 +11,7 @@ import type { WorkerReport, WorkerSpec } from "./protocol.ts";
 import type { Reaper } from "./reaper-client.ts";
 import {
 	createReaperLauncher,
+	FORCED_CLEANUP_MS,
 	launchReaperAsync,
 	ORPHAN_WAIT_MS,
 	TERMINATE_MARGIN_MS,
@@ -286,11 +287,11 @@ describe("reaper end", () => {
 		expect(clock.pending()).toBe(0);
 	});
 
-	it("should close stdin after the grace and margin, then kill the reaper after one more margin", async () => {
+	it("should close stdin after the grace and margin, then clean up by force after one more margin", async () => {
 		expect.assertions(4);
 
-		const { child, clock, reaper } = await launchedAsync();
-		const ending = reaper.terminateAsync(1000);
+		const { child, clock, native, reaper } = await launchedAsync();
+		void reaper.terminateAsync(1000);
 		await flushAsync();
 		clock.advance(1000 + TERMINATE_MARGIN_MS - 1);
 		await flushAsync();
@@ -302,27 +303,103 @@ describe("reaper end", () => {
 
 		expect(child.stdin.writableEnded).toBeTrue();
 
-		clock.advance(TERMINATE_MARGIN_MS);
+		clock.advance(TERMINATE_MARGIN_MS - 1);
 		await flushAsync();
 
-		expect(child.kills).toStrictEqual(["SIGKILL"]);
-		await expect(ending).resolves.toStrictEqual({ reports: [], terminated: false });
+		expect(native.cleanups).toStrictEqual([]);
+
+		clock.advance(1);
+		await flushAsync();
+
+		expect(native.cleanups).toStrictEqual([
+			{
+				boundMs: FORCED_CLEANUP_MS,
+				target: {
+					leasePath: "/p/workers.lock",
+					recordPath: "/p/reaper.json",
+					sessionId: "s-1",
+				},
+			},
+		]);
 	});
 
-	it("should not kill a reaper that exits after its stdin closed", async () => {
-		expect.assertions(2);
+	it("should kill a reaper that still runs a moment after the forced cleanup", async () => {
+		expect.assertions(3);
 
 		const { child, clock, reaper } = await launchedAsync();
 		const ending = reaper.terminateAsync(0);
 		await flushAsync();
 		clock.advance(TERMINATE_MARGIN_MS);
 		await flushAsync();
-		child.close(0);
+		clock.advance(TERMINATE_MARGIN_MS);
+		await flushAsync();
+		clock.advance(ORPHAN_WAIT_MS - 1);
+		await flushAsync();
+
+		expect(child.kills).toStrictEqual([]);
+
+		clock.advance(1);
+		await flushAsync();
+
+		expect(child.kills).toStrictEqual(["SIGKILL"]);
+		await expect(ending).resolves.toStrictEqual({
+			escalation: "forced_cleanup",
+			reports: [],
+			terminated: false,
+		});
+	});
+
+	it("should not kill a reaper that the forced cleanup ended", async () => {
+		expect.assertions(2);
+
+		const { child, clock, native, reaper } = await launchedAsync();
+		native.addon.forceCleanup = async () => {
+			child.close(null, "SIGKILL");
+			return { killed: [77], survivors: [], unverifiable: [] };
+		};
+
+		const ending = reaper.terminateAsync(0);
+		await flushAsync();
+		clock.advance(TERMINATE_MARGIN_MS);
+		await flushAsync();
+		clock.advance(TERMINATE_MARGIN_MS);
+
+		await expect(ending).resolves.toMatchObject({ escalation: "forced_cleanup" });
+		expect(child.kills).toStrictEqual([]);
+	});
+
+	it("should kill the reaper when the forced cleanup fails", async () => {
+		expect.assertions(1);
+
+		const { child, clock, reaper } = await launchedAsync({ nativeThrows: true });
+		const ending = reaper.terminateAsync(0);
+		await flushAsync();
+		clock.advance(TERMINATE_MARGIN_MS);
+		await flushAsync();
+		clock.advance(TERMINATE_MARGIN_MS);
+		await flushAsync();
+		clock.advance(ORPHAN_WAIT_MS);
 		await ending;
+
+		expect(child.kills).toStrictEqual(["SIGKILL"]);
+	});
+
+	it("should not kill a reaper that exits after its stdin closed", async () => {
+		expect.assertions(4);
+
+		const { child, clock, native, reaper } = await launchedAsync();
+		const ending = reaper.terminateAsync(0);
+		await flushAsync();
+		clock.advance(TERMINATE_MARGIN_MS);
+		await flushAsync();
+		child.close(0);
+		const end = await ending;
 		const pending = clock.pending();
 		clock.advance(TERMINATE_MARGIN_MS);
 
+		expect(end).toStrictEqual({ escalation: "stdin_closed", reports: [], terminated: false });
 		expect(child.kills).toStrictEqual([]);
+		expect(native.cleanups).toStrictEqual([]);
 		expect(pending).toBe(0);
 	});
 

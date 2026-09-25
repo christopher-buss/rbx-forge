@@ -1,5 +1,9 @@
+import assert from "node:assert/strict";
+
 import { ForgeError } from "../errors.ts";
 import type { CleanupReport, SessionTarget } from "../native/addon.ts";
+import type { FinalReport } from "../reaper/protocol.ts";
+import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import type { LockSeams } from "./locks.ts";
 import { LEASE_POLL_MS } from "./locks.ts";
 import type { ForgeFiles, SessionFiles } from "./session-files.ts";
@@ -16,8 +20,9 @@ export const OLD_SESSION_MARGIN_MS = 15_000;
  * On POSIX a worker that escaped its tree may still be dying.
  */
 export const SETTLE_MS = 5000;
-/** The bound of one forced cleanup (spec #28: the forced-stop loop, 10 s). */
-export const FORCED_CLEANUP_MS = 10_000;
+
+/** The final barrier always runs to its bound. */
+const NEVER_ABORTS = AbortSignal.any([]);
 
 /** Where a barrier stands. */
 export interface Barrier {
@@ -142,6 +147,46 @@ export async function clearOldSessionsAsync(
 	return cleanups;
 }
 
+/**
+ * The final barrier of a session whose reaper has exited (spec #28): the
+ * session's files go once its barrier is clear and every tree was reported
+ * empty; otherwise they stay, so the next session's barrier waits. Call
+ * only while holding the singleton lock.
+ *
+ * @param seams - The clock, file system, and native addon.
+ * @param forge - The project's `.forge` files.
+ * @param files - The session's files.
+ * @param reports - Every worker's report.
+ * @rejects {ForgeError} `cleanup_in_progress` when a process of the session
+ *   outlived the wait.
+ */
+export async function finalBarrierAsync(
+	seams: LockSeams,
+	forge: ForgeFiles,
+	files: SessionFiles,
+	reports: ReadonlyArray<FinalReport>,
+): Promise<void> {
+	const survivors = survivorsOf(reports);
+	const barrier = await waitForBarrierAsync(seams, files, SETTLE_MS, NEVER_ABORTS);
+	// The final barrier never aborts.
+	assert(barrier !== undefined);
+	if (!barrier.clear || survivors.length > 0) {
+		const names = survivors.length > 0 ? survivors.join(", ") : "the session";
+		const { pids } = barrier;
+		const named = pids.length > 0 ? ` (PIDs ${pids.join(", ")})` : "";
+		throw new ForgeError(
+			"cleanup_in_progress",
+			`Processes of ${names} were still alive when forge stopped waiting${named}.`,
+			{
+				details: { pids, reports, sessionId: files.sessionId },
+				hint: "Check for them, and stop them by hand.",
+			},
+		);
+	}
+
+	removeSession(seams.fileSystem, forge, files.sessionId);
+}
+
 function pidsOf(seams: Pick<LockSeams, "native">, target: SessionTarget): Array<number> {
 	return seams
 		.native()
@@ -221,4 +266,8 @@ async function forceAsync(
 	}
 
 	return cleanup;
+}
+
+function survivorsOf(reports: ReadonlyArray<FinalReport>): Array<string> {
+	return reports.filter(({ report }) => report.incomplete).map(({ id }) => id);
 }
