@@ -220,7 +220,7 @@ describe(createStudioLauncher, () => {
 		expect(spawner.calls[0]).toMatchObject({
 			args: [POSIX_PLACE],
 			file: MACOS_STUDIO_PATH,
-			options: { detached: true, stdio: "ignore" },
+			options: { detached: true, stdio: "ignore", windowsHide: true },
 		});
 	});
 

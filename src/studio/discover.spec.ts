@@ -162,7 +162,7 @@ describe(findStudioExecutable, () => {
 	it("should find nothing on Linux", () => {
 		expect.assertions(1);
 
-		expect(find({ files: [LINK_EXE], platform: "linux" })).toBeUndefined();
+		expect(find({ files: [LINK_EXE, MACOS_STUDIO_PATH], platform: "linux" })).toBeUndefined();
 	});
 });
 

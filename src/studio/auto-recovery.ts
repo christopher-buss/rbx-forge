@@ -125,7 +125,7 @@ export async function handleAutoRecoveryAsync(
 		try {
 			if (target.mode === "delete") {
 				await retryAsync(seams, () => {
-					seams.fileSystem.rmSync(file, { force: true });
+					seams.fileSystem.rmSync(file);
 				});
 				report.deleted.push(file);
 			} else {
@@ -225,6 +225,8 @@ function readNames(seams: RecoverySeams, directory: string, report: RecoveryRepo
 			report.warnings.push(`Could not read ${directory}: ${messageOf(err)}`);
 		}
 
+		// Stryker disable next-line ArrayDeclaration: equivalent, no filter
+		// keeps a made-up name
 		return [];
 	}
 }
@@ -326,7 +328,7 @@ async function moveAsync(
 			}
 
 			fileSystem.copyFileSync(file, to);
-			fileSystem.rmSync(file, { force: true });
+			fileSystem.rmSync(file);
 		}
 	});
 	return { from: file, to };
@@ -347,7 +349,7 @@ function prune(seams: RecoverySeams, directory: string, report: RecoveryReport):
 	for (const name of old) {
 		const file = path.join(directory, name);
 		try {
-			seams.fileSystem.rmSync(file, { force: true });
+			seams.fileSystem.rmSync(file);
 		} catch (err) {
 			report.warnings.push(`Could not delete ${file}: ${messageOf(err)}`);
 		}

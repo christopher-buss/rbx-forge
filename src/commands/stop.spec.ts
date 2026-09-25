@@ -542,7 +542,9 @@ describe(runStopAsync, () => {
 		await expect(stopAsync(project)).resolves.toMatchObject({
 			data: {
 				recovery: {
+					deleted: [],
 					mode: "move",
+					moved: [],
 					warnings: ["forge cannot read process start times on freebsd."],
 				},
 			},
@@ -550,7 +552,7 @@ describe(runStopAsync, () => {
 	});
 
 	it("should kill nothing when the lock file names another Studio than the session's", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
@@ -567,6 +569,23 @@ describe(runStopAsync, () => {
 		expect(error.message).toBe(
 			`${path.join(PROJECT, LOCK)} names PID ${STUDIO_PID}, not the Roblox Studio forge started (PID 7). Nothing was killed.`,
 		);
+		expect(error.hint).toBe("Close the other Roblox Studio that has the place open by hand.");
+	});
+
+	it("should close the session's Studio when the lock file names it too", async () => {
+		expect.assertions(1);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		await serveSessionAsync(project, () => {
+			return { pid: STUDIO_PID, place: PLACE, startTime: String(STUDIO_PID), status: "open" };
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { pid: STUDIO_PID, stopped: true },
+		});
 	});
 
 	it("should end a Studio that stays open after the close request, without a save", async () => {

@@ -254,6 +254,23 @@ describe(handleAutoRecoveryAsync, () => {
 		]);
 	});
 
+	it("should prune nothing when it moved nothing", async () => {
+		expect.assertions(1);
+
+		const world = makeWorld();
+		for (let index = 0; index <= RECOVERY_KEEP_COUNT; index++) {
+			writeAt(
+				world,
+				path.join(RECOVERY, `2026-01-0${index + 1}T00-00-00_game_AutoRecovery_0.rbxl`),
+				0,
+			);
+		}
+
+		await handleAutoRecoveryAsync(world.seams, targetOf());
+
+		expect(Object.keys(world.memory.files())).toHaveLength(RECOVERY_KEEP_COUNT + 1);
+	});
+
 	it("should try a busy file again until it moves", async () => {
 		expect.assertions(2);
 
