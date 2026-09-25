@@ -12,6 +12,8 @@ export const BIN: string = path.join(REPOSITORY, "bin", "rbx-forge.js");
 
 /** One finished run of the built bin. */
 export interface BinRun {
+	/** The forge process's pid. */
+	pid: number | undefined;
 	status: null | number;
 	stderr: string;
 	stdout: string;
@@ -58,7 +60,7 @@ export async function runBinAsync(
 	return new Promise((resolve, reject) => {
 		child.once("error", reject);
 		child.once("close", (status) => {
-			resolve({ status, stderr, stdout });
+			resolve({ pid: child.pid, status, stderr, stdout });
 		});
 	});
 }

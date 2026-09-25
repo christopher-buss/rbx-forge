@@ -18,6 +18,7 @@ import type {
 	ReporterEvent,
 } from "../../src/seams/reporter.ts";
 import type { Seams } from "../../src/seams/seams.ts";
+import type { StudioLauncher } from "../../src/studio/launcher.ts";
 
 /** The project directory of every in-memory test project. */
 export const PROJECT: string = path.resolve("/project");
@@ -93,6 +94,7 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 			choose: vi.fn<Prompter["choose"]>(unreachable("prompter")),
 			confirm: vi.fn<Prompter["confirm"]>(unreachable("prompter")),
 		},
+		studioLauncher: vi.fn<StudioLauncher>(unreachable("studio launcher")),
 		...overrides,
 	};
 }

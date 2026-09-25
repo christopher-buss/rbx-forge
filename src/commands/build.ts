@@ -45,6 +45,31 @@ export interface BuildOutcome {
 }
 
 /**
+ * The build step with its `build` hooks. `forge build` runs it, and so does
+ * every command that builds first (`open`, `start`), so the hooks apply
+ * however a build is reached.
+ *
+ * @param context - The run: project root, seams, and reporter.
+ * @param config - The resolved config: Rojo command and hooks.
+ * @param options - The project and target.
+ * @returns The build outcome and every hook result.
+ * @rejects {ForgeError} `rojo_missing`, `process_failed`, `hook_failed`, or
+ *   `hook_depth_exceeded`.
+ */
+export async function buildAsync(
+	context: CommandContext,
+	config: ResolvedConfig,
+	options: BuildOptions,
+): Promise<HookedRun<BuildOutcome>> {
+	return runWithHooksAsync(context, config, "build", async () => {
+		const destination = prepareTarget(context, options.target);
+		const args = rojoBuildArgs(options.project, options.target);
+		const { durationMs } = await runRojoAsync(context, config, args);
+		return { durationMs, ...destination };
+	});
+}
+
+/**
  * `forge build`: build the Rojo project to the configured output, to
  * `--output`, or into the plugins folder with `--plugin`.
  *
@@ -107,29 +132,4 @@ function prepareTarget(
 	const output = path.resolve(context.cwd, target.output);
 	context.seams.fileSystem.mkdirSync(path.dirname(output), { recursive: true });
 	return { output };
-}
-
-/**
- * The build step with its `build` hooks. `forge build` runs it, and so does
- * every command that builds first (`open`, `start`), so the hooks apply
- * however a build is reached.
- *
- * @param context - The run: project root, seams, and reporter.
- * @param config - The resolved config: Rojo command and hooks.
- * @param options - The project and target.
- * @returns The build outcome and every hook result.
- * @rejects {ForgeError} `rojo_missing`, `process_failed`, `hook_failed`, or
- *   `hook_depth_exceeded`.
- */
-async function buildAsync(
-	context: CommandContext,
-	config: ResolvedConfig,
-	options: BuildOptions,
-): Promise<HookedRun<BuildOutcome>> {
-	return runWithHooksAsync(context, config, "build", async () => {
-		const destination = prepareTarget(context, options.target);
-		const args = rojoBuildArgs(options.project, options.target);
-		const { durationMs } = await runRojoAsync(context, config, args);
-		return { durationMs, ...destination };
-	});
 }
