@@ -124,5 +124,9 @@ Before a task is done, lint, typecheck, knip, and every test project must pass.
   waits 30 s per busy pipe.
 - Environment variable names are case-insensitive: read and set them through
   `src/process/environment.ts`.
-- An e2e test that opens a place must use the Studio stand-in (a `.cmd`); a
-  plain `.rbxl` opens real Studio.
+- E2E runs never reach real Studio: `test/setup/studio-isolation.ts` points
+  `RBX_FORGE_STUDIO_PATH` at a missing file and the AutoSaves folders at a
+  scratch home. A test that opens a place sets `RBX_FORGE_STUDIO_PATH` to the
+  stand-in (Node, or a copy named as Studio) and builds the place with
+  `studioPlaceContent()`. `test/e2e/real-studio.spec.ts` runs real Studio only
+  with `RBX_FORGE_TEST_REAL_STUDIO=1`.

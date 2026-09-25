@@ -2,3 +2,6 @@
 
 # Recorded compiler output: bytes as the compiler wrote them (ANSI, CRLF).
 test/fixtures/rbxtsc/*.txt -text
+
+# Roblox places that Studio or Rojo wrote: binary.
+*.rbxl binary

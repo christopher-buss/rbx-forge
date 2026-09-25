@@ -77,6 +77,18 @@ A handle on a process that proves its identity (PID plus start time), so a
 reused PID is never killed.\
 _Avoid_: handle (alone)
 
+## Studio
+
+**Lock file**:\
+`<place>.lock`, which Roblox Studio keeps next to a place while it has the place
+open. It names Studio's PID and computer.\
+_Avoid_: place lock, Studio lock
+
+**Auto-recovery file**:\
+`<place>_AutoRecovery_<n>.rbxl` in Studio's AutoSaves folder. Studio deletes it
+only when it closes by itself; forge handles the ones of a Studio it ended.\
+_Avoid_: autosave, backup
+
 ## Control
 
 **Endpoint**:\
