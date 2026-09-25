@@ -1,3 +1,4 @@
+import { BUILD_FLAGS, runBuildCommandAsync } from "../commands/build.ts";
 import { runConfigAsync } from "../commands/config.ts";
 import type { CommandRun } from "../commands/context.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
@@ -26,5 +27,11 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		flags: [],
 		run: runConfigAsync,
 		summary: "Print the resolved config (flags over the config file over defaults).",
+	},
+	{
+		name: "build",
+		flags: BUILD_FLAGS,
+		run: runBuildCommandAsync,
+		summary: "Build the Rojo project to a place or model file, or a Studio plugin.",
 	},
 ];
