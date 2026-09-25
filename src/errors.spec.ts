@@ -27,6 +27,14 @@ describe(ForgeError, () => {
 		expect(error.cause).toBe(cause);
 	});
 
+	it("should name itself in stack traces", () => {
+		expect.assertions(1);
+
+		const error = new ForgeError("usage", "x");
+
+		expect(error.name).toBe("ForgeError");
+	});
+
 	it("should leave the hint undefined when none is given", () => {
 		expect.assertions(1);
 

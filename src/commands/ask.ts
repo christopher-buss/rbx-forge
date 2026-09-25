@@ -3,6 +3,24 @@ import type { Prompter } from "../seams/prompter.ts";
 import type { CommandContext } from "./context.ts";
 
 /**
+ * How a question is answered when the run cannot prompt: with a safe default,
+ * or by failing with `needs_confirmation`.
+ *
+ * @template T - The type of the answer.
+ */
+export type Unattended<T> =
+	| {
+			/** How to answer without asking, such as a flag. */
+			hint: string;
+			/** The question, as the error message. */
+			text: string;
+	  }
+	| {
+			/** The answer to take. */
+			answer: T;
+	  };
+
+/**
  * A question a command may ask.
  *
  * @template T - The type of the answer.
@@ -10,17 +28,8 @@ import type { CommandContext } from "./context.ts";
 export interface Question<T> {
 	/** Ask it at a terminal. */
 	ask: (prompter: Prompter) => Promise<T>;
-	/**
-	 * How to answer without asking, such as a flag. For `needs_confirmation`.
-	 */
-	hint: string;
-	/** The question, for `needs_confirmation`. */
-	text: string;
-	/**
-	 * The answer when the run cannot prompt. `undefined` means there is no
-	 * safe default, so the command fails with `needs_confirmation`.
-	 */
-	unattended: T | undefined;
+	/** What happens when the run cannot prompt. */
+	unattended: Unattended<T>;
 }
 
 /**
@@ -32,16 +41,19 @@ export interface Question<T> {
  * @param question - What to ask, and how to answer without asking.
  * @returns The answer.
  * @rejects {ForgeError} `needs_confirmation` when the run cannot prompt and
- *   the question has no unattended answer.
+ *   the question has no safe default.
  */
-export async function askAsync<T>(context: CommandContext, question: Question<T>): Promise<T> {
+export async function askAsync<T>(
+	context: CommandContext,
+	{ ask, unattended }: Question<T>,
+): Promise<T> {
 	if (context.interactive) {
-		return question.ask(context.seams.prompter);
+		return ask(context.seams.prompter);
 	}
 
-	if (question.unattended === undefined) {
-		throw new ForgeError("needs_confirmation", question.text, { hint: question.hint });
+	if ("answer" in unattended) {
+		return unattended.answer;
 	}
 
-	return question.unattended;
+	throw new ForgeError("needs_confirmation", unattended.text, { hint: unattended.hint });
 }

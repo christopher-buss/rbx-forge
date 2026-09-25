@@ -17,6 +17,6 @@ export interface Clock {
 export const nodeClock: Clock = {
 	now: () => Date.now(),
 	sleep: async (ms, signal) => {
-		await sleep(ms, undefined, signal === undefined ? {} : { signal });
+		await sleep(ms, undefined, { signal });
 	},
 };

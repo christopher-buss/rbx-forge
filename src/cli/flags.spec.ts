@@ -12,6 +12,7 @@ const FLAGS: ReadonlyArray<FlagDefinition> = [
 	{ name: "build", config: "open.buildFirst", kind: "boolean", text: "t" },
 	{ name: "include", config: "typegen.include", kind: "list", text: "t", value: "<glob>" },
 	{ name: "depth", config: "typegen.maxDepth", kind: "number", text: "t", value: "<n>" },
+	{ name: "pre-build", config: "hooks.build.pre", kind: "list", text: "t", value: "<cmd>" },
 	{ name: "dry-run", kind: "boolean", short: "n", text: "t" },
 ];
 
@@ -30,6 +31,7 @@ describe(parserOptions, () => {
 			"include": { multiple: true, type: "string" },
 			"output": { type: "string" },
 			"port": { type: "string" },
+			"pre-build": { multiple: true, type: "string" },
 		});
 	});
 
@@ -65,13 +67,24 @@ describe(configLayerFromFlags, () => {
 			"B/**",
 			"--depth",
 			"2",
+			"--pre-build",
+			"lint",
 		]);
 
 		expect(configLayerFromFlags(FLAGS, values)).toStrictEqual({
 			buildOutputPath: "out.rbxl",
+			hooks: { build: { pre: ["lint"] } },
 			open: { buildFirst: false },
 			rojoPort: 4000,
 			typegen: { include: ["A/**", "B/**"], maxDepth: 2 },
+		});
+	});
+
+	it("should keep a string flag's value a string, even when it looks like a number", () => {
+		expect.assertions(1);
+
+		expect(configLayerFromFlags(FLAGS, parse(["--output", "123"]))).toStrictEqual({
+			buildOutputPath: "123",
 		});
 	});
 

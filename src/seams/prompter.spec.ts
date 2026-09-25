@@ -1,7 +1,6 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 
-import { ForgeError } from "../errors.ts";
 import type { Prompter } from "./prompter.ts";
 import { createReadlinePrompter } from "./prompter.ts";
 
@@ -10,6 +9,7 @@ interface Terminal {
 	answer: (...lines: Array<string>) => void;
 	/** End the input, as Ctrl+D does. */
 	close: () => void;
+	input: PassThrough;
 	/** Everything the prompter wrote. */
 	output: () => string;
 	prompter: Prompter;
@@ -35,6 +35,7 @@ function makeTerminal(): Terminal {
 				input.end();
 			});
 		},
+		input,
 		output: () => written,
 		prompter: createReadlinePrompter(input, output),
 	};
@@ -98,15 +99,29 @@ describe(createReadlinePrompter, () => {
 		await expect(answer).resolves.toBe(expected);
 	});
 
-	it("should show the yes/no default", async () => {
+	it.for([
+		[true, "Replace? (y/n) [y] "],
+		[false, "Replace? (y/n) [n] "],
+	] as const)("should show the yes/no default %s", async ([fallback, shown]) => {
 		expect.assertions(1);
 
 		const terminal = makeTerminal();
-		const answer = terminal.prompter.confirm("Replace?", true);
+		const answer = terminal.prompter.confirm("Replace?", fallback);
 		terminal.answer("");
 		await answer;
 
-		expect(terminal.output()).toBe("Replace? (y/n) [y] ");
+		expect(terminal.output()).toBe(shown);
+	});
+
+	it("should let go of the input after an answer", async () => {
+		expect.assertions(1);
+
+		const terminal = makeTerminal();
+		const answer = terminal.prompter.confirm("Replace?", false);
+		terminal.answer("y");
+		await answer;
+
+		expect(terminal.input.listenerCount("data")).toBe(0);
 	});
 
 	it.for([true, false])("should return the fallback %s for an empty answer", async (fallback) => {
@@ -136,8 +151,9 @@ describe(createReadlinePrompter, () => {
 		const answer = terminal.prompter.confirm("Replace?", false);
 		terminal.close();
 
-		await expect(answer).rejects.toThrow(
-			expect.objectContaining({ code: "interrupted", constructor: ForgeError }),
-		);
+		await expect(answer).rejects.toMatchObject({
+			code: "interrupted",
+			message: "The prompt was closed before an answer.",
+		});
 	});
 });

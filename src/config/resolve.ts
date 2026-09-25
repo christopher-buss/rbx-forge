@@ -77,7 +77,8 @@ export function resolveConfig(file: ForgeConfig, flags: ConfigLayer): ResolvedCo
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+	// The schema rejects `null`, and the defaults hold none.
+	return typeof value === "object" && !Array.isArray(value);
 }
 
 function mergeLayer(base: Record<string, unknown>, layer: object): Record<string, unknown> {

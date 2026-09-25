@@ -98,9 +98,10 @@ async function confirmReplaceAsync(context: CommandContext, isForced: boolean): 
 
 	const shouldReplace = await askAsync(context, {
 		ask: async (prompter) => prompter.confirm(`${CONFIG_FILE_NAME} exists. Replace it?`, false),
-		hint: "Pass --force to replace it.",
-		text: `${CONFIG_FILE_NAME} already exists.`,
-		unattended: undefined,
+		unattended: {
+			hint: "Pass --force to replace it.",
+			text: `${CONFIG_FILE_NAME} already exists.`,
+		},
 	});
 	if (!shouldReplace) {
 		throw new ForgeError("declined", `Kept the existing ${CONFIG_FILE_NAME}.`);
@@ -140,11 +141,10 @@ async function askProjectTypeAsync(context: CommandContext): Promise<ProjectType
 				DEFAULT_PROJECT_TYPE,
 			);
 			const chosen = toProjectType(typed);
-			assert(chosen !== undefined, "the prompter answers with one of the choices");
+			// The prompter answers with one of the choices.
+			assert(chosen !== undefined);
 			return chosen;
 		},
-		hint: "Pass --type.",
-		text: "Project type?",
-		unattended: DEFAULT_PROJECT_TYPE,
+		unattended: { answer: DEFAULT_PROJECT_TYPE },
 	});
 }

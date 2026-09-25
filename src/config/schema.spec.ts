@@ -62,6 +62,16 @@ describe(validateConfigFile, () => {
 		);
 	});
 
+	it("should list every problem, one per line", () => {
+		expect.assertions(1);
+
+		const error = errorOf(() => validateConfigFile({ a: 1, projectType: "rbxts", z: 2 }, FILE));
+
+		expect(error.message).toBe(
+			`Invalid config in ${FILE}:\na must be removed\nz must be removed`,
+		);
+	});
+
 	it.for([
 		[{ projectType: "rbxts", unknownKey: 1 }, "unknownKey must be removed"],
 		[{ projectType: "rbxts", typegen: { depth: 2 } }, "typegen.depth must be removed"],

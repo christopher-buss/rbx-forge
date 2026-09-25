@@ -97,6 +97,7 @@ describe(runInitAsync, () => {
 
 		await expect(initAsync(makeProject(), { type: "python" })).rejects.toMatchObject({
 			code: "usage",
+			hint: 'Run "forge init --help" for usage.',
 			message: '--type must be rbxts or luau, got "python".',
 		});
 	});
@@ -168,14 +169,16 @@ describe(runInitAsync, () => {
 		});
 
 		it("should replace an existing config file when the user agrees", async () => {
-			expect.assertions(2);
+			expect.assertions(3);
 
 			const prompter = answering({ confirm: true });
 			const project = makeProject(
 				{ "rbx-forge.config.ts": "old" },
 				{ interactive: true, prompter },
 			);
-			await initAsync(project, { type: "rbxts" });
+			const result = await initAsync(project, { type: "rbxts" });
+
+			expect(result.data).toMatchObject({ replaced: true });
 
 			expect(prompter.confirm).toHaveBeenCalledExactlyOnceWith(
 				"rbx-forge.config.ts exists. Replace it?",
@@ -216,6 +219,16 @@ describe(runInitAsync, () => {
 			expect(Object.keys(project.disk.files())).toHaveLength(1);
 		},
 	);
+
+	it("should name every other config file it found", async () => {
+		expect.assertions(1);
+
+		const project = makeProject({ "rbx-forge.config.js": "", "rbx-forge.config.json": "{}" });
+
+		await expect(initAsync(project, { type: "rbxts" })).rejects.toMatchObject({
+			message: "rbx-forge.config.js, rbx-forge.config.json already configures this project.",
+		});
+	});
 
 	it("should ignore files that only look like a config file", async () => {
 		expect.assertions(1);

@@ -19,6 +19,8 @@ interface CliOptions {
 	commands?: ReadonlyArray<CommandDefinition>;
 	environment?: Environment;
 	seams?: Seams;
+	/** Whether stdin is a terminal. Follows `tty` unless set. */
+	stdinIsTty?: boolean;
 	/** Both stdin and stdout are terminals. Off by default, as for agents. */
 	tty?: boolean;
 }
@@ -38,6 +40,7 @@ function makeCli({
 	environment = {},
 	seams = createTestSeams(),
 	tty = false,
+	stdinIsTty = tty,
 }: CliOptions = {}): Cli {
 	const captured = captureOutput();
 	const context: CliContext = {
@@ -46,7 +49,7 @@ function makeCli({
 		env: environment,
 		output: captured.output,
 		seams,
-		terminal: { stdinIsTty: tty, stdoutIsTty: tty },
+		terminal: { stdinIsTty, stdoutIsTty: tty },
 		version: "1.2.3",
 	};
 
@@ -254,6 +257,18 @@ describe(runCliAsync, () => {
 			expect(runs.map(({ context }) => context.interactive)).toStrictEqual([false]);
 		});
 
+		it.for([
+			{ name: "stdin only", stdinIsTty: true, tty: false },
+			{ name: "stdout only", stdinIsTty: false, tty: true },
+		])("should not let a command prompt when $name is a terminal", async (terminal) => {
+			expect.assertions(1);
+
+			const { command, runs } = recordingProbe();
+			await makeCli({ commands: [command], ...terminal }).run("probe");
+
+			expect(runs.map(({ context }) => context.interactive)).toStrictEqual([false]);
+		});
+
 		it("should exit with needs_confirmation when init would replace a file unasked", async () => {
 			expect.assertions(2);
 
@@ -289,6 +304,17 @@ describe(runCliAsync, () => {
 			expect(run!.context).toMatchObject({ cwd: PROJECT, env: environment });
 			expect(run!.input.config).toStrictEqual({ rojoPort: 4000 });
 			expect({ ...run!.input.flags }).toStrictEqual({ dry: true, port: "4000" });
+		});
+
+		it("should read --no-<flag> as false for a boolean config flag", async () => {
+			expect.assertions(1);
+
+			const { command, runs } = recordingProbe([
+				{ name: "build", config: "open.buildFirst", kind: "boolean", text: "t" },
+			]);
+			await makeCli({ commands: [command] }).run("probe", "--no-build");
+
+			expect(runs[0]!.input.config).toStrictEqual({ open: { buildFirst: false } });
 		});
 
 		it("should report a config error with its code and exit code", async () => {

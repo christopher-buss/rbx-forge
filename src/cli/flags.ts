@@ -114,12 +114,13 @@ export function configLayerFromFlags(
  * Find the flag that set a config value.
  *
  * @param flags - The flag table.
- * @param path - Dotted path of the value; a list item's path runs past it.
+ * @param path - Dotted path of the value. List flags hold strings, which
+ *   always pass, so a problem path is always a flag's own option.
  * @returns The flag whose option holds the path.
  */
 function flagFor(flags: ReadonlyArray<FlagDefinition>, path: string): FlagDefinition {
-	const flag = flags.find(({ config }) => `${path}.`.startsWith(`${config}.`));
-	assert(flag !== undefined, `no flag sets ${path}`);
+	const flag = flags.find(({ config }) => config === path);
+	assert(flag !== undefined);
 	return flag;
 }
 
@@ -137,7 +138,8 @@ function toNumber(raw: FlagValues[string]): FlagValues[string] | number {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
+	// Only flag values and objects made here reach it: never `null`.
+	return typeof value === "object" && !Array.isArray(value);
 }
 
 function setPath(target: Record<string, unknown>, path: string, value: unknown): void {

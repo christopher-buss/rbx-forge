@@ -38,6 +38,19 @@ describe(loadConfigFileAsync, () => {
 		});
 	});
 
+	it("should drop $-prefixed keys such as $schema", async () => {
+		expect.assertions(1);
+
+		const directory = makeTemporaryDirectory({
+			"rbx-forge.config.json": JSON.stringify({ $schema: "x", projectType: "luau" }),
+		});
+
+		await expect(loadConfigFileAsync(directory)).resolves.toStrictEqual({
+			path: path.join(directory, "rbx-forge.config.json").replaceAll("\\", "/"),
+			value: { projectType: "luau" },
+		});
+	});
+
 	it("should ignore rc files and package.json keys", async () => {
 		expect.assertions(1);
 
