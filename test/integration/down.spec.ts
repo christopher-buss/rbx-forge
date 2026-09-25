@@ -14,6 +14,7 @@ import { stopSessionAsync } from "../../src/client/down.ts";
 import { findSession } from "../../src/client/session.ts";
 import { ForgeError } from "../../src/errors.ts";
 import { nodeClock } from "../../src/seams/clock.ts";
+import { nodeHost } from "../../src/seams/host.ts";
 import type { IdentityRecord } from "../../src/supervisor/session-files.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
@@ -35,7 +36,7 @@ import {
 
 const LOCK_HOLDER = path.join(import.meta.dirname, "..", "fixtures", "bin", "lock-holder.ts");
 /** A short wait: the scenarios never need the 15 s default. */
-const SHORT = { force: false, timeoutMs: 1000 };
+const SHORT = { force: false, keepStudio: false, timeoutMs: 1000 };
 
 type Outcome = { error: ForgeError; ok: false } | { ok: true; report: DownReport };
 
@@ -59,7 +60,13 @@ async function downAsync(project: Project, options: DownOptions = SHORT): Promis
 	assert(session !== undefined, "no session is named");
 	try {
 		const report = await stopSessionAsync(
-			{ clock: nodeClock, fileSystem: nodeFs, ipc: realTransport(), native: () => native },
+			{
+				clock: nodeClock,
+				fileSystem: nodeFs,
+				host: nodeHost,
+				ipc: realTransport(),
+				native: () => native,
+			},
 			forge,
 			session,
 			options,
@@ -263,7 +270,7 @@ describe("forge down", () => {
 		await waitForWorkersAsync(project.log, 3);
 		const started = Date.now();
 
-		const outcome = await downAsync(project, { force: false, timeoutMs: 15_000 });
+		const outcome = await downAsync(project, { ...SHORT, timeoutMs: 15_000 });
 		const elapsed = Date.now() - started;
 		// Dead already; on POSIX a zombie still answers a signal-0 probe
 		// until its parent reaps it.
@@ -271,7 +278,12 @@ describe("forge down", () => {
 
 		expect(outcome).toStrictEqual({
 			ok: true,
-			report: { removed: false, sessionId, stoppedBy: "shutdown" },
+			report: {
+				removed: false,
+				sessionId,
+				stoppedBy: "shutdown",
+				studio: { status: "none" },
+			},
 		});
 		expect(elapsed).toBeGreaterThanOrEqual(2000);
 		expect({ alive, files: filesLeft(project) }).toStrictEqual({ alive: [], files: [] });

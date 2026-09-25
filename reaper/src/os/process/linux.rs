@@ -245,11 +245,20 @@ impl Pin {
     }
 
     pub fn kill(&self) -> io::Result<bool> {
+        self.signal_live(libc::SIGKILL)
+    }
+
+    pub fn request_close(&self) -> io::Result<bool> {
+        self.signal_live(libc::SIGTERM)
+    }
+
+    /// Send `signal` through the pidfd unless the process has exited.
+    fn signal_live(&self, signal: libc::c_int) -> io::Result<bool> {
         if self.wait(Duration::ZERO)? {
             return Ok(false);
         }
 
-        match self.send_signal(libc::SIGKILL) {
+        match self.send_signal(signal) {
             Ok(()) => Ok(true),
             Err(err) if err.raw_os_error() == Some(libc::ESRCH) => Ok(false),
             Err(err) => Err(err),

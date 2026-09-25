@@ -120,14 +120,17 @@ describe(createStatusStore, () => {
 		store.syncbackStarted();
 		const running = store.snapshot().services.syncback.status;
 		store.syncbackFinished({ durationMs: 5, hooks: [], ok: true });
-		store.studio("open");
+		store.studio("open", "/project/game.rbxl");
 
 		expect(running).toBe("running");
 		expect(store.snapshot().services.syncback).toStrictEqual({
 			lastRun: { at: AT, durationMs: 5, hooks: [], ok: true },
 			status: "idle",
 		});
-		expect(store.snapshot().services.studio).toStrictEqual({ status: "open" });
+		expect(store.snapshot().services.studio).toStrictEqual({
+			place: "/project/game.rbxl",
+			status: "open",
+		});
 	});
 
 	it("should keep syncback off after a forge sync run in a session without the save watch", () => {
@@ -150,7 +153,7 @@ describe(createStatusStore, () => {
 
 		const { onChange, store } = makeStore();
 		store.snapshot().services.rojo.port = 1;
-		store.studio("closed");
+		store.studio("closed", "/project/game.rbxl");
 		onChange.mock.calls[0]![0].services.rojo.port = 2;
 
 		expect(store.snapshot().services.rojo.port).toBe(34_872);

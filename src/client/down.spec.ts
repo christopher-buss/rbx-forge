@@ -5,17 +5,24 @@ import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { FakeNative, FakeProcess, FakeSessionProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import type { MemoryFileSystem } from "../../test/helpers/seams.ts";
-import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
+import {
+	createMemoryFileSystem,
+	createTestSeams,
+	PROJECT,
+	TEST_HOSTNAME,
+} from "../../test/helpers/seams.ts";
 import { ForgeError } from "../errors.ts";
 import type { IpcHandler } from "../ipc/server.ts";
 import { startIpcServer } from "../ipc/server.ts";
 import type { FileLock, NativeAddon } from "../native/addon.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import type { Clock } from "../seams/clock.ts";
+import type { SessionStatus } from "../session/status.ts";
+import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import type { IdentityRecord } from "../supervisor/session-files.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
-import type { DownOptions, DownPoint, DownReport } from "./down.ts";
-import { FORCED_SHUTDOWN_MS, KILL_WAIT_MS, stopSessionAsync } from "./down.ts";
+import type { DownOptions, DownPoint, DownReport, DownStudio } from "./down.ts";
+import { FORCED_SHUTDOWN_MS, KILL_WAIT_MS, stopSessionAsync, STUDIO_END_WAIT_MS } from "./down.ts";
 import type { KnownSession } from "./session.ts";
 import { findSession } from "./session.ts";
 
@@ -23,6 +30,11 @@ const FORGE = forgeFiles(PROJECT);
 const FILES = sessionFiles(FORGE, "s1");
 const SUPERVISOR = 500;
 const TIMEOUT_MS = 1000;
+const STUDIO_PID = 4242;
+const STUDIO = String.raw`C:\Roblox\Versions\version-1\RobloxStudioBeta.exe`;
+const PLACE = `${PROJECT}/game.rbxl`;
+const LOCK = `${PLACE}.lock`;
+const UNKNOWN: DownStudio = { status: "unknown" };
 const IDENTITY: IdentityRecord = {
 	endpoint: "endpoint-s1",
 	pid: SUPERVISOR,
@@ -117,10 +129,11 @@ function makeWorld({ holdsLock = true, supervisor = {} }: WorldSetup = {}): Worl
  *
  * @param world - The project.
  * @param shutdown - Answers `shutdown`.
+ * @param status - Answers `status`; none by default.
  */
-async function listenAsync(world: World, shutdown: IpcHandler): Promise<void> {
+async function listenAsync(world: World, shutdown: IpcHandler, status?: IpcHandler): Promise<void> {
 	const server = startIpcServer(await world.ipc.listenAsync(IDENTITY.endpoint), {
-		handlers: { shutdown },
+		handlers: { shutdown, ...(status === undefined ? {} : { status }) },
 		token: "token",
 	});
 	onTestFinished(async () => {
@@ -134,13 +147,75 @@ async function listenAsync(world: World, shutdown: IpcHandler): Promise<void> {
  *
  * @param world - The project.
  * @param onShutdown - What the supervisor does on it.
+ * @param status - Answers `status`; none by default.
  */
-async function serveAsync(world: World, onShutdown: OnShutdown): Promise<void> {
-	await listenAsync(world, (parameters) => {
-		world.asked.push(parameters);
-		onShutdown(parameters, world);
-		return { accepted: true, sessionId: "s1" };
-	});
+async function serveAsync(
+	world: World,
+	onShutdown: OnShutdown,
+	status?: IpcHandler,
+): Promise<void> {
+	await listenAsync(
+		world,
+		(parameters) => {
+			world.asked.push(parameters);
+			onShutdown(parameters, world);
+			return { accepted: true, sessionId: "s1" };
+		},
+		status,
+	);
+}
+
+/**
+ * The status of a ready session with Rojo alone, and this Studio.
+ *
+ * @param studio - The Studio entry.
+ * @param sessionId - The session that answers.
+ * @returns The `status` answer.
+ */
+function statusWith(
+	studio: SessionStatus["services"]["studio"],
+	sessionId = "s1",
+): () => Record<string, unknown> {
+	const status: SessionStatus = {
+		phase: "ready",
+		pid: SUPERVISOR,
+		running: true,
+		services: {
+			compiler: { status: "off" },
+			rojo: { port: 34_872, status: "ready" },
+			studio,
+			syncback: { status: "off" },
+		},
+		sessionId,
+		startedAt: IDENTITY.startedAt,
+	};
+	return () => ({ ...status });
+}
+
+const STUDIO_OPEN = statusWith({ place: PLACE, status: "open" });
+
+/**
+ * Studio with the place open: its lock file, and its process.
+ *
+ * @param world - The project.
+ * @param studio - How the process behaves.
+ * @returns Its entry in the process table.
+ */
+function openStudio(world: World, studio: Partial<FakeProcess> = {}): FakeProcess {
+	world.memory.fileSystem.writeFileSync(
+		LOCK,
+		`${STUDIO_PID}\nRobloxStudioBeta\n${TEST_HOSTNAME}\n4378769e-07d9-4eda-b5ee-187aa6c43cda\n`,
+	);
+	const entry: FakeProcess = {
+		alive: true,
+		executablePath: STUDIO,
+		onClose: () => {
+			world.memory.fileSystem.rmSync(LOCK, { force: true });
+		},
+		...studio,
+	};
+	world.native.processes.set(STUDIO_PID, entry);
+	return entry;
 }
 
 /**
@@ -167,12 +242,13 @@ async function downAsync(world: World, options: Partial<DownOptions> = {}): Prom
 		{
 			clock: world.clock,
 			fileSystem: world.memory.fileSystem,
+			host: createTestSeams().host,
 			ipc: world.ipc,
 			native: () => world.native.addon,
 		},
 		FORGE,
 		world.session,
-		{ force: false, timeoutMs: TIMEOUT_MS, ...options },
+		{ force: false, keepStudio: false, timeoutMs: TIMEOUT_MS, ...options },
 	);
 }
 
@@ -273,8 +349,140 @@ describe(stopSessionAsync, () => {
 			removed: false,
 			sessionId: "s1",
 			stoppedBy: "shutdown",
+			studio: UNKNOWN,
 		});
 		expect(world.asked).toStrictEqual([{ sessionId: "s1" }]);
+	});
+
+	it("should close the session's Studio first, then let the session end by itself", async () => {
+		expect.assertions(3);
+
+		const world = makeWorld();
+		const studio = openStudio(world);
+		await serveAsync(world, exitOnShutdown, STUDIO_OPEN);
+		at(world, 800, world.exit);
+
+		await expect(downAsync(world)).resolves.toStrictEqual({
+			removed: false,
+			sessionId: "s1",
+			stoppedBy: "studio_closed",
+			studio: { forced: false, pid: STUDIO_PID, place: PLACE, status: "closed" },
+		});
+		expect(world.asked).toStrictEqual([]);
+		expect(studio).toMatchObject({ alive: false, closeRequests: 1 });
+	});
+
+	it("should ask a session that does not end by itself once its Studio closed", async () => {
+		expect.assertions(3);
+
+		const world = makeWorld();
+		openStudio(world);
+		await serveAsync(world, exitOnShutdown, STUDIO_OPEN);
+
+		await expect(downAsync(world)).resolves.toMatchObject({ stoppedBy: "shutdown" });
+		expect({ asked: world.asked, waited: world.clock.now() }).toStrictEqual({
+			asked: [{ sessionId: "s1" }],
+			// The session's syncback wait, plus a margin.
+			waited: STUDIO_END_WAIT_MS,
+		});
+		expect(STUDIO_END_WAIT_MS).toBe(35_000);
+	});
+
+	it("should end a Studio that stays open, without a save, and report it", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		const studio = openStudio(world, { onCloseRequest: "refuse" });
+		await serveAsync(world, exitOnShutdown, STUDIO_OPEN);
+		at(world, 100, world.exit);
+
+		await expect(downAsync(world)).resolves.toMatchObject({
+			studio: { forced: true, pid: STUDIO_PID, place: PLACE, status: "closed" },
+		});
+		expect(studio.alive).toBeFalse();
+	});
+
+	it("should leave Studio open with keepStudio", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		const studio = openStudio(world);
+		await serveAsync(world, exitOnShutdown, STUDIO_OPEN);
+
+		await expect(downAsync(world, { keepStudio: true })).resolves.toMatchObject({
+			stoppedBy: "shutdown",
+			studio: { status: "kept" },
+		});
+		expect(studio).toStrictEqual(expect.objectContaining({ alive: true }));
+	});
+
+	it.for([
+		["Studio is not open", statusWith({ status: "opening" })],
+		["Studio closed the place before", STUDIO_OPEN],
+	] as const)("should report no Studio when %s", async ([, status]) => {
+		expect.assertions(1);
+
+		const world = makeWorld();
+		await serveAsync(world, exitOnShutdown, status);
+
+		await expect(downAsync(world)).resolves.toMatchObject({
+			stoppedBy: "shutdown",
+			studio: { status: "none" },
+		});
+	});
+
+	it("should touch no Studio when the status is not one", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		const studio = openStudio(world);
+		await serveAsync(world, exitOnShutdown, () => ({ phase: "ready" }));
+
+		await expect(downAsync(world)).resolves.toMatchObject({ studio: UNKNOWN });
+		expect(studio.alive).toBeTrue();
+	});
+
+	it("should touch no Studio when another session answers the status", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		const studio = openStudio(world);
+		await serveAsync(world, exitOnShutdown, statusWith({ place: PLACE, status: "open" }, "s2"));
+
+		await expect(downAsync(world)).resolves.toMatchObject({ studio: UNKNOWN });
+		expect(studio.alive).toBeTrue();
+	});
+
+	it("should report a Studio forge cannot verify, touch it not, and still stop the session", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		const other = openStudio(world, { executablePath: "/usr/bin/node" });
+		await serveAsync(world, exitOnShutdown, STUDIO_OPEN);
+
+		await expect(downAsync(world)).resolves.toMatchObject({
+			stoppedBy: "shutdown",
+			studio: {
+				code: "identity_mismatch",
+				message: `${LOCK} names PID ${STUDIO_PID}, but that process is /usr/bin/node, not Roblox Studio. Nothing was killed.`,
+				place: PLACE,
+				status: "failed",
+			},
+		});
+		expect([other.alive, other.closeRequests]).toStrictEqual([true, undefined]);
+	});
+
+	it("should give Studio its close time before it ends it", async () => {
+		expect.assertions(1);
+
+		const world = makeWorld();
+		const waits: Array<number> = [];
+		openStudio(world, { onCloseRequest: "refuse", waits });
+		await serveAsync(world, exitOnShutdown, STUDIO_OPEN);
+		at(world, 100, world.exit);
+		await downAsync(world);
+
+		expect(waits[0]).toBe(STUDIO_CLOSE_MS);
 	});
 
 	it("should wait for the supervisor after it accepted, asking once", async () => {
@@ -352,7 +560,12 @@ describe(stopSessionAsync, () => {
 
 		await expect(
 			downAsync(world, { force: true, pause: async () => unlockAsync(world) }),
-		).resolves.toStrictEqual({ removed: true, sessionId: "s1", stoppedBy: "killed" });
+		).resolves.toStrictEqual({
+			removed: true,
+			sessionId: "s1",
+			stoppedBy: "killed",
+			studio: UNKNOWN,
+		});
 		expect(world.native.processes.get(SUPERVISOR)!.alive).toBeFalse();
 	});
 
@@ -445,6 +658,7 @@ describe(stopSessionAsync, () => {
 			removed: true,
 			sessionId: "s1",
 			stoppedBy: "gone",
+			studio: UNKNOWN,
 		});
 		expect({ files: world.memory.files(), locks: world.native.locks.size }).toStrictEqual({
 			files: { ".forge/sessions": null },
@@ -517,6 +731,7 @@ describe(stopSessionAsync, () => {
 			removed: true,
 			sessionId: "s1",
 			stoppedBy: "gone",
+			studio: UNKNOWN,
 		});
 		expect(world.native.cleanups).toStrictEqual([
 			{

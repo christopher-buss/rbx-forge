@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,7 @@ import { EXIT_FAILURE, EXIT_IDENTITY_UNVERIFIED, EXIT_SUCCESS } from "../../src/
 import { parseResult } from "../helpers/output.ts";
 import {
 	NATIVE_DIRECTORY,
+	openStudioStandInAsync,
 	pidOf,
 	spawnFakeStudio,
 	spawnSleeper,
@@ -50,20 +52,65 @@ function makeLockedProject(
 	return { lockPath, place, project };
 }
 
+/**
+ * Make a project whose place a stand-in Studio has open, and a second
+ * stand-in Studio with another place open.
+ *
+ * @param variables - Fixture variables for the first Studio.
+ * @returns The project, its place, and both Studios.
+ */
+async function makeStudioProjectAsync(variables: Record<string, string> = {}): Promise<{
+	other: ChildProcess;
+	place: string;
+	project: string;
+	studio: ChildProcess;
+}> {
+	const project = makeProject({ "rbx-forge.config.json": '{ "projectType": "luau" }' });
+	const place = path.join(project, "game.rbxl");
+	const studio = await openStudioStandInAsync(place, variables);
+	const other = await openStudioStandInAsync(path.join(project, "other.rbxl"));
+	return { other, place, project, studio };
+}
+
 describe("forge stop", () => {
-	it("should kill a verified Studio and remove its lock file", async () => {
+	it("should close a verified Studio with a close request, and no other Studio", async () => {
 		expect.assertions(4);
 
-		const studio = spawnFakeStudio();
-		const pid = pidOf(studio);
-		const { lockPath, place, project } = makeLockedProject(pid);
+		const { other, place, project, studio } = await makeStudioProjectAsync();
 		const { status, stdout } = await runBinAsync(["stop", "--json"], project, NATIVE);
 		await waitForExitAsync(studio);
 
 		expect(status).toBe(EXIT_SUCCESS);
-		expect(parseResult(stdout).data).toStrictEqual({ pid, place, stopped: true });
-		expect(existsSync(lockPath)).toBeFalse();
-		expect(isProcessAlive(pid)).toBeFalse();
+		expect(parseResult(stdout).data).toStrictEqual({
+			forced: false,
+			pid: pidOf(studio),
+			place,
+			stopped: true,
+		});
+		expect(existsSync(`${place}.lock`)).toBeFalse();
+		expect({
+			isOtherAlive: isProcessAlive(pidOf(other)),
+			isOtherOpen: existsSync(path.join(project, "other.rbxl.lock")),
+		}).toStrictEqual({ isOtherAlive: true, isOtherOpen: true });
+	});
+
+	it("should end a Studio that stays open after the close request, and remove its lock file", async () => {
+		expect.assertions(3);
+
+		const { place, project, studio } = await makeStudioProjectAsync({
+			FIXTURE_STUDIO_REFUSE_CLOSE: "1",
+		});
+		const { status, stdout } = await runBinAsync(["stop", "--json"], project, NATIVE);
+		await waitForExitAsync(studio);
+
+		expect(status).toBe(EXIT_SUCCESS);
+		expect(parseResult(stdout).data).toStrictEqual({
+			forced: true,
+			pid: pidOf(studio),
+			place,
+			stopped: true,
+		});
+		expect(existsSync(`${place}.lock`)).toBeFalse();
 	});
 
 	it("should kill nothing when a stale lock names a PID that another program reused", async () => {

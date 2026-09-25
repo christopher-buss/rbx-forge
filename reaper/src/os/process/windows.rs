@@ -13,7 +13,7 @@ use windows_sys::Win32::Foundation::{
     WAIT_TIMEOUT,
 };
 use windows_sys::Win32::System::Threading::{
-    GetProcessTimes, OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_NAME_WIN32,
+    GetProcessId, GetProcessTimes, OpenProcess, PROCESS_ACCESS_RIGHTS, PROCESS_NAME_WIN32,
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
     QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject,
 };
@@ -167,6 +167,22 @@ impl Pin {
 
     pub fn kill_group(&self) -> io::Result<bool> {
         self.kill()
+    }
+
+    /// Post `WM_CLOSE` to the main windows of the process. The open handle
+    /// keeps its PID from reuse, so the windows found by PID are its own.
+    pub fn request_close(&self) -> io::Result<bool> {
+        if self.0.has_exited()? {
+            return Ok(false);
+        }
+
+        // SAFETY: the handle is open and has query access.
+        let pid = unsafe { GetProcessId(self.0.0) };
+        if pid == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        crate::os::win::window::close_main_windows(pid)
     }
 
     pub fn wait_for_exit(&self, timeout: Duration) -> io::Result<bool> {

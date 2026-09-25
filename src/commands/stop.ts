@@ -1,60 +1,26 @@
-import assert from "node:assert/strict";
 import path from "node:path";
 
 import { loadProjectConfigAsync } from "../config/load.ts";
-import { ForgeError } from "../errors.ts";
-import type { PinnedProcess } from "../native/addon.ts";
-import { startTimeToEpochMs } from "../native/start-time.ts";
-import type { Host } from "../seams/host.ts";
 import type { CommandResult } from "../seams/reporter.ts";
-import type { Seams } from "../seams/seams.ts";
-import type { StudioLock } from "../studio/lock-file.ts";
-import {
-	isLockHost,
-	isStudioExecutable,
-	parseStudioLock,
-	studioLockPath,
-} from "../studio/lock-file.ts";
+import type { StudioStop } from "../studio/close-studio.ts";
+import { closeStudio, STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
-
-/** How long `forge stop` waits for a killed Studio to exit. */
-export const STUDIO_EXIT_TIMEOUT_MS = 10_000;
-
-/**
- * How much later than the lock file's modification time Studio's start time
- * may be. Studio starts before it writes the lock file, but file systems
- * round modification times (FAT to 2 s) and Linux start times are 10 ms
- * ticks since a boot time that drifts with the wall clock.
- */
-export const STUDIO_START_SLACK_MS = 2000;
-
-const NOTHING_KILLED = "Nothing was killed.";
-const STALE_HINT =
-	"The lock file is stale. Delete it if Roblox Studio does not have the place open.";
-
-/** The Studio process a lock file names, once verified. */
-type StudioCheck =
-	| { pinned: PinnedProcess; status: "studio" }
-	| { status: "closed" }
-	| { status: "exited" };
-
-const EXITED: StudioCheck = { status: "exited" };
 
 /**
  * `forge stop`: close the Roblox Studio that has this project's place open.
- * The PID in the place's lock file is only a hint: forge acts only on a lock
- * file this computer wrote, pins the process (so a reused PID cannot be hit
- * later), and kills it only when the OS reports the Studio executable for
- * it and it started before the lock file was written.
+ * Studio gets a close request; when it is still open after
+ * {@link STUDIO_CLOSE_MS}, forge ends it without a save (`closeStudio`). It
+ * acts only on the Studio its identity check verifies.
  *
  * @param context - The run: project directory, config loader, file system,
  *   and native addon.
  * @param input - The config values flags set.
- * @returns Whether a Studio was stopped, its PID, and the place.
- * @rejects {ForgeError} `identity_mismatch` when the lock file names no
- *   process or another computer, or a process that is not Studio, started
- *   after the lock file was written, or cannot be checked;
- *   `process_failed` when Studio does not exit in time; config errors from
+ * @returns Whether a Studio was stopped, its PID, the place, and whether
+ *   forge had to end it.
+ * @rejects `identity_mismatch` when the lock file names no process or
+ *   another computer, or a process that is not Studio, started after the
+ *   lock file was written, or cannot be checked; `process_failed` when
+ *   Studio does not exit in time; config errors from
  *   `loadProjectConfigAsync`.
  */
 export async function runStopAsync(
@@ -67,264 +33,58 @@ export async function runStopAsync(
 		input.config,
 	);
 	const place = path.resolve(context.cwd, config.open.buildOutputPath ?? config.buildOutputPath);
-	const lockPath = studioLockPath(place);
-	const text = readLockText(context.seams, lockPath);
-	if (text === undefined) {
-		return {
-			data: { place, stopped: false },
-			summary: `Roblox Studio does not have ${place} open.`,
-		};
-	}
-
-	const { pid } = readStudioLock(context.seams, text, lockPath);
-	const check = checkStudio(context.seams, pid, lockPath);
-	if (check.status !== "studio") {
-		return notStopped(check.status, pid, place);
-	}
-
-	killStudio(check.pinned);
-	// A killed Studio cannot remove its own lock file; one that was closing
-	// may have.
-	context.seams.fileSystem.rmSync(lockPath, { force: true });
-	return {
-		data: { pid, place, stopped: true },
-		summary: `Stopped Roblox Studio (PID ${pid}) for ${place}.`,
-	};
+	return stopResult(closeStudio(context.seams, place), place);
 }
 
 /**
- * Whether a file system call failed because the file is gone: Studio
- * deletes its lock file when it closes, at any time.
+ * The result of `forge stop` once Studio is gone.
  *
- * @param err - What the call threw.
- * @returns True for `ENOENT`.
- */
-function isMissingFile(err: unknown): boolean {
-	return err instanceof Error && Reflect.get(err, "code") === "ENOENT";
-}
-
-/**
- * Read a lock file that Studio may delete at any time.
- *
- * @param seams - The file system.
- * @param lockPath - The lock file.
- * @returns Its content, or `undefined` when there is none.
- */
-function readLockText(seams: Seams, lockPath: string): string | undefined {
-	try {
-		return seams.fileSystem.readFileSync(lockPath, "utf8");
-	} catch (err) {
-		if (isMissingFile(err)) {
-			return undefined;
-		}
-
-		throw err;
-	}
-}
-
-/**
- * The result when no Studio was stopped.
- *
- * @param status - Why: the PID `exited`, or Studio `closed` the place
- *   while forge checked it.
- * @param pid - The PID the lock file names.
+ * @param stop - How Studio went: its PID, and whether forge ended it.
  * @param place - The absolute path of the place file.
- * @returns The data and summary of a run that killed nothing.
+ * @returns Its data and summary.
  */
-function notStopped(status: "closed" | "exited", pid: number, place: string): CommandResult {
+function stoppedResult(
+	{ forced: isForced, pid }: Extract<StudioStop, { status: "stopped" }>,
+	place: string,
+): CommandResult {
+	const how = isForced
+		? `: it did not close within ${STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving`
+		: "";
 	return {
-		data: { pid, place, stopped: false },
-		summary:
-			status === "exited"
-				? `Roblox Studio is not running: the lock file names PID ${pid}, which has exited.`
-				: `Roblox Studio (PID ${pid}) closed ${place} while forge checked it.`,
+		data: { forced: isForced, pid, place, stopped: true },
+		summary: `Stopped Roblox Studio (PID ${pid}) for ${place}${how}.`,
 	};
 }
 
 /**
- * Check that the lock file was written on this computer: a PID from another
- * computer names an unrelated process here.
+ * The result of `forge stop`.
  *
- * @param lockHost - The computer the lock file names.
- * @param hostname - This computer's name.
- * @param lockPath - The lock file, for messages.
- * @throws {ForgeError} `identity_mismatch` when it names no computer or
- *   another one.
+ * @param stop - What closing Studio did.
+ * @param place - The absolute path of the place file.
+ * @returns Its data and summary.
  */
-function checkHost(lockHost: string | undefined, hostname: string, lockPath: string): void {
-	if (lockHost === undefined) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} names no computer, so forge cannot tell that it is this one (${hostname}). ${NOTHING_KILLED}`,
-		);
-	}
-
-	if (!isLockHost(lockHost, hostname)) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} was written on ${lockHost}, not on this computer (${hostname}). ${NOTHING_KILLED}`,
-			{ hint: "Stop Roblox Studio on the computer that has the place open." },
-		);
-	}
-}
-
-/**
- * Parse a lock file and check that this computer wrote it.
- *
- * @param seams - This computer.
- * @param text - The lock file's content.
- * @param lockPath - The lock file, for messages.
- * @returns The PID and computer the lock file names.
- * @throws {ForgeError} `identity_mismatch` when it names no PID, or no
- *   computer or another one.
- */
-function readStudioLock(seams: Seams, text: string, lockPath: string): StudioLock {
-	const lock = parseStudioLock(text);
-	if (lock === undefined) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} names no process. ${NOTHING_KILLED}`,
-		);
-	}
-
-	checkHost(lock.host, seams.host.hostname, lockPath);
-	return lock;
-}
-
-/**
- * Kill a verified Studio and wait for it to exit.
- *
- * @param pinned - The pinned Studio process.
- * @throws {ForgeError} `process_failed` when it does not exit in time.
- */
-function killStudio(pinned: PinnedProcess): void {
-	pinned.kill();
-	if (!pinned.waitForExit(STUDIO_EXIT_TIMEOUT_MS)) {
-		throw new ForgeError(
-			"process_failed",
-			`Roblox Studio (PID ${pinned.pid}) did not exit within ${STUDIO_EXIT_TIMEOUT_MS} ms.`,
-		);
-	}
-}
-
-/**
- * Check that Studio started before its lock file was written. A Studio that
- * started later reused the PID of the Studio that wrote it.
- *
- * @param pinned - The pinned Studio process.
- * @param host - The OS, for the start time's unit.
- * @param lock - The lock file and its modification time.
- * @param lock.lockPath - The lock file, for messages.
- * @param lock.lockWrittenMs - When it was last written, in milliseconds since
- *   the Unix epoch.
- * @throws {ForgeError} `identity_mismatch` when it started later, or forge
- *   cannot read start times on this OS.
- */
-function checkStartTime(
-	pinned: PinnedProcess,
-	host: Host,
-	{ lockPath, lockWrittenMs }: { lockPath: string; lockWrittenMs: number },
-): void {
-	const startedMs = startTimeToEpochMs(pinned.startTime, host.platform, host.bootTimeMs());
-	if (startedMs === undefined) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`Could not verify PID ${pinned.pid}: forge cannot read process start times on ${host.platform}. ${NOTHING_KILLED}`,
-		);
-	}
-
-	if (startedMs > lockWrittenMs + STUDIO_START_SLACK_MS) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} names PID ${pinned.pid}, but that Roblox Studio started after the lock file was written, so it reused the PID. ${NOTHING_KILLED}`,
-			{ hint: STALE_HINT },
-		);
-	}
-}
-
-/**
- * Run one addon query about a process, turning an OS refusal into
- * `identity_mismatch`: a process forge cannot check is never killed.
- *
- * @template T - What the query returns.
- * @param pid - The PID, for the message.
- * @param query - The addon call.
- * @returns What the call returned.
- * @throws {ForgeError} `identity_mismatch` when the call throws.
- */
-function queryProcess<T>(pid: number, query: () => T): T {
-	try {
-		return query();
-	} catch (err) {
-		// The addon throws only `Error`s (`reaper/src/lib.rs`).
-		assert(err instanceof Error);
-		throw new ForgeError(
-			"identity_mismatch",
-			`Could not verify PID ${pid}: ${err.message} ${NOTHING_KILLED}`,
-			{ cause: err },
-		);
-	}
-}
-
-/**
- * When a lock file was last written.
- *
- * @param seams - The file system.
- * @param lockPath - The lock file.
- * @returns Its modification time, in milliseconds since the Unix epoch;
- *   `undefined` once Studio deleted it.
- */
-function lockWrittenAt(seams: Seams, lockPath: string): number | undefined {
-	try {
-		return seams.fileSystem.statSync(lockPath).mtimeMs;
-	} catch (err) {
-		if (isMissingFile(err)) {
-			return undefined;
+function stopResult(stop: StudioStop, place: string): CommandResult {
+	switch (stop.status) {
+		case "closed_first": {
+			return {
+				data: { pid: stop.pid, place, stopped: false },
+				summary: `Roblox Studio (PID ${stop.pid}) closed ${place} while forge checked it.`,
+			};
 		}
-
-		throw err;
+		case "exited": {
+			return {
+				data: { pid: stop.pid, place, stopped: false },
+				summary: `Roblox Studio is not running: the lock file names PID ${stop.pid}, which has exited.`,
+			};
+		}
+		case "not_open": {
+			return {
+				data: { place, stopped: false },
+				summary: `Roblox Studio does not have ${place} open.`,
+			};
+		}
+		case "stopped": {
+			return stoppedResult(stop, place);
+		}
 	}
-}
-
-/**
- * Pin the process a lock file names and check that it is the Studio that
- * wrote the lock file.
- *
- * @param seams - The addon, the OS, and the file system.
- * @param pid - The PID from the lock file.
- * @param lockPath - The lock file, for messages.
- * @returns The pinned Studio; `exited` when no process has the PID;
- *   `closed` when Studio deleted the lock file meanwhile.
- * @throws {ForgeError} `identity_mismatch` when the process is not Studio,
- *   started after the lock file was written, or the OS refuses the check.
- */
-function checkStudio(seams: Seams, pid: number, lockPath: string): StudioCheck {
-	// Load the addon outside `queryProcess`: `native_missing` must not become
-	// `identity_mismatch`.
-	const native = seams.native();
-	const pinned = queryProcess(pid, () => native.pinProcess(pid));
-	if (pinned === null) {
-		return EXITED;
-	}
-
-	const executable = queryProcess(pid, () => pinned.executablePath());
-	if (executable === null) {
-		return EXITED;
-	}
-
-	if (!isStudioExecutable(executable)) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} names PID ${pid}, but that process is ${executable}, not Roblox Studio. ${NOTHING_KILLED}`,
-			{ hint: STALE_HINT },
-		);
-	}
-
-	const lockWrittenMs = lockWrittenAt(seams, lockPath);
-	if (lockWrittenMs === undefined) {
-		return { status: "closed" };
-	}
-
-	checkStartTime(pinned, seams.host, { lockPath, lockWrittenMs });
-	return { pinned, status: "studio" };
 }

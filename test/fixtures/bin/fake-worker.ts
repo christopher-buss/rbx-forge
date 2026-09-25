@@ -47,8 +47,11 @@
  *   `fake place`).
  *
  * The `open` and `xdg-open` roles stand in for the platform launcher: they
- * start a detached `studio` with their arguments and exit at once, as the
- * real launchers hand a file to its app. A `studio` stays alive until killed.
+ * start a detached `studio` with their arguments and exit at once, as the real
+ * launchers hand a file to its app. A `studio` stays alive until killed. It
+ * runs `FIXTURE_STUDIO_EXE` when set: a copy of Node named as Studio, so
+ * forge's identity check takes it for Studio. With `FIXTURE_STUDIO_LOCK=1`
+ * it behaves as Studio with its place open (`studio-stand-in.ts`).
  *
  * Markers (`RBX_FORGE_SESSION`, `RBX_FORGE_WORKER`) are recorded as seen and
  * inherited by every grandchild unchanged.
@@ -66,6 +69,8 @@ import {
 import { createServer } from "node:net";
 import path from "node:path";
 import process from "node:process";
+
+import { launchStudio, runStudio } from "./studio-stand-in.ts";
 
 const ROJO_VERSION = "7.7.0";
 const KEEP_ALIVE_MS = 60_000;
@@ -365,16 +370,9 @@ function runCompiler(): void {
 
 function runLauncher(): void {
 	exitOnce();
-	if (process.exitCode !== 0) {
-		return;
+	if (process.exitCode === 0) {
+		launchStudio(ARGS);
 	}
-
-	const studio = spawn(process.execPath, [import.meta.filename, "studio", ...ARGS], {
-		detached: true,
-		stdio: "ignore",
-		windowsHide: true,
-	});
-	studio.unref();
 }
 
 function runHook(): void {
@@ -424,7 +422,7 @@ switch (ROLE) {
 		break;
 	}
 	case "studio": {
-		setInterval(doNothing, KEEP_ALIVE_MS);
+		runStudio(ARGS[0]);
 		break;
 	}
 	default: {

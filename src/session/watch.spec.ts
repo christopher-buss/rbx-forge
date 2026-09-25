@@ -6,7 +6,7 @@ import type { ManualClock } from "../../test/helpers/manual-clock.ts";
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
 import type { MemoryFileSystem } from "../../test/helpers/seams.ts";
 import type { WatchOptions } from "./watch.ts";
-import { waitForStudioCloseAsync, watchSavesAsync } from "./watch.ts";
+import { waitForStudioCloseAsync, watchSaves } from "./watch.ts";
 
 const PLACE = path.join(PROJECT, "game.rbxl");
 const LOCK = `${PLACE}.lock`;
@@ -97,13 +97,13 @@ describe(waitForStudioCloseAsync, () => {
 	});
 });
 
-describe(watchSavesAsync, () => {
+describe(watchSaves, () => {
 	it("should call onSave once per write, not for the file as it was", async () => {
 		expect.assertions(2);
 
 		const watch = watching({ "game.rbxl": "v1" });
 		const onSave = vi.fn<() => void>();
-		const done = watchSavesAsync(watch.options, PLACE, onSave);
+		const { done } = watchSaves(watch.options, PLACE, onSave);
 		await watch.tickAsync();
 
 		expect(onSave).not.toHaveBeenCalled();
@@ -124,9 +124,27 @@ describe(watchSavesAsync, () => {
 
 		const watch = watching();
 		const onSave = vi.fn<() => void>();
-		const done = watchSavesAsync(watch.options, PLACE, onSave);
+		const { done } = watchSaves(watch.options, PLACE, onSave);
 		watch.memory.fileSystem.writeFileSync(PLACE, "v1");
 		await watch.tickAsync();
+		watch.abort.abort();
+		await done;
+
+		expect(onSave).toHaveBeenCalledOnce();
+	});
+
+	it("should look at the file between two polls on check", async () => {
+		expect.assertions(2);
+
+		const watch = watching({ "game.rbxl": "v1" });
+		const onSave = vi.fn<() => void>();
+		const { check, done } = watchSaves(watch.options, PLACE, onSave);
+		check();
+
+		expect(onSave).not.toHaveBeenCalled();
+
+		watch.memory.fileSystem.writeFileSync(PLACE, "saved");
+		check();
 		watch.abort.abort();
 		await done;
 

@@ -11,6 +11,14 @@ export interface WatchOptions {
 	signal: AbortSignal;
 }
 
+/** A running save watch. */
+export interface SaveWatch {
+	/** Look at the file now, between two polls. */
+	check: () => void;
+	/** Resolves once the watch ended. */
+	done: Promise<void>;
+}
+
 /**
  * Wait until Studio closes a place: its lock file appears, then goes away.
  *
@@ -41,23 +49,20 @@ export async function waitForStudioCloseAsync(
  * @param options - The clock, file system, interval, and end signal.
  * @param file - The file to watch, such as the place Studio saves.
  * @param onSave - Called once per change seen.
+ * @returns The watch: a look now, and its end.
  */
-export async function watchSavesAsync(
-	options: WatchOptions,
-	file: string,
-	onSave: () => void,
-): Promise<void> {
+export function watchSaves(options: WatchOptions, file: string, onSave: () => void): SaveWatch {
 	const { fileSystem } = options;
 	let version = versionOf(fileSystem, file);
-	await pollAsync(options, () => {
+	function check(): void {
 		const next = versionOf(fileSystem, file);
 		if (next !== version) {
 			version = next;
 			onSave();
 		}
+	}
 
-		return false;
-	});
+	return { check, done: watchUntilEndAsync(options, check) };
 }
 
 /**
@@ -85,6 +90,19 @@ async function pollAsync(
 	}
 
 	return false;
+}
+
+/**
+ * Look every `intervalMs` until the watch ends.
+ *
+ * @param options - The clock, interval, and end signal.
+ * @param check - Looks once.
+ */
+async function watchUntilEndAsync(options: WatchOptions, check: () => void): Promise<void> {
+	await pollAsync(options, () => {
+		check();
+		return false;
+	});
 }
 
 /**

@@ -14,8 +14,13 @@ import { ForgeError } from "../errors.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Host } from "../seams/host.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import {
+	STUDIO_CLOSE_MS,
+	STUDIO_EXIT_TIMEOUT_MS,
+	STUDIO_START_SLACK_MS,
+} from "../studio/close-studio.ts";
 import type { CommandContext } from "./context.ts";
-import { runStopAsync, STUDIO_EXIT_TIMEOUT_MS, STUDIO_START_SLACK_MS } from "./stop.ts";
+import { runStopAsync } from "./stop.ts";
 
 const PLACE = path.join(PROJECT, "game.rbxl");
 const LOCK = "game.rbxl.lock";
@@ -143,7 +148,7 @@ async function catchStopErrorAsync(project: StopProject): Promise<ForgeError> {
 }
 
 describe(runStopAsync, () => {
-	it("should kill a verified Studio and remove its lock file", async () => {
+	it("should close a verified Studio with a close request and remove its lock file", async () => {
 		expect.assertions(3);
 
 		const project = makeProject({
@@ -153,14 +158,14 @@ describe(runStopAsync, () => {
 		const result = await stopAsync(project);
 
 		expect(result).toStrictEqual({
-			data: { pid: STUDIO_PID, place: PLACE, stopped: true },
+			data: { forced: false, pid: STUDIO_PID, place: PLACE, stopped: true },
 			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}.`,
 		});
-		expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
+		expect(project.processes.get(STUDIO_PID)).toMatchObject({ alive: false, closeRequests: 1 });
 		expect(project.files()).not.toHaveProperty(LOCK);
 	});
 
-	it("should wait a bounded time for Studio to exit", async () => {
+	it("should give Studio a bounded time to close on the close request", async () => {
 		expect.assertions(1);
 
 		const waits: Array<number> = [];
@@ -171,7 +176,74 @@ describe(runStopAsync, () => {
 			}),
 		);
 
-		expect(waits).toStrictEqual([STUDIO_EXIT_TIMEOUT_MS]);
+		expect(waits).toStrictEqual([STUDIO_CLOSE_MS]);
+	});
+
+	it("should end a Studio that stays open after the close request, without a save", async () => {
+		expect.assertions(4);
+
+		const waits: Array<number> = [];
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: {
+				[STUDIO_PID]: {
+					alive: true,
+					executablePath: STUDIO,
+					onCloseRequest: "refuse",
+					waits,
+				},
+			},
+		});
+		const result = await stopAsync(project);
+
+		expect(result).toStrictEqual({
+			data: { forced: true, pid: STUDIO_PID, place: PLACE, stopped: true },
+			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}: it did not close within ${STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving.`,
+		});
+		expect(waits).toStrictEqual([STUDIO_CLOSE_MS, STUDIO_EXIT_TIMEOUT_MS]);
+		expect(project.processes.get(STUDIO_PID)).toMatchObject({ alive: false, closeRequests: 1 });
+		expect(project.files()).not.toHaveProperty(LOCK);
+	});
+
+	it.for(["no_window", "throw"] as const)(
+		"should end Studio at once when the close request does not go out (%s)",
+		async (onCloseRequest) => {
+			expect.assertions(3);
+
+			const waits: Array<number> = [];
+			const project = makeProject({
+				files: { [LOCK]: studioLock(STUDIO_PID) },
+				processes: {
+					[STUDIO_PID]: { alive: true, executablePath: STUDIO, onCloseRequest, waits },
+				},
+			});
+			const { data } = await stopAsync(project);
+
+			expect(data).toMatchObject({ forced: true, stopped: true });
+			expect(waits).toStrictEqual([STUDIO_EXIT_TIMEOUT_MS]);
+			expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
+		},
+	);
+
+	it("should not end a Studio that exits just before the close request", async () => {
+		expect.assertions(2);
+
+		const waits: Array<number> = [];
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: {
+				[STUDIO_PID]: {
+					alive: true,
+					executablePath: STUDIO,
+					onCloseRequest: "exit_first",
+					waits,
+				},
+			},
+		});
+		const { data } = await stopAsync(project);
+
+		expect(data).toMatchObject({ forced: false, stopped: true });
+		expect(waits).toStrictEqual([]);
 	});
 
 	it("should stop the Studio of the place forge open opens", async () => {
@@ -425,7 +497,14 @@ describe(runStopAsync, () => {
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
-			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO, ignoresKill: true } },
+			processes: {
+				[STUDIO_PID]: {
+					alive: true,
+					executablePath: STUDIO,
+					ignoresKill: true,
+					onCloseRequest: "refuse",
+				},
+			},
 		});
 		const error = await catchStopErrorAsync(project);
 
@@ -468,7 +547,7 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should report the stop when the killed Studio deleted its lock file itself", async () => {
+	it("should report the stop when the closed Studio deleted its lock file itself", async () => {
 		expect.assertions(2);
 
 		const project = makeProject({

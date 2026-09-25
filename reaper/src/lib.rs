@@ -176,6 +176,21 @@ impl PinnedProcess {
             .map_err(|err| to_napi(&format!("kill group of process {}", self.pid()), &err))
     }
 
+    /// Ask the pinned process to close, as a user would: `WM_CLOSE` to its
+    /// main windows on Windows, `SIGTERM` elsewhere. It does not wait, and
+    /// the process may refuse. `false` when it had already exited, or on
+    /// Windows has no main window.
+    ///
+    /// # Errors
+    ///
+    /// When the OS refuses the request.
+    #[napi]
+    pub fn request_close(&self) -> Result<bool> {
+        self.inner
+            .request_close()
+            .map_err(|err| to_napi(&format!("close process {}", self.pid()), &err))
+    }
+
     /// Block until the process exits or `timeout_ms` passes. `true` once it
     /// has exited.
     ///

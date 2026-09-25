@@ -20,13 +20,9 @@ import { createReaperRunner } from "./reaper-runner.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
-import {
-	checkSyncbackOnce,
-	startSyncback,
-	watchSavesForSyncbackAsync,
-} from "./session-syncback.ts";
+import { checkSyncbackOnce, startSyncback, watchSavesForSyncback } from "./session-syncback.ts";
 import type { StatusRecorder } from "./status.ts";
-import type { WatchOptions } from "./watch.ts";
+import type { SaveWatch, WatchOptions } from "./watch.ts";
 import { waitForStudioCloseAsync } from "./watch.ts";
 
 /** A long-running service of the session, resolved before it starts. */
@@ -66,6 +62,11 @@ const ROJO_LISTEN_POLL_MS = 100;
  * whole project tree before it listens, so a big project takes a while.
  */
 export const ROJO_LISTEN_BOUND_MS = 60_000;
+/**
+ * How long a session whose Studio closed waits for syncback before it ends:
+ * a save just before the close still syncs back.
+ */
+export const STUDIO_CLOSED_SYNCBACK_MS = 30_000;
 
 /**
  * The body of a dev session, for
@@ -73,7 +74,8 @@ export const ROJO_LISTEN_BOUND_MS = 60_000;
  *
  * 1. With syncback on, check that Rojo has syncback, before anything runs.
  * 2. Compile (roblox-ts) and build once, when the session has a compiler.
- * 3. Open the place in Studio, and end the session when Studio closes it.
+ * 3. Open the place in Studio, and end the session when Studio closes it,
+ *    once a save just before the close has synced back.
  * 4. Start Rojo and the watch-mode compiler. Each is a service: its exit
  *    ends the session.
  * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
@@ -93,14 +95,20 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 	return async (scope) => {
 		const requireSyncback = checkSyncbackOnce(session.config);
 		const place = await runStepsAsync(session, scope, requireSyncback);
-		if (place !== undefined) {
-			scope.track(watchStudioAsync(session, scope, place));
-		}
-
 		const syncback = startSyncback(session, scope, {
 			context: workerContext(session, scope, "syncback"),
 			requireSyncback,
 		});
+		// The save watch starts once Rojo serves; until then no save is seen.
+		const saves: Pick<SaveWatch, "check"> = { check: noSaveWatch };
+		if (place !== undefined) {
+			async function flushSyncbackAsync(): Promise<void> {
+				saves.check();
+				await syncback.settled();
+			}
+
+			scope.track(watchStudioAsync(session, scope, { flushSyncbackAsync, place }));
+		}
 
 		await startServicesAsync(session, scope);
 		// A stop request while the services started: the session is ending.
@@ -110,16 +118,17 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 
 		announceReady(session);
 		if (session.plan.syncback) {
-			const saves = watchSavesForSyncbackAsync(
-				session,
-				watchOptions(session, scope),
-				syncback,
-			);
+			const watch = watchSavesForSyncback(session, watchOptions(session, scope), syncback);
+			saves.check = watch.check;
 			// The watch ends with the session either way; tracking orders it.
 			// Stryker disable next-line CallExpression: equivalent
-			scope.track(saves);
+			scope.track(watch.done);
 		}
 	};
+}
+
+function noSaveWatch(): void {
+	// No save watch runs: syncback runs only for `forge sync`.
 }
 
 /**
@@ -340,30 +349,55 @@ function watchOptions(session: SessionSetup, scope: SessionScope): WatchOptions 
 }
 
 /**
- * End the session with `studio_closed` once Studio closes the place.
+ * Wait for syncback before a session whose Studio closed ends: look at the
+ * place once more, then wait for the runs going, for at most
+ * {@link STUDIO_CLOSED_SYNCBACK_MS}. A stop meanwhile ends the runs.
+ *
+ * @param clock - Runs the bound.
+ * @param flushSyncbackAsync - Looks at the place and waits for the runs.
+ */
+async function settleSyncbackAsync(
+	clock: Clock,
+	flushSyncbackAsync: () => Promise<void>,
+): Promise<void> {
+	const abort = new AbortController();
+	const bound = clock.sleep(STUDIO_CLOSED_SYNCBACK_MS, abort.signal).catch(ignore);
+	await Promise.race([flushSyncbackAsync(), bound]);
+	abort.abort();
+}
+
+/**
+ * End the session with `studio_closed` once Studio closes the place, after
+ * the syncback of a save just before the close.
  *
  * @param session - The clock, file system, and reporter.
  * @param scope - Where the end goes.
- * @param place - The place the session opened.
+ * @param studio - The place the session opened, and the syncback flush.
+ * @param studio.flushSyncbackAsync - Looks at the place and waits for the
+ *   runs.
+ * @param studio.place - The absolute path of the place file.
  */
 async function watchStudioAsync(
 	session: SessionSetup,
 	scope: SessionScope,
-	place: string,
+	{ flushSyncbackAsync, place }: { flushSyncbackAsync: () => Promise<void>; place: string },
 ): Promise<void> {
 	const { reporter } = session.context;
-	await waitForStudioCloseAsync(watchOptions(session, scope), studioLockPath(place), () => {
-		session.status.studio("open");
+	const lockPath = studioLockPath(place);
+	const isClosed = await waitForStudioCloseAsync(watchOptions(session, scope), lockPath, () => {
+		session.status.studio("open", place);
 		reporter.emit({
 			message: `Roblox Studio has ${place} open. The session ends when Studio closes it.`,
 			type: "info",
 		});
 	});
 	// A watch that ended first ended with the session: Studio stays open.
-	if (!scope.signal.aborted) {
-		session.status.studio("closed");
+	if (!isClosed) {
+		return;
 	}
 
+	session.status.studio("closed", place);
+	await settleSyncbackAsync(session.context.seams.clock, flushSyncbackAsync);
 	scope.end({ type: "studio_closed" });
 }
 

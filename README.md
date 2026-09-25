@@ -42,7 +42,7 @@ Session commands:
 | `forge status`      | Each service's state, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks.                     |
 | `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                            |
 | `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.          |
-| `forge down`        | Stop the running session. Reports `stopped` only when its supervisor and every process of it are gone.                                    |
+| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.           |
 
 `start` and `up` take the same flags:
 
@@ -55,8 +55,17 @@ Session commands:
 - `--force`: when a crashed earlier session still has processes after the wait,
   kill them, each verified as that session's own.
 
-`down` takes `--timeout <seconds>` (default 15) and `--force` (kill a supervisor
-that does not stop, and what is left of its session, each verified).
+`down` takes `--timeout <seconds>` (default 15), `--force` (kill a supervisor
+that does not stop, and what is left of its session, each verified), and
+`--keep-studio` (leave the session's Studio open).
+
+`down` and `stop` close Studio the same way: a close request first, as when you
+close its window. When Studio is still open after 5 seconds, for example at a
+prompt to save changes, forge ends it without a save. forge acts only on the
+Studio that has the place open, as the place's lock file names it, and only
+after it verifies that the process is that Studio. It never touches another
+Studio. When `down` closes Studio, the session ends by itself once a syncback
+run for a last save is done.
 
 One-shot commands:
 
@@ -137,9 +146,14 @@ The intended flow:
    hooks. It waits for a running save-triggered run, then runs once more.
    Failures keep their code, with hook results in `error.details.hooks`.
 6. `forge down --json`: `data.stoppedBy` is `shutdown`, `forced_shutdown`,
-   `killed`, or `gone`. Exit 6 means processes still live or the supervisor does
-   not answer: retry with `--force`. Exit 5 means forge could not verify a
-   process, so it killed nothing.
+   `killed`, `gone`, or `studio_closed` (the session ended by itself once `down`
+   closed its Studio). `data.studio.status` is `closed` (`forced: true` when
+   forge ended Studio without a save), `kept` (`--keep-studio`), `none` (no
+   Studio open), `unknown` (the supervisor did not answer, so forge touched no
+   Studio), or `failed` (with the error's `code` and `message`: Studio may still
+   be open; the session still stops). Exit 6 means processes still live or the
+   supervisor does not answer: retry with `--force`. Exit 5 means forge could
+   not verify a process, so it killed nothing.
 
 `forge logs <name> --json` gives one `log` event per line.
 

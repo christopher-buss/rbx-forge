@@ -1,22 +1,30 @@
-import { describe, expect, it } from "vitest";
+import path from "node:path";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
+import type { FakeNative, FakeProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import {
 	createCommandContext,
 	createMemoryFileSystem,
 	createTestSeams,
 	PROJECT,
+	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
 import type { FlagValues } from "../cli/flags.ts";
 import { DOWN_TIMEOUT_MS } from "../client/down.ts";
+import { startIpcServer } from "../ipc/server.ts";
 import type { Clock } from "../seams/clock.ts";
+import type { SessionStatus } from "../session/status.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
 import type { CommandContext } from "./context.ts";
 import { runDownAsync } from "./down.ts";
 
 const FORGE = forgeFiles(PROJECT);
 const FILES = sessionFiles(FORGE, "s1");
+const PLACE = path.join(PROJECT, "game.rbxl");
+const STUDIO_PID = 4242;
+const STUDIO_OPEN: SessionStatus["services"]["studio"] = { place: PLACE, status: "open" };
 const SESSION_FILES = {
 	".forge/current": "s1\n",
 	".forge/sessions/s1/supervisor.id": `${JSON.stringify({
@@ -49,7 +57,7 @@ function makeContext({
 	isLeaseHeld = false,
 	isNamed = true,
 	isSupervisorAlive = false,
-}: Setup = {}): { context: CommandContext; elapsed: () => number } {
+}: Setup = {}): { context: CommandContext; elapsed: () => number; native: FakeNative } {
 	const memory = createMemoryFileSystem(isNamed ? SESSION_FILES : {});
 	const native = createFakeNative({ 500: { alive: isSupervisorAlive, executablePath: "/node" } });
 	if (isSupervisorAlive) {
@@ -75,7 +83,61 @@ function makeContext({
 			native: () => native.addon,
 		}),
 	});
-	return { context, elapsed: () => now };
+	return { context, elapsed: () => now, native };
+}
+
+/**
+ * Give session `s1` a Studio with its place open, and serve its endpoint:
+ * `status` names the place, and `shutdown` ends the supervisor.
+ *
+ * @param project - The context and addon of {@link makeContext}.
+ * @param project.context - The run.
+ * @param project.native - Its addon.
+ * @param studio - How the Studio process behaves.
+ * @param entry - What the session reports about Studio.
+ */
+async function serveStudioAsync(
+	{ context, native }: { context: CommandContext; native: FakeNative },
+	studio: Partial<FakeProcess>,
+	entry: SessionStatus["services"]["studio"] = STUDIO_OPEN,
+): Promise<void> {
+	const { fileSystem, ipc } = context.seams;
+	fileSystem.writeFileSync(
+		`${PLACE}.lock`,
+		`${STUDIO_PID}\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+	);
+	native.processes.set(STUDIO_PID, {
+		alive: true,
+		executablePath: String.raw`C:\Roblox\RobloxStudioBeta.exe`,
+		...studio,
+	});
+	const status: SessionStatus = {
+		phase: "ready",
+		pid: 500,
+		running: true,
+		services: {
+			compiler: { status: "off" },
+			rojo: { port: 34_872, status: "ready" },
+			studio: entry,
+			syncback: { status: "off" },
+		},
+		sessionId: "s1",
+		startedAt: "2026-01-01T00:00:00.000Z",
+	};
+	const server = startIpcServer(await ipc.listenAsync("endpoint-s1"), {
+		handlers: {
+			shutdown: () => {
+				native.processes.get(500)!.alive = false;
+				native.locks.delete(FORGE.lock);
+				return { accepted: true };
+			},
+			status: () => ({ ...status }),
+		},
+		token: "token",
+	});
+	onTestFinished(async () => {
+		await server.closeAsync();
+	});
 }
 
 async function downAsync(context: CommandContext, flags: FlagValues = {}) {
@@ -89,9 +151,66 @@ describe(runDownAsync, () => {
 		const { context } = makeContext();
 
 		await expect(downAsync(context)).resolves.toStrictEqual({
-			data: { removed: true, sessionId: "s1", status: "stopped", stoppedBy: "gone" },
+			data: {
+				removed: true,
+				sessionId: "s1",
+				status: "stopped",
+				stoppedBy: "gone",
+				studio: { status: "unknown" },
+			},
 			summary: "Cleaned up after session s1; every process of it is gone.",
 		});
+	});
+
+	it.for([
+		["closes", {}, " Closed Roblox Studio (PID 4242)."],
+		[
+			"ends",
+			{ onCloseRequest: "refuse" },
+			" Roblox Studio (PID 4242) did not close within 5 s, so forge ended it without saving.",
+		],
+		[
+			"cannot verify",
+			{ executablePath: "/usr/bin/node" },
+			` Roblox Studio may still have ${PLACE} open: ${PLACE}.lock names PID 4242, but that process is /usr/bin/node, not Roblox Studio. Nothing was killed.`,
+		],
+	] as const)(
+		"should say in the summary when it %s the session's Studio",
+		async ([, studio, sentence]) => {
+			expect.assertions(1);
+
+			const project = makeContext({ isSupervisorAlive: true });
+			await serveStudioAsync(project, studio);
+
+			await expect(downAsync(project.context)).resolves.toMatchObject({
+				summary: `Stopped session s1; every process of it is gone.${sentence}`,
+			});
+		},
+	);
+
+	it("should say nothing of Studio when the session has none open", async () => {
+		expect.assertions(1);
+
+		const project = makeContext({ isSupervisorAlive: true });
+		await serveStudioAsync(project, {}, { status: "off" });
+
+		await expect(downAsync(project.context)).resolves.toMatchObject({
+			data: { studio: { status: "none" } },
+			summary: "Stopped session s1; every process of it is gone.",
+		});
+	});
+
+	it("should leave the session's Studio open with --keep-studio", async () => {
+		expect.assertions(2);
+
+		const project = makeContext({ isSupervisorAlive: true });
+		await serveStudioAsync(project, {});
+
+		await expect(downAsync(project.context, { "keep-studio": true })).resolves.toMatchObject({
+			data: { studio: { status: "kept" } },
+			summary: "Stopped session s1; every process of it is gone. Roblox Studio stays open.",
+		});
+		expect(project.native.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
 	it("should name a supervisor --force killed", async () => {
