@@ -64,6 +64,12 @@ describe(studioLaunchInvocation, () => {
 		});
 	});
 
+	it("should fall back to cmd.exe when ComSpec is not set", () => {
+		expect.assertions(1);
+
+		expect(studioLaunchInvocation(WINDOWS_PLACE, "win32", {}).file).toBe("cmd.exe");
+	});
+
 	it("should open the place with open on macOS", () => {
 		expect.assertions(1);
 
