@@ -15,13 +15,14 @@ applies. Checked 2026-09-25.
 | `pkl` (mise)                     | 0.31.1                 | 0.32.1                        | Same as project-halcyon. hk 2 evaluates hk.pkl with its bundled pklr, so pkl only serves the editor LSP.                                                                                                                                     |
 | `node` (mise)                    | 26.5.0                 | 26.10.0                       | Same as project-halcyon's dev line. `engines.node` is `>=24.12.0`, as in halcyon's packages.                                                                                                                                                 |
 | `pnpm`                           | 11.24.0                | 12.6.0 (`latest-11`: 11.27.1) | Same as project-halcyon.                                                                                                                                                                                                                     |
-| `c12`                            | not yet added          | 4.0.0-rc.2                    | Only a release candidate exists for 4.x. Added by the config ticket; use the newest 4.x pre-release there and keep this entry.                                                                                                               |
+| `c12`                            | 4.0.0-rc.2             | 4.0.0-rc.2                    | Only a release candidate exists for 4.x; this is the newest 4.x pre-release. Keep this entry until 4.0.0 is stable.                                                                                                                          |
+| `arktype`                        | 2.2.3                  | 2.2.5                         | 2.2.5 was published under 24 hours ago and fails `minimumReleaseAge` (1 day). Renovate raises it.                                                                                                                                            |
+| `jiti`                           | 2.7.0 (runtime)        | 2.7.0                         | Latest. A runtime dependency: c12 loads a `rbx-forge.config.ts` through it when native import fails.                                                                                                                                         |
 | `@stryker-mutator/vitest-runner` | 10.0.0 + patch         | 10.0.0                        | Latest, patched (`patches/`, same patch as project-halcyon). Without it the runner builds test-name filters with `" "` while vitest 5 names tests with `" > "`, so every mutant runs zero tests and survives.                                |
 
-Runtime dependencies (`arktype`, `c12`, `@clack/prompts`, `ansis`, `chokidar`,
-`picomatch`, `std-env`) and test helpers (`memfs`, `@total-typescript/shoehorn`)
-are not in the skeleton because nothing imports them yet (knip fails on unused
-dependencies). Each ticket adds the ones it uses, at the latest version.
+Runtime dependencies not added yet (`@clack/prompts`, `ansis`, `chokidar`,
+`picomatch`, `std-env`) are left out because nothing imports them (knip fails on
+unused dependencies). Each ticket adds the ones it uses, at the latest version.
 
 Removed with the old implementation: `execa`, `commander`, `magicast`,
 `package-manager-detector`, `dedent`, `@antfu/ni`, `simple-git-hooks`,

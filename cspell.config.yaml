@@ -4,14 +4,19 @@ version: "0.2"
 language: en
 
 words:
+  - arktype
   - catchable
+  - codegen
   - darklua
+  - defu
+  - forgerc
   - napi
   - pids
   - rbxl
   - rbxlx
   - rbxm
   - rbxmx
+  - rbxts
   - rbxtsc
   - rojo
   - scriptable

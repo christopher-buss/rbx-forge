@@ -50,7 +50,6 @@ catalogs:
     eslint-plugin-n: 18.3.0
     eslint-plugin-pnpm: 1.9.1
     eslint_d: 15.0.3
-    jiti: 2.7.0
     knip: 6.38.0
     oxlint: 1.85.0
     oxlint-tsgolint: 7.0.2002
@@ -62,9 +61,15 @@ catalogs:
     "@stryker-mutator/vitest-runner": 10.0.0
   native:
     "@napi-rs/cli": 3.10.5
+  runtime:
+    arktype: 2.2.3
+    c12: 4.0.0-rc.2
+    jiti: 2.7.0
   test:
+    "@total-typescript/shoehorn": 0.1.2
     "@vitest/coverage-v8": 5.0.1
     jest-extended: 7.0.0
+    memfs: 4.79.0
     vitest: 5.0.1
   tsc:
     "@isentinel/tsconfig": 2.0.0

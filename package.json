@@ -29,8 +29,13 @@
 	"sideEffects": false,
 	"type": "module",
 	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"default": "./dist/index.mjs"
+		},
 		"./package.json": "./package.json"
 	},
+	"types": "./dist/index.d.mts",
 	"bin": {
 		"forge": "./bin/rbx-forge.js",
 		"rbx-forge": "./bin/rbx-forge.js"
@@ -55,6 +60,11 @@
 		"typecheck": "tsc --build",
 		"watch": "tsdown --watch"
 	},
+	"dependencies": {
+		"arktype": "catalog:runtime",
+		"c12": "catalog:runtime",
+		"jiti": "catalog:runtime"
+	},
 	"devDependencies": {
 		"@isentinel/eslint-config": "catalog:lint",
 		"@isentinel/tsconfig": "catalog:tsc",
@@ -63,6 +73,7 @@
 		"@stryker-mutator/core": "catalog:mutation",
 		"@stryker-mutator/typescript-checker": "catalog:mutation",
 		"@stryker-mutator/vitest-runner": "catalog:mutation",
+		"@total-typescript/shoehorn": "catalog:test",
 		"@types/node": "catalog:types",
 		"@typescript/native": "catalog:tsc",
 		"@vitest/coverage-v8": "catalog:test",
@@ -74,8 +85,8 @@
 		"eslint-plugin-pnpm": "catalog:lint",
 		"eslint_d": "catalog:lint",
 		"jest-extended": "catalog:test",
-		"jiti": "catalog:lint",
 		"knip": "catalog:lint",
+		"memfs": "catalog:test",
 		"oxlint": "catalog:lint",
 		"oxlint-tsgolint": "catalog:lint",
 		"publint": "catalog:lint",
