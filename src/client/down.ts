@@ -17,8 +17,9 @@ export const DOWN_TIMEOUT_MS = 15_000;
 export const FORCED_SHUTDOWN_MS = 5000;
 /** How long `down --force` waits for the supervisor it killed. */
 export const KILL_WAIT_MS = 5000;
+
 /** How often `down` looks at the supervisor again. */
-export const DOWN_POLL_MS = 100;
+const DOWN_POLL_MS = 100;
 
 /** A barrier wait nothing aborts. */
 const NEVER = AbortSignal.any([]);

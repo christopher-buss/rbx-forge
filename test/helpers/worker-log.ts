@@ -117,38 +117,6 @@ export async function waitForDeathAsync(
 }
 
 /**
- * Pin the process a record names, only while it is still that process. A
- * worker writes its record after it started, so a process that started
- * later reused the PID: a test file running in parallel may own it (Windows
- * reuses PIDs within seconds), and killing it breaks that test.
- *
- * @param record - The worker's record.
- * @param record.at - When it wrote the record.
- * @param record.pid - Its PID.
- * @returns The pin; `undefined` when the PID has exited, was reused, or
- *   cannot be opened.
- */
-export function pinRecorded({
-	at,
-	pid,
-}: Pick<WorkerRecord, "at" | "pid">): PinnedProcess | undefined {
-	let pin: null | PinnedProcess;
-	try {
-		pin = realNative().pinProcess(pid);
-	} catch {
-		// Another user's process: not a fixture process.
-		return undefined;
-	}
-
-	if (pin === null) {
-		return undefined;
-	}
-
-	const startedMs = startTimeToEpochMs(pin.startTime, process.platform, nodeHost.bootTimeMs());
-	return startedMs !== undefined && startedMs <= at + START_SLACK_MS ? pin : undefined;
-}
-
-/**
  * Force-kill every recorded worker that still runs, through a pin: never a
  * process that reused a recorded PID.
  *
@@ -202,4 +170,33 @@ export function pinNow(pid: number): PinnedProcess | undefined {
 function realNative(): NativeAddon {
 	native ??= loadRealNative();
 	return native;
+}
+
+/**
+ * Pin the process a record names, only while it is still that process. A
+ * worker writes its record after it started, so a process that started
+ * later reused the PID: a test file running in parallel may own it (Windows
+ * reuses PIDs within seconds), and killing it breaks that test.
+ *
+ * @param record - The worker's record.
+ * @param record.at - When it wrote the record.
+ * @param record.pid - Its PID.
+ * @returns The pin; `undefined` when the PID has exited, was reused, or
+ *   cannot be opened.
+ */
+function pinRecorded({ at, pid }: Pick<WorkerRecord, "at" | "pid">): PinnedProcess | undefined {
+	let pin: null | PinnedProcess;
+	try {
+		pin = realNative().pinProcess(pid);
+	} catch {
+		// Another user's process: not a fixture process.
+		return undefined;
+	}
+
+	if (pin === null) {
+		return undefined;
+	}
+
+	const startedMs = startTimeToEpochMs(pin.startTime, process.platform, nodeHost.bootTimeMs());
+	return startedMs !== undefined && startedMs <= at + START_SLACK_MS ? pin : undefined;
 }
