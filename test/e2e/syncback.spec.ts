@@ -17,7 +17,7 @@ const NO_SYNCBACK =
  * @param config - The config file's content besides `projectType`.
  * @returns The project and a way to run forge in it.
  */
-function makeFixture(config: object = {}): FixtureProject {
+function makeFixture(config?: object): FixtureProject {
 	return makeFixtureProject({
 		config: { projectType: "luau", ...config },
 		files: { "game.rbxl": "fake place\n" },

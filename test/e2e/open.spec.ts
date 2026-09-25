@@ -42,11 +42,16 @@ function makeFixture({ hasPlace = false }: { hasPlace?: boolean } = {}): Fixture
 	const fixture = makeFixtureProject({
 		config: { projectType: "luau" },
 		files: hasPlace ? { [PLACE]: PLACE_CONTENT } : {},
-		variables: { FIXTURE_PLACE_CONTENT: PLACE_CONTENT },
 	});
 	const place = path.join(fixture.project, PLACE);
 	mkdirSync(path.dirname(place), { recursive: true });
-	return { ...fixture, place };
+	return {
+		...fixture,
+		forge: async (argv, variables = {}) => {
+			return fixture.forge(argv, { FIXTURE_PLACE_CONTENT: PLACE_CONTENT, ...variables });
+		},
+		place,
+	};
 }
 
 /**

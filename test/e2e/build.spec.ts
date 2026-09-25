@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS, EXIT_USAGE } from "../../src/exit-codes.ts";
+import type { FixtureProject, FixtureProjectOptions } from "../helpers/fixture-project.ts";
 import { makeFixtureProject } from "../helpers/fixture-project.ts";
 import { parseResult } from "../helpers/output.ts";
 import { isProcessAlive, readWorkerLog, waitForWorkersAsync } from "../helpers/worker-log.ts";
@@ -13,6 +14,17 @@ import { BIN } from "./run-bin.ts";
 
 const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 const NODE = `"${process.execPath}"`;
+
+/**
+ * A fixture project for an rbxts build.
+ *
+ * @param options - Config keys over `projectType: "rbxts"`, and extra files.
+ * @returns The project and a way to run forge in it.
+ */
+function makeFixture({ config, ...options }: Partial<FixtureProjectOptions> = {}): FixtureProject {
+	return makeFixtureProject({ ...options, config: { projectType: "rbxts", ...config } });
+}
+
 async function waitForExitAsync(
 	pids: ReadonlyArray<number>,
 	timeoutMs = 10_000,
@@ -31,7 +43,7 @@ describe("forge build", () => {
 	it("should build the configured output with the Rojo on PATH", async () => {
 		expect.assertions(3);
 
-		const { forge, project } = makeFixtureProject();
+		const { forge, project } = makeFixture();
 		const { status, stdout } = await forge(["build", "--json"]);
 
 		expect(status).toBe(EXIT_SUCCESS);
@@ -45,7 +57,7 @@ describe("forge build", () => {
 	it("should build to --output, creating its folder", async () => {
 		expect.assertions(2);
 
-		const { forge, project } = makeFixtureProject();
+		const { forge, project } = makeFixture();
 		const { status } = await forge(["build", "--output", "out/place.rbxl"]);
 
 		expect(status).toBe(EXIT_SUCCESS);
@@ -55,7 +67,7 @@ describe("forge build", () => {
 	it("should pass --plugin to Rojo", async () => {
 		expect.assertions(2);
 
-		const { forge, log } = makeFixtureProject();
+		const { forge, log } = makeFixture();
 		const { status } = await forge(["build", "--plugin", "Tool.rbxm"]);
 
 		expect(status).toBe(EXIT_SUCCESS);
@@ -67,7 +79,7 @@ describe("forge build", () => {
 	it("should exit 2 for --output with --plugin", async () => {
 		expect.assertions(2);
 
-		const { forge } = makeFixtureProject();
+		const { forge } = makeFixture();
 		const { status, stdout } = await forge([
 			"build",
 			"--output",
@@ -83,7 +95,7 @@ describe("forge build", () => {
 	it("should fail with rojo_missing when Rojo is not installed", async () => {
 		expect.assertions(2);
 
-		const { forge } = makeFixtureProject({ fixtureBins: false });
+		const { forge } = makeFixture({ fixtureBins: false });
 		const { status, stdout } = await forge(["build"]);
 
 		expect(status).toBe(EXIT_FAILURE);
@@ -96,7 +108,7 @@ describe("forge build", () => {
 	it("should run a Node-based Rojo from a dependency with the current Node", async () => {
 		expect.assertions(2);
 
-		const { forge, log } = makeFixtureProject({
+		const { forge, log } = makeFixture({
 			files: {
 				"node_modules/fake-rojo/cli.mjs": [
 					'process.argv.splice(2, 0, "rojo");',
@@ -126,7 +138,7 @@ describe("forge build", () => {
 		it("should run pre and post hooks around Rojo and report them", async () => {
 			expect.assertions(3);
 
-			const { forge, log } = makeFixtureProject({
+			const { forge, log } = makeFixture({
 				config: { hooks: { build: { post: ["hook post"], pre: ["hook pre"] } } },
 			});
 			const { status, stdout } = await forge(["build", "--json"]);
@@ -156,7 +168,7 @@ describe("forge build", () => {
 		it("should abort the build when a pre hook fails", async () => {
 			expect.assertions(4);
 
-			const { forge, log, project } = makeFixtureProject({
+			const { forge, log, project } = makeFixture({
 				config: { hooks: { build: { post: ["hook post"], pre: ["hook pre"] } } },
 			});
 			const { status, stdout } = await forge(["build", "--json"], { FIXTURE_EXIT_CODE: "3" });
@@ -173,7 +185,7 @@ describe("forge build", () => {
 		it("should run a post hook that calls forge build only once", async () => {
 			expect.assertions(3);
 
-			const { forge, log } = makeFixtureProject({
+			const { forge, log } = makeFixture({
 				config: { hooks: { build: { post: [`${NODE} "${BIN}" build --json`] } } },
 			});
 			const { status, stdout } = await forge(["build", "--json"]);
@@ -191,7 +203,7 @@ describe("forge build", () => {
 		it("should fail a hook nested deeper than 8", async () => {
 			expect.assertions(3);
 
-			const { forge, log } = makeFixtureProject({
+			const { forge, log } = makeFixture({
 				config: { hooks: { build: { pre: ["hook pre"] } } },
 			});
 			const stack = Array.from({ length: 8 }, (_, index) => `open:pre:${index}`).join(",");
@@ -207,7 +219,7 @@ describe("forge build", () => {
 		it("should kill a hook's whole process tree when it times out", async () => {
 			expect.assertions(3);
 
-			const { forge, log } = makeFixtureProject({
+			const { forge, log } = makeFixture({
 				config: { hooks: { build: { pre: ["hook hang"] } }, hookTimeoutMs: 2000 },
 			});
 			const { status, stdout } = await forge(["build", "--json"], {

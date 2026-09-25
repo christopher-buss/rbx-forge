@@ -44,6 +44,7 @@ export type ForgeErrorCode =
 	| "service_failed"
 	| "session_replaced"
 	| "session_running"
+	| "sourcemap_invalid"
 	| "studio_launch_failed"
 	| "supervisor_unresponsive"
 	| "syncback_unsupported"
@@ -139,6 +140,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	session_running: {
 		exitCode: EXIT_FAILURE,
 		text: "A session already runs for this project.",
+	},
+	sourcemap_invalid: {
+		exitCode: EXIT_FAILURE,
+		text: "Rojo's sourcemap is missing, or is not the sourcemap of a place.",
 	},
 	studio_launch_failed: {
 		exitCode: EXIT_FAILURE,
