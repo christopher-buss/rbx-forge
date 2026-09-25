@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
@@ -152,16 +153,43 @@ describe(runStatusAsync, () => {
 		expect(asked).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 300_000 });
 	});
 
-	it("should pass --timeout on to the wait", async () => {
+	it.for([0, 2000, 2_147_000_000])("should pass --timeout %d on to the wait", async (ms) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
 		const session = await serveFakeSessionAsync(memory, ipc);
 		const asked = vi.fn<IpcHandler>(() => ({ ...session.status }));
 		session.freshStatus = asked;
-		await runStatusAsync(context, withFlags({ timeout: "2000", wait: true }));
+		await runStatusAsync(context, withFlags({ timeout: String(ms), wait: true }));
 
-		expect(asked).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 2000 });
+		expect(asked).toHaveBeenCalledExactlyOnceWith({ timeoutMs: ms });
+	});
+
+	it("should give the session time to answer past the wait itself", async () => {
+		expect.assertions(1);
+
+		const { context, ipc, memory } = makeContext();
+		const session = await serveFakeSessionAsync(memory, ipc);
+		session.freshStatus = async () => {
+			await sleep(50);
+			return { ...session.status };
+		};
+
+		await expect(
+			runStatusAsync(context, withFlags({ timeout: "0", wait: true })),
+		).resolves.toMatchObject({ data: session.status });
+	});
+
+	it("should ask for the status now without --wait", async () => {
+		expect.assertions(1);
+
+		const { context, ipc, memory } = makeContext();
+		const session = await serveFakeSessionAsync(memory, ipc);
+		session.freshStatus = () => {
+			throw new ForgeError("compile_timeout", "Not asked.");
+		};
+
+		await expect(runStatusAsync(context)).resolves.toMatchObject({ data: session.status });
 	});
 
 	it("should fail with the session's compile_timeout", async () => {

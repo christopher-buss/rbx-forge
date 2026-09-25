@@ -59,10 +59,10 @@ describe(controlHandlers, () => {
 
 		const { builds, handlers, status } = makeTarget();
 
-		await expect(handlers.freshStatus!({ timeoutMs: 5000 })).resolves.toStrictEqual(
+		await expect(handlers.freshStatus!({ timeoutMs: 0 })).resolves.toStrictEqual(
 			status.snapshot(),
 		);
-		expect(builds.waitAsync).toHaveBeenCalledExactlyOnceWith(5000);
+		expect(builds.waitAsync).toHaveBeenCalledExactlyOnceWith(0);
 	});
 
 	it.for([[{}], [{ timeoutMs: "5" }], [{ timeoutMs: -1 }]] as const)(

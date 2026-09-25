@@ -175,12 +175,21 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.settleAt()).toBe(bound);
 		expect([tracker.tick(bound - 1), tracker.building()]).toStrictEqual([false, true]);
 		expect(tracker.tick(bound)).toBeTrue();
-		expect(tracker.building()).toBeFalse();
+		expect([tracker.building(), tracker.tick(bound + 1)]).toStrictEqual([false, false]);
 		expect(tracker.freshAt(900)).toBe(bound + QUIET_WINDOW_MS);
 	});
 
-	it("should count open start events as merged once a new compile starts", () => {
+	it("should never settle the first compile, however long it runs", () => {
 		expect.assertions(2);
+
+		const tracker = feed([[0, START]]);
+
+		expect(tracker.tick(1_000_000)).toBeFalse();
+		expect(tracker.building()).toBeTrue();
+	});
+
+	it("should count open start events as merged once a new compile starts", () => {
+		expect.assertions(3);
 
 		const tracker = feed([
 			[0, START],
@@ -189,11 +198,14 @@ describe(createFreshnessTracker, () => {
 			[1200, CHANGE],
 			[1400, FOUND],
 			[3000, CHANGE],
-			[3300, FOUND],
 		]);
+		// The new compile runs long, silent: it does not settle.
+		const isSettled = tracker.tick(100_000);
+		tracker.record(FOUND, 100_300);
 
+		expect(isSettled).toBeFalse();
 		expect(tracker.building()).toBeFalse();
-		expect(tracker.lastBuild()).toMatchObject({ at: iso(3300), startedAt: iso(3000) });
+		expect(tracker.lastBuild()).toMatchObject({ at: iso(100_300), startedAt: iso(3000) });
 	});
 
 	it("should wait twice the longest compile for merged start events", () => {

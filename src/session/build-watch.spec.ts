@@ -237,6 +237,8 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).rejects.toMatchObject({
 			code: "compile_timeout",
 			details: { building: true, timeoutMs: 2000 },
+			hint: 'Read the compiler\'s output with "forge logs compiler", or wait longer with --timeout.',
+			message: "No fresh build within 2000 ms: a compile still runs.",
 		});
 	});
 
@@ -254,13 +256,12 @@ describe(createBuildWatch, () => {
 		expect.assertions(1);
 
 		const { advanceAsync, lineAsync, wait } = await builtAsync();
-		const waiting = wait(2000);
-		for (let save = 0; save < 4; save += 1) {
-			await lineAsync(CHANGE);
-			await advanceAsync(100);
-			await lineAsync(FOUND);
-			await advanceAsync(400);
-		}
+		// A wait as long as the window: the compile moves the window past it.
+		const waiting = wait(QUIET_WINDOW_MS);
+		await lineAsync(CHANGE);
+		await advanceAsync(100);
+		await lineAsync(FOUND);
+		await advanceAsync(QUIET_WINDOW_MS - 100);
 
 		await expect(waiting.wait).rejects.toThrow("compiles kept starting");
 	});
@@ -294,11 +295,30 @@ describe(createBuildWatch, () => {
 	});
 
 	it("should fail every wait with not_running once the session stops", async () => {
-		expect.assertions(1);
+		expect.assertions(2);
 
-		const { wait, watch } = makeWatch();
+		const { recorder, wait, watch } = makeWatch();
 		watch.close();
 
-		await expect(wait().wait).rejects.toMatchObject({ code: "not_running" });
+		// No compile ran, so none ends.
+		expect(recorder.building).not.toHaveBeenCalled();
+		await expect(wait().wait).rejects.toMatchObject({
+			code: "not_running",
+			hint: 'Start a session with "forge up".',
+			message: "The session is stopping; no build comes.",
+		});
+	});
+
+	it("should settle merged start lines before it reads a late output line", async () => {
+		expect.assertions(1);
+
+		const { advanceAsync, lineAsync, recorder } = await builtAsync();
+		await lineAsync(CHANGE);
+		await lineAsync(CHANGE);
+		await lineAsync(FOUND);
+		await advanceAsync(10_000);
+		await lineAsync("compiling as game..");
+
+		expect(recorder.building.mock.lastCall).toStrictEqual([false]);
 	});
 });

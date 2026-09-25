@@ -113,9 +113,8 @@ function finish(state: TrackerState, report: CompileReport, now: number): LastBu
 	const startedAt = state.starts.shift() ?? now;
 	state.unsettled = state.starts.length > 0;
 	state.longestMs = Math.max(state.longestMs, now - startedAt);
-	if (!state.unsettled) {
-		state.idleSince = now;
-	}
+	// While start events stay open, no wait is answered, and `tick` moves this.
+	state.idleSince = now;
 
 	const build = { ...report, at: isoTime(now), startedAt: isoTime(startedAt) };
 	state.lastBuild = build;

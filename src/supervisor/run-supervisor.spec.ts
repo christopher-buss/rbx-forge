@@ -1677,6 +1677,73 @@ describe("forge up control channel", () => {
 		});
 	});
 
+	it("should answer freshStatus at once for a Luau watch command, which reports no builds", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			file: { luau: { watch: { command: "darklua" } } },
+			files: { ...TOOL_FILES, "tools/darklua": "" },
+			flags: { open: false },
+		});
+		await flushAsync();
+
+		await expect(
+			callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", { params: { timeoutMs: 0 } }),
+		).resolves.toMatchObject({ services: { compiler: { status: "ready" } } });
+	});
+
+	it("should wait in freshStatus for the first build of a roblox-ts compiler", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
+		await flushAsync();
+
+		await expect(
+			callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", { params: { timeoutMs: 0 } }),
+		).rejects.toMatchObject({ code: "compile_timeout" });
+	});
+
+	it("should fail a freshStatus wait with service_failed when the compiler exits", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
+		run.result.catch(() => {});
+		await flushAsync();
+		const waiting = callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", {
+			params: { timeoutMs: 60_000 },
+			responseTimeoutMs: 10_000,
+		});
+		await flushAsync();
+		run.fake.exit("compiler", EXITED);
+
+		await expect(waiting).rejects.toMatchObject({
+			code: "service_failed",
+			details: { reason: "service_failed:compiler" },
+			hint: `Its output is in ${path.join(PROJECT, ".forge", "logs", "compiler.log")}.`,
+			message: "The compiler stopped, so no build comes.",
+		});
+	});
+
+	it("should fail a freshStatus wait with not_running once the session stops", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
+		await flushAsync();
+		const waiting = callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", {
+			params: { timeoutMs: 60_000 },
+			responseTimeoutMs: 10_000,
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		await expect(waiting).rejects.toMatchObject({
+			code: "not_running",
+			hint: 'Start a session with "forge up".',
+			message: "The session is stopping; no build comes.",
+		});
+	});
+
 	it("should be ready once a Luau watch command runs, with no compile", async () => {
 		expect.assertions(1);
 

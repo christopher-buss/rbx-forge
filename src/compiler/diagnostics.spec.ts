@@ -242,6 +242,7 @@ describe(createDiagnosticsParser, () => {
 		const { final } = parseAll([
 			"src/a.ts:1:1 - error TS1005: ';' expected.",
 			"[10:00:00] File change detected. Starting incremental compilation...",
+			"compiling as game..",
 		]);
 
 		expect(final.diagnostics).toStrictEqual([
