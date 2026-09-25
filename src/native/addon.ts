@@ -152,6 +152,15 @@ export interface CleanupReport {
 /** The addon's exports. */
 export interface NativeAddon {
 	/**
+	 * Windows only: connect to the pipe at `path` as a client, waiting at most
+	 * `timeoutMs` for a free instance. `node:net` would wait up to 30 s for a
+	 * busy pipe, whatever its own timeout.
+	 *
+	 * @returns The connection, or `null` when there is no pipe or no instance
+	 *   became free in time.
+	 */
+	connectPipe?: (path: string, timeoutMs: number) => Promise<NativePipeConnection | null>;
+	/**
 	 * Windows only: create the pipe at `path` (`\\.\pipe\<name>`) and its
 	 * first instance.
 	 *

@@ -208,6 +208,39 @@ impl PipeServer {
     }
 }
 
+pub struct ConnectTask {
+    path: String,
+    timeout: Duration,
+}
+
+impl Task for ConnectTask {
+    type Output = Option<pipe::PipeConnection>;
+    type JsValue = Option<PipeConnection>;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        pipe::connect(&self.path, self.timeout)
+            .map_err(|err| to_napi(&format!("connect to pipe {}", self.path), &err))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output.map(|connection| PipeConnection {
+            inner: Arc::new(connection),
+        }))
+    }
+}
+
+/// Connect to the pipe at `path` as a client, waiting at most `timeout_ms`
+/// for a free instance; `null` when there is no pipe, or no instance became
+/// free in time.
+#[napi(ts_return_type = "Promise<PipeConnection | null>")]
+#[must_use]
+pub fn connect_pipe(path: String, timeout_ms: u32) -> AsyncTask<ConnectTask> {
+    AsyncTask::new(ConnectTask {
+        path,
+        timeout: Duration::from_millis(u64::from(timeout_ms)),
+    })
+}
+
 /// Create the pipe at `path` (`\\.\pipe\<name>`) and its first instance.
 ///
 /// # Errors

@@ -6,7 +6,12 @@ import path from "node:path";
 import { ForgeError } from "../errors.ts";
 import type { NativeLoader } from "../native/addon.ts";
 import type { IpcConnection, IpcListener } from "./connection.ts";
-import { nativeListener, socketListener, streamConnection } from "./connection.ts";
+import {
+	nativeConnection,
+	nativeListener,
+	socketListener,
+	streamConnection,
+} from "./connection.ts";
 
 /**
  * Opens and reaches a session's endpoint. Unit tests pass an in-memory
@@ -48,7 +53,8 @@ const PERMISSION_BITS = 0o777;
 /**
  * The real transport: on Windows a native named pipe server (owner-only
  * DACL, remote clients rejected, first instance), elsewhere a Unix socket in
- * an owner-only directory. Clients connect through `node:net` on both.
+ * an owner-only directory. Clients connect through the addon on Windows
+ * (bounded waits for a busy pipe), and through `node:net` elsewhere.
  *
  * @param backend - The OS facts, file system, native addon, and `node:net`.
  * @returns A transport for this OS.
@@ -56,26 +62,9 @@ const PERMISSION_BITS = 0o777;
 export function createNodeTransport(backend: NodeTransportBackend): IpcTransport {
 	return {
 		connectAsync: async (endpoint, timeoutMs) => {
-			const socket = backend.net.connect(endpoint);
-			const isConnected = await new Promise<boolean>((resolve) => {
-				const timer = setTimeout(() => {
-					resolve(false);
-				}, timeoutMs);
-				socket.once("connect", () => {
-					clearTimeout(timer);
-					resolve(true);
-				});
-				socket.once("error", () => {
-					clearTimeout(timer);
-					resolve(false);
-				});
-			});
-			if (!isConnected) {
-				socket.destroy();
-				return;
-			}
-
-			return streamConnection(socket);
+			return backend.platform === "win32"
+				? connectPipeAsync(backend, endpoint, timeoutMs)
+				: connectSocketAsync(backend, endpoint, timeoutMs);
 		},
 		listenAsync: async (endpoint) => {
 			return backend.platform === "win32"
@@ -83,6 +72,63 @@ export function createNodeTransport(backend: NodeTransportBackend): IpcTransport
 				: listenSocketAsync(backend, endpoint);
 		},
 	};
+}
+
+/**
+ * Connect to a Unix socket through `node:net`.
+ *
+ * @param backend - `node:net`.
+ * @param endpoint - The socket's path.
+ * @param timeoutMs - How long the connect may take.
+ * @returns The connection, or `undefined` when nothing listens in time.
+ */
+async function connectSocketAsync(
+	backend: Pick<NodeTransportBackend, "net">,
+	endpoint: string,
+	timeoutMs: number,
+): Promise<IpcConnection | undefined> {
+	const socket = backend.net.connect(endpoint);
+	const isConnected = await new Promise<boolean>((resolve) => {
+		const timer = setTimeout(() => {
+			resolve(false);
+		}, timeoutMs);
+		socket.once("connect", () => {
+			clearTimeout(timer);
+			resolve(true);
+		});
+		socket.once("error", () => {
+			clearTimeout(timer);
+			resolve(false);
+		});
+	});
+	if (!isConnected) {
+		socket.destroy();
+		return;
+	}
+
+	return streamConnection(socket);
+}
+
+/**
+ * Connect to a named pipe through the addon (Windows). `node:net` waits up
+ * to 30 s for a busy pipe on a libuv pool thread, and keeps the process
+ * alive meanwhile, whatever the caller's timeout: a supervisor that stopped
+ * accepting would hold up `down` and `status` long after their bounds.
+ *
+ * @param backend - The native addon.
+ * @param endpoint - The pipe's path.
+ * @param timeoutMs - How long to wait for a free instance.
+ * @returns The connection, or `undefined` when nothing listens in time.
+ */
+async function connectPipeAsync(
+	backend: Pick<NodeTransportBackend, "native">,
+	endpoint: string,
+	timeoutMs: number,
+): Promise<IpcConnection | undefined> {
+	const { connectPipe } = backend.native();
+	assert(connectPipe !== undefined);
+	const connection = await connectPipe(endpoint, timeoutMs);
+	return connection === null ? undefined : nativeConnection(connection);
 }
 
 function inUse(endpoint: string, reason: string, cause?: unknown): ForgeError {

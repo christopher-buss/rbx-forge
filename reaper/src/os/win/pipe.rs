@@ -11,22 +11,24 @@
 
 use std::io;
 use std::os::windows::io::OwnedHandle;
-use std::ptr::null_mut;
+use std::ptr::{null, null_mut};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_OPERATION_ABORTED,
-    ERROR_PIPE_CONNECTED, GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
+    ERROR_BROKEN_PIPE, ERROR_FILE_NOT_FOUND, ERROR_IO_PENDING, ERROR_NO_DATA,
+    ERROR_OPERATION_ABORTED, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GENERIC_READ, GENERIC_WRITE,
+    GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
+    CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
+    PIPE_ACCESS_DUPLEX, ReadFile, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WriteFile,
 };
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_ACCEPT_REMOTE_CLIENTS,
     PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
-    PIPE_WAIT,
+    PIPE_WAIT, WaitNamedPipeW,
 };
 use windows_sys::Win32::System::Threading::{
     INFINITE, WaitForMultipleObjects, WaitForSingleObject,
@@ -231,6 +233,65 @@ impl PipeConnection {
     }
 }
 
+/// Connect to the pipe at `path` (`\\.\pipe\<name>`) as a client, waiting
+/// at most `timeout` for a free instance. The server can only identify the
+/// client, never act as it.
+///
+/// Every wait is bounded: `node:net` waits up to 30 s for a busy pipe on a
+/// thread of the libuv pool, and keeps its process alive meanwhile, so a
+/// server that stopped accepting (a hung supervisor) would hold up the
+/// client long after its own timeout.
+///
+/// Returns `None` when no pipe has the name, or no instance became free in
+/// time.
+///
+/// # Errors
+///
+/// When the OS refuses the open for another reason, such as access denied.
+pub fn connect(path: &str, timeout: Duration) -> io::Result<Option<PipeConnection>> {
+    let name = wide(path);
+    let deadline = Instant::now() + timeout;
+    loop {
+        // SAFETY: a NUL-terminated name; no security attributes or template.
+        let handle = unsafe {
+            CreateFileW(
+                name.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                null(),
+                OPEN_EXISTING,
+                FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+                null_mut(),
+            )
+        };
+        if handle != INVALID_HANDLE_VALUE {
+            let handle = owned(handle, INVALID_HANDLE_VALUE)?;
+            return PipeConnection::new(Arc::new(handle)).map(Some);
+        }
+
+        // SAFETY: plain call right after the failed open.
+        let error = unsafe { GetLastError() };
+        if error == ERROR_FILE_NOT_FOUND {
+            return Ok(None);
+        }
+        if error != ERROR_PIPE_BUSY {
+            return Err(io::Error::from_raw_os_error(
+                i32::try_from(error).unwrap_or(i32::MAX),
+            ));
+        }
+
+        // Every instance is taken: wait for one, within the deadline. A
+        // wait of 0 would mean the server's default, so stop first.
+        let left = millis_until(deadline);
+        if left == 0 {
+            return Ok(None);
+        }
+        // SAFETY: a NUL-terminated name. Its failure (time out, or the pipe
+        // went away) is read by the next open.
+        unsafe { WaitNamedPipeW(name.as_ptr(), left) };
+    }
+}
+
 /// The server end of a named pipe.
 #[derive(Debug)]
 pub struct PipeServer {
@@ -368,7 +429,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use super::{PipeServer, ReadLine};
+    use super::{PipeServer, ReadLine, connect};
     use crate::os::win::security::current_user_sid;
 
     fn name(tag: &str) -> String {
@@ -450,5 +511,61 @@ mod tests {
         assert_eq!(security.aces.len(), 1);
         assert_eq!(security.aces[0].kind, "allow");
         assert_eq!(security.aces[0].sid, user);
+    }
+
+    #[test]
+    fn connect_exchanges_lines_with_the_server() {
+        let path = name("connect");
+        let server = Arc::new(PipeServer::create(&path, true).expect("create"));
+        let accepting = thread::spawn({
+            let server = Arc::clone(&server);
+            move || server.accept().expect("accept").expect("a client")
+        });
+        let client = connect(&path, Duration::from_secs(5))
+            .expect("connect")
+            .expect("an instance");
+        let connection = accepting.join().expect("accept thread");
+
+        assert!(
+            client
+                .write(b"ping\n", Duration::from_secs(5))
+                .expect("write")
+        );
+        let line = connection
+            .read_line(64, Duration::from_secs(5))
+            .expect("read");
+        assert!(
+            connection
+                .write(b"pong\n", Duration::from_secs(5))
+                .expect("write")
+        );
+        let answer = client.read_line(64, Duration::from_secs(5)).expect("read");
+        assert_eq!(
+            (line, answer),
+            (
+                ReadLine::Line("ping".to_owned()),
+                ReadLine::Line("pong".to_owned())
+            )
+        );
+    }
+
+    #[test]
+    fn connect_finds_no_pipe_at_a_free_name() {
+        let found = connect(&name("missing"), Duration::from_secs(5)).expect("connect");
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn connect_gives_up_on_a_busy_pipe_within_its_timeout() {
+        let path = name("busy");
+        let _server = PipeServer::create(&path, true).expect("create");
+        // Nobody accepts: the one instance is taken by the first client.
+        let _first = connect(&path, Duration::from_secs(5))
+            .expect("connect")
+            .expect("the listening instance");
+        let started = std::time::Instant::now();
+        let second = connect(&path, Duration::from_millis(300)).expect("connect");
+        assert!(second.is_none());
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }

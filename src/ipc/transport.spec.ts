@@ -4,10 +4,10 @@ import { EventEmitter } from "node:events";
 import type { AddressInfo, Server } from "node:net";
 import { connect, createServer } from "node:net";
 import path from "node:path";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createFakeNative } from "../../test/helpers/native.ts";
-import type { NativePipeServer } from "../native/addon.ts";
+import type { NativeAddon, NativePipeConnection, NativePipeServer } from "../native/addon.ts";
 import type { NodeTransportBackend } from "./transport.ts";
 import { createNodeTransport } from "./transport.ts";
 
@@ -182,6 +182,37 @@ describe(createNodeTransport, () => {
 			message:
 				"Cannot open the control endpoint \\\\.\\pipe\\x: another process holds the pipe.",
 		});
+	});
+
+	it("should connect a client through the addon on Windows, within the timeout", async () => {
+		expect.assertions(4);
+
+		const client: NativePipeConnection = {
+			close: vi.fn<NativePipeConnection["close"]>(),
+			readLine: vi.fn<NativePipeConnection["readLine"]>().mockResolvedValue({
+				kind: "line",
+				line: "hi",
+			}),
+			write: vi.fn<NativePipeConnection["write"]>().mockResolvedValue(true),
+		};
+		const connectPipe = vi.fn<NonNullable<NativeAddon["connectPipe"]>>();
+		connectPipe.mockResolvedValueOnce(client).mockResolvedValueOnce(null);
+		const transport = createNodeTransport({
+			...posixBackend(undefined),
+			native: () => ({ ...createFakeNative().addon, connectPipe }),
+			platform: "win32",
+		});
+
+		const connection = await transport.connectAsync("\\\\.\\pipe\\x", 2000);
+		assert(connection !== undefined);
+
+		await expect(connection.readLineAsync(100)).resolves.toStrictEqual({
+			line: "hi",
+			type: "line",
+		});
+		await expect(transport.connectAsync("\\\\.\\pipe\\x", 2000)).resolves.toBeUndefined();
+		expect(connectPipe).toHaveBeenCalledWith("\\\\.\\pipe\\x", 2000);
+		expect(connectPipe).toHaveBeenCalledTimes(2);
 	});
 
 	it("should connect a client, or report that nothing listens", async () => {
