@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { onTestFinished } from "vitest";
@@ -8,10 +8,12 @@ import { onTestFinished } from "vitest";
  * when the test finishes.
  *
  * @param files - Relative path to content.
- * @returns The absolute directory path.
+ * @returns The absolute, symlink-free directory path.
  */
 export function makeTemporaryDirectory(files: Record<string, string> = {}): string {
-	const directory = mkdtempSync(path.join(os.tmpdir(), "rbx-forge-test-"));
+	// Canonical path: macOS `os.tmpdir()` is under the `/var` symlink, and
+	// tools such as c12 report `/private/var` paths.
+	const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), "rbx-forge-test-")));
 	onTestFinished(() => {
 		rmSync(directory, { force: true, recursive: true });
 	});
