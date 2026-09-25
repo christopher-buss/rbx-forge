@@ -12,6 +12,7 @@ import {
 import { createChildProcessRunner } from "../process/process-runner.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
 import { createReaperLauncher } from "../reaper/reaper-client.ts";
+import { createStudioLauncher } from "../studio/launcher.ts";
 import { nodeChildProcessRunner } from "./child-process.ts";
 import { nodeClock } from "./clock.ts";
 import { loadConfigFileAsync } from "./config-loader.ts";
@@ -35,6 +36,9 @@ export interface NodeSeamsOptions {
 	output: NodeJS.WritableStream;
 }
 
+/** What every process-starting seam is built from. */
+const PROCESS_BACKEND = { childProcess: nodeChildProcessRunner, clock: nodeClock, host: nodeHost };
+
 /**
  * The real seams. Only the CLI entry calls this.
  *
@@ -48,7 +52,6 @@ export function createNodeSeams({ input, nativeDirectory, output }: NodeSeamsOpt
 		readHost: () => readHost(process),
 		requireModule,
 	});
-
 	return {
 		childProcess: nodeChildProcessRunner,
 		clock: nodeClock,
@@ -57,15 +60,12 @@ export function createNodeSeams({ input, nativeDirectory, output }: NodeSeamsOpt
 		host: nodeHost,
 		native,
 		network: nodeNetwork,
-		processRunner: createChildProcessRunner({
-			childProcess: nodeChildProcessRunner,
-			clock: nodeClock,
-			host: nodeHost,
-		}),
+		processRunner: createChildProcessRunner(PROCESS_BACKEND),
 		prompter: createReadlinePrompter(input, output),
 		randomId: randomUUID,
 		reaper: createNodeReaperLauncher(nativeDirectory, native, requireModule),
 		signals: createSignals(process),
+		studioLauncher: createStudioLauncher(PROCESS_BACKEND),
 	};
 }
 

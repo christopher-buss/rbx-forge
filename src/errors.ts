@@ -19,6 +19,7 @@ export type ForgeErrorCode =
 	| "cleanup_in_progress"
 	| "cleanup_unverifiable"
 	| "command_unavailable"
+	| "compile_failed"
 	| "compiler_missing"
 	| "config_exists"
 	| "config_invalid"
@@ -35,6 +36,7 @@ export type ForgeErrorCode =
 	| "native_missing"
 	| "needs_confirmation"
 	| "not_running"
+	| "place_not_found"
 	| "port_in_use"
 	| "previous_generation_alive"
 	| "process_failed"
@@ -43,6 +45,8 @@ export type ForgeErrorCode =
 	| "service_failed"
 	| "session_replaced"
 	| "session_running"
+	| "sourcemap_invalid"
+	| "studio_launch_failed"
 	| "supervisor_unresponsive"
 	| "syncback_unsupported"
 	| "usage";
@@ -71,6 +75,7 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		exitCode: EXIT_FAILURE,
 		text: "The command does not apply to this project type.",
 	},
+	compile_failed: { exitCode: EXIT_FAILURE, text: "The compiler reported errors or failed." },
 	compiler_missing: { exitCode: EXIT_FAILURE, text: "The compiler is not installed." },
 	config_exists: {
 		exitCode: EXIT_FAILURE,
@@ -111,6 +116,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		text: "A question has no safe default and the run cannot prompt.",
 	},
 	not_running: { exitCode: EXIT_NOT_RUNNING, text: "No session is running." },
+	place_not_found: {
+		exitCode: EXIT_FAILURE,
+		text: "The place file to open does not exist, and it was not built.",
+	},
 	port_in_use: { exitCode: EXIT_FAILURE, text: "The fixed Rojo port is busy." },
 	previous_generation_alive: {
 		exitCode: EXIT_CLEANUP_PENDING,
@@ -133,6 +142,14 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	session_running: {
 		exitCode: EXIT_FAILURE,
 		text: "A session already runs for this project.",
+	},
+	sourcemap_invalid: {
+		exitCode: EXIT_FAILURE,
+		text: "Rojo's sourcemap is missing, or is not the sourcemap of a place.",
+	},
+	studio_launch_failed: {
+		exitCode: EXIT_FAILURE,
+		text: "The platform launcher could not open the place in Roblox Studio.",
 	},
 	supervisor_unresponsive: {
 		exitCode: EXIT_CLEANUP_PENDING,

@@ -1,113 +1,28 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS, EXIT_USAGE } from "../../src/exit-codes.ts";
-import { createFixtureBinDirectory } from "../helpers/fixture-bin.ts";
+import type { FixtureProject, FixtureProjectOptions } from "../helpers/fixture-project.ts";
+import { makeFixtureProject } from "../helpers/fixture-project.ts";
 import { parseResult } from "../helpers/output.ts";
-import {
-	isProcessAlive,
-	killWorkers,
-	readWorkerLog,
-	waitForWorkersAsync,
-} from "../helpers/worker-log.ts";
-import { BIN, makeProject, runBinAsync } from "./run-bin.ts";
+import { isProcessAlive, readWorkerLog, waitForWorkersAsync } from "../helpers/worker-log.ts";
+import { BIN } from "./run-bin.ts";
 
 const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 const NODE = `"${process.execPath}"`;
-const PATH_NAME = /^path$/i;
-
-interface Fixture {
-	/** Run `forge` in the project with the fixture binaries first on PATH. */
-	forge: (
-		argv: Array<string>,
-		variables?: Record<string, string>,
-	) => ReturnType<typeof runBinAsync>;
-	/** The NDJSON file every fixture process appends a record to. */
-	log: string;
-	project: string;
-}
-
-interface FixtureOptions {
-	/** The config file's content besides `projectType`. */
-	config?: object;
-	/** Extra files, by path relative to the project. */
-	files?: Record<string, string>;
-	/** Put the fixture binaries (fake rojo, hook) on PATH. */
-	fixtureBins?: boolean;
-}
 
 /**
- * This process's environment with PATH replaced. Windows spells the name
- * `Path`, and two spellings of one variable would both reach the child.
+ * A fixture project for an rbxts build.
  *
- * @param directory - The only PATH entry.
- * @param variables - Variables to add.
- * @returns The environment for a run.
+ * @param options - Config keys over `projectType: "rbxts"`, and extra files.
+ * @returns The project and a way to run forge in it.
  */
-function environmentWith(directory: string, variables: Record<string, string>): NodeJS.ProcessEnv {
-	const environment: NodeJS.ProcessEnv = {
-		...process.env,
-		CI: undefined,
-		RBX_FORGE_HOOK_STACK: undefined,
-	};
-	for (const key of Object.keys(environment)) {
-		if (PATH_NAME.test(key)) {
-			delete environment[key];
-		}
-	}
-
-	return { ...environment, ...variables, PATH: directory };
-}
-
-function writeFiles(root: string, files: Record<string, string>): void {
-	for (const [name, content] of Object.entries(files)) {
-		const file = path.join(root, name);
-		mkdirSync(path.dirname(file), { recursive: true });
-		writeFileSync(file, content);
-	}
-}
-
-function makeFixture({
-	config = {},
-	files = {},
-	fixtureBins = true,
-}: FixtureOptions = {}): Fixture {
-	const project = makeProject();
-	writeFiles(project, {
-		"default.project.json": JSON.stringify({
-			name: "fixture",
-			tree: { $className: "DataModel" },
-		}),
-		"rbx-forge.config.json": JSON.stringify({ projectType: "rbxts", ...config }),
-		...files,
-	});
-	const bin = path.join(project, fixtureBins ? "fixture-bin" : "empty-bin");
-	if (fixtureBins) {
-		createFixtureBinDirectory(bin);
-	} else {
-		mkdirSync(bin);
-	}
-
-	const log = path.join(project, "workers.ndjson");
-	onTestFinished(() => {
-		killWorkers(readWorkerLog(log));
-	});
-
-	return {
-		forge: async (argv, variables = {}) => {
-			return runBinAsync(
-				argv,
-				project,
-				environmentWith(bin, { FIXTURE_LOG: log, ...variables }),
-			);
-		},
-		log,
-		project,
-	};
+function makeFixture({ config, ...options }: Partial<FixtureProjectOptions> = {}): FixtureProject {
+	return makeFixtureProject({ ...options, config: { projectType: "rbxts", ...config } });
 }
 
 async function waitForExitAsync(

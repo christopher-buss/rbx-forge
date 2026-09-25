@@ -1,6 +1,7 @@
 import type { NativeLoader } from "../native/addon.ts";
 import type { ProcessRunner } from "../process/process-runner.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
+import type { StudioLauncher } from "../studio/launcher.ts";
 import type { ChildProcessRunner } from "./child-process.ts";
 import type { Clock } from "./clock.ts";
 import type { ConfigLoader } from "./config-loader.ts";
@@ -46,4 +47,6 @@ export interface Seams {
 	/** Starts a session's `forge-reaper`, which owns its workers. */
 	reaper: ReaperLauncher;
 	signals: Signals;
+	/** Opens a place in Studio outside every forge-owned process tree. */
+	studioLauncher: StudioLauncher;
 }

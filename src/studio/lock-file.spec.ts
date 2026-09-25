@@ -1,6 +1,8 @@
+// cspell:ignore SAPPHIR VERYLONGCOMPUTE VERYLONGCOMPUT VERYLONGCOMPUTX
+// cspell:ignore verylongcomputername STRASSE straße
 import { describe, expect, it } from "vitest";
 
-import { isStudioExecutable, parseStudioLock, studioLockPath } from "./lock-file.ts";
+import { isLockHost, isStudioExecutable, parseStudioLock, studioLockPath } from "./lock-file.ts";
 
 /** A lock file as Roblox Studio 0.700 on Windows writes it. */
 const WINDOWS_LOCK = "47212\nRobloxStudioBeta\nSAPPHIRE\n4378769e-07d9-4eda-b5ee-187aa6c43cda\n\n";
@@ -9,25 +11,46 @@ describe(parseStudioLock, () => {
 	it("should read the PID from the first line of a Studio lock file", () => {
 		expect.assertions(1);
 
-		expect(parseStudioLock(WINDOWS_LOCK)).toStrictEqual({ pid: 47_212 });
+		expect(parseStudioLock(WINDOWS_LOCK)).toStrictEqual({ host: "SAPPHIRE", pid: 47_212 });
 	});
 
 	it("should read a lock file with CRLF line endings", () => {
 		expect.assertions(1);
 
-		expect(parseStudioLock("512\r\nRobloxStudio\r\n")).toStrictEqual({ pid: 512 });
+		expect(parseStudioLock("512\r\nRobloxStudio\r\nmac-mini\r\n")).toStrictEqual({
+			host: "mac-mini",
+			pid: 512,
+		});
 	});
 
 	it("should read a lock file that holds only the PID", () => {
 		expect.assertions(1);
 
-		expect(parseStudioLock("7")).toStrictEqual({ pid: 7 });
+		expect(parseStudioLock("7")).toStrictEqual({ host: undefined, pid: 7 });
 	});
 
 	it("should read the largest PID", () => {
 		expect.assertions(1);
 
-		expect(parseStudioLock("4294967295\n")).toStrictEqual({ pid: 4_294_967_295 });
+		expect(parseStudioLock("4294967295\n")).toStrictEqual({
+			host: undefined,
+			pid: 4_294_967_295,
+		});
+	});
+
+	it.for(["1\nRobloxStudio\n\n", "1\nRobloxStudio\n  \n"])(
+		"should find no host in %j",
+		(text) => {
+			expect.assertions(1);
+
+			expect(parseStudioLock(text)).toStrictEqual({ host: undefined, pid: 1 });
+		},
+	);
+
+	it("should trim the host", () => {
+		expect.assertions(1);
+
+		expect(parseStudioLock("1\nRobloxStudio\n SAPPHIRE \nguid")!.host).toBe("SAPPHIRE");
 	});
 
 	it.for([
@@ -74,6 +97,38 @@ describe(isStudioExecutable, () => {
 		expect.assertions(1);
 
 		expect(isStudioExecutable(executable)).toBeFalse();
+	});
+});
+
+describe(isLockHost, () => {
+	it.for([
+		["SAPPHIRE", "Sapphire"],
+		["sapphire", "SAPPHIRE"],
+		["Chris-Mac", "Chris-Mac.local"],
+		["chris-mac.local", "Chris-Mac"],
+		["DESKTOP-ABCDEFGH", "desktop-abcdefgh.corp.example.com"],
+		// Windows NetBIOS names stop at 15 characters.
+		["VERYLONGCOMPUTE", "verylongcomputername"],
+	])("should accept lock host %s on host %s", ([lockHost, hostname]) => {
+		expect.assertions(1);
+
+		expect(isLockHost(lockHost!, hostname!)).toBeTrue();
+	});
+
+	it.for([
+		["OTHER", "SAPPHIRE"],
+		["SAPPHIRE2", "SAPPHIRE"],
+		["SAPPHIR", "SAPPHIRE"],
+		["local", "Chris-Mac.local"],
+		["VERYLONGCOMPUT", "verylongcomputername"],
+		["VERYLONGCOMPUTX", "verylongcomputername"],
+		["", "SAPPHIRE"],
+		// Names compare in lower case, where "ß" stays: it does not become "ss".
+		["STRASSE", "straße"],
+	])("should reject lock host %s on host %s", ([lockHost, hostname]) => {
+		expect.assertions(1);
+
+		expect(isLockHost(lockHost!, hostname!)).toBeFalse();
 	});
 });
 

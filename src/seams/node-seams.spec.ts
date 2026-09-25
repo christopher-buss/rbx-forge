@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { PassThrough } from "node:stream";
@@ -53,8 +54,18 @@ describe(createNodeSeams, () => {
 
 		expect(makeSeams().host).toMatchObject({
 			execPath: process.execPath,
+			hostname: os.hostname(),
 			platform: process.platform,
 		});
+	});
+
+	it("should report when the OS booted", () => {
+		expect.assertions(2);
+
+		const bootTimeMs = makeSeams().host.bootTimeMs();
+
+		expect(bootTimeMs).toBeLessThan(Date.now());
+		expect(Math.abs(bootTimeMs - (Date.now() - os.uptime() * 1000))).toBeLessThan(1000);
 	});
 
 	it("should signal processes through process.kill", () => {

@@ -25,6 +25,8 @@ export interface FakeChild {
 	/** Signals sent through the process's own `kill`, in order. */
 	kills: Array<NodeJS.Signals>;
 	pid: number | undefined;
+	/** False once forge called `unref`, letting it exit before the child. */
+	referenced: boolean;
 	stderr: PassThrough;
 	/** What the code under test wrote to the process's stdin. */
 	stdin: PassThrough;
@@ -108,8 +110,27 @@ function emitLater(
 	});
 }
 
-function makeStreams(): Pick<FakeChild, "stderr" | "stdin" | "stdout"> {
-	return { stderr: new PassThrough(), stdin: new PassThrough(), stdout: new PassThrough() };
+/**
+ * The members of the object `spawn` returns, besides its events.
+ *
+ * @param child - The test's handle, which the members update.
+ * @returns `kill`, `unref`, the pid, and the streams.
+ */
+function processMembers(child: FakeChild): object {
+	return {
+		kill: (signal: NodeJS.Signals) => {
+			child.kills.push(signal);
+			child.close(null, signal);
+			return true;
+		},
+		pid: child.pid,
+		stderr: child.stderr,
+		stdin: child.stdin,
+		stdout: child.stdout,
+		unref: () => {
+			child.referenced = false;
+		},
+	};
 }
 
 /**
@@ -120,11 +141,13 @@ function makeStreams(): Pick<FakeChild, "stderr" | "stdin" | "stdout"> {
  */
 function makeFakeChild(pid: number): { child: FakeChild; spawned: EventEmitter } {
 	const emitter = new EventEmitter();
-	const streams = makeStreams();
+	const stdout = new PassThrough();
+	const stderr = new PassThrough();
+	const stdin = new PassThrough();
 	const child: FakeChild = {
 		close: (exitCode, signal = null) => {
-			streams.stdout.end();
-			streams.stderr.end();
+			stdout.end();
+			stderr.end();
 			emitLater(emitter, ["exit", "close"], [exitCode, signal]);
 		},
 		error: (error) => {
@@ -135,19 +158,13 @@ function makeFakeChild(pid: number): { child: FakeChild; spawned: EventEmitter }
 		},
 		kills: [],
 		pid,
-		...streams,
+		referenced: true,
+		stderr,
+		stdin,
+		stdout,
 	};
-	const spawned = Object.assign(emitter, {
-		kill: (signal: NodeJS.Signals) => {
-			child.kills.push(signal);
-			child.close(null, signal);
-			return true;
-		},
-		pid,
-		...streams,
-	});
 
-	return { child, spawned };
+	return { child, spawned: Object.assign(emitter, processMembers(child)) };
 }
 
 function doNothing(): void {

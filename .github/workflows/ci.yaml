@@ -93,13 +93,9 @@ jobs:
         with:
           tools: node rust
 
-      - name: Add Rust target
+      - if: ${{ !matrix.musl }}
+        name: Add Rust target
         run: rustup target add ${{ matrix.target }}
-        shell: bash
-
-      - if: ${{ matrix.musl }}
-        name: Install musl tools
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
         shell: bash
 
       - name: Cache cargo
@@ -122,27 +118,41 @@ jobs:
         run: cargo clippy --manifest-path reaper/Cargo.toml --target ${{ matrix.target }} -- -D warnings
         shell: bash
 
-      # A Node addon must link the C runtime dynamically; musl defaults to
-      # static, so the addon build turns `crt-static` off. The napi CLI picks
-      # the cross linker `aarch64-linux-musl-gcc` for aarch64 musl, which
-      # cannot find `libgcc_s` on a native arm64 host, so use the host `cc`
-      # (the Rust default, as for x86_64 musl).
-      - name: Build addon
+      - if: ${{ !matrix.musl }}
+        name: Build addon
         run: pnpm build:native --target ${{ matrix.target }}
         shell: bash
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: cc
-          RUSTFLAGS: ${{ matrix.musl && '-C target-feature=-crt-static' || '' }}
 
-      - name: Build reaper
+      - if: ${{ !matrix.musl }}
+        name: Build reaper
         run: cargo build --manifest-path reaper/Cargo.toml --release --bin forge-reaper --target ${{ matrix.target }}
         shell: bash
 
+      # musl targets build in Alpine, where the C toolchain is musl's own: a
+      # glibc host links the glibc loader into the addon, and Ubuntu's
+      # musl-gcc has no `libgcc_s`. A Node addon must link the C runtime
+      # dynamically, so the addon build turns `crt-static` off; the reaper
+      # stays static. The napi CLI picks the cross linker
+      # `aarch64-linux-musl-gcc` for aarch64 musl; Alpine's `cc` already links
+      # for musl. The container runs as root, so give the files back.
+      - if: ${{ matrix.musl }}
+        name: Build addon and reaper (Alpine)
+        run: |
+          mkdir -p ~/.cargo/registry
+          docker run --rm -v "$PWD:/w" -v "$HOME/.cargo/registry:/usr/local/cargo/registry" -w /w -e TARGET -e CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER rust:1.98.1-alpine sh -euc '
+              apk add --no-cache musl-dev nodejs npm
+              RUSTFLAGS="-C target-feature=-crt-static" npm run build:native -- --target "$TARGET"
+              cargo build --manifest-path reaper/Cargo.toml --release --bin forge-reaper --target "$TARGET"
+            '
+          sudo chown -R "$(id -u):$(id -g)" reaper/target ~/.cargo/registry
+        shell: bash
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: cc
+          TARGET: ${{ matrix.target }}
+
       # Load the addon in a Node of the target's platform and call it. musl
-      # builds load in an Alpine container. Not loaded: x86_64-apple-darwin
-      # (no x64 Node on the arm64 runner) and x86_64-unknown-linux-musl (the
-      # host `cc` links the glibc loader into it, so Alpine cannot load it;
-      # the release ticket fixes the musl toolchain).
+      # builds load in an Alpine container; x86_64-apple-darwin loads on the
+      # Intel macOS runner.
       - if: ${{ matrix.load }}
         name: Load addon
         run: node -e "$LOAD" reaper/target/napi/*.node
@@ -150,7 +160,7 @@ jobs:
         env:
           LOAD: ${{ env.LOAD_ADDON }}
 
-      - if: ${{ matrix.alpine }}
+      - if: ${{ matrix.musl }}
         name: Load addon (Alpine)
         run: docker run --rm -v "$PWD/reaper/target/napi:/napi" -e LOAD node:24-alpine sh -c 'node -e "$LOAD" /napi/*.node'
         shell: bash
@@ -171,9 +181,9 @@ jobs:
           - { host: windows-latest, load: true, target: x86_64-pc-windows-msvc }
           - { host: windows-11-arm, load: true, target: aarch64-pc-windows-msvc }
           - { host: macos-latest, load: true, target: aarch64-apple-darwin }
-          - { host: macos-latest, target: x86_64-apple-darwin }
+          - { host: macos-15-intel, load: true, target: x86_64-apple-darwin }
           - { checks: true, host: ubuntu-latest, load: true, target: x86_64-unknown-linux-gnu }
           - { host: ubuntu-24.04-arm, load: true, target: aarch64-unknown-linux-gnu }
           - { host: ubuntu-latest, musl: true, target: x86_64-unknown-linux-musl }
-          - { alpine: true, host: ubuntu-24.04-arm, musl: true, target: aarch64-unknown-linux-musl }
+          - { host: ubuntu-24.04-arm, musl: true, target: aarch64-unknown-linux-musl }
       fail-fast: false

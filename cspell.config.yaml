@@ -5,6 +5,7 @@ language: en
 
 words:
   - FILETIME
+  - NETBIOS
   - arktype
   - catchable
   - codegen

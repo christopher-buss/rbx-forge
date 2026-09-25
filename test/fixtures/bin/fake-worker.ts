@@ -15,12 +15,24 @@
  * - `FIXTURE_HANG=1`: a hook stays alive instead of exiting.
  * - `FIXTURE_EXIT_AFTER_MS`: a long-running role exits on its own after this
  *   long, with `FIXTURE_EXIT_CODE`. Its grandchildren stay alive.
+ * - `FIXTURE_ROJO_NO_SYNCBACK=1`: rojo has no `syncback` command.
+ * - `FIXTURE_ROJO_ERROR`: `rojo syncback` prints this and exits with code 1.
+ * - `FIXTURE_SOURCEMAP`: what `rojo sourcemap --output <file>` writes; no
+ *   file when unset.
+ * - `FIXTURE_COMPILER_OUTPUT`: a file whose bytes a one-shot `rbxtsc` writes
+ *   to stdout before it exits, such as recorded compiler output.
+ * - `FIXTURE_PLACE_CONTENT`: what `rojo build` writes to its output (default
+ *   `fake place`).
+ *
+ * The `open` and `xdg-open` roles stand in for the platform launcher: they
+ * start a detached `studio` with their arguments and exit at once, as the
+ * real launchers hand a file to its app. A `studio` stays alive until killed.
  *
  * Markers (`RBX_FORGE_SESSION`, `RBX_FORGE_WORKER`) are recorded as seen and
  * inherited by every grandchild unchanged.
  */
 import { spawn } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import process from "node:process";
 
 const ROJO_VERSION = "7.7.0";
@@ -93,6 +105,28 @@ function exitOnce(): void {
 	process.exitCode = Number(env["FIXTURE_EXIT_CODE"] ?? "0");
 }
 
+function runSyncback(): void {
+	if (env["FIXTURE_ROJO_NO_SYNCBACK"] === "1") {
+		process.stderr.write("error: unrecognized subcommand 'syncback'\n");
+		process.exitCode = 2;
+		return;
+	}
+
+	if (ARGS.includes("--help")) {
+		process.stdout.write("Usage: rojo syncback [PROJECT] --input <INPUT>\n");
+		return;
+	}
+
+	const error = env["FIXTURE_ROJO_ERROR"];
+	if (error !== undefined) {
+		process.stderr.write(`${error}\n`);
+		process.exitCode = 1;
+		return;
+	}
+
+	exitOnce();
+}
+
 function runRojo(): void {
 	const [command] = ARGS;
 	if (command === "--version") {
@@ -106,10 +140,20 @@ function runRojo(): void {
 		return;
 	}
 
+	if (command === "syncback") {
+		runSyncback();
+		return;
+	}
+
 	const outputIndex = ARGS.findIndex((argument) => argument === "--output" || argument === "-o");
 	const output = outputIndex === -1 ? undefined : ARGS[outputIndex + 1];
 	if (command === "build" && output !== undefined) {
-		writeFileSync(output, "fake place\n");
+		writeFileSync(output, env["FIXTURE_PLACE_CONTENT"] ?? "fake place\n");
+	}
+
+	const sourcemap = env["FIXTURE_SOURCEMAP"];
+	if (command === "sourcemap" && output !== undefined && sourcemap !== undefined) {
+		writeFileSync(output, sourcemap);
 	}
 
 	exitOnce();
@@ -122,7 +166,26 @@ function runCompiler(): void {
 		return;
 	}
 
+	const output = env["FIXTURE_COMPILER_OUTPUT"];
+	if (output !== undefined) {
+		process.stdout.write(readFileSync(output));
+	}
+
 	exitOnce();
+}
+
+function runLauncher(): void {
+	exitOnce();
+	if (process.exitCode !== 0) {
+		return;
+	}
+
+	const studio = spawn(process.execPath, [import.meta.filename, "studio", ...ARGS], {
+		detached: true,
+		stdio: "ignore",
+		windowsHide: true,
+	});
+	studio.unref();
 }
 
 function runHook(): void {
@@ -139,12 +202,18 @@ ignoreSignals();
 record();
 
 switch (ROLE) {
-	case "grandchild": {
+	case "grandchild":
+	case "studio": {
 		setInterval(doNothing, KEEP_ALIVE_MS);
 		break;
 	}
 	case "hook": {
 		runHook();
+		break;
+	}
+	case "open":
+	case "xdg-open": {
+		runLauncher();
 		break;
 	}
 	case "rbxtsc": {

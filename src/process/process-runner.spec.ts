@@ -7,6 +7,7 @@ import { createFailingSpawner, createFakeSpawner } from "../../test/helpers/fake
 import type { FakeChild, SpawnBehavior } from "../../test/helpers/fake-process.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { ManualClock } from "../../test/helpers/manual-clock.ts";
+import { createTestSeams } from "../../test/helpers/seams.ts";
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Host } from "../seams/host.ts";
 import type { ProcessRunner, ProcessSpec } from "./process-runner.ts";
@@ -43,7 +44,7 @@ function makeRunner({
 		run: createChildProcessRunner({
 			childProcess,
 			clock: clock.clock,
-			host: { execPath: "/node", kill, platform },
+			host: { ...createTestSeams().host, kill, platform },
 		}),
 	};
 }
@@ -205,6 +206,41 @@ describe(createChildProcessRunner, () => {
 		);
 	});
 
+	it("should hand every output line to onLine, past the tail and a last partial line", async () => {
+		expect.assertions(1);
+
+		const lines = Array.from({ length: OUTPUT_TAIL_LINES + 5 }, (_, index) => `line ${index}`);
+		const spawner = createFakeSpawner((child) => {
+			child.stdout.write(`${lines.join("\r\n")}\r\nsplit `);
+			child.stderr.write("line\nno newline");
+			child.close(1);
+		});
+		const seen: Array<string> = [];
+		await makeRunner({ childProcess: spawner.runner }).run({
+			...SPEC,
+			onLine: (line) => {
+				seen.push(line);
+			},
+		});
+
+		expect(seen).toStrictEqual([...lines, "split line", "no newline"]);
+	});
+
+	it("should hand no partial line to onLine when the output ends with a newline", async () => {
+		expect.assertions(1);
+
+		const spawner = createFakeSpawner(exitWith(0, ["done\n"]));
+		const seen: Array<string> = [];
+		await makeRunner({ childProcess: spawner.runner }).run({
+			...SPEC,
+			onLine: (line) => {
+				seen.push(line);
+			},
+		});
+
+		expect(seen).toStrictEqual(["done"]);
+	});
+
 	it("should report a process a signal ended", async () => {
 		expect.assertions(1);
 
@@ -334,5 +370,32 @@ describe(createChildProcessRunner, () => {
 
 		await expect(run({ ...SPEC, timeoutMs: 10 })).resolves.toMatchObject({ type: "timed_out" });
 		expect(spawner.children[0]!.stdout.destroyed).toBeTrue();
+	});
+
+	it("should hand the last partial line of a timed-out process to onLine", async () => {
+		expect.assertions(1);
+
+		const clock = createManualClock();
+		const spawner = createFakeSpawner((child) => {
+			child.stdout.write("working");
+			// Let the chunk arrive before the timeout fires.
+			setImmediate(() => {
+				clock.advance(10);
+			});
+		});
+		const { kill, run } = makeRunner({ childProcess: spawner.runner, clock });
+		kill.mockImplementation(() => {
+			spawner.children[0]!.close(null, "SIGKILL");
+		});
+		const seen: Array<string> = [];
+		await run({
+			...SPEC,
+			onLine: (line) => {
+				seen.push(line);
+			},
+			timeoutMs: 10,
+		});
+
+		expect(seen).toStrictEqual(["working"]);
 	});
 });

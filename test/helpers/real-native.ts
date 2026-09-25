@@ -57,6 +57,24 @@ export function realNativePath(): string {
 }
 
 /**
+ * Wait until a child has exited and Node has reaped it, so its PID is free.
+ *
+ * @param child - The child process.
+ * @returns Resolves once it has exited.
+ */
+export async function waitForExitAsync(child: ChildProcess): Promise<void> {
+	if (child.exitCode !== null || child.signalCode !== null) {
+		return;
+	}
+
+	await new Promise<void>((resolve) => {
+		child.once("exit", () => {
+			resolve();
+		});
+	});
+}
+
+/**
  * Start a process that stays alive until the test ends.
  *
  * @param executable - The Node executable to run (a copy works too).
@@ -64,8 +82,11 @@ export function realNativePath(): string {
  */
 export function spawnSleeper(executable: string = process.execPath): ChildProcess {
 	const child = spawn(executable, ["-e", KEEP_ALIVE], { stdio: "ignore", windowsHide: true });
-	onTestFinished(() => {
+	// Wait for the exit: Windows cannot delete a running executable, and a
+	// fake Studio runs from a temporary directory that is removed next.
+	onTestFinished(async () => {
 		child.kill("SIGKILL");
+		await waitForExitAsync(child);
 	});
 	return child;
 }
@@ -83,24 +104,6 @@ export function spawnFakeStudio(): ChildProcess {
 	copyFileSync(process.execPath, executable);
 	chmodSync(executable, 0o755);
 	return spawnSleeper(executable);
-}
-
-/**
- * Wait until a child has exited and Node has reaped it, so its PID is free.
- *
- * @param child - The child process.
- * @returns Resolves once it has exited.
- */
-export async function waitForExitAsync(child: ChildProcess): Promise<void> {
-	if (child.exitCode !== null || child.signalCode !== null) {
-		return;
-	}
-
-	await new Promise<void>((resolve) => {
-		child.once("exit", () => {
-			resolve();
-		});
-	});
 }
 
 /**

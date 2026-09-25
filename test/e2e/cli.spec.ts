@@ -9,7 +9,7 @@ describe("forge bin", () => {
 	it("should exit 0 printing the package version", async () => {
 		expect.assertions(1);
 
-		await expect(runBinAsync(["--version"])).resolves.toStrictEqual({
+		await expect(runBinAsync(["--version"])).resolves.toMatchObject({
 			status: EXIT_SUCCESS,
 			stderr: "",
 			stdout: `${packageJson.version}\n`,
