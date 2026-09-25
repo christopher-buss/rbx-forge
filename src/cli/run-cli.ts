@@ -34,7 +34,8 @@ export function runCli(argv: ReadonlyArray<string>, { output, version }: CliCont
 			strict: true,
 		});
 	} catch (err) {
-		assert(err instanceof TypeError, "parseArgs throws only TypeError");
+		// parseArgs reports every bad argument as a TypeError.
+		assert(err instanceof TypeError);
 		output.stderr(`forge: ${err.message}\nRun "forge --help" for usage.\n`);
 		return EXIT_USAGE;
 	}

@@ -101,6 +101,9 @@ overrides:
   '@typescript-eslint/typescript-estree': 8.70.1
   '@typescript-eslint/utils': 8.70.1
 
+patchedDependencies:
+  '@stryker-mutator/vitest-runner@10.0.0': 4e4786ad92abcf9fc5e311e356fcf5be6ca34cb3a41bbeb7bd5c7559eae96cec
+
 importers:
 
   .:
@@ -125,7 +128,7 @@ importers:
         version: 10.0.0(@stryker-mutator/core@10.0.0)(typescript@6.0.3)
       '@stryker-mutator/vitest-runner':
         specifier: catalog:mutation
-        version: 10.0.0(@stryker-mutator/core@10.0.0)(vitest@5.0.1)
+        version: 10.0.0(patch_hash=4e4786ad92abcf9fc5e311e356fcf5be6ca34cb3a41bbeb7bd5c7559eae96cec)(@stryker-mutator/core@10.0.0)(vitest@5.0.1)
       '@types/node':
         specifier: catalog:types
         version: 26.6.2
@@ -6562,7 +6565,7 @@ snapshots:
 
   '@stryker-mutator/util@10.0.0': {}
 
-  '@stryker-mutator/vitest-runner@10.0.0(@stryker-mutator/core@10.0.0)(vitest@5.0.1)':
+  '@stryker-mutator/vitest-runner@10.0.0(patch_hash=4e4786ad92abcf9fc5e311e356fcf5be6ca34cb3a41bbeb7bd5c7559eae96cec)(@stryker-mutator/core@10.0.0)(vitest@5.0.1)':
     dependencies:
       '@stryker-mutator/api': 10.0.0
       '@stryker-mutator/core': 10.0.0(@types/node@26.6.2)

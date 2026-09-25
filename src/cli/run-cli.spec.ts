@@ -44,15 +44,25 @@ describe(runCli, () => {
 		expect(run(["-v"]).stdout).toBe("1.2.3\n");
 	});
 
-	it("should print help listing every flag for --help", () => {
-		expect.assertions(4);
+	it("should print the help page listing every flag for --help", () => {
+		expect.assertions(1);
 
-		const result = run(["--help"]);
-
-		expect(result.code).toBe(EXIT_SUCCESS);
-		expect(result.stdout).toStartWith("forge - ");
-		expect(result.stdout).toContain("-h, --help     Show this help and exit.\n");
-		expect(result.stdout).toContain("-v, --version  Print the version and exit.\n");
+		// The whole page is the contract: agents and people read it.
+		expect(run(["--help"])).toStrictEqual({
+			code: EXIT_SUCCESS,
+			stderr: "",
+			stdout: [
+				"forge - supervised Rojo and roblox-ts sessions.",
+				"",
+				"Usage",
+				"  forge [options]",
+				"",
+				"Options",
+				"  -h, --help     Show this help and exit.",
+				"  -v, --version  Print the version and exit.",
+				"",
+			].join("\n"),
+		});
 	});
 
 	it("should print help when run without arguments", () => {

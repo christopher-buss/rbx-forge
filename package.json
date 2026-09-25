@@ -47,7 +47,7 @@
 		"knip": "knip",
 		"lint": "isentinel-lint",
 		"lint:fix": "isentinel-lint --fix",
-		"mutation": "stryker run",
+		"mutation": "stryker run stryker.config.ts",
 		"test": "pnpm test:unit && pnpm test:integration",
 		"test:e2e": "vitest run --project e2e",
 		"test:integration": "vitest run --project integration",

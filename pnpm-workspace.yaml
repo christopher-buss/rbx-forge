@@ -34,6 +34,11 @@ overrides:
   "@typescript-eslint/typescript-estree": 8.70.1
   "@typescript-eslint/utils": 8.70.1
 
+patchedDependencies:
+  # vitest 5 matches test name patterns against " > "-joined names; also
+  # reports test locations. Same patch as project-halcyon.
+  "@stryker-mutator/vitest-runner@10.0.0": patches/@stryker-mutator__vitest-runner@10.0.0.patch
+
 catalogs:
   build:
     tsdown: 0.23.0
