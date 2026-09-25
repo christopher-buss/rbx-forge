@@ -43,6 +43,11 @@
  *   file when unset.
  * - `FIXTURE_COMPILER_OUTPUT`: a file whose bytes a one-shot `rbxtsc` writes
  *   to stdout before it exits, such as recorded compiler output.
+ * - `FIXTURE_COMPILER_WATCH`: a file that `rbxtsc -w` watches, as roblox-ts
+ *   does, shaped by `FIXTURE_COMPILE_DELAY_MS`, `FIXTURE_COMPILE_MS`,
+ *   `FIXTURE_COMPILE_STARTS`, and `FIXTURE_COMPILE_ENDS`
+ *   (`watch-compiler.ts`). Without it, `rbxtsc -w` prints one summary line
+ *   and stays alive.
  * - `FIXTURE_PLACE_CONTENT`: what `rojo build` writes to its output (default
  *   `fake place`).
  *
@@ -72,6 +77,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { launchStudio, runStudio } from "./studio-stand-in.ts";
+import { runWatchCompiler } from "./watch-compiler.ts";
 
 const ROJO_VERSION = "7.7.0";
 const KEEP_ALIVE_MS = 60_000;
@@ -356,7 +362,13 @@ function runRojo(): void {
 
 function runCompiler(): void {
 	if (ARGS.includes("-w") || ARGS.includes("--watch")) {
-		process.stdout.write("Found 0 errors. Watching for file changes.\n");
+		const watched = env["FIXTURE_COMPILER_WATCH"];
+		if (watched === undefined) {
+			process.stdout.write("Found 0 errors. Watching for file changes.\n");
+		} else {
+			runWatchCompiler(watched, env);
+		}
+
 		stayAlive();
 		return;
 	}

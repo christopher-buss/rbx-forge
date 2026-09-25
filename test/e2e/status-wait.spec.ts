@@ -1,0 +1,76 @@
+/**
+ * `forge status --wait` as a real process, against a detached session whose
+ * fake roblox-ts compiler watches one file (`FIXTURE_COMPILER_WATCH`). The
+ * test edits the file, then asks for the status at once: the answer must be
+ * the build of the edit, not the one before it.
+ */
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { EXIT_SUCCESS } from "../../src/exit-codes.ts";
+import type { SessionStatus } from "../../src/session/status.ts";
+import { parseStatus } from "../../src/session/status.ts";
+import { makeFixtureAsync } from "./session-fixture.ts";
+import type { UpRun } from "./up-fixture.ts";
+import { runForgeAsync } from "./up-fixture.ts";
+
+function statusOf(run: UpRun): SessionStatus["services"]["compiler"] | undefined {
+	return parseStatus(run.result.data)?.services.compiler;
+}
+
+describe("forge status --wait", () => {
+	it.for([
+		{ name: "one start line per compile", compileMs: "1500", ends: "1", starts: "1" },
+		{
+			name: "a second start line during the compile",
+			compileMs: "500",
+			ends: "2",
+			starts: "2",
+		},
+		{ name: "two start lines of one compile", compileMs: "500", ends: "1", starts: "2" },
+	])(
+		"should return the build of the last edit with $name",
+		async ({ compileMs, ends, starts }) => {
+			expect.assertions(5);
+
+			const fixture = await makeFixtureAsync({ projectType: "rbxts" });
+			const watched = path.join(fixture.project, "src", "main.ts");
+			mkdirSync(path.dirname(watched), { recursive: true });
+			writeFileSync(watched, "export {};\n");
+			const up = await runForgeAsync(fixture, ["up", "--no-open", "--json"], {
+				FIXTURE_COMPILE_ENDS: ends,
+				FIXTURE_COMPILE_MS: compileMs,
+				FIXTURE_COMPILE_STARTS: starts,
+				FIXTURE_COMPILER_WATCH: watched,
+			});
+			const editedAt = Date.now();
+			writeFileSync(watched, "export const error = 1;\n");
+			const fresh = await runForgeAsync(fixture, ["status", "--json", "--wait"]);
+			const compiler = statusOf(fresh);
+
+			expect([up.status, fresh.status]).toStrictEqual([EXIT_SUCCESS, EXIT_SUCCESS]);
+			expect(statusOf(up)!.lastBuild!.errors).toBe(0);
+			expect(compiler).toMatchObject({ building: false, lastBuild: { errors: 1 } });
+			expect(Date.parse(compiler!.lastBuild!.startedAt)).toBeGreaterThanOrEqual(editedAt);
+			expect(Date.parse(compiler!.lastBuild!.at)).toBeGreaterThan(editedAt);
+		},
+	);
+
+	it("should return at once with no roblox-ts compiler", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync();
+		await runForgeAsync(fixture, ["up", "--no-open", "--no-compiler", "--json"]);
+		const fresh = await runForgeAsync(fixture, [
+			"status",
+			"--json",
+			"--wait",
+			"--timeout",
+			"0",
+		]);
+
+		expect(fresh.status).toBe(EXIT_SUCCESS);
+		expect(statusOf(fresh)).toStrictEqual({ building: false, status: "off" });
+	});
+});
