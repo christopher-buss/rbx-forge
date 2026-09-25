@@ -54,6 +54,16 @@ describe(resolveTool, () => {
 		});
 	});
 
+	it("should take a single bin named after the package", () => {
+		expect.assertions(1);
+
+		const lookup = makeLookup({
+			files: projectWith("rojo", { name: "rojo", bin: "bin/cli.js" }),
+		});
+
+		expect(resolveTool("rojo", lookup)).toMatchObject({ type: "node" });
+	});
+
 	it("should take a single bin named after the unscoped package", () => {
 		expect.assertions(1);
 
@@ -172,6 +182,26 @@ describe(resolveTool, () => {
 			file: path.join(TOOLS, "rojo.exe"),
 			type: "executable",
 		});
+	});
+
+	it("should not try a .exe on macOS, even with a WSL variable", () => {
+		expect.assertions(1);
+
+		const lookup = makeLookup({
+			environment: { PATH: TOOLS, WSL_DISTRO_NAME: "Ubuntu" },
+			files: { "tools/rojo.exe": "" },
+			platform: "darwin",
+		});
+
+		expect(resolveTool("rojo", lookup)).toBeUndefined();
+	});
+
+	it("should not search the project root for an empty PATH entry", () => {
+		expect.assertions(1);
+
+		const lookup = makeLookup({ environment: { PATH: `:${TOOLS}` }, files: { rojo: "" } });
+
+		expect(resolveTool("rojo", lookup)).toBeUndefined();
 	});
 
 	it("should not try a .exe outside WSL", () => {

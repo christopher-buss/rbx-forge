@@ -20,6 +20,8 @@ export interface FakeChild {
 	 * End the process while a descendant keeps its pipes: only `exit` fires.
 	 */
 	exit: (exitCode: null | number, signal?: NodeJS.Signals | null) => void;
+	/** Signals sent through the process's own `kill`, in order. */
+	kills: Array<NodeJS.Signals>;
 	pid: number | undefined;
 	stderr: PassThrough;
 	stdout: PassThrough;
@@ -121,12 +123,14 @@ function makeFakeChild(pid: number): { child: FakeChild; spawned: EventEmitter }
 		exit: (exitCode, signal = null) => {
 			emitLater(emitter, ["exit"], [exitCode, signal]);
 		},
+		kills: [],
 		pid,
 		stderr,
 		stdout,
 	};
 	const spawned = Object.assign(emitter, {
 		kill: (signal: NodeJS.Signals) => {
+			child.kills.push(signal);
 			child.close(null, signal);
 			return true;
 		},

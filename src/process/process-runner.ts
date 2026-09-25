@@ -134,11 +134,9 @@ async function outlivesTimeoutAsync(
 	}
 
 	const abort = new AbortController();
-	// An abort means the process closed first.
-	const timer = clock
-		.sleep(timeoutMs, abort.signal)
-		.then(() => true)
-		.catch(() => false);
+	// The race handles the timer's rejection: once the process closes, the
+	// abort rejects a timer nobody waits for.
+	const timer = clock.sleep(timeoutMs, abort.signal).then(() => true);
 	const isTimedOut = await Promise.race([closed.then(() => false), timer]);
 	abort.abort();
 	return isTimedOut;

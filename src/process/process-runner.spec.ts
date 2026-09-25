@@ -82,22 +82,28 @@ function taskkillClosesTarget(clock: ManualClock, target: () => FakeChild): Spaw
  * cannot start.
  *
  * @param clock - Advanced past the timeout once the target runs.
- * @returns The seam.
+ * @returns The seam and the children it made.
  */
-function taskkillMissing(clock: ManualClock): ChildProcessRunner {
+function taskkillMissing(clock: ManualClock): {
+	children: Array<FakeChild>;
+	runner: ChildProcessRunner;
+} {
 	const spawner = createFakeSpawner(() => {
 		clock.advance(10);
 	});
 	const failing = createFailingSpawner("ENOENT");
 
 	return {
-		spawn: fromAny((file: string, args: Array<string>, options: SpawnOptions) => {
-			if (spawner.children.length === 0) {
-				return spawner.runner.spawn(file, args, options);
-			}
+		children: spawner.children,
+		runner: {
+			spawn: fromAny((file: string, args: Array<string>, options: SpawnOptions) => {
+				if (spawner.children.length === 0) {
+					return spawner.runner.spawn(file, args, options);
+				}
 
-			return failing.spawn(file, args, options);
-		}),
+				return failing.spawn(file, args, options);
+			}),
+		},
 	};
 }
 
@@ -186,6 +192,19 @@ describe(createChildProcessRunner, () => {
 		);
 	});
 
+	it("should keep only the last lines when the output ends mid-line", async () => {
+		expect.assertions(1);
+
+		const lines = Array.from({ length: OUTPUT_TAIL_LINES }, (_, index) => `line ${index}`);
+		const spawner = createFakeSpawner(exitWith(0, [`${lines.join("\n")}\nno newline`]));
+
+		await expect(makeRunner({ childProcess: spawner.runner }).run(SPEC)).resolves.toMatchObject(
+			{
+				outputTail: [...lines.slice(1), "no newline"],
+			},
+		);
+	});
+
 	it("should report a process a signal ended", async () => {
 		expect.assertions(1);
 
@@ -230,7 +249,7 @@ describe(createChildProcessRunner, () => {
 			child.stdout.write("still going\n");
 			clock.advance(1000);
 		});
-		const clock = createManualClock();
+		const clock = createManualClock(5000);
 		const { kill, run } = makeRunner({ childProcess: spawner.runner, clock });
 		kill.mockImplementation(() => {
 			spawner.children[0]!.close(null, "SIGKILL");
@@ -261,7 +280,7 @@ describe(createChildProcessRunner, () => {
 	});
 
 	it("should kill the process tree of a Windows process with taskkill", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const clock = createManualClock();
 		const spawner = createFakeSpawner(taskkillClosesTarget(clock, () => spawner.children[0]!));
@@ -270,6 +289,7 @@ describe(createChildProcessRunner, () => {
 		await expect(
 			run({ ...SPEC, env: { SYSTEMROOT: "D:\\Win" }, timeoutMs: 10 }),
 		).resolves.toMatchObject({ type: "timed_out" });
+		expect(spawner.children[0]!.kills).toStrictEqual([]);
 		expect(spawner.calls[1]).toStrictEqual({
 			args: ["/pid", "1000", "/T", "/F"],
 			file: "D:\\Win\\System32\\taskkill.exe",
@@ -289,16 +309,14 @@ describe(createChildProcessRunner, () => {
 	});
 
 	it("should kill the process alone when taskkill cannot start", async () => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const clock = createManualClock();
-		const { run } = makeRunner({
-			childProcess: taskkillMissing(clock),
-			clock,
-			platform: "win32",
-		});
+		const { children, runner } = taskkillMissing(clock);
+		const { run } = makeRunner({ childProcess: runner, clock, platform: "win32" });
 
 		await expect(run({ ...SPEC, timeoutMs: 10 })).resolves.toMatchObject({ type: "timed_out" });
+		expect(children[0]!.kills).toStrictEqual(["SIGKILL"]);
 	});
 
 	it("should stop reading output a killed process's descendants still hold", async () => {

@@ -33,18 +33,23 @@ export interface ToolLookup {
 const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
 const HAS_DIRECTORY = /[/\\]/;
 const STRING_MAP = "Record<string, string>";
+const JSON_TEXT = "string.json.parse";
 const WINDOWS_EXECUTABLE = /\.(?:com|exe)$/i;
 
-const projectManifest = type({
-	"dependencies?": STRING_MAP,
-	"devDependencies?": STRING_MAP,
-	"optionalDependencies?": STRING_MAP,
-});
+const projectManifest = type(JSON_TEXT).pipe(
+	type({
+		"dependencies?": STRING_MAP,
+		"devDependencies?": STRING_MAP,
+		"optionalDependencies?": STRING_MAP,
+	}),
+);
 
-const packageManifest = type({
-	"bin?": `string | ${STRING_MAP}`,
-	"name?": "string",
-});
+const packageManifest = type(JSON_TEXT).pipe(
+	type({
+		"bin?": `string | ${STRING_MAP}`,
+		"name?": "string",
+	}),
+);
 
 /**
  * Find a tool by command name. A bin of a project dependency wins, and runs
@@ -110,23 +115,26 @@ function binOf(
 	return bin?.[name];
 }
 
+/**
+ * Read a manifest that may be missing or broken.
+ *
+ * @template T - The manifest's shape.
+ * @param fileSystem - Reads the file.
+ * @param file - The manifest's path.
+ * @param schema - Parses the JSON text and checks its shape.
+ * @returns The manifest, or `undefined` when it is missing, not JSON, or the
+ *   wrong shape.
+ */
 function readManifest<T>(
 	fileSystem: FileSystem,
 	file: string,
-	schema: (data: unknown) => T | type.errors,
+	schema: (text: string) => T | type.errors,
 ): T | undefined {
 	if (!fileSystem.existsSync(file)) {
 		return undefined;
 	}
 
-	let data: unknown;
-	try {
-		data = JSON.parse(fileSystem.readFileSync(file, "utf8"));
-	} catch {
-		return undefined;
-	}
-
-	const parsed = schema(data);
+	const parsed = schema(fileSystem.readFileSync(file, "utf8"));
 	return parsed instanceof type.errors ? undefined : parsed;
 }
 
@@ -187,16 +195,37 @@ function fileNames(
 	return isWsl ? [name, `${name}.exe`] : [name];
 }
 
-function findOnPath(name: string, { cwd, env, fileSystem, host }: ToolLookup): Tool | undefined {
-	const directories = HAS_DIRECTORY.test(name)
-		? [cwd]
-		: (readVariable(env, "PATH", host.platform) ?? "")
-				.split(pathDelimiter(host.platform))
-				.filter((directory) => directory !== "");
+/**
+ * Where to look for a command: the project root for a path, else each
+ * non-empty `PATH` entry. An empty entry does not mean the project root.
+ *
+ * @param name - The command.
+ * @param lookup - The project root, environment, and host.
+ * @returns The directories, or `undefined` when there is no `PATH`.
+ */
+function searchDirectories(
+	name: string,
+	{ cwd, env, host }: ToolLookup,
+): Array<string> | undefined {
+	if (HAS_DIRECTORY.test(name)) {
+		return [cwd];
+	}
+
+	return readVariable(env, "PATH", host.platform)
+		?.split(pathDelimiter(host.platform))
+		.filter((directory) => directory !== "");
+}
+
+function findOnPath(name: string, lookup: ToolLookup): Tool | undefined {
+	const { cwd, env, fileSystem, host } = lookup;
+	const directories = searchDirectories(name, lookup);
+	if (directories === undefined) {
+		return undefined;
+	}
 
 	for (const directory of directories) {
 		for (const candidate of fileNames(name, env, host.platform)) {
-			const file = path.resolve(directory, candidate);
+			const file = path.resolve(cwd, directory, candidate);
 			if (fileSystem.existsSync(file) && fileSystem.statSync(file).isFile()) {
 				return host.platform === "win32" && !WINDOWS_EXECUTABLE.test(file)
 					? { file, type: "batch" }

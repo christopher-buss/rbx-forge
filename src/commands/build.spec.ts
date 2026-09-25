@@ -143,6 +143,7 @@ describe(runBuildCommandAsync, () => {
 			runBuildCommandAsync(context, input({ output: "a.rbxl", plugin: "b.rbxm" })),
 		).rejects.toMatchObject({
 			code: "usage",
+			hint: 'Run "forge build --help" for usage.',
 			message: "--output and --plugin cannot be used together.",
 		});
 		expect(configLoader).not.toHaveBeenCalled();

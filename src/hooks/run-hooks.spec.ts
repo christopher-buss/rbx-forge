@@ -277,7 +277,10 @@ describe(runWithHooksAsync, () => {
 				),
 			);
 
-			expect(error.code).toBe("hook_failed");
+			expect(error).toMatchObject({
+				code: "hook_failed",
+				hint: "Fix the hook, or remove it from hooks in the config.",
+			});
 			expect(error.message).toBe(
 				[
 					"Hook build:pre:0 failed (exit code 2): codegen",
@@ -489,7 +492,10 @@ describe(runWithHooksAsync, () => {
 				),
 			);
 
-			expect(error.code).toBe("hook_depth_exceeded");
+			expect(error).toMatchObject({
+				code: "hook_depth_exceeded",
+				hint: "A hook runs forge, which runs hooks that run forge again. Break the chain in the config.",
+			});
 			expect(error.message).toBe("Hook build:pre:0 would nest 9 hooks deep; the limit is 8.");
 			expect(error.details).toStrictEqual({
 				hooks: [],
