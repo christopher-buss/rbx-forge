@@ -15,6 +15,26 @@ export interface WorkerRecord {
 const POLL_MS = 50;
 
 /**
+ * Read every record in a fixture log. A missing file means no worker started.
+ *
+ * @param logFile - The `FIXTURE_LOG` path.
+ * @returns Records in start order.
+ */
+export function readWorkerLog(logFile: string): Array<WorkerRecord> {
+	if (!existsSync(logFile)) {
+		return [];
+	}
+
+	return readFileSync(logFile, "utf8")
+		.split("\n")
+		.filter((line) => line.length > 0)
+		.map((line) => {
+			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- fake-worker.ts writes this shape
+			return JSON.parse(line) as unknown as WorkerRecord;
+		});
+}
+
+/**
  * Wait until at least `count` workers have started.
  *
  * @param logFile - The `FIXTURE_LOG` path.
@@ -72,24 +92,4 @@ export function killWorkers(records: ReadonlyArray<WorkerRecord>): void {
 			// Already gone.
 		}
 	}
-}
-
-/**
- * Read every record in a fixture log. A missing file means no worker started.
- *
- * @param logFile - The `FIXTURE_LOG` path.
- * @returns Records in start order.
- */
-function readWorkerLog(logFile: string): Array<WorkerRecord> {
-	if (!existsSync(logFile)) {
-		return [];
-	}
-
-	return readFileSync(logFile, "utf8")
-		.split("\n")
-		.filter((line) => line.length > 0)
-		.map((line) => {
-			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- fake-worker.ts writes this shape
-			return JSON.parse(line) as unknown as WorkerRecord;
-		});
 }

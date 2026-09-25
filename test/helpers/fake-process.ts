@@ -14,8 +14,12 @@ export interface SpawnCall {
 
 /** A child process a test drives by hand. */
 export interface FakeChild {
-	/** End the process: its streams end, then `close` fires. */
+	/** End the process: its streams end, then `exit` and `close` fire. */
 	close: (exitCode: null | number, signal?: NodeJS.Signals | null) => void;
+	/**
+	 * End the process while a descendant keeps its pipes: only `exit` fires.
+	 */
+	exit: (exitCode: null | number, signal?: NodeJS.Signals | null) => void;
 	pid: number | undefined;
 	stderr: PassThrough;
 	stdout: PassThrough;
@@ -32,9 +36,10 @@ export interface FakeSpawner {
 export type SpawnBehavior = (child: FakeChild, call: SpawnCall) => void;
 
 /**
- * A fake child-process seam. Each spawn makes a child with pid 1000 + n.
- * `behave` runs on the next tick after the spawn, so the code under test can
- * attach its listeners first; the default leaves the child running.
+ * A fake child-process seam. Each spawn makes a child with pid 1000 + n;
+ * `kill` ends it as the signal would. `behave` runs on the next tick after
+ * the spawn, so the code under test can attach its listeners first; the
+ * default leaves the child running.
  *
  * @param behave - What each child does once spawned.
  * @returns The seam and a record of the calls.
@@ -45,28 +50,14 @@ export function createFakeSpawner(behave: SpawnBehavior = doNothing): FakeSpawne
 
 	function spawn(file: string, args: Array<string>, options: Record<string, unknown>): unknown {
 		const call = { args, file, options };
-		const emitter = new EventEmitter();
-		const stdout = new PassThrough();
-		const stderr = new PassThrough();
-		const child: FakeChild = {
-			close: (exitCode, signal = null) => {
-				stdout.end();
-				stderr.end();
-				setImmediate(() => {
-					emitter.emit("close", exitCode, signal);
-				});
-			},
-			pid: 1000 + calls.length,
-			stderr,
-			stdout,
-		};
+		const { child, spawned } = makeFakeChild(1000 + calls.length);
 		calls.push(call);
 		children.push(child);
 		setImmediate(() => {
 			behave(child, call);
 		});
 
-		return Object.assign(emitter, { pid: child.pid, stderr, stdout });
+		return spawned;
 	}
 
 	return { calls, children, runner: { spawn: fromAny(spawn) } };
@@ -90,6 +81,61 @@ export function createFailingSpawner(code: string): ChildProcessRunner {
 	}
 
 	return { spawn: fromAny(spawn) };
+}
+
+/**
+ * Emit events on the next tick, after the code under test has listened.
+ *
+ * @param emitter - The fake process.
+ * @param events - Event names, in order.
+ * @param values - The arguments of each event.
+ */
+function emitLater(
+	emitter: EventEmitter,
+	events: ReadonlyArray<string>,
+	values: ReadonlyArray<unknown>,
+): void {
+	setImmediate(() => {
+		for (const event of events) {
+			emitter.emit(event, ...values);
+		}
+	});
+}
+
+/**
+ * A fake child process and the object `spawn` returns for it.
+ *
+ * @param pid - Its pid.
+ * @returns The test's handle and the spawned process.
+ */
+function makeFakeChild(pid: number): { child: FakeChild; spawned: EventEmitter } {
+	const emitter = new EventEmitter();
+	const stdout = new PassThrough();
+	const stderr = new PassThrough();
+	const child: FakeChild = {
+		close: (exitCode, signal = null) => {
+			stdout.end();
+			stderr.end();
+			emitLater(emitter, ["exit", "close"], [exitCode, signal]);
+		},
+		exit: (exitCode, signal = null) => {
+			emitLater(emitter, ["exit"], [exitCode, signal]);
+		},
+		pid,
+		stderr,
+		stdout,
+	};
+	const spawned = Object.assign(emitter, {
+		kill: (signal: NodeJS.Signals) => {
+			child.close(null, signal);
+			return true;
+		},
+		pid,
+		stderr,
+		stdout,
+	});
+
+	return { child, spawned };
 }
 
 function doNothing(): void {

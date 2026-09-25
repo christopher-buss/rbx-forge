@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import type { ChildProcess } from "node:child_process";
+import path from "node:path";
 
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { Host } from "../seams/host.ts";
 import type { Environment } from "../seams/seams.ts";
+import { readVariable } from "./environment.ts";
 
 /** How many trailing output lines a run keeps. */
 export const OUTPUT_TAIL_LINES = 50;
@@ -72,6 +74,14 @@ interface Closed {
 	signal: NodeJS.Signals | null;
 }
 
+/** The output a run keeps. */
+interface CollectedOutput {
+	/** The kept lines; a last line with no newline is included. */
+	lines: () => Array<string>;
+	/** Stop reading: destroy both pipes. */
+	release: () => void;
+}
+
 /**
  * The plain child-process backend. Every spawn is hidden on Windows. On POSIX
  * each process leads its own process group, so a timeout kills the whole tree
@@ -80,42 +90,8 @@ interface Closed {
  * @param backend - The spawn seam, the clock for timeouts, and the host.
  * @returns A {@link ProcessRunner}.
  */
-export function createChildProcessRunner({
-	childProcess,
-	clock,
-	host,
-}: ChildProcessBackend): ProcessRunner {
-	return async (spec) => {
-		const startedAt = clock.now();
-		const child = childProcess.spawn(spec.file, [...spec.args], {
-			cwd: spec.cwd,
-			detached: host.platform !== "win32",
-			env: spec.env,
-			stdio: ["ignore", "pipe", "pipe"],
-			windowsHide: true,
-			windowsVerbatimArguments: spec.verbatimArguments === true,
-		});
-
-		if (child.pid === undefined) {
-			const error = await spawnErrorAsync(child);
-			return { errorCode: error.code, message: error.message, type: "spawn_failed" };
-		}
-
-		const tail = collectOutput(child);
-		const closed = waitForCloseAsync(child);
-		const isTimedOut = await outlivesTimeoutAsync(closed, clock, spec.timeoutMs);
-		if (isTimedOut) {
-			await killTreeAsync(child.pid, { childProcess, host });
-		}
-
-		const { exitCode, signal } = await closed;
-		const durationMs = clock.now() - startedAt;
-		const outputTail = tail();
-
-		return isTimedOut
-			? { durationMs, outputTail, type: "timed_out" }
-			: { durationMs, exitCode, outputTail, signal, type: "exited" };
-	};
+export function createChildProcessRunner(backend: ChildProcessBackend): ProcessRunner {
+	return async (spec) => runChildAsync(backend, spec);
 }
 
 async function spawnErrorAsync(child: ChildProcess): Promise<NodeJS.ErrnoException> {
@@ -124,9 +100,17 @@ async function spawnErrorAsync(child: ChildProcess): Promise<NodeJS.ErrnoExcepti
 	});
 }
 
-async function waitForCloseAsync(child: ChildProcess): Promise<Closed> {
+/**
+ * Wait for the process to end: `exit` when it ends, `close` once its output
+ * pipes are also closed.
+ *
+ * @param child - The process.
+ * @param event - `exit` or `close`.
+ * @returns Its exit code and signal.
+ */
+async function waitForEventAsync(child: ChildProcess, event: "close" | "exit"): Promise<Closed> {
 	return new Promise((resolve) => {
-		child.once("close", (exitCode: null | number, signal: NodeJS.Signals | null) => {
+		child.once(event, (exitCode: null | number, signal: NodeJS.Signals | null) => {
 			resolve({ exitCode, signal });
 		});
 	});
@@ -160,26 +144,46 @@ async function outlivesTimeoutAsync(
 	return isTimedOut;
 }
 
+/**
+ * Kill a process and its descendants. POSIX signals the process group the
+ * process leads; Windows runs `taskkill /T` by absolute path (the spec's PATH
+ * may not reach System32) and falls back to killing the process alone.
+ *
+ * @param target - The process and its pid.
+ * @param environment - The spec's variables, for `SystemRoot`.
+ * @param backend - The spawn seam and the host.
+ */
 async function killTreeAsync(
-	pid: number,
+	{ child, pid }: { child: ChildProcess; pid: number },
+	environment: Environment,
 	{ childProcess, host }: Pick<ChildProcessBackend, "childProcess" | "host">,
 ): Promise<void> {
-	if (host.platform === "win32") {
-		const taskkill = childProcess.spawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
-			stdio: "ignore",
-			windowsHide: true,
-		});
-		await new Promise((resolve) => {
-			taskkill.once("close", resolve);
-			taskkill.once("error", resolve);
-		});
+	if (host.platform !== "win32") {
+		try {
+			host.kill(-pid, "SIGKILL");
+		} catch {
+			// The group is already gone.
+		}
+
 		return;
 	}
 
-	try {
-		host.kill(-pid, "SIGKILL");
-	} catch {
-		// The group is already gone.
+	const systemRoot = readVariable(environment, "SystemRoot", "win32") ?? "C:\\Windows";
+	const taskkill = childProcess.spawn(
+		path.win32.join(systemRoot, "System32", "taskkill.exe"),
+		["/pid", String(pid), "/T", "/F"],
+		{ stdio: "ignore", windowsHide: true },
+	);
+	const hasRun = await new Promise<boolean>((resolve) => {
+		taskkill.once("close", () => {
+			resolve(true);
+		});
+		taskkill.once("error", () => {
+			resolve(false);
+		});
+	});
+	if (!hasRun) {
+		child.kill("SIGKILL");
 	}
 }
 
@@ -187,9 +191,9 @@ async function killTreeAsync(
  * Keep the last {@link OUTPUT_TAIL_LINES} lines of a child's output.
  *
  * @param child - A child spawned with piped stdout and stderr.
- * @returns Reads the kept lines; a last line with no newline is included.
+ * @returns The kept lines and a way to stop reading.
  */
-function collectOutput(child: ChildProcess): () => Array<string> {
+function collectOutput(child: ChildProcess): CollectedOutput {
 	let lines: Array<string> = [];
 	let partial = "";
 
@@ -209,12 +213,63 @@ function collectOutput(child: ChildProcess): () => Array<string> {
 		);
 	}
 
-	for (const stream of [child.stdout, child.stderr]) {
+	const streams = [child.stdout, child.stderr].map((stream) => {
 		// Spawned with piped stdout and stderr.
 		assert(stream !== null);
 		stream.setEncoding("utf8");
 		stream.on("data", write);
+		return stream;
+	});
+
+	return {
+		lines: () => (partial === "" ? lines : [...lines, partial].slice(-OUTPUT_TAIL_LINES)),
+		release: () => {
+			for (const stream of streams) {
+				stream.destroy();
+			}
+		},
+	};
+}
+
+function spawnChild({ childProcess, host }: ChildProcessBackend, spec: ProcessSpec): ChildProcess {
+	return childProcess.spawn(spec.file, [...spec.args], {
+		cwd: spec.cwd,
+		detached: host.platform !== "win32",
+		env: spec.env,
+		stdio: ["ignore", "pipe", "pipe"],
+		windowsHide: true,
+		windowsVerbatimArguments: spec.verbatimArguments === true,
+	});
+}
+
+async function runChildAsync(
+	backend: ChildProcessBackend,
+	spec: ProcessSpec,
+): Promise<ProcessOutcome> {
+	const { clock } = backend;
+	const startedAt = clock.now();
+	const child = spawnChild(backend, spec);
+	if (child.pid === undefined) {
+		const error = await spawnErrorAsync(child);
+		return { errorCode: error.code, message: error.message, type: "spawn_failed" };
 	}
 
-	return () => (partial === "" ? lines : [...lines, partial].slice(-OUTPUT_TAIL_LINES));
+	const output = collectOutput(child);
+	const exited = waitForEventAsync(child, "exit");
+	const closed = waitForEventAsync(child, "close");
+	if (await outlivesTimeoutAsync(closed, clock, spec.timeoutMs)) {
+		await killTreeAsync({ child, pid: child.pid }, spec.env, backend);
+		await exited;
+		// A descendant that escaped the kill may still hold the pipes.
+		output.release();
+		return {
+			durationMs: clock.now() - startedAt,
+			outputTail: output.lines(),
+			type: "timed_out",
+		};
+	}
+
+	const { exitCode, signal } = await closed;
+	const durationMs = clock.now() - startedAt;
+	return { durationMs, exitCode, outputTail: output.lines(), signal, type: "exited" };
 }

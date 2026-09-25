@@ -8,7 +8,7 @@ import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 
 const REPOSITORY = path.join(import.meta.dirname, "..", "..");
 // Runs after `build`: the bin imports `dist/cli.mjs`.
-const BIN = path.join(REPOSITORY, "bin", "rbx-forge.js");
+export const BIN: string = path.join(REPOSITORY, "bin", "rbx-forge.js");
 
 /** One finished run of the built bin. */
 export interface BinRun {
@@ -23,12 +23,18 @@ export interface BinRun {
  *
  * @param argv - Arguments after `forge`.
  * @param cwd - Working directory of the run.
+ * @param environment - The run's variables; defaults to this process's,
+ *   without `CI`.
  * @returns Exit status and output.
  */
-export async function runBinAsync(argv: Array<string>, cwd = REPOSITORY): Promise<BinRun> {
+export async function runBinAsync(
+	argv: Array<string>,
+	cwd = REPOSITORY,
+	environment?: NodeJS.ProcessEnv,
+): Promise<BinRun> {
 	const child = spawn(process.execPath, [BIN, ...argv], {
 		cwd,
-		env: { ...process.env, CI: undefined },
+		env: environment ?? { ...process.env, CI: undefined },
 		stdio: ["pipe", "pipe", "pipe"],
 		windowsHide: true,
 	});
