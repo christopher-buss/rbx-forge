@@ -23,11 +23,12 @@ export interface FakeProcess {
 	/** Runs when a close request ends it, such as to delete a lock file. */
 	onClose?: () => void;
 	/**
-	 * What `requestClose` does: `exit` (the default), `refuse` (it stays
-	 * open, as Studio does while it asks to save), or `throw` (the OS
-	 * refuses the request).
+	 * What `requestClose` does: `exit` (the default); `refuse` (it stays
+	 * open, as Studio does while it asks to save); `no_window` (it has no
+	 * window to close: `false`); `exit_first` (it exits just before the
+	 * request: `false`); or `throw` (the OS refuses the request).
 	 */
-	onCloseRequest?: "exit" | "refuse" | "throw";
+	onCloseRequest?: "exit" | "exit_first" | "no_window" | "refuse" | "throw";
 	/** `pinProcess` throws this message (for example, access denied). */
 	pinError?: string;
 	/** Its start time as the addon reports it; the PID when not set. */
@@ -218,15 +219,29 @@ function startTimeOf(pid: number, entry: FakeProcess): string {
  * says.
  *
  * @param entry - The process.
- * @returns `false` when it had already exited.
+ * @returns `false` when it had already exited or has no window.
  */
 function requestClose(entry: FakeProcess): boolean {
 	if (!entry.alive) {
 		return false;
 	}
 
-	if (entry.onCloseRequest === "throw") {
-		throw new Error("close process: Access is denied. (os error 5)");
+	switch (entry.onCloseRequest) {
+		case "exit_first": {
+			entry.alive = false;
+			return false;
+		}
+		case "no_window": {
+			return false;
+		}
+		case "throw": {
+			throw new Error("close process: Access is denied. (os error 5)");
+		}
+		case "exit":
+		case "refuse":
+		case undefined: {
+			break;
+		}
 	}
 
 	entry.closeRequests = (entry.closeRequests ?? 0) + 1;

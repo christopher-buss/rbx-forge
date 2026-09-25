@@ -15,7 +15,7 @@ import type { HookResult } from "../hooks/run-hooks.ts";
  *     "rojo":     { "status": "ready", "port": 34872 },
  *     "compiler": { "status": "ready", "lastBuild": { "at": "…", "errors": 0, "diagnostics": [] } },
  *     "syncback": { "status": "idle", "lastRun": { "at": "…", "ok": true, "durationMs": 812, "hooks": [] } },
- *     "studio":   { "status": "open" }
+ *     "studio":   { "status": "open", "place": "…" }
  *   }
  * }
  * ```
@@ -59,7 +59,8 @@ export interface SessionStatus {
 	services: {
 		compiler: { lastBuild?: LastBuild; status: ServiceStatus };
 		rojo: { port: number; status: ServiceStatus };
-		studio: { status: "closed" | "off" | "open" | "opening" };
+		/** `place`: the place Studio has open, once it has. */
+		studio: { place?: string; status: "closed" | "off" | "open" | "opening" };
 		/**
 		 * `off` when the session does not run syncback on save; `forge sync`
 		 * runs still show `running` and their `lastRun`.
@@ -79,8 +80,8 @@ export interface StatusRecorder {
 	 * compiles, `starting`) or its tree is gone.
 	 */
 	service: (id: "compiler" | "rojo", status: ServiceStatus) => void;
-	/** Studio: launched, has the place open, or closed it. */
-	studio: (status: "closed" | "open" | "opening") => void;
+	/** Studio has the place open, or closed it. */
+	studio: (status: "closed" | "open", place: string) => void;
 	/** A syncback run ended. */
 	syncbackFinished: (run: SyncbackRun) => void;
 	/** A syncback run started. */
@@ -207,8 +208,8 @@ function createRecorder(
 			status.services[id].status = serviceStatus;
 			changed();
 		},
-		studio: (studioStatus) => {
-			status.services.studio.status = studioStatus;
+		studio: (studioStatus, place) => {
+			status.services.studio = { place, status: studioStatus };
 			changed();
 		},
 		syncbackFinished: (run) => {
@@ -267,7 +268,7 @@ const statusSchema: Type<SessionStatus> = type({
 			"status": serviceStatus,
 		},
 		rojo: { port: INTEGER, status: serviceStatus },
-		studio: { status: "'closed' | 'off' | 'open' | 'opening'" },
+		studio: { "place?": TEXT, "status": "'closed' | 'off' | 'open' | 'opening'" },
 		syncback: {
 			"lastRun?": {
 				"at": TEXT,

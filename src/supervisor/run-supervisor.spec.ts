@@ -27,7 +27,12 @@ import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { Pause, PausePoint } from "../session/pause.ts";
 import { neverPauseAsync } from "../session/pause.ts";
-import { FILE_POLL_MS, OUTPUT_POLL_MS, ROJO_LISTEN_BOUND_MS } from "../session/session-body.ts";
+import {
+	FILE_POLL_MS,
+	OUTPUT_POLL_MS,
+	ROJO_LISTEN_BOUND_MS,
+	STUDIO_CLOSED_SYNCBACK_MS,
+} from "../session/session-body.ts";
 import type { StopSource } from "../session/stop-source.ts";
 import { createStopSource } from "../session/stop-source.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
@@ -950,6 +955,109 @@ describe("forge start hooks and syncback", () => {
 		return run;
 	}
 
+	/**
+	 * A syncback session with Studio whose save watch looks at the place
+	 * 100 ms after the Studio watch looks at the lock file (Rojo listens on
+	 * the second look), and Studio has the place open.
+	 *
+	 * @param setup - More of the session.
+	 * @returns The session, at 500 ms.
+	 */
+	async function studioSyncbackAsync(setup: StartSetup = {}): Promise<StartRun> {
+		const run = startCommand({
+			...SYNCBACK,
+			files: { ...TOOL_FILES, "game.rbxl": "v1" },
+			flags: { compiler: false, syncback: true },
+			isListening: vi
+				.fn<Network["isListeningAsync"]>()
+				.mockResolvedValueOnce(false)
+				.mockResolvedValue(true),
+			...setup,
+		});
+		await flushAsync();
+		run.clock.advance(100);
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, "1");
+		run.clock.advance(400);
+		await flushAsync();
+		return run;
+	}
+
+	/**
+	 * Studio saves the place and closes it between two looks of the save
+	 * watch, and the Studio watch sees the close first.
+	 *
+	 * @param run - A session from {@link studioSyncbackAsync}.
+	 */
+	async function saveAndCloseAsync(run: StartRun): Promise<void> {
+		run.clock.advance(100);
+		await flushAsync();
+		run.memory.setModifiedTime("game.rbxl", Date.UTC(2026, 0, 2));
+		run.memory.fileSystem.rmSync(LOCK);
+		run.clock.advance(400);
+		await flushAsync();
+	}
+
+	it("should sync back a save Studio made just before it closed, then end with studio_closed", async () => {
+		expect.assertions(4);
+
+		const run = await studioSyncbackAsync({ oneShot: oneShotsWith({ "syncback-1": "hold" }) });
+		await saveAndCloseAsync(run);
+		let isEnded = false;
+		void run.result.finally(() => {
+			isEnded = true;
+		});
+		await passAsync(run, FILE_POLL_MS);
+
+		expect(isEnded).toBeFalse();
+
+		run.fake.exit("syncback-1", OK);
+		await passAsync(run, FILE_POLL_MS);
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "studio_closed" } });
+		// The syncback wait's timer is gone too.
+		expect(run.clock.pending()).toBe(0);
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"start-1: syncback --help",
+			"start-2: build default.project.json --output game.rbxl",
+			"rojo: serve default.project.json --port 4000",
+			"syncback-1: syncback default.project.json --input game.rbxl --non-interactive",
+			"syncback-2: -c lint",
+		]);
+	});
+
+	it("should end with studio_closed once syncback outlasts its wait", async () => {
+		expect.assertions(2);
+
+		const run = await studioSyncbackAsync({ oneShot: oneShotsWith({ "syncback-1": "hold" }) });
+		await saveAndCloseAsync(run);
+		let isEnded = false;
+		void run.result.finally(() => {
+			isEnded = true;
+		});
+		await passAsync(run, STUDIO_CLOSED_SYNCBACK_MS - OUTPUT_POLL_MS);
+
+		expect(isEnded).toBeFalse();
+
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "studio_closed" } });
+	});
+
+	it("should end with studio_closed at once when no syncback runs", async () => {
+		expect.assertions(1);
+
+		const run = await studioSyncbackAsync();
+		run.clock.advance(100);
+		await flushAsync();
+		run.memory.fileSystem.rmSync(LOCK);
+		run.clock.advance(400);
+		await flushAsync();
+		await flushAsync();
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "studio_closed" } });
+	});
+
 	it("should not run syncback on a save without --syncback", async () => {
 		expect.assertions(1);
 
@@ -1580,7 +1688,9 @@ describe("forge up control channel", () => {
 		await passAsync(run, 5750);
 		await caught;
 
-		expect(stateOf(run)).toMatchObject({ services: { studio: { status: "closed" } } });
+		expect(stateOf(run)).toMatchObject({
+			services: { studio: { place: PLACE, status: "closed" } },
+		});
 	});
 
 	it("should show a stopping session, with Studio still open, while its workers go", async () => {
@@ -1597,7 +1707,10 @@ describe("forge up control channel", () => {
 		await passAsync(run, 5250);
 		await caught;
 
-		expect(open).toMatchObject({ phase: "ready", services: { studio: { status: "open" } } });
+		expect(open).toMatchObject({
+			phase: "ready",
+			services: { studio: { place: PLACE, status: "open" } },
+		});
 		expect(stateOf(run)).toMatchObject({
 			phase: "stopping",
 			running: true,

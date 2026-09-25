@@ -15,7 +15,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { onTestFinished } from "vitest";
 
 import { createFixtureBinDirectory } from "../helpers/fixture-bin.ts";
-import { NATIVE_DIRECTORY } from "../helpers/real-native.ts";
+import { makeStudioExecutable, NATIVE_DIRECTORY, studioVariables } from "../helpers/real-native.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { killWorkers, readWorkerLog } from "../helpers/worker-log.ts";
 import { BIN, makeProject } from "./run-bin.ts";
@@ -31,9 +31,15 @@ export const WORKER_ROLES: ReadonlySet<string> = new Set(["hook", "rbxtsc", "roj
 /** The place every session builds: the Studio stand-in of `open.spec.ts`. */
 export const PLACE = IS_WINDOWS ? "My Places/Studio Stand-in.cmd" : "My Places/game.rbxl";
 
-const PLACE_CONTENT = IS_WINDOWS
-	? `@cd /d "%SystemRoot%" & "${process.execPath}" "${FAKE_WORKER}" studio "%~f0" & exit\r\n`
-	: "fake place\n";
+/** What a fixture's Studio stand-in does. */
+export interface FixtureOptions {
+	/**
+	 * Behave as Studio: run as a Studio executable, write the place's lock
+	 * file, and close on a close request (`test/fixtures/bin/fake-worker.ts`).
+	 * Otherwise it only stays alive, and a test writes the lock file.
+	 */
+	studio?: boolean;
+}
 
 export interface Fixture {
 	environment: (variables?: Record<string, string>) => NodeJS.ProcessEnv;
@@ -71,13 +77,18 @@ export async function holdPortAsync(port: number): Promise<void> {
  * still alive at the test's end is killed.
  *
  * @param config - Config keys, such as `projectType` or `hooks`.
+ * @param options - What the Studio stand-in does.
  * @returns The project, its fixture log, and its environment.
  */
-export async function makeFixtureAsync(config: Record<string, unknown> = {}): Promise<Fixture> {
+export async function makeFixtureAsync(
+	config: Record<string, unknown> = {},
+	options: FixtureOptions = {},
+): Promise<Fixture> {
 	const port = await freePortAsync();
 	const project = makeProject();
 	const place = writeProjectFiles(project, { rojoPort: port, ...config });
 	const bin = createFixtureBinDirectory(path.join(project, "fixture-bin"));
+	const studio = options.studio === true ? makeStudioExecutable() : undefined;
 	const log = path.join(project, "workers.ndjson");
 	onTestFinished(() => {
 		killWorkers(readWorkerLog(log));
@@ -89,7 +100,8 @@ export async function makeFixtureAsync(config: Record<string, unknown> = {}): Pr
 			return {
 				...base,
 				FIXTURE_LOG: log,
-				FIXTURE_PLACE_CONTENT: PLACE_CONTENT,
+				FIXTURE_PLACE_CONTENT: placeContent(studio ?? process.execPath),
+				...(studio === undefined ? {} : studioVariables(studio)),
 				PATH: bin,
 				RBX_FORGE_NATIVE_DIR: NATIVE_DIRECTORY,
 				...variables,
@@ -180,6 +192,20 @@ export async function waitForRoleAsync(log: string, role: string): Promise<Worke
 
 		await sleep(50);
 	}
+}
+
+/**
+ * What `rojo build` writes to the place: on Windows, the batch file that
+ * stands in for Studio (see `open.spec.ts`).
+ *
+ * @param studio - The path of the program the stand-in runs: Node, or a
+ *   copy of Node named as Studio.
+ * @returns What the place file holds.
+ */
+function placeContent(studio: string): string {
+	return IS_WINDOWS
+		? `@cd /d "%SystemRoot%" & "${studio}" "${FAKE_WORKER}" studio "%~f0" & exit\r\n`
+		: "fake place\n";
 }
 
 /**

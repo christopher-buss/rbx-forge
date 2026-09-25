@@ -26,7 +26,8 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, RegisterClassW,
-    TranslateMessage, WM_CLOSE, WNDCLASSW, WS_EX_NOACTIVATE, WS_POPUP, WS_VISIBLE,
+    SW_SHOWNOACTIVATE, ShowWindow, TranslateMessage, WM_CLOSE, WNDCLASSW, WS_EX_NOACTIVATE,
+    WS_POPUP, WS_VISIBLE,
 };
 
 use super::{check, owned, raw, wide};
@@ -193,6 +194,12 @@ pub fn open_test_window() -> io::Result<()> {
             return;
         }
 
+        // A hidden start (`windowsHide`) sets the first show to hide: show it
+        // twice, so the second one counts.
+        for _ in 0..2 {
+            // SAFETY: a window this thread owns.
+            unsafe { ShowWindow(window, SW_SHOWNOACTIVATE) };
+        }
         let _ = sender.send(Ok(()));
         // SAFETY: all-zero is a valid value of this plain struct.
         let mut message: MSG = unsafe { zeroed() };

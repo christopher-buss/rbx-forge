@@ -14,8 +14,8 @@ import type { SessionSetup } from "./session-body.ts";
 import type { SyncbackAttempt } from "./session-sync.ts";
 import type { SyncbackRun } from "./status.ts";
 import { parseHookResults } from "./status.ts";
-import type { WatchOptions } from "./watch.ts";
-import { watchSavesAsync } from "./watch.ts";
+import type { SaveWatch, WatchOptions } from "./watch.ts";
+import { watchSaves } from "./watch.ts";
 
 // Syncback in a session (spec #28, Hooks): one runner per session, shared by
 // the save watch and `forge sync`, so syncback and its hooks run one at a
@@ -73,14 +73,15 @@ export function startSyncback(
  * @param session - The config and context.
  * @param options - How the place is watched, and the session's end signal.
  * @param runner - The session's syncback runner.
+ * @returns The save watch.
  */
-export async function watchSavesForSyncbackAsync(
+export function watchSavesForSyncback(
 	{ config, context }: Pick<SessionSetup, "config" | "context">,
 	options: WatchOptions,
 	runner: CoalescingRunner<SyncbackAttempt>,
-): Promise<void> {
+): SaveWatch {
 	const place = path.resolve(context.cwd, resolveSyncbackTarget(config).input);
-	await watchSavesAsync(options, place, () => {
+	return watchSaves(options, place, () => {
 		// A run never rejects; its outcome is in the status.
 		void runner.request();
 	});

@@ -1,9 +1,10 @@
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
-import { chmodSync, copyFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { onTestFinished } from "vitest";
 
 import type { NativeAddon } from "../../src/native/addon.ts";
@@ -33,6 +34,8 @@ export const REAPER_PATH: string = path.join(
 
 /** Keeps a process alive until it is killed. */
 const KEEP_ALIVE = "setInterval(() => {}, 60_000);";
+
+const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 
 /**
  * Load the real addon from {@link NATIVE_DIRECTORY}.
@@ -92,18 +95,88 @@ export function spawnSleeper(executable: string = process.execPath): ChildProces
 }
 
 /**
- * A process whose executable the OS reports as Roblox Studio: a copy of the
- * Node executable named `RobloxStudioBeta.exe` (Windows) or `RobloxStudio`
- * (macOS, Linux), running until the test ends.
+ * An executable the OS reports as Roblox Studio: a copy of the Node
+ * executable named `RobloxStudioBeta.exe` (Windows) or `RobloxStudio`
+ * (macOS, Linux), in a directory removed when the test ends.
  *
- * @returns The child process.
+ * @returns Its path.
  */
-export function spawnFakeStudio(): ChildProcess {
+export function makeStudioExecutable(): string {
 	const name = process.platform === "win32" ? "RobloxStudioBeta.exe" : "RobloxStudio";
 	const executable = path.join(makeTemporaryDirectory(), name);
 	copyFileSync(process.execPath, executable);
 	chmodSync(executable, 0o755);
-	return spawnSleeper(executable);
+	return executable;
+}
+
+/**
+ * A process whose executable the OS reports as Roblox Studio, running until
+ * the test ends. It does nothing else.
+ *
+ * @returns The child process.
+ */
+export function spawnFakeStudio(): ChildProcess {
+	return spawnSleeper(makeStudioExecutable());
+}
+
+/**
+ * The variables that make the fixture `studio` role behave as Studio (see
+ * `test/fixtures/bin/fake-worker.ts`).
+ *
+ * @param executable - A Studio executable from {@link makeStudioExecutable}.
+ * @returns The variables, for the stand-in's environment.
+ */
+export function studioVariables(executable: string): Record<string, string> {
+	return {
+		FIXTURE_NATIVE_ADDON: realNativePath(),
+		FIXTURE_STUDIO_EXE: executable,
+		FIXTURE_STUDIO_LOCK: "1",
+	};
+}
+
+/**
+ * Wait until a file exists.
+ *
+ * @param file - Its absolute path.
+ * @rejects When 30 seconds pass first.
+ */
+export async function waitForFileAsync(file: string): Promise<void> {
+	const deadline = Date.now() + 30_000;
+	while (!existsSync(file)) {
+		if (Date.now() > deadline) {
+			throw new Error(`expected ${file}`);
+		}
+
+		await sleep(50);
+	}
+}
+
+/**
+ * Start a stand-in Studio with `place` open, and wait for its lock file. It
+ * closes on a close request, unless `variables` say otherwise, and runs
+ * until the test ends.
+ *
+ * @param place - The absolute path of the place.
+ * @param variables - More fixture variables, such as
+ *   `FIXTURE_STUDIO_REFUSE_CLOSE`.
+ * @returns The child process.
+ */
+export async function openStudioStandInAsync(
+	place: string,
+	variables: Record<string, string> = {},
+): Promise<ChildProcess> {
+	const executable = makeStudioExecutable();
+	const child = spawn(executable, [FAKE_WORKER, "studio", place], {
+		env: { ...process.env, ...studioVariables(executable), ...variables },
+		stdio: "ignore",
+		windowsHide: true,
+	});
+	onTestFinished(async () => {
+		child.kill("SIGKILL");
+		await waitForExitAsync(child);
+	});
+	await waitForFileAsync(`${place}.lock`);
+	return child;
 }
 
 /**

@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 
-import { ForgeError } from "../errors.ts";
+import { ForgeError, toForgeError } from "../errors.ts";
 import { callSessionAsync } from "../ipc/client.ts";
 import type { CleanupReport, PinnedProcess } from "../native/addon.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import type { Seams } from "../seams/seams.ts";
+import { STUDIO_CLOSED_SYNCBACK_MS } from "../session/session-body.ts";
+import { parseStatus } from "../session/status.ts";
+import { closeStudio } from "../studio/close-studio.ts";
 import type { Barrier } from "../supervisor/barrier.ts";
 import { SETTLE_MS, targetOf, waitForBarrierAsync } from "../supervisor/barrier.ts";
 import type { ForgeFiles, SessionFiles } from "../supervisor/session-files.ts";
@@ -17,6 +20,11 @@ export const DOWN_TIMEOUT_MS = 15_000;
 export const FORCED_SHUTDOWN_MS = 5000;
 /** How long `down --force` waits for the supervisor it killed. */
 export const KILL_WAIT_MS = 5000;
+/**
+ * How long `down` lets a session whose Studio it closed end by itself,
+ * before it asks: the session waits for syncback of a last save first.
+ */
+export const STUDIO_END_WAIT_MS: number = STUDIO_CLOSED_SYNCBACK_MS + 5000;
 
 /** How often `down` looks at the supervisor again. */
 const DOWN_POLL_MS = 100;
@@ -25,7 +33,7 @@ const DOWN_POLL_MS = 100;
 const NEVER = AbortSignal.any([]);
 
 /** The seams `down` runs with. */
-export type DownSeams = Pick<Seams, "clock" | "fileSystem" | "ipc" | "native">;
+export type DownSeams = Pick<Seams, "clock" | "fileSystem" | "host" | "ipc" | "native">;
 
 /** Where a test can hold `down` up: before the barrier, before the delete. */
 export type DownPoint = "barrier" | "delete";
@@ -37,6 +45,8 @@ export interface DownOptions {
 	 * start-time-verified handle), and kill what outlives the barrier.
 	 */
 	force: boolean;
+	/** `--keep-studio`: leave the session's Studio open. */
+	keepStudio: boolean;
 	/** Test only: waits at each point. */
 	pause?: ((point: DownPoint) => Promise<void>) | undefined;
 	/** How long to wait for the supervisor, and for the barrier. */
@@ -50,8 +60,26 @@ export interface DownOptions {
  * - `shutdown`: it stopped on the shutdown request.
  * - `forced_shutdown`: it stopped on the forced shutdown request.
  * - `killed`: `--force` killed it.
+ * - `studio_closed`: it stopped by itself once `down` closed its Studio.
  */
-export type StoppedBy = "forced_shutdown" | "gone" | "killed" | "shutdown";
+export type StoppedBy = "forced_shutdown" | "gone" | "killed" | "shutdown" | "studio_closed";
+
+/**
+ * What `down` did with the session's Studio:
+ *
+ * - `closed`: Studio is gone. `forced`: it did not close on the close
+ *   request, so forge ended it without a save.
+ * - `failed`: forge could not verify or end it (the error's `code` and
+ *   `message`); Studio may still be open.
+ * - `kept`: `--keep-studio` left it as it is.
+ * - `none`: the session has no Studio open.
+ * - `unknown`: the supervisor did not answer, so forge cannot tell which
+ *   Studio is the session's; it touched none.
+ */
+export type DownStudio =
+	| { code: string; message: string; place: string; status: "failed" }
+	| { forced: boolean; pid: number; place: string; status: "closed" }
+	| { status: "kept" | "none" | "unknown" };
 
 /** What `down` did. */
 export interface DownReport {
@@ -61,6 +89,7 @@ export interface DownReport {
 	removed: boolean;
 	sessionId: string;
 	stoppedBy: StoppedBy;
+	studio: DownStudio;
 }
 
 /** The target's supervisor, pinned when it still runs. */
@@ -74,7 +103,13 @@ interface Target {
 /**
  * Stop one session and prove it gone (spec #28, `down`). It acts on this
  * session only: requests carry its id, pins its recorded supervisor, and
- * cleans up and deletes only its files. `stopped` needs both:
+ * cleans up and deletes only its files.
+ *
+ * First it closes the session's Studio (unless `keepStudio`): the place the
+ * session reports open, through `closeStudio` (a close request, then a kill
+ * without a save). The session then ends by itself once syncback of a last
+ * save is done; `down` waits {@link STUDIO_END_WAIT_MS} for that before it
+ * asks. `stopped` needs both:
  *
  * 1. Its supervisor has exited: its pinned process (PID plus start time)
  *    is gone. A supervisor lets go of the singleton lock before it writes
@@ -107,7 +142,8 @@ export async function stopSessionAsync(
 	options: DownOptions,
 ): Promise<DownReport> {
 	const target: Target = { forge, pin: pinSupervisor(seams, session), session };
-	const stoppedBy = await stopSupervisorAsync(seams, target, options);
+	const studio = await closeSessionStudioAsync(seams, target, options);
+	const stoppedBy = await stopSupervisorAsync(seams, target, { ...options, studio });
 	await options.pause?.("barrier");
 	const cleanup = await clearBarrierAsync(seams, session.files, options);
 	await options.pause?.("delete");
@@ -116,7 +152,90 @@ export async function stopSessionAsync(
 		removed: removeUnderLock(seams, forge, session.files),
 		sessionId: session.identity.sessionId,
 		stoppedBy,
+		studio,
 	};
+}
+
+/**
+ * The place the session's Studio has open, as the session reports it.
+ *
+ * @param seams - The transport.
+ * @param session - The target's endpoint, token, and id.
+ * @returns The place; `null` when Studio does not have it open;
+ *   `undefined` when the session did not answer, or another one did.
+ */
+async function studioPlaceAsync(
+	seams: Pick<DownSeams, "ipc">,
+	{ identity, token }: KnownSession,
+): Promise<null | string | undefined> {
+	let result: Record<string, unknown>;
+	try {
+		result = await callSessionAsync(
+			seams.ipc,
+			{ endpoint: identity.endpoint, token },
+			"status",
+		);
+	} catch {
+		return undefined;
+	}
+
+	const status = parseStatus(result);
+	if (status?.sessionId !== identity.sessionId) {
+		return undefined;
+	}
+
+	return status.services.studio.place ?? null;
+}
+
+/**
+ * Condition 1 of {@link stopSessionAsync}: the target's supervisor has
+ * exited.
+ *
+ * @param target - The pinned supervisor.
+ * @param target.pin - Its pin; `undefined` when it was gone at the start.
+ * @returns Whether it has.
+ */
+function isGone({ pin }: Target): boolean {
+	return pin?.isAlive() !== true;
+}
+
+/**
+ * Close the Studio that has the session's place open, unless `keepStudio`.
+ * A failure is reported, not thrown: the session still stops.
+ *
+ * @param seams - The transport, file system, OS, and native addon.
+ * @param target - The session and its pinned supervisor.
+ * @param options - `keepStudio`.
+ * @returns What it did.
+ */
+async function closeSessionStudioAsync(
+	seams: DownSeams,
+	target: Target,
+	{ keepStudio }: Pick<DownOptions, "keepStudio">,
+): Promise<DownStudio> {
+	if (keepStudio) {
+		return { status: "kept" };
+	}
+
+	// Gone, silent, or replaced: which Studio is the session's is unknown.
+	const place = await (isGone(target) ? undefined : studioPlaceAsync(seams, target.session));
+	if (place === undefined) {
+		return { status: "unknown" };
+	}
+
+	if (place === null) {
+		return { status: "none" };
+	}
+
+	try {
+		const stop = closeStudio(seams, place);
+		return stop.status === "stopped"
+			? { forced: stop.forced, pid: stop.pid, place, status: "closed" }
+			: { status: "none" };
+	} catch (err) {
+		const { code, message } = toForgeError(err);
+		return { code, message, place, status: "failed" };
+	}
 }
 
 /**
@@ -152,18 +271,6 @@ function pinSupervisor(
  */
 function isLockHeld(seams: Pick<DownSeams, "native">, forge: ForgeFiles): boolean {
 	return !seams.native().isLockFree(forge.lock);
-}
-
-/**
- * Condition 1 of {@link stopSessionAsync}: the target's supervisor has
- * exited.
- *
- * @param target - The pinned supervisor.
- * @param target.pin - Its pin; `undefined` when it was gone at the start.
- * @returns Whether it has.
- */
-function isGone({ pin }: Target): boolean {
-	return pin?.isAlive() !== true;
 }
 
 /**
@@ -257,21 +364,30 @@ function unresponsive({ session }: Target, force: boolean): ForgeError {
 }
 
 /**
- * Condition 1 of {@link stopSessionAsync}, with its escalation.
+ * Condition 1 of {@link stopSessionAsync}, with its escalation. A session
+ * whose Studio `down` closed gets {@link STUDIO_END_WAIT_MS} to end by
+ * itself first.
  *
  * @param seams - The clock, transport, and native addon.
  * @param target - The session and its pinned supervisor.
- * @param options - `--force` and the wait.
+ * @param options - `--force`, the wait, and what `down` did with Studio.
  * @returns How the supervisor went.
  * @rejects {ForgeError} `supervisor_unresponsive`; `session_replaced`.
  */
 async function stopSupervisorAsync(
 	seams: DownSeams,
 	target: Target,
-	options: DownOptions,
+	options: DownOptions & { studio: DownStudio },
 ): Promise<StoppedBy> {
 	if (isGone(target)) {
 		return "gone";
+	}
+
+	if (
+		options.studio.status === "closed" &&
+		(await waitGoneAsync(seams, target, STUDIO_END_WAIT_MS))
+	) {
+		return "studio_closed";
 	}
 
 	if (await requestStopAsync(seams, target, false, options.timeoutMs)) {
