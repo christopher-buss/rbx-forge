@@ -83,14 +83,10 @@ function toCompileEvent(event: typeof sloptorEvent.infer): CompileEvent {
  */
 function readLine(parser: DiagnosticsParser, line: string): CompileEvent | undefined {
 	const value = JSON_OBJECT_START.test(line) ? jsonText(line) : undefined;
-	if (value === undefined || value instanceof type.errors) {
+	if (!anyEvent.allows(value)) {
 		return parser.read(line);
 	}
 
 	const event = sloptorEvent(value);
-	if (!(event instanceof type.errors)) {
-		return toCompileEvent(event);
-	}
-
-	return anyEvent.allows(value) ? undefined : parser.read(line);
+	return event instanceof type.errors ? undefined : toCompileEvent(event);
 }
