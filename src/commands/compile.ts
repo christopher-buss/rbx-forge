@@ -1,7 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 
 import type { CompileReport } from "../compiler/diagnostics.ts";
-import { createDiagnosticsParser } from "../compiler/diagnostics.ts";
+import { createCompilerOutputParser } from "../compiler/sloptor.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
@@ -46,7 +46,7 @@ export async function compileAsync(
 		const startedAt = new Date(clock.now());
 		log.write(`--- forge compile ${startedAt.toISOString()} ---`);
 
-		const parser = createDiagnosticsParser();
+		const parser = createCompilerOutputParser();
 		const call: ToolCall = {
 			args: config.rbxts.args,
 			command: config.rbxts.command,
@@ -101,7 +101,7 @@ export async function runCompileCommandAsync(
 	}
 
 	const { hooks, value } = await compileAsync(context, config);
-	const warnings = value.diagnostics.length - value.errors;
+	const warnings = value.diagnostics.filter(({ severity }) => severity === "warning").length;
 
 	return {
 		data: { ...value, hooks },

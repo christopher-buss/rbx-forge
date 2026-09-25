@@ -17,15 +17,15 @@ export const STATUS_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
 		name: "timeout",
 		kind: "number",
-		text: `How long --wait waits for a fresh build (default ${FRESH_BUILD_TIMEOUT_MS}).`,
-		value: "<ms>",
+		text: `How long --wait waits for a fresh build (default ${FRESH_BUILD_TIMEOUT_MS / 1000}). 0 does not wait: the status now.`,
+		value: "<seconds>",
 	},
 ];
 
 const NO_INPUT: CommandInput = { config: {}, flags: {} };
 
 /** The longest `--timeout`: a timer waits at most 2^31 - 1 ms. */
-const MAX_WAIT_MS = 2_147_000_000;
+const MAX_WAIT_SECONDS = 2_147_000;
 
 /**
  * `forge status`: the state of the project's running session: each service's
@@ -62,9 +62,10 @@ export async function runStatusAsync(
  * The wait `--wait` and `--timeout` ask for.
  *
  * @param flags - The parsed flags.
- * @returns Milliseconds, or `undefined` without `--wait`.
+ * @returns Milliseconds (`--timeout` is in seconds, as for `down`; 0 does
+ *   not wait), or `undefined` without `--wait`.
  * @throws {ForgeError} `usage` for `--timeout` without `--wait`, or a value
- *   that is not a number of milliseconds.
+ *   that is not a number of seconds.
  */
 function waitOf(flags: FlagValues): number | undefined {
 	const value = flags["timeout"];
@@ -80,7 +81,7 @@ function waitOf(flags: FlagValues): number | undefined {
 		return FRESH_BUILD_TIMEOUT_MS;
 	}
 
-	return readCountFlag("timeout", value, "milliseconds", MAX_WAIT_MS);
+	return readCountFlag("timeout", value, "seconds", MAX_WAIT_SECONDS) * 1000;
 }
 
 function plural(count: number, noun: string): string {

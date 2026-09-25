@@ -28,7 +28,7 @@ export const IS_MACOS = process.platform === "darwin";
 const PATH_NAME = /^path$/i;
 export const ROJO_ONLY = ["start", "--no-open", "--no-compiler", "--json"];
 /** Roles that run as reaper workers; Studio and its launcher do not. */
-export const WORKER_ROLES: ReadonlySet<string> = new Set(["hook", "rbxtsc", "rojo"]);
+export const WORKER_ROLES: ReadonlySet<string> = new Set(["hook", "rbxtsc", "rojo", "sloptor"]);
 
 /**
  * How a stand-in Studio that closes on the request goes. It exits right

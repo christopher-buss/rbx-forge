@@ -72,11 +72,15 @@ after one window with the last build. A session that is still starting waits for
 its first compile. With no roblox-ts compiler (Luau, or `--no-compiler`), it
 returns at once.
 
-Failures: `compile_timeout` (exit 1) after `--timeout <ms>` (default 300000, at
-most 2147000000), with `details.building` and `details.timeoutMs`. A `--timeout`
-shorter than the quiet window always fails when a roblox-ts compiler runs;
-`service_failed` (exit 1) when the compiler stops during the wait; `not_running`
-(exit 3) when no session runs or it stops.
+`--timeout <seconds>` (default 300, at most 2147000; decimals are allowed)
+bounds the wait. `--timeout 0` does not wait: it returns the status now, with
+`building`, and never fails with `compile_timeout`.
+
+Failures: `compile_timeout` (exit 1) when the wait ends with no fresh build,
+with `details.building` and `details.timeoutSeconds`. A `--timeout` above 0 and
+shorter than the quiet window (0.75 s) always fails when a roblox-ts compiler
+runs; `service_failed` (exit 1) when the compiler stops during the wait;
+`not_running` (exit 3) when no session runs or it stops.
 
 ## The `down` and `stop` result
 

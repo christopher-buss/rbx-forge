@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 
 /** Roles `test/fixtures/bin/fake-worker.ts` knows, each written as a shim. */
-const FIXTURE_ROLES = ["hook", "open", "rbxtsc", "rojo", "xdg-open"] as const;
+const FIXTURE_ROLES = ["hook", "open", "rbxtsc", "rojo", "sloptor", "xdg-open"] as const;
 
 const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 

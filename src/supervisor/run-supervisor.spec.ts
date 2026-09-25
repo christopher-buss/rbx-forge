@@ -1697,10 +1697,13 @@ describe("forge up control channel", () => {
 
 		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
 		await flushAsync();
+		const waiting = callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", {
+			params: { timeoutMs: 1 },
+		});
+		await flushAsync();
+		run.clock.advance(1);
 
-		await expect(
-			callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", { params: { timeoutMs: 0 } }),
-		).rejects.toMatchObject({ code: "compile_timeout" });
+		await expect(waiting).rejects.toMatchObject({ code: "compile_timeout" });
 	});
 
 	it("should fail a freshStatus wait with service_failed when the compiler exits", async () => {

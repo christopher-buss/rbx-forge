@@ -236,9 +236,9 @@ describe(createBuildWatch, () => {
 
 		await expect(waiting.wait).rejects.toMatchObject({
 			code: "compile_timeout",
-			details: { building: true, timeoutMs: 2000 },
+			details: { building: true, timeoutSeconds: 2 },
 			hint: 'Read the compiler\'s output with "forge logs compiler", or wait longer with --timeout.',
-			message: "No fresh build within 2000 ms: a compile still runs.",
+			message: "No fresh build within 2 s: a compile still runs.",
 		});
 	});
 
@@ -286,12 +286,21 @@ describe(createBuildWatch, () => {
 		expect.assertions(1);
 
 		const { advanceAsync, wait } = await builtAsync();
-		const waiting = wait(0);
-		await advanceAsync(0);
+		const waiting = wait(500);
+		await advanceAsync(500);
 
 		await expect(waiting.wait).rejects.toThrow(
-			`the quiet window (${QUIET_WINDOW_MS} ms) is longer than the wait`,
+			"the quiet window (0.75 s) is longer than the wait",
 		);
+	});
+
+	it("should not wait with a timeout of 0, even while a compile runs", async () => {
+		expect.assertions(1);
+
+		const { lineAsync, wait } = await builtAsync();
+		await lineAsync(CHANGE);
+
+		await expect(wait(0).wait).resolves.toBeUndefined();
 	});
 
 	it("should fail every wait with not_running once the session stops", async () => {

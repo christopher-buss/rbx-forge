@@ -1,5 +1,5 @@
-import type { DiagnosticsParser } from "../compiler/diagnostics.ts";
-import { createDiagnosticsParser } from "../compiler/diagnostics.ts";
+import type { CompileEvent } from "../compiler/diagnostics.ts";
+import { createCompilerOutputParser } from "../compiler/sloptor.ts";
 import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
@@ -29,7 +29,8 @@ export interface BuildWatch {
 	tick: () => void;
 	/**
 	 * Wait until the last build is fresh: no compile runs, and none started
-	 * for one quiet window since the call or the last build.
+	 * for one quiet window since the call or the last build. A `timeoutMs`
+	 * of 0 does not wait: the caller reads the status now.
 	 *
 	 * @rejects {ForgeError} `compile_timeout` after `timeoutMs`; the failure
 	 *   given to `fail` or `close`.
@@ -58,14 +59,16 @@ interface Watch {
 	change: PromiseWithResolvers<void> | undefined;
 	clock: Clock;
 	failure: ForgeError | undefined;
-	parser: DiagnosticsParser;
+	/** Turns each output line into its build event (rbxtsc or sloptor). */
+	parse: (line: string) => CompileEvent | undefined;
 	recorder: BuildWatchOptions["recorder"];
 	tracker: FreshnessTracker;
 }
 
 /**
- * Watch the builds of a session's roblox-ts compiler, for a status wait: its
- * output lines become build events for a freshness tracker.
+ * Watch the builds of a session's roblox-ts compiler (rbxtsc or sloptor), for
+ * a status wait: its output lines become build events for a freshness
+ * tracker.
  *
  * @param options - The clock, the status, and whether a compiler is read.
  * @returns A watch with no build.
@@ -75,7 +78,7 @@ export function createBuildWatch({ clock, recorder, tracks }: BuildWatchOptions)
 		change: undefined,
 		clock,
 		failure: undefined,
-		parser: createDiagnosticsParser(),
+		parse: createCompilerOutputParser().read,
 		recorder,
 		tracker: createFreshnessTracker(),
 	};
@@ -91,7 +94,7 @@ export function createBuildWatch({ clock, recorder, tracks }: BuildWatchOptions)
 			tick(watch, clock.now());
 		},
 		waitAsync: async (timeoutMs) => {
-			if (tracks) {
+			if (tracks && timeoutMs > 0) {
 				await waitFreshAsync(watch, timeoutMs);
 			}
 		},
@@ -129,11 +132,11 @@ function tick(watch: Watch, now: number): void {
 }
 
 function read(watch: Watch, line: string): LastBuild | undefined {
-	const { clock, parser, recorder, tracker } = watch;
+	const { clock, parse, recorder, tracker } = watch;
 	const now = clock.now();
 	tick(watch, now);
 	const wasBuilding = tracker.building();
-	const build = tracker.record(parser.read(line), now);
+	const build = tracker.record(parse(line), now);
 	if (build !== undefined) {
 		recorder.compiled(build, tracker.building());
 	} else if (tracker.building() !== wasBuilding) {
@@ -152,11 +155,12 @@ function timedOut(tracker: FreshnessTracker, timeoutMs: number): ForgeError {
 	} else if (tracker.lastBuild() === undefined) {
 		why = "the first compile has not ended";
 	} else if (timeoutMs < QUIET_WINDOW_MS) {
-		why = `the quiet window (${QUIET_WINDOW_MS} ms) is longer than the wait`;
+		why = `the quiet window (${QUIET_WINDOW_MS / 1000} s) is longer than the wait`;
 	}
 
-	return new ForgeError("compile_timeout", `No fresh build within ${timeoutMs} ms: ${why}.`, {
-		details: { building: isBuilding, timeoutMs },
+	const timeoutSeconds = timeoutMs / 1000;
+	return new ForgeError("compile_timeout", `No fresh build within ${timeoutSeconds} s: ${why}.`, {
+		details: { building: isBuilding, timeoutSeconds },
 		hint: 'Read the compiler\'s output with "forge logs compiler", or wait longer with --timeout.',
 	});
 }

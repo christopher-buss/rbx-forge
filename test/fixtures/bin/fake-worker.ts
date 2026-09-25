@@ -1,8 +1,8 @@
 /**
- * One fake binary for every worker a session runs: rojo, the compiler, and
- * hooks. The first argument names the role; the shims written by
- * `test/helpers/fixture-bin.ts` pass it. Environment variables shape the
- * process tree, so a test builds any tree without extra files:
+ * One fake binary for every worker a session runs: rojo, the compiler
+ * (`rbxtsc` or `sloptor`), and hooks. The first argument names the role; the
+ * shims of `test/helpers/fixture-bin.ts` pass it. Environment variables shape
+ * the process tree, so a test builds any tree without extra files:
  *
  * - `FIXTURE_LOG`: NDJSON file; every process appends one `start` record,
  *   with the time it started (`at`, milliseconds since the Unix epoch).
@@ -45,7 +45,8 @@
  *   to stdout before it exits, such as recorded compiler output.
  * - `FIXTURE_COMPILER_WATCH`: a file that `rbxtsc -w` watches, as roblox-ts
  *   does, shaped by `FIXTURE_COMPILE_DELAY_MS`, `FIXTURE_COMPILE_MS`,
- *   `FIXTURE_COMPILE_STARTS`, and `FIXTURE_COMPILE_ENDS`
+ *   `FIXTURE_COMPILE_STARTS`, `FIXTURE_COMPILE_ENDS`, and
+ *   `FIXTURE_COMPILER_NDJSON=1` (sloptor's NDJSON events, not roblox-ts text)
  *   (`watch-compiler.ts`). Without it, `rbxtsc -w` prints one summary line
  *   and stays alive.
  * - `FIXTURE_PLACE_CONTENT`: what `rojo build` writes to its output (default
@@ -362,13 +363,7 @@ function runRojo(): void {
 
 function runCompiler(): void {
 	if (ARGS.includes("-w") || ARGS.includes("--watch")) {
-		const watched = env["FIXTURE_COMPILER_WATCH"];
-		if (watched === undefined) {
-			process.stdout.write("Found 0 errors. Watching for file changes.\n");
-		} else {
-			runWatchCompiler(watched, env);
-		}
-
+		runWatchCompiler(env);
 		stayAlive();
 		return;
 	}
@@ -426,7 +421,8 @@ switch (ROLE) {
 		runLauncher();
 		break;
 	}
-	case "rbxtsc": {
+	case "rbxtsc":
+	case "sloptor": {
 		runCompiler();
 		break;
 	}

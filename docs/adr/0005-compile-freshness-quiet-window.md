@@ -18,7 +18,11 @@ output every 250 ms.
 - **Build events, not text.** A pure freshness tracker takes build events
   (start, and end with the error count and diagnostics) and the time. The
   roblox-ts line parser turns output lines into these events, so an adapter for
-  another compiler's output feeds the same tracker unchanged.
+  another compiler's output feeds the same tracker unchanged. The second adapter
+  reads the NDJSON events of `sloptor build -w --json`
+  ([howmanyslop/sloptor#67](https://github.com/howmanyslop/sloptor/issues/67)):
+  a line that is a JSON object with a string `event` field is a sloptor event,
+  and all other lines go to the roblox-ts parser.
 - **Unanswered start lines.** A roblox-ts fork prints a start line for a save
   during a compile and folds several of them into one trailing compile, so start
   lines and summary lines do not always pair. Each summary line ends the oldest
@@ -30,9 +34,13 @@ output every 250 ms.
 - **No compiler to read.** A session with no roblox-ts compiler (Luau, or
   `--no-compiler`) answers at once. A session that is still starting waits for
   its first build.
-- **Failures.** No fresh build within `--timeout` (default 300 s) gives
-  `compile_timeout`; a compiler that stops during the wait gives
-  `service_failed`; a session that stops gives `not_running`.
+- **Failures.** No fresh build within `--timeout` (in seconds, as for `down`;
+  default 300) gives `compile_timeout`; a compiler that stops during the wait
+  gives `service_failed`; a session that stops gives `not_running`. A timeout
+  above 0 and shorter than the quiet window (0.75 s) always fails while a
+  compiler runs.
+- **`--timeout 0` does not wait.** It returns the status now, with `building`,
+  and never gives `compile_timeout`: an agent can read the state without a wait.
 
 ## Considered options
 

@@ -295,6 +295,59 @@ describe(runCompileCommandAsync, () => {
 		expect(summary).toBe(`Compiled: 1 error, 1 warning. Full output: ${LOG}`);
 	});
 
+	it("should fail with the diagnostics of a one-shot sloptor result", async () => {
+		expect.assertions(1);
+
+		const result = {
+			diagnostics: [
+				{
+					code: "TS2322",
+					col: 7,
+					file: "src/a.ts",
+					line: 3,
+					message: "Bad.",
+					severity: "error",
+				},
+			],
+			durationMs: 142,
+			files: 222,
+			ok: false,
+			version: "1.0.0",
+		};
+		const { context } = makeCompile({
+			runs: { rbxtsc: { exitCode: 1, output: [JSON.stringify(result)] } },
+		});
+
+		await expect(runCompileCommandAsync(context, INPUT)).rejects.toMatchObject({
+			code: "compile_failed",
+			details: {
+				diagnostics: [
+					{
+						code: "TS2322",
+						column: 7,
+						file: "src/a.ts",
+						line: 3,
+						message: "Bad.",
+						severity: "error",
+					},
+				],
+				errors: 1,
+			},
+		});
+	});
+
+	it("should count a failed sloptor result with no diagnostics as one error, no warnings", async () => {
+		expect.assertions(1);
+
+		const result = { diagnostics: [], durationMs: 1, files: 1, ok: false, version: "1" };
+		const { context } = makeCompile({
+			runs: { rbxtsc: { exitCode: 0, output: [JSON.stringify(result)] } },
+		});
+		const { summary } = await runCompileCommandAsync(context, INPUT);
+
+		expect(summary).toBe(`Compiled: 1 error, 0 warnings. Full output: ${LOG}`);
+	});
+
 	it("should fail as process_failed when a signal ends the compiler", async () => {
 		expect.assertions(1);
 
