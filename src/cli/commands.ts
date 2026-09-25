@@ -57,7 +57,7 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		flags: START_FLAGS,
 		run: runStartAsync,
 		summary:
-			"Run the dev session in this terminal. Every process it starts stops with it. For now: Rojo only (--no-open --no-compiler).",
+			"Run the dev session in this terminal: compile, build, open Studio, serve Rojo, and watch. Every process it starts stops with it.",
 	},
 	{
 		name: "stop",

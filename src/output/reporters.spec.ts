@@ -1,9 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import { captureOutput } from "../../test/helpers/output.ts";
+import type { Diagnostic } from "../compiler/diagnostics.ts";
 import { EXIT_NEEDS_CONFIRMATION } from "../exit-codes.ts";
 import type { CommandFailure } from "../seams/reporter.ts";
-import { createJsonReporter, createReporter, createTtyReporter } from "./reporters.ts";
+import {
+	COMPILE_VIEW_LINES,
+	createJsonReporter,
+	createReporter,
+	createTtyReporter,
+} from "./reporters.ts";
+
+const DIAGNOSTIC: Diagnostic = {
+	code: "TS2322",
+	column: 7,
+	file: "src/a.ts",
+	line: 3,
+	message: "Bad.",
+	severity: "error",
+};
 
 const FAILURE: CommandFailure = {
 	code: "needs_confirmation",
@@ -106,6 +121,50 @@ describe(createTtyReporter, () => {
 
 		expect(captured.stdout()).toBe("hello\n› build\n✔ build\n✖ lint\nCreated it.\n");
 		expect(captured.stderr()).toBe("");
+	});
+
+	it("should write a clean watch-mode compile as one line", () => {
+		expect.assertions(1);
+
+		const captured = captureOutput();
+		createTtyReporter(captured.output).emit({ diagnostics: [], errors: 0, type: "compiled" });
+
+		expect(captured.stdout()).toBe("✔ compiled: 0 errors, 0 warnings\n");
+	});
+
+	it("should write one line per diagnostic of a compile, the first message line only", () => {
+		expect.assertions(1);
+
+		const captured = captureOutput();
+		createTtyReporter(captured.output).emit({
+			diagnostics: [
+				{ ...DIAGNOSTIC, message: "Type 'x' is wrong.\n  More detail." },
+				{ ...DIAGNOSTIC, column: null, file: null, line: null, severity: "warning" },
+			],
+			errors: 1,
+			type: "compiled",
+		});
+
+		expect(captured.stdout()).toBe(
+			[
+				"✖ compiled: 1 error, 1 warning",
+				"  src/a.ts:3:7 error TS2322: Type 'x' is wrong.",
+				"  warning TS2322: Bad.",
+				"",
+			].join("\n"),
+		);
+	});
+
+	it("should show at most a bounded number of diagnostics per compile", () => {
+		expect.assertions(2);
+
+		const captured = captureOutput();
+		const diagnostics = Array.from({ length: COMPILE_VIEW_LINES + 5 }, () => DIAGNOSTIC);
+		createTtyReporter(captured.output).emit({ diagnostics, errors: 25, type: "compiled" });
+		const lines = captured.stdout().trimEnd().split("\n");
+
+		expect(lines).toHaveLength(COMPILE_VIEW_LINES + 2);
+		expect(lines.at(-1)).toBe("  ... and 5 more in the compiler log");
 	});
 
 	it("should write warnings to stderr", () => {

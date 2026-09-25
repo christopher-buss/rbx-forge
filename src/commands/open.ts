@@ -29,8 +29,18 @@ export const OPEN_FLAGS: ReadonlyArray<FlagDefinition> = [
 ];
 
 /** A build that ran before the place opened, with its `build` hooks. */
-interface OpenBuild extends BuildOutcome {
+export interface OpenBuild extends BuildOutcome {
 	hooks: Array<HookResult>;
+}
+
+/** What the open step did. */
+export interface OpenedPlace {
+	/** The build that ran first, or `null`. */
+	build: null | OpenBuild;
+	/** The `open` hook results. */
+	hooks: Array<HookResult>;
+	/** The absolute path of the place. */
+	place: string;
 }
 
 /** The place, as the config names it and as an absolute path. */
@@ -41,6 +51,38 @@ interface Place {
 }
 
 const STEP = "open Roblox Studio";
+
+/**
+ * The open step with its `open` hooks: build the place when configured or
+ * missing (unless the caller built it), then open it in Studio. `forge open`
+ * runs it, and so does `forge start`.
+ *
+ * @param context - The run: project root, seams, and reporter.
+ * @param config - The resolved config: the place, the build, and the hooks.
+ * @param options - `isBuilt`: the caller already built this place, so it
+ *   is opened as it is.
+ * @returns The place, the build (or `null`), and the `open` hook results.
+ * @rejects {ForgeError} `place_not_found`, `studio_launch_failed`, a build
+ *   failure from `buildAsync`, or a hook failure.
+ */
+export async function openPlaceAsync(
+	context: CommandContext,
+	config: ResolvedConfig,
+	options: { isBuilt: boolean },
+): Promise<OpenedPlace> {
+	const output = openPlacePath(config);
+	const place = path.resolve(context.cwd, output);
+
+	const { hooks, value: build } = await runWithHooksAsync(context, config, "open", async () => {
+		const built = options.isBuilt
+			? null
+			: await prepareAsync(context, config, { output, place });
+		await launchAsync(context, place);
+		return built;
+	});
+
+	return { build, hooks, place };
+}
 
 /**
  * `forge open`: open the place file in Roblox Studio, building it first when
@@ -64,19 +106,22 @@ export async function runOpenAsync(
 		context.seams.configLoader,
 		input.config,
 	);
-	const output = config.open.buildOutputPath ?? config.buildOutputPath;
-	const place = path.resolve(context.cwd, output);
-
-	const { hooks, value: build } = await runWithHooksAsync(context, config, "open", async () => {
-		const built = await prepareAsync(context, config, { output, place });
-		await launchAsync(context, place);
-		return built;
-	});
+	const opened = await openPlaceAsync(context, config, { isBuilt: false });
 
 	return {
-		data: { build, hooks, place },
-		summary: `Opened ${place} in Roblox Studio.`,
+		data: { ...opened },
+		summary: `Opened ${opened.place} in Roblox Studio.`,
 	};
+}
+
+/**
+ * The place `forge open` opens, as the config names it.
+ *
+ * @param config - The resolved config.
+ * @returns `open.buildOutputPath`, else `buildOutputPath`.
+ */
+function openPlacePath(config: Pick<ResolvedConfig, "buildOutputPath" | "open">): string {
+	return config.open.buildOutputPath ?? config.buildOutputPath;
 }
 
 async function shouldBuildAsync(

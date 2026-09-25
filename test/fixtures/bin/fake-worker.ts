@@ -15,6 +15,7 @@
  * - `FIXTURE_HANG=1`: a hook stays alive instead of exiting.
  * - `FIXTURE_EXIT_AFTER_MS`: a long-running role exits on its own after this
  *   long, with `FIXTURE_EXIT_CODE`. Its grandchildren stay alive.
+ * - `FIXTURE_EXIT_ROLE`: only this role exits after `FIXTURE_EXIT_AFTER_MS`.
  * - `FIXTURE_ROJO_NO_SYNCBACK=1`: rojo has no `syncback` command.
  * - `FIXTURE_ROJO_ERROR`: `rojo syncback` prints this and exits with code 1.
  * - `FIXTURE_SOURCEMAP`: what `rojo sourcemap --output <file>` writes; no
@@ -94,7 +95,8 @@ function stayAlive(): void {
 	spawnGrandchildren();
 	setInterval(doNothing, KEEP_ALIVE_MS);
 	const exitAfter = env["FIXTURE_EXIT_AFTER_MS"];
-	if (exitAfter !== undefined) {
+	const exitRole = env["FIXTURE_EXIT_ROLE"];
+	if (exitAfter !== undefined && (exitRole === undefined || exitRole === ROLE)) {
 		setTimeout(() => {
 			process.exit(Number(env["FIXTURE_EXIT_CODE"] ?? "0"));
 		}, Number(exitAfter));

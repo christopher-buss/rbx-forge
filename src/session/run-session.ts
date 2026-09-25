@@ -1,13 +1,17 @@
 import type { WorkerReport, WorkerSpec } from "../reaper/protocol.ts";
-import type { Reaper, ReaperEnd, SpawnedWorker } from "../reaper/reaper-client.ts";
-import type { Seams } from "../seams/seams.ts";
+import type { Reaper, ReaperEnd, ReaperLauncher, SpawnedWorker } from "../reaper/reaper-client.ts";
+import type { Signals } from "../seams/signals.ts";
 
 /** Why a session ended. */
 export type SessionEndReason =
+	/** A step before the services failed, or a service could not start. */
+	| { error: unknown; type: "failed" }
 	/** A service's tree is gone: it exited, or its reaper died. */
 	| { report: WorkerReport; service: string; type: "service_exited" }
 	/** A stop signal (Ctrl+C, `kill`, a closed terminal). */
-	| { signal: NodeJS.Signals; type: "signal" };
+	| { signal: NodeJS.Signals; type: "signal" }
+	/** Studio closed the place the session opened. */
+	| { type: "studio_closed" };
 
 /** How a session ended, once every worker is gone. */
 export interface SessionOutcome {
@@ -16,124 +20,167 @@ export interface SessionOutcome {
 	reason: SessionEndReason;
 }
 
-/** What one session runs. */
+/** One session's reaper and stop requests. */
 export interface SessionOptions {
 	/** How long workers get to stop after the graceful signal. */
 	graceMs: number;
 	/** The lease file, in the session's directory. */
 	leasePath: string;
-	/** Called once every service runs. */
-	onReady: () => void;
-	/** The long-running workers, in start order. Each id names a service. */
-	services: ReadonlyArray<WorkerSpec>;
+	/**
+	 * Listens for stop requests: the stop signals of `forge start`. A
+	 * detached session's supervisor passes its own.
+	 */
+	onStop: Signals["onStop"];
 	sessionId: string;
 }
 
-/** A session's stop-signal listener. */
-interface StopListener {
-	dispose: () => void;
-	/** The first stop signal, once one arrived. */
-	fired: () => NodeJS.Signals | undefined;
-	/** Resolves with the first stop signal. */
-	signal: Promise<NodeJS.Signals>;
+/** What a session's body runs with. */
+export interface SessionScope {
+	/** End the session. The first reason wins; later ones do nothing. */
+	end: (reason: SessionEndReason) => void;
+	/** The session's reaper, admitted. */
+	reaper: Reaper;
+	/** Aborts once the session ends: nothing new starts after that. */
+	signal: AbortSignal;
+	/**
+	 * Start a long-running service. Its exit ends the session.
+	 *
+	 * @returns The worker, or `undefined` when the session is ending.
+	 * @rejects `process_failed` or `reaper_unavailable`.
+	 */
+	startServiceAsync: (service: WorkerSpec) => Promise<SpawnedWorker | undefined>;
+	/**
+	 * Keep a background task, such as a file watch. Once the reaper has
+	 * ended, the session waits for every task before it returns.
+	 */
+	track: (task: Promise<unknown>) => void;
+}
+
+/** What starts a session: its reaper launcher. */
+export type SessionSeams = Readonly<{ reaper: ReaperLauncher }>;
+
+/** The parts of a session the helpers below share. */
+interface SessionState {
+	abort: AbortController;
+	ended: Promise<SessionEndReason>;
+	finish: (reason: SessionEndReason) => void;
+	tasks: Array<Promise<unknown>>;
 }
 
 /**
- * Run a session in this process: start its reaper, start every service
- * through it, and wait for the first end trigger (a stop signal, or any
- * service's exit). Then terminate the reaper, which stops every worker, and
- * return once it has exited. The reaper also ends every worker when this
+ * Run one session: start its reaper, run `body` (the steps, services, and
+ * watches), and wait for the first end trigger: a stop request, a service's
+ * exit, a failed step, or a reason `body` passes to `end`. Then terminate the
+ * reaper, which stops every worker, and return once it has exited and every
+ * tracked task has settled. The reaper also ends every worker when this
  * process dies, however it dies.
  *
- * Admission (spec #28): the reaper gets `go` only while no stop signal has
- * arrived, and no service starts after one.
+ * Admission (spec #28): the reaper gets `go` only while no end trigger has
+ * fired, and nothing starts after one.
  *
- * @param seams - The reaper launcher and the stop signals.
- * @param options - The services and the session's files.
+ * @param seams - The reaper launcher.
+ * @param options - The session's files, grace time, and stop requests.
+ * @param body - Starts what the session runs. A rejection ends the session
+ *   with `failed`.
  * @returns Why the session ended and the reaper's end.
- * @rejects `reaper_unavailable`, or `process_failed` when a
- *   service cannot start. Every started worker is gone by then.
+ * @rejects `reaper_unavailable` when the reaper does not start.
  */
 export async function runSessionAsync(
-	seams: Pick<Seams, "reaper" | "signals">,
+	seams: SessionSeams,
 	options: SessionOptions,
+	body: (scope: SessionScope) => Promise<void>,
 ): Promise<SessionOutcome> {
-	const stop = listenForStop(seams);
+	const state = createState();
+	const dispose = options.onStop((signal) => {
+		state.finish({ signal, type: "signal" });
+	});
 	try {
 		const reaper = await seams.reaper({
 			leasePath: options.leasePath,
 			sessionId: options.sessionId,
 		});
-		try {
-			const reason = await runServicesAsync(reaper, stop, options);
-			return { end: await reaper.terminateAsync(options.graceMs), reason };
-		} catch (err) {
-			await reaper.terminateAsync(options.graceMs);
-			throw err;
+		if (!state.abort.signal.aborted) {
+			reaper.go();
+			const setup = body(makeScope(state, reaper)).catch((err: unknown) => {
+				state.finish({ error: err, type: "failed" });
+			});
+			state.tasks.push(setup);
 		}
+
+		const reason = await state.ended;
+		const end = await reaper.terminateAsync(options.graceMs);
+		await settleTasksAsync(state.tasks);
+		return { end, reason };
 	} finally {
-		stop.dispose();
+		dispose();
 	}
-}
-
-function listenForStop({ signals }: Pick<Seams, "signals">): StopListener {
-	const { promise, resolve } = Promise.withResolvers<NodeJS.Signals>();
-	let fired: NodeJS.Signals | undefined;
-	const dispose = signals.onStop((signal) => {
-		fired ??= signal;
-		resolve(signal);
-	});
-
-	return { dispose, fired: () => fired, signal: promise };
 }
 
 /**
- * Admit the reaper and start the services, unless a stop signal came first.
+ * Wait until every task has settled, including tasks that settling ones
+ * added meanwhile.
  *
- * @param reaper - The session's reaper, leased.
- * @param stop - The stop-signal listener.
- * @param services - The workers to start, in order.
- * @returns The services started before any stop signal.
+ * @param tasks - The tracked tasks; it may grow while this waits.
  */
-async function startServicesAsync(
-	reaper: Reaper,
-	stop: StopListener,
-	services: ReadonlyArray<WorkerSpec>,
-): Promise<Array<SpawnedWorker>> {
-	const workers: Array<SpawnedWorker> = [];
-	if (stop.fired() !== undefined) {
-		return workers;
+async function settleTasksAsync(tasks: ReadonlyArray<Promise<unknown>>): Promise<void> {
+	let settled = 0;
+	while (settled < tasks.length) {
+		settled = tasks.length;
+		await Promise.allSettled(tasks);
 	}
-
-	reaper.go();
-	for (const service of services) {
-		// Once a stop signal arrived, nothing more starts.
-		if (stop.fired() !== undefined) {
-			return workers;
-		}
-
-		workers.push(await reaper.spawnAsync(service));
-	}
-
-	return workers;
 }
 
-async function runServicesAsync(
-	reaper: Reaper,
-	stop: StopListener,
-	options: SessionOptions,
-): Promise<SessionEndReason> {
-	const workers = await startServicesAsync(reaper, stop, options.services);
-	if (stop.fired() === undefined) {
-		options.onReady();
-	}
+function createState(): SessionState {
+	const abort = new AbortController();
+	const { promise, resolve } = Promise.withResolvers<SessionEndReason>();
+	return {
+		abort,
+		ended: promise,
+		finish: (reason) => {
+			if (abort.signal.aborted) {
+				return;
+			}
 
-	const ends = workers.map(async ({ id, exited }): Promise<SessionEndReason> => {
-		const report = await exited;
-		return { report, service: id, type: "service_exited" };
-	});
-	return Promise.race([
-		stop.signal.then((signal): SessionEndReason => ({ signal, type: "signal" })),
-		...ends,
-	]);
+			abort.abort();
+			resolve(reason);
+		},
+		tasks: [],
+	};
+}
+
+/**
+ * End the session once a service's tree is gone.
+ *
+ * @param state - The session.
+ * @param id - The service's id.
+ * @param exited - Resolves with its report.
+ */
+async function endOnExitAsync(
+	state: SessionState,
+	id: string,
+	exited: Promise<WorkerReport>,
+): Promise<void> {
+	const report = await exited;
+	state.finish({ report, service: id, type: "service_exited" });
+}
+
+function makeScope(state: SessionState, reaper: Reaper): SessionScope {
+	const { signal } = state.abort;
+	return {
+		end: state.finish,
+		reaper,
+		signal,
+		startServiceAsync: async (service) => {
+			if (signal.aborted) {
+				return;
+			}
+
+			const worker = await reaper.spawnAsync(service);
+			state.tasks.push(endOnExitAsync(state, service.id, worker.exited));
+			return worker;
+		},
+		track: (task) => {
+			state.tasks.push(task);
+		},
+	};
 }

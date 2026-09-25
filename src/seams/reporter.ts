@@ -1,3 +1,4 @@
+import type { Diagnostic } from "../compiler/diagnostics.ts";
 import type { ForgeErrorCode } from "../errors.ts";
 import type { ExitCode } from "../exit-codes.ts";
 
@@ -15,6 +16,8 @@ export interface OutputStreams {
  * command needs a new kind; both reporters must then render it.
  */
 export type ReporterEvent =
+	/** The watch-mode compiler finished one compile. */
+	| { diagnostics: Array<Diagnostic>; errors: number; type: "compiled" }
 	| { message: string; type: "info" }
 	| { message: string; type: "warning" }
 	| { name: string; status: "failed" | "started" | "succeeded"; type: "step" };

@@ -1,26 +1,39 @@
 import path from "node:path";
 
-import type { FlagDefinition, FlagValues } from "../cli/flags.ts";
+import type { FlagDefinition } from "../cli/flags.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
+import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
+import { logFilePath } from "../output/log-file.ts";
+import { resolveInvocation } from "../process/run-tool.ts";
 import type { FinalReport, WorkerReport } from "../reaper/protocol.ts";
 import { rojoInvocation, rojoServeArgs } from "../rojo/rojo.ts";
 import type { Network } from "../seams/network.ts";
-import type { CommandResult, Reporter } from "../seams/reporter.ts";
-import type { SessionOutcome } from "../session/run-session.ts";
+import type { CommandResult } from "../seams/reporter.ts";
+import type { SessionPlan } from "../session/plan.ts";
+import { planSession } from "../session/plan.ts";
+import type { SessionEndReason, SessionOutcome } from "../session/run-session.ts";
 import { runSessionAsync } from "../session/run-session.ts";
+import type { SessionSetup } from "../session/session-body.ts";
+import { createSessionBody } from "../session/session-body.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
 export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
 		name: "compiler",
 		kind: "boolean",
-		text: "Run the compiler in watch mode. For now, pass --no-compiler.",
+		text: "Compile, build, and run the compiler in watch mode (the default); --no-compiler runs none of them.",
 	},
 	{
 		name: "open",
 		kind: "boolean",
-		text: "Open the place in Studio. For now, pass --no-open.",
+		text: "Open the place in Studio and stop when Studio closes it (the default); --no-open leaves Studio alone.",
+	},
+	{
+		name: "syncback",
+		config: "syncback.runOnStart",
+		kind: "boolean",
+		text: "Run syncback and its hooks each time Studio saves the place.",
 	},
 ];
 
@@ -30,51 +43,51 @@ interface SessionFiles {
 	directory: string;
 	/** The reaper's lease file. */
 	leasePath: string;
-	/** Rojo's stdout and stderr, appended across sessions. */
-	rojoLog: string;
 	sessionId: string;
 }
 
-const ROJO = "rojo";
-const STEP = "rojo serve";
-
 /**
- * `forge start --no-open --no-compiler`: serve the Rojo project in this
- * terminal. Rojo runs as a worker of the session's reaper, so every Rojo
- * process dies with the session: on Ctrl+C, when Rojo exits, and when this
- * process is killed or its terminal closes.
+ * `forge start`: run the dev session in this terminal (spec #28): compile and
+ * build, open Studio, serve Rojo, run the compiler in watch mode, and, with
+ * `--syncback`, sync Studio's saves back. Every process runs as a worker of
+ * the session's reaper, so all of them die with the session: on Ctrl+C, when
+ * Studio closes the place, when a service exits, and when this process is
+ * killed or its terminal closes.
  *
  * @param context - The run: project root, seams, and reporter.
  * @param input - The parsed flags.
  * @returns The stop reason and every worker's report, once all are gone.
- * @rejects {ForgeError} `usage` without `--no-open --no-compiler`;
- *   `port_in_use` when `rojoPort` is busy; `rojo_missing`;
- *   `service_failed` when Rojo exits; `cleanup_in_progress` when a worker
- *   outlived the wait; a config error; or `reaper_unavailable`.
+ * @rejects {ForgeError} `port_in_use` when `rojoPort` is busy;
+ *   `rojo_missing` or `compiler_missing`; a step's failure (such as
+ *   `compile_failed` or `hook_failed`); `service_failed` when a service
+ *   exits; `cleanup_in_progress` when a worker outlived the wait; a config
+ *   error; or `reaper_unavailable`.
  */
 export async function runStartAsync(
 	context: CommandContext,
 	input: CommandInput,
 ): Promise<CommandResult> {
-	requireRojoOnly(input.flags);
-	const { cwd, env, reporter, seams } = context;
+	const { cwd, seams } = context;
 	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
-	const { rojoPort: port, rojoProjectPath: project } = config;
-	await requireFreePortAsync(seams.network, port);
-	const invocation = rojoInvocation(context, config, rojoServeArgs(project, port));
+	const plan = planSession(config, {
+		compiler: input.flags["compiler"] !== false,
+		open: input.flags["open"] !== false,
+	});
+	await requireFreePortAsync(seams.network, config.rojoPort);
+	const session = resolveServices(context, config, plan);
 	const files = createSessionFiles(context, seams.randomId());
-	reporter.emit({ name: STEP, status: "started", type: "step" });
 	try {
-		const outcome = await runSessionAsync(seams, {
-			graceMs: config.gracefulTimeoutMs,
-			leasePath: files.leasePath,
-			onReady: () => {
-				announceReady(reporter, project, port);
+		const outcome = await runSessionAsync(
+			seams,
+			{
+				graceMs: config.gracefulTimeoutMs,
+				leasePath: files.leasePath,
+				onStop: seams.signals.onStop,
+				sessionId: files.sessionId,
 			},
-			services: [{ id: ROJO, ...invocation, cwd, env, log: files.rojoLog }],
-			sessionId: files.sessionId,
-		});
-		return startResult(outcome, files, port);
+			createSessionBody({ ...session, directory: files.directory }),
+		);
+		return startResult(outcome, cwd, config.rojoPort);
 	} finally {
 		seams.fileSystem.rmSync(files.directory, { recursive: true });
 	}
@@ -88,22 +101,42 @@ async function requireFreePortAsync(network: Network, port: number): Promise<voi
 	}
 }
 
-function announceReady(reporter: Reporter, project: string, port: number): void {
-	reporter.emit({ name: STEP, status: "succeeded", type: "step" });
-	reporter.emit({
-		message: `Rojo serves ${project} on port ${port}. Press Ctrl+C to stop.`,
-		type: "info",
-	});
-}
-
-function requireRojoOnly(flags: FlagValues): void {
-	if (flags["open"] !== false || flags["compiler"] !== false) {
-		throw new ForgeError(
-			"usage",
-			"forge start runs only Rojo for now: pass --no-open --no-compiler.",
-			{ hint: 'Run "forge start --help" for usage.' },
-		);
-	}
+/**
+ * Find Rojo and the compiler before anything starts, so a missing tool fails
+ * first.
+ *
+ * @param context - The project root, environment, and seams.
+ * @param config - The resolved config.
+ * @param plan - What the session runs.
+ * @returns The session, without its directory.
+ * @throws {ForgeError} `rojo_missing` or `compiler_missing`.
+ */
+function resolveServices(
+	context: CommandContext,
+	config: ResolvedConfig,
+	plan: SessionPlan,
+): Pick<SessionSetup, "compiler" | "config" | "context" | "plan" | "rojo"> {
+	const rojo = rojoInvocation(
+		context,
+		config,
+		rojoServeArgs(config.rojoProjectPath, config.rojoPort),
+	);
+	const { compiler } = plan;
+	return {
+		compiler:
+			compiler === undefined
+				? undefined
+				: {
+						...resolveInvocation(context, compiler.call),
+						id: "compiler",
+						parsesDiagnostics: compiler.parsesDiagnostics,
+						step: `${compiler.call.command} watch`,
+					},
+		config,
+		context,
+		plan,
+		rojo: { ...rojo, id: "rojo", step: "rojo serve" },
+	};
 }
 
 function createSessionFiles(
@@ -111,15 +144,12 @@ function createSessionFiles(
 	sessionId: string,
 ): SessionFiles {
 	const directory = path.join(cwd, ".forge", "sessions", sessionId);
-	const logs = path.join(cwd, ".forge", "logs");
 	seams.fileSystem.mkdirSync(directory, { recursive: true });
-	seams.fileSystem.mkdirSync(logs, { recursive: true });
-	return {
-		directory,
-		leasePath: path.join(directory, "workers.lock"),
-		rojoLog: path.join(logs, "rojo.log"),
-		sessionId,
-	};
+	return { directory, leasePath: path.join(directory, "workers.lock"), sessionId };
+}
+
+function survivorsOf(reports: ReadonlyArray<FinalReport>): Array<string> {
+	return reports.filter(({ report }) => report.incomplete).map(({ id }) => id);
 }
 
 function describeExit({ exitCode, signal }: WorkerReport): string {
@@ -130,25 +160,62 @@ function describeExit({ exitCode, signal }: WorkerReport): string {
 	return signal === null ? "killed" : `signal ${signal}`;
 }
 
-function survivorsOf(reports: ReadonlyArray<FinalReport>): Array<string> {
-	return reports.filter(({ report }) => report.incomplete).map(({ id }) => id);
+/**
+ * The outcome for why the session ended, once every worker is gone.
+ *
+ * @param reason - Why it ended.
+ * @param cwd - The project root, for the log paths.
+ * @param data - The port and every worker's report.
+ * @returns The result for a stop signal or a closed Studio.
+ * @throws The failed step's error, or `service_failed` when a service
+ *   exited.
+ */
+function endedResult(
+	reason: SessionEndReason,
+	cwd: string,
+	data: { port: number; reports: Array<FinalReport> },
+): CommandResult {
+	switch (reason.type) {
+		case "failed": {
+			throw reason.error;
+		}
+		case "service_exited": {
+			throw new ForgeError(
+				"service_failed",
+				`${reason.service} exited (${describeExit(reason.report)}), so the session stopped.`,
+				{
+					details: { reason: `service_failed:${reason.service}`, reports: data.reports },
+					hint: `Its output is in ${logFilePath(cwd, reason.service)}.`,
+				},
+			);
+		}
+		case "signal": {
+			return {
+				data: { ...data, reason: reason.signal },
+				summary: `Stopped on ${reason.signal}; every process of the session is gone.`,
+			};
+		}
+		case "studio_closed": {
+			return {
+				data: { ...data, reason: "studio_closed" },
+				summary: "Studio closed the place; every process of the session is gone.",
+			};
+		}
+	}
 }
 
 /**
  * The command's outcome once the session ended.
  *
  * @param outcome - Why it ended (`reason`) and every worker's report (`end`).
- * @param files - The session's files, for the log path.
+ * @param cwd - The project root, for the log paths.
  * @param port - The Rojo port.
- * @returns The result for a stop signal.
+ * @returns The result for a stop signal or a closed Studio.
  * @throws {ForgeError} `cleanup_in_progress` when a worker outlived the
- *   wait, else `service_failed` when a service exited.
+ *   wait; else the failed step's error, or `service_failed` when a service
+ *   exited.
  */
-function startResult(
-	{ end, reason }: SessionOutcome,
-	files: SessionFiles,
-	port: number,
-): CommandResult {
+function startResult({ end, reason }: SessionOutcome, cwd: string, port: number): CommandResult {
 	const survivors = survivorsOf(end.reports);
 	if (survivors.length > 0) {
 		throw new ForgeError(
@@ -158,19 +225,5 @@ function startResult(
 		);
 	}
 
-	if (reason.type === "service_exited") {
-		throw new ForgeError(
-			"service_failed",
-			`${reason.service} exited (${describeExit(reason.report)}), so the session stopped.`,
-			{
-				details: { reason: `service_failed:${reason.service}`, reports: end.reports },
-				hint: `Its output is in ${files.rojoLog}.`,
-			},
-		);
-	}
-
-	return {
-		data: { port, reason: reason.signal, reports: end.reports },
-		summary: `Stopped on ${reason.signal}; every process of the session is gone.`,
-	};
+	return endedResult(reason, cwd, { port, reports: end.reports });
 }

@@ -5,15 +5,15 @@ import type { FakeReaper, FakeReaperOptions, FakeSignals } from "../../test/help
 import { ForgeError } from "../errors.ts";
 import type { WorkerReport, WorkerSpec } from "../reaper/protocol.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
-import type { SessionOptions, SessionOutcome } from "./run-session.ts";
+import type { SessionOutcome, SessionScope } from "./run-session.ts";
 import { runSessionAsync } from "./run-session.ts";
 
 const REPORT: WorkerReport = { exitCode: 3, forced: false, incomplete: false, signal: null };
 const END = { reports: [{ id: "rojo", report: REPORT }], terminated: true };
+const OPTIONS = { graceMs: 250, leasePath: "/p/.forge/sessions/s/workers.lock", sessionId: "s" };
 
 interface SessionRun {
 	fake: FakeReaper;
-	onReady: ReturnType<typeof vi.fn<() => void>>;
 	outcome: Promise<SessionOutcome>;
 	signals: FakeSignals;
 }
@@ -22,22 +22,26 @@ function service(id: string): WorkerSpec {
 	return { id, args: [], cwd: "/p", env: {}, file: `/bin/${id}` };
 }
 
+async function startServicesAsync(scope: SessionScope, ids: ReadonlyArray<string>): Promise<void> {
+	for (const id of ids) {
+		await scope.startServiceAsync(service(id));
+	}
+}
+
 function startSession(
+	body: (scope: SessionScope) => Promise<void> = async (scope) => {
+		await startServicesAsync(scope, ["rojo"]);
+	},
 	reaperOptions: FakeReaperOptions = {},
-	services: ReadonlyArray<WorkerSpec> = [service("rojo")],
 	signals: FakeSignals = createFakeSignals(),
 ): SessionRun {
 	const fake = createFakeReaper({ end: END, ...reaperOptions });
-	const onReady = vi.fn<() => void>();
-	const options: SessionOptions = {
-		graceMs: 250,
-		leasePath: "/p/.forge/sessions/s/workers.lock",
-		onReady,
-		services,
-		sessionId: "s",
-	};
-	const outcome = runSessionAsync({ reaper: fake.launch, signals: signals.signals }, options);
-	return { fake, onReady, outcome, signals };
+	const outcome = runSessionAsync(
+		{ reaper: fake.launch },
+		{ ...OPTIONS, onStop: signals.signals.onStop },
+		body,
+	);
+	return { fake, outcome, signals };
 }
 
 async function flushAsync(): Promise<void> {
@@ -47,13 +51,12 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(runSessionAsync, () => {
-	it("should admit the reaper, start every service, and end on a stop signal", async () => {
+	it("should admit the reaper, run the body, and end on a stop signal", async () => {
 		expect.assertions(4);
 
-		const { fake, onReady, outcome, signals } = startSession({}, [
-			service("rojo"),
-			service("compiler"),
-		]);
+		const { fake, outcome, signals } = startSession(async (scope) => {
+			await startServicesAsync(scope, ["rojo", "compiler"]);
+		});
 		await flushAsync();
 		signals.fire("SIGINT");
 
@@ -65,7 +68,7 @@ describe(runSessionAsync, () => {
 			{ leasePath: "/p/.forge/sessions/s/workers.lock", sessionId: "s" },
 		]);
 		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "spawn compiler", "terminate 250"]);
-		expect([onReady.mock.calls.length, signals.listeners()]).toStrictEqual([1, 0]);
+		expect(signals.listeners()).toBe(0);
 	});
 
 	it("should end when a service exits, with its report", async () => {
@@ -82,17 +85,31 @@ describe(runSessionAsync, () => {
 		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "terminate 250"]);
 	});
 
-	it("should never admit the reaper after a stop signal during its launch", async () => {
+	it("should keep the first reason it ends with", async () => {
+		expect.assertions(1);
+
+		const { outcome, signals } = startSession(async (scope) => {
+			scope.end({ type: "studio_closed" });
+			scope.end({ error: new Error("late"), type: "failed" });
+		});
+		await flushAsync();
+		signals.fire("SIGINT");
+
+		await expect(outcome).resolves.toMatchObject({ reason: { type: "studio_closed" } });
+	});
+
+	it("should never admit the reaper or run the body after a stop signal during its launch", async () => {
 		expect.assertions(3);
 
 		const signals = createFakeSignals();
-		const { fake, onReady, outcome } = startSession(
+		const body = vi.fn<(scope: SessionScope) => Promise<void>>();
+		const { fake, outcome } = startSession(
+			body,
 			{
 				onLaunch: () => {
 					signals.fire("SIGHUP");
 				},
 			},
-			[service("rojo")],
 			signals,
 		);
 
@@ -100,21 +117,27 @@ describe(runSessionAsync, () => {
 			reason: { signal: "SIGHUP", type: "signal" },
 		});
 		expect(fake.calls).toStrictEqual(["terminate 250"]);
-		expect(onReady).not.toHaveBeenCalled();
+		expect(body).not.toHaveBeenCalled();
 	});
 
 	it("should start no further service after a stop signal", async () => {
 		expect.assertions(3);
 
 		const signals = createFakeSignals();
-		const { fake, onReady, outcome } = startSession(
+		const started: Array<unknown> = [];
+		const { fake, outcome } = startSession(
+			async (scope) => {
+				started.push(
+					await scope.startServiceAsync(service("rojo")),
+					await scope.startServiceAsync(service("compiler")),
+				);
+			},
 			{
 				onSpawn: () => {
 					signals.fire("SIGTERM");
 					signals.fire("SIGINT");
 				},
 			},
-			[service("rojo"), service("compiler")],
 			signals,
 		);
 
@@ -122,18 +145,67 @@ describe(runSessionAsync, () => {
 			reason: { signal: "SIGTERM", type: "signal" },
 		});
 		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "terminate 250"]);
-		expect(onReady).not.toHaveBeenCalled();
+		expect(started[1]).toBeUndefined();
 	});
 
-	it("should terminate the reaper and rethrow when a service cannot start", async () => {
+	it("should end with failed and terminate the reaper when the body rejects", async () => {
 		expect.assertions(3);
 
 		const error = new ForgeError("process_failed", "no rojo");
-		const { fake, outcome, signals } = startSession({ spawnError: error });
+		const { fake, outcome, signals } = startSession(undefined, { spawnError: error });
 
-		await expect(outcome).rejects.toBe(error);
+		await expect(outcome).resolves.toStrictEqual({
+			end: END,
+			reason: { error, type: "failed" },
+		});
 		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "terminate 250"]);
 		expect(signals.listeners()).toBe(0);
+	});
+
+	it("should abort the scope's signal once the session ends", async () => {
+		expect.assertions(1);
+
+		let scopeSignal: AbortSignal | undefined;
+		const { outcome, signals } = startSession(async (scope) => {
+			scopeSignal = scope.signal;
+		});
+		await flushAsync();
+		signals.fire("SIGINT");
+		await outcome;
+
+		expect(scopeSignal).toHaveProperty("aborted", true);
+	});
+
+	it("should wait for every tracked task after the reaper ended, even ones added late", async () => {
+		expect.assertions(1);
+
+		const order: Array<string> = [];
+		const { outcome, signals } = startSession(async (scope) => {
+			const { promise, resolve } = Promise.withResolvers<void>();
+			scope.signal.addEventListener("abort", () => {
+				setImmediate(() => {
+					resolve();
+				});
+			});
+			async function lateAsync(): Promise<void> {
+				await flushAsync();
+				order.push("late");
+			}
+
+			async function firstAsync(): Promise<void> {
+				await promise;
+				order.push("first");
+				scope.track(lateAsync());
+			}
+
+			scope.track(firstAsync());
+		});
+		await flushAsync();
+		signals.fire("SIGINT");
+		await outcome;
+		order.push("returned");
+
+		expect(order).toStrictEqual(["first", "late", "returned"]);
 	});
 
 	it("should stop listening for signals when the reaper cannot launch", async () => {
@@ -142,14 +214,9 @@ describe(runSessionAsync, () => {
 		const signals = createFakeSignals();
 		const error = new ForgeError("reaper_unavailable", "no reaper");
 		const outcome = runSessionAsync(
-			{ reaper: vi.fn<ReaperLauncher>().mockRejectedValue(error), signals: signals.signals },
-			{
-				graceMs: 0,
-				leasePath: "/l",
-				onReady: vi.fn<() => void>(),
-				services: [],
-				sessionId: "s",
-			},
+			{ reaper: vi.fn<ReaperLauncher>().mockRejectedValue(error) },
+			{ ...OPTIONS, onStop: signals.signals.onStop },
+			vi.fn<(scope: SessionScope) => Promise<void>>(),
 		);
 
 		await expect(outcome).rejects.toBe(error);
