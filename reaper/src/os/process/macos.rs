@@ -322,13 +322,22 @@ impl Pin {
     }
 
     pub fn kill(&self) -> io::Result<bool> {
+        self.signal_live(libc::SIGKILL)
+    }
+
+    pub fn request_close(&self) -> io::Result<bool> {
+        self.signal_live(libc::SIGTERM)
+    }
+
+    /// Send `signal` to the process, once its start time still names it.
+    fn signal_live(&self, signal: libc::c_int) -> io::Result<bool> {
         if !self.is_alive()? {
             return Ok(false);
         }
 
         let raw_pid = libc::pid_t::try_from(self.pid).map_err(io::Error::other)?;
         // SAFETY: plain call; the start time check above names the process.
-        if unsafe { libc::kill(raw_pid, libc::SIGKILL) } != 0 {
+        if unsafe { libc::kill(raw_pid, signal) } != 0 {
             let err = io::Error::last_os_error();
             return if err.raw_os_error() == Some(libc::ESRCH) {
                 Ok(false)

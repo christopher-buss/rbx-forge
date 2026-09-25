@@ -160,6 +160,21 @@ impl PinnedProcess {
         self.pin.kill()
     }
 
+    /// Ask the pinned process to close, as a user would: `WM_CLOSE` to its
+    /// main windows on Windows (visible, unowned, not tool or console
+    /// windows), `SIGTERM` elsewhere. The process may refuse or ask its user
+    /// first; this does not wait.
+    ///
+    /// Returns `Ok(false)` when the process had already exited, or on
+    /// Windows has no main window to close.
+    ///
+    /// # Errors
+    ///
+    /// When the OS refuses the request.
+    pub fn request_close(&self) -> io::Result<bool> {
+        self.pin.request_close()
+    }
+
     /// Force-kill the process group the pinned process leads (`SIGKILL` to
     /// the group; the live leader pins the group id). Windows has no groups
     /// to kill: there it kills the process only, as [`Self::kill`].
@@ -326,6 +341,51 @@ mod tests {
         assert!(!pinned.is_alive().unwrap());
         assert!(!pinned.kill().unwrap());
         assert_eq!(pinned.executable_path().unwrap(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn request_close_ends_a_process_that_does_not_handle_sigterm() {
+        let mut child = sleeper();
+        let pinned = PinnedProcess::open(child.id()).unwrap().unwrap();
+
+        assert!(pinned.request_close().unwrap());
+        assert!(pinned.wait_for_exit(Duration::from_secs(10)).unwrap());
+        child.wait().unwrap();
+        assert!(!pinned.request_close().unwrap());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn request_close_skips_a_process_with_no_main_window() {
+        let mut child = sleeper();
+        let pinned = PinnedProcess::open(child.id()).unwrap().unwrap();
+        let requested = pinned.request_close().unwrap();
+        let exited = pinned.wait_for_exit(Duration::from_millis(200)).unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        assert!(!requested);
+        assert!(!exited);
+        assert!(!pinned.request_close().unwrap());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn request_close_posts_wm_close_to_the_main_window() {
+        crate::os::win::testing::open_test_window().unwrap();
+        let before = crate::os::win::testing::close_requests();
+        let pinned = PinnedProcess::open(std::process::id()).unwrap().unwrap();
+
+        assert!(pinned.request_close().unwrap());
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while crate::os::win::testing::close_requests() == before
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(crate::os::win::testing::close_requests() > before);
+        assert!(pinned.is_alive().unwrap());
     }
 
     #[test]

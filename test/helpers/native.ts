@@ -11,6 +11,8 @@ import type {
 /** One process in the fake process table. */
 export interface FakeProcess {
 	alive: boolean;
+	/** How many times `requestClose` reached it while it ran. */
+	closeRequests?: number;
 	executablePath: string;
 	/** It exits right after it is pinned, before any query on the pin. */
 	exitsAfterPin?: boolean;
@@ -18,6 +20,14 @@ export interface FakeProcess {
 	groupKilled?: boolean;
 	/** `kill` leaves it running (a process the OS cannot end in time). */
 	ignoresKill?: boolean;
+	/** Runs when a close request ends it, such as to delete a lock file. */
+	onClose?: () => void;
+	/**
+	 * What `requestClose` does: `exit` (the default), `refuse` (it stays
+	 * open, as Studio does while it asks to save), or `throw` (the OS
+	 * refuses the request).
+	 */
+	onCloseRequest?: "exit" | "refuse" | "throw";
 	/** `pinProcess` throws this message (for example, access denied). */
 	pinError?: string;
 	/** Its start time as the addon reports it; the PID when not set. */
@@ -203,6 +213,31 @@ function startTimeOf(pid: number, entry: FakeProcess): string {
 	return entry.startTime ?? String(pid);
 }
 
+/**
+ * A close request on a fake process, as {@link FakeProcess.onCloseRequest}
+ * says.
+ *
+ * @param entry - The process.
+ * @returns `false` when it had already exited.
+ */
+function requestClose(entry: FakeProcess): boolean {
+	if (!entry.alive) {
+		return false;
+	}
+
+	if (entry.onCloseRequest === "throw") {
+		throw new Error("close process: Access is denied. (os error 5)");
+	}
+
+	entry.closeRequests = (entry.closeRequests ?? 0) + 1;
+	if (entry.onCloseRequest !== "refuse") {
+		entry.alive = false;
+		entry.onClose?.();
+	}
+
+	return true;
+}
+
 function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 	if (entry.exitsAfterPin === true) {
 		entry.alive = false;
@@ -223,6 +258,7 @@ function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 			return kill();
 		},
 		pid,
+		requestClose: () => requestClose(entry),
 		startTime: startTimeOf(pid, entry),
 		waitForExit: (timeoutMs) => {
 			entry.waits?.push(timeoutMs);

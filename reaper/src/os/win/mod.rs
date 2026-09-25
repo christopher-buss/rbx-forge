@@ -4,12 +4,15 @@
 //!   private files, and security read-back.
 //! - [`pipe`]: the named-pipe server of a session's control channel.
 //! - [`detach`]: start a process outside the caller's job (`forge up`).
-//! - [`testing`]: helpers that only tests call (jobs, other-user connects).
+//! - [`window`]: ask a process to close through its main windows.
+//! - [`testing`]: helpers that only tests call (jobs, other-user connects,
+//!   a window that counts close requests).
 
 pub mod detach;
 pub mod pipe;
 pub mod security;
 pub mod testing;
+pub mod window;
 
 use std::ffi::{OsStr, c_void};
 use std::io;

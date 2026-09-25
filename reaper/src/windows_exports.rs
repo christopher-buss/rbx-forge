@@ -342,3 +342,21 @@ pub fn connect_pipe_as(path: String, user: String, password: String, write: bool
     testing::connect_pipe_as(&path, &user, &password, write)
         .map_err(|err| to_napi(&format!("log on as {user}"), &err))
 }
+
+/// Tests only: open a main window (visible, unowned, off screen) that counts
+/// the close requests it gets and stays open.
+///
+/// # Errors
+///
+/// When the window cannot be made.
+#[napi]
+pub fn open_test_window() -> Result<()> {
+    testing::open_test_window().map_err(|err| to_napi("open a test window", &err))
+}
+
+/// Tests only: how many close requests the test window got.
+#[napi]
+#[must_use]
+pub fn test_window_close_requests() -> u32 {
+    testing::close_requests()
+}

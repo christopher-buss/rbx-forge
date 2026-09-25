@@ -47,6 +47,16 @@ export interface PinnedProcess {
 	killGroup: () => boolean;
 	/** The PID the process had when it was pinned. */
 	readonly pid: number;
+	/**
+	 * Ask the pinned process to close, as a user would: `WM_CLOSE` to its
+	 * main windows (visible, unowned, not tool or console windows) on
+	 * Windows, `SIGTERM` elsewhere. It does not wait, and the process may
+	 * refuse or ask its user first.
+	 *
+	 * @returns `false` when it had already exited, or on Windows has no main
+	 *   window.
+	 */
+	requestClose: () => boolean;
 	/** The start time read when it was pinned (see `processStartTime`). */
 	readonly startTime: string;
 	/**
