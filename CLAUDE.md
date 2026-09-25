@@ -39,12 +39,25 @@ Before a task is done, lint, typecheck, knip, and every test project must pass.
 
 ## Architecture
 
-- `src/cli.ts` is the only module that touches the process (argv, streams,
-  `process.exitCode`). Logic lives in modules that take their inputs, so unit
-  tests drive them directly (`src/cli/run-cli.ts`).
-- Flags come from one table (`src/cli/flags.ts`) parsed with `node:util`
-  `parseArgs`; help is generated from it.
-- Exit codes live in `src/exit-codes.ts`.
+- `src/cli.ts` is the only module that touches the process (argv, env, streams,
+  `process.exitCode`). It builds the real seams and calls `cli/run-cli.ts`,
+  which never throws and returns an exit code.
+- Seams live in `src/seams/`: `FileSystem`, `ChildProcessRunner`, `Clock`,
+  `ConfigLoader`, `Prompter` (the `Seams` record) and `Reporter`. Commands get
+  them as required arguments; only `src/cli.ts` wires the real ones
+  (`createNodeSeams`). Unit tests use `test/helpers/seams.ts`.
+- Commands: `src/commands/` (one `run*Async` per command), registered with their
+  flag tables in `src/cli/commands.ts`. Flags come from those tables
+  (`src/cli/flags.ts`), parsed with `node:util` `parseArgs`; help is generated
+  from the same tables. Flags set no defaults.
+- Config: `src/config/` (arktype schema, strict; one merge for flags > file >
+  defaults in `resolve.ts`, arrays replace). New options go in `schema.ts` and
+  `resolve.ts` (`DEFAULT_CONFIG`). `src/index.ts` is the library entry
+  (`defineConfig` and config types).
+- Errors: throw `ForgeError` with a stable code (`src/errors.ts`); each code
+  maps to a named exit code in `src/exit-codes.ts`. Output goes through the
+  `Reporter`: NDJSON for `--json` or a non-TTY stdout, a TTY view otherwise.
+  Non-interactive runs never prompt (`src/commands/ask.ts`).
 - `bin/rbx-forge.js` imports `dist/cli.mjs`; bins `forge` and `rbx-forge` both
   point at it.
 

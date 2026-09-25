@@ -27,11 +27,6 @@ export interface MemoryFileSystem {
 	fileSystem: FileSystem;
 }
 
-/** A clock that stands still until the test moves it. */
-export interface FakeClock extends Clock {
-	advance: (ms: number) => void;
-}
-
 /** A reporter that records every call. */
 export interface RecordingReporter extends Reporter {
 	events: Array<ReporterEvent>;
@@ -59,28 +54,6 @@ export function createMemoryFileSystem(files: Record<string, string> = {}): Memo
 }
 
 /**
- * A clock that starts at `start` and moves only with `advance`. `sleep`
- * resolves at once and moves the clock by the wait.
- *
- * @param start - The first `now()`.
- * @returns A clock the test moves by hand.
- */
-export function createFakeClock(start = Date.UTC(2026, 0, 1)): FakeClock {
-	let now = start;
-	return {
-		advance: (ms) => {
-			now += ms;
-		},
-		now: () => now,
-		sleep: async (ms) => {
-			now += ms;
-			// Yield once, as a real timer would.
-			await Promise.resolve();
-		},
-	};
-}
-
-/**
  * Seams for a unit test: memfs, a fake clock, and seams that throw when a test
  * reaches them without passing its own.
  *
@@ -90,7 +63,11 @@ export function createFakeClock(start = Date.UTC(2026, 0, 1)): FakeClock {
 export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 	return {
 		childProcess: { spawn: unreachable("child process") },
-		clock: createFakeClock(),
+		// A clock that stands still: `sleep` resolves at once.
+		clock: {
+			now: () => Date.UTC(2026, 0, 1),
+			sleep: vi.fn<Clock["sleep"]>().mockResolvedValue(undefined),
+		},
 		configLoader: vi.fn<ConfigLoader>(unreachable("config loader")),
 		fileSystem: createMemoryFileSystem().fileSystem,
 		prompter: {

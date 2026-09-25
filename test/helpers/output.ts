@@ -27,6 +27,31 @@ export interface CapturedOutput {
 }
 
 /**
+ * Parse NDJSON output, one value per line. Fails on a line that is not JSON.
+ *
+ * @param stdout - The output.
+ * @returns One value per line.
+ */
+export function parseLines(stdout: string): Array<unknown> {
+	return stdout
+		.split("\n")
+		.filter((line) => line !== "")
+		.map((line): unknown => JSON.parse(line));
+}
+
+/**
+ * Parse the last NDJSON line of some output as a result object.
+ *
+ * @param stdout - The output.
+ * @returns The result, checked against its shape.
+ */
+export function parseResult(stdout: string): ResultLine {
+	const parsed = resultLine(parseLines(stdout).at(-1));
+	assert(!(parsed instanceof type.errors), "the last line is a result object");
+	return parsed;
+}
+
+/**
  * Make output streams that record every write.
  *
  * @returns The streams and readers for what they got.
@@ -35,15 +60,8 @@ export function captureOutput(): CapturedOutput {
 	let stdout = "";
 	let stderr = "";
 
-	function jsonLines(): Array<unknown> {
-		return stdout
-			.split("\n")
-			.filter((line) => line !== "")
-			.map((line): unknown => JSON.parse(line));
-	}
-
 	return {
-		jsonLines,
+		jsonLines: () => parseLines(stdout),
 		output: {
 			stderr: (text) => {
 				stderr += text;
@@ -52,11 +70,7 @@ export function captureOutput(): CapturedOutput {
 				stdout += text;
 			},
 		},
-		result: () => {
-			const parsed = resultLine(jsonLines().at(-1));
-			assert(!(parsed instanceof type.errors), "the last line is a result object");
-			return parsed;
-		},
+		result: () => parseResult(stdout),
 		stderr: () => stderr,
 		stdout: () => stdout,
 	};

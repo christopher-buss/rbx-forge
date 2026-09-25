@@ -14,6 +14,9 @@ export default {
 		// Editor-only daemon.
 		"eslint_d",
 	],
+	// A type that annotates an export in its own file is part of that
+	// export's declaration (`isolatedDeclarations` needs it exported).
+	ignoreExportsUsedInFile: { interface: true, type: true },
 	stryker: { config: ["stryker.config.ts"] },
 	vitest: { config: ["vitest{,.stryker}.config.ts"] },
 } satisfies KnipConfig;

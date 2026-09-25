@@ -1,48 +1,9 @@
-import { spawn } from "node:child_process";
-import path from "node:path";
-import process from "node:process";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import packageJson from "../../package.json" with { type: "json" };
-import { EXIT_SUCCESS } from "../../src/exit-codes.ts";
-
-// Runs after `build`: spawns the shipped bin, which imports `dist/cli.mjs`.
-const BIN = path.join(import.meta.dirname, "..", "..", "bin", "rbx-forge.js");
-
-interface BinRun {
-	status: null | number;
-	stderr: string;
-	stdout: string;
-}
-
-async function runBinAsync(argv: Array<string>): Promise<BinRun> {
-	const child = spawn(process.execPath, [BIN, ...argv], {
-		stdio: ["ignore", "pipe", "pipe"],
-		windowsHide: true,
-	});
-
-	onTestFinished(() => {
-		child.kill();
-	});
-
-	let stdout = "";
-	let stderr = "";
-	child.stdout.setEncoding("utf8");
-	child.stderr.setEncoding("utf8");
-	child.stdout.on("data", (chunk: string) => {
-		stdout += chunk;
-	});
-	child.stderr.on("data", (chunk: string) => {
-		stderr += chunk;
-	});
-
-	return new Promise((resolve, reject) => {
-		child.once("error", reject);
-		child.once("close", (status) => {
-			resolve({ status, stderr, stdout });
-		});
-	});
-}
+import { EXIT_SUCCESS, EXIT_USAGE } from "../../src/exit-codes.ts";
+import { parseLines } from "../helpers/output.ts";
+import { runBinAsync } from "./run-bin.ts";
 
 describe("forge bin", () => {
 	it("should exit 0 printing the package version", async () => {
@@ -63,5 +24,26 @@ describe("forge bin", () => {
 		expect(status).toBe(EXIT_SUCCESS);
 		expect(stderr).toBe("");
 		expect(stdout).toContain("--version");
+	});
+
+	it("should exit 2 with an NDJSON usage error for an unknown command", async () => {
+		expect.assertions(2);
+
+		const { status, stdout } = await runBinAsync(["serve"]);
+
+		expect(status).toBe(EXIT_USAGE);
+		expect(parseLines(stdout)).toStrictEqual([
+			{
+				command: null,
+				error: {
+					code: "usage",
+					hint: 'Run "forge --help" for usage.',
+					message: 'Unknown command "serve".',
+				},
+				exitCode: EXIT_USAGE,
+				ok: false,
+				type: "result",
+			},
+		]);
 	});
 });
