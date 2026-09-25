@@ -4,6 +4,7 @@
  * code. Every decision lives in `cli/run-cli.ts`, where a test drives it.
  */
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import packageJson from "../package.json" with { type: "json" };
 import { COMMANDS } from "./cli/commands.ts";
@@ -26,6 +27,8 @@ process.exitCode = await runCliAsync(process.argv.slice(2), {
 		input: process.stdin,
 		nativeDirectory: process.env["RBX_FORGE_NATIVE_DIR"],
 		output: process.stdout,
+		// Built next to this file (`dist/supervisor.mjs`).
+		supervisorEntry: fileURLToPath(new URL("supervisor.mjs", import.meta.url)),
 	}),
 	terminal: {
 		stdinIsTty: process.stdin.isTTY,

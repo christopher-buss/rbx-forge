@@ -200,3 +200,22 @@ export class ForgeError extends Error {
 		return ERROR_CODES[this.code].exitCode;
 	}
 }
+
+/**
+ * The error to report for anything a command threw: a `ForgeError` as it
+ * is, anything else as an `internal_error` (a bug in forge).
+ *
+ * @param err - What was thrown.
+ * @returns The error to report.
+ */
+export function toForgeError(err: unknown): ForgeError {
+	if (err instanceof ForgeError) {
+		return err;
+	}
+
+	const message = err instanceof Error ? err.message : String(err);
+	return new ForgeError("internal_error", message, {
+		cause: err,
+		hint: "This is a bug in forge. Please report it.",
+	});
+}

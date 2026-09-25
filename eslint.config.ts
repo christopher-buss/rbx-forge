@@ -29,6 +29,13 @@ export default isentinel(
 		},
 	},
 	{
+		// Process entries, like `src/cli.ts`: the config exempts that one by
+		// name.
+		name: "project/process-entries",
+		files: ["src/supervisor.ts"],
+		rules: { "antfu/no-top-level-await": "off" },
+	},
+	{
 		name: "project/type-tests",
 		files: ["**/*.spec-d.ts"],
 		rules: { "flawless/max-lines-per-function": "off" },

@@ -1,10 +1,12 @@
 //! `forge-reaper`: owns every worker process of one session.
 //!
 //! ```text
-//! forge-reaper serve --session <id> --lease <path>
+//! forge-reaper serve --session <id> --lease <path> --record <path>
 //! ```
 //!
-//! Takes a shared lock on the lease file, writes `leased`, and then speaks
+//! Takes a shared lock on the lease file, writes the reaper record (`{ pid,
+//! startTime, sessionId, workers: [{ id, pid, startTime }] }`, rewritten
+//! whole on each change and deleted before exit), writes `leased`, and then speaks
 //! the protocol in [`protocol`] on stdin and stdout until `terminate` or
 //! stdin EOF (see [`reaper`]). Diagnostics go to stderr. The host must hold
 //! the only write end of stdin: its EOF is how the reaper learns that the
@@ -29,7 +31,7 @@ use std::thread;
 use os::lock::{FileLock, LockMode};
 use os::worker::{self, Inherit, Spec, WorkerTree};
 use protocol::SpawnRequest;
-use reaper::{Input, Platform, Reaper, Tree};
+use reaper::{Input, Platform, Reaper, RecordedWorker, Tree};
 
 /// Exit code for a command line the reaper cannot read.
 const EXIT_USAGE: u8 = 2;
@@ -61,10 +63,43 @@ impl Tree for WorkerTree {
     }
 }
 
+/// The reaper record file. Each write replaces the whole file (a temporary
+/// file, then a rename), so a reader never sees half a record.
+struct RecordFile {
+    path: PathBuf,
+    pid: u32,
+    start_time: String,
+    session: String,
+}
+
+impl RecordFile {
+    fn write(&self, workers: &[RecordedWorker]) -> io::Result<()> {
+        let record = serde_json::json!({
+            "pid": self.pid,
+            "startTime": self.start_time,
+            "sessionId": self.session,
+            "workers": workers,
+        });
+        let temporary = self.path.with_extension("json.tmp");
+        std::fs::write(&temporary, record.to_string())?;
+        std::fs::rename(&temporary, &self.path)
+    }
+
+    fn remove(&self) {
+        match std::fs::remove_file(&self.path) {
+            Err(err) if err.kind() != io::ErrorKind::NotFound => {
+                eprintln!("forge-reaper: remove {}: {err}", self.path.display());
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Real workers for one session.
 struct OsPlatform {
     session: String,
     inherit: Inherit,
+    record: RecordFile,
 }
 
 impl Platform for OsPlatform {
@@ -94,6 +129,15 @@ impl Platform for OsPlatform {
             job_name: format!("Local\\rbx-forge-{}-{serial}", self.session),
         };
         WorkerTree::spawn(&spec, &self.inherit)
+    }
+
+    fn record(&mut self, workers: &[RecordedWorker]) {
+        if let Err(err) = self.record.write(workers) {
+            eprintln!(
+                "forge-reaper: write the record {}: {err}",
+                self.record.path.display()
+            );
+        }
     }
 
     fn sweep_orphans(&mut self) {
@@ -161,7 +205,7 @@ fn ignore_terminal_signals() {
     }
 }
 
-fn serve(session: &str, lease: &Path) -> ExitCode {
+fn serve(session: &str, lease: &Path, record: &Path) -> ExitCode {
     ignore_terminal_signals();
     let lock = match FileLock::try_acquire(lease, LockMode::Shared) {
         Ok(Some(lock)) => lock,
@@ -197,14 +241,31 @@ fn serve(session: &str, lease: &Path) -> ExitCode {
         let _ = stdin_sender.send(Input::StdinClosed);
     });
 
+    let pid = std::process::id();
+    let start_time = match os::process::start_time(pid) {
+        Ok(Some(start)) => start.to_string(),
+        Ok(None) => unreachable!("the reaper itself is alive"),
+        Err(err) => {
+            eprintln!("forge-reaper: read its own start time: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let record = RecordFile {
+        path: record.to_owned(),
+        pid,
+        start_time,
+        session: session.to_owned(),
+    };
     let platform = OsPlatform {
         session: session.to_owned(),
         inherit: Inherit {
             #[cfg(unix)]
             lease: Some(lock.raw_fd()),
         },
+        record,
     };
-    Reaper::new(platform, io::stdout(), sender).run(std::process::id(), &receiver);
+    let (platform, _) = Reaper::new(platform, io::stdout(), sender).run(pid, &receiver);
+    platform.record.remove();
     // The lease ends here for the reaper; workers that inherited it (POSIX)
     // hold it until they exit.
     drop(lock);
@@ -215,15 +276,21 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
-        ["serve", "--session", session, "--lease", lease] if !session.contains('\\') => {
-            serve(session, Path::new(lease))
-        }
+        [
+            "serve",
+            "--session",
+            session,
+            "--lease",
+            lease,
+            "--record",
+            record,
+        ] if !session.contains('\\') => serve(session, Path::new(lease), Path::new(record)),
         ["--version"] => {
             println!("forge-reaper {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         _ => {
-            eprintln!("usage: forge-reaper serve --session <id> --lease <path>");
+            eprintln!("usage: forge-reaper serve --session <id> --lease <path> --record <path>");
             ExitCode::from(EXIT_USAGE)
         }
     }

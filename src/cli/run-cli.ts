@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { parseArgs } from "node:util";
 
 import type { CommandContext } from "../commands/context.ts";
-import { ForgeError } from "../errors.ts";
+import { ForgeError, toForgeError } from "../errors.ts";
 import { EXIT_SUCCESS } from "../exit-codes.ts";
 import type { ExitCode } from "../exit-codes.ts";
 import { createReporter } from "../output/reporters.ts";
@@ -169,18 +169,6 @@ function parseValues(
 	}
 
 	return parsed.values;
-}
-
-function toForgeError(err: unknown): ForgeError {
-	if (err instanceof ForgeError) {
-		return err;
-	}
-
-	const message = err instanceof Error ? err.message : String(err);
-	return new ForgeError("internal_error", message, {
-		cause: err,
-		hint: "This is a bug in forge. Please report it.",
-	});
 }
 
 function reportFailure(reporter: Reporter, command: string | undefined, err: unknown): ExitCode {

@@ -22,6 +22,7 @@ import type {
 import type { Seams } from "../../src/seams/seams.ts";
 import type { Signals } from "../../src/seams/signals.ts";
 import type { StudioLauncher } from "../../src/studio/launcher.ts";
+import type { SupervisorLauncher } from "../../src/supervisor/launcher.ts";
 
 /** The project directory of every in-memory test project. */
 export const PROJECT: string = path.resolve("/project");
@@ -84,13 +85,7 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 		},
 		configLoader: vi.fn<ConfigLoader>(unreachable("config loader")),
 		fileSystem: createMemoryFileSystem().fileSystem,
-		host: {
-			bootTimeMs: () => 0,
-			execPath: "/node",
-			hostname: TEST_HOSTNAME,
-			kill: vi.fn<Host["kill"]>(unreachable("host kill")),
-			platform: "linux",
-		},
+		host: createTestHost(),
 		native: unreachable("native addon"),
 		network: { isPortFreeAsync: vi.fn<Network["isPortFreeAsync"]>(unreachable("network")) },
 		processRunner: vi.fn<ProcessRunner>(unreachable("process runner")),
@@ -102,6 +97,7 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 		reaper: vi.fn<ReaperLauncher>(unreachable("reaper")),
 		signals: { onStop: vi.fn<Signals["onStop"]>(unreachable("signals")) },
 		studioLauncher: vi.fn<StudioLauncher>(unreachable("studio launcher")),
+		supervisor: vi.fn<SupervisorLauncher>(unreachable("supervisor")),
 		...overrides,
 	};
 }
@@ -152,5 +148,22 @@ export function createCommandContext(overrides: Partial<CommandContext> = {}): C
 function unreachable(seam: string): () => never {
 	return () => {
 		throw new Error(`the test reached the ${seam} seam without providing it`);
+	};
+}
+
+/**
+ * The test host: Linux, PID 4242, user 1000, booted at the epoch.
+ *
+ * @returns A host whose `kill` throws unless a test replaces it.
+ */
+function createTestHost(): Host {
+	return {
+		bootTimeMs: () => 0,
+		execPath: "/node",
+		hostname: TEST_HOSTNAME,
+		kill: vi.fn<Host["kill"]>(unreachable("host kill")),
+		pid: 4242,
+		platform: "linux",
+		userId: 1000,
 	};
 }

@@ -10,11 +10,15 @@ import { makeTemporaryDirectory } from "../../test/helpers/temporary-directory.t
 import { nodeNetwork } from "./network.ts";
 import { createNodeSeams } from "./node-seams.ts";
 
+/** POSIX: this process's user id; Windows has none. */
+const USER_ID = process.getuid?.();
+
 function makeSeams(nativeDirectory?: string): ReturnType<typeof createNodeSeams> {
 	return createNodeSeams({
 		input: new PassThrough(),
 		nativeDirectory,
 		output: new PassThrough(),
+		supervisorEntry: "/forge/supervisor.mjs",
 	});
 }
 
@@ -68,6 +72,15 @@ describe(createNodeSeams, () => {
 		expect(Math.abs(bootTimeMs - (Date.now() - os.uptime() * 1000))).toBeLessThan(1000);
 	});
 
+	it("should name this process and its user", () => {
+		expect.assertions(2);
+
+		const { host } = makeSeams();
+
+		expect(host.pid).toBe(process.pid);
+		expect(host.userId).toBe(USER_ID);
+	});
+
 	it("should signal processes through process.kill", () => {
 		expect.assertions(1);
 
@@ -95,7 +108,11 @@ describe(createNodeSeams, () => {
 
 		const directory = makeTemporaryDirectory();
 		const binary = path.join(directory, path.basename(REAPER_PATH));
-		const launch = makeSeams(directory).reaper({ leasePath: "l", sessionId: "s" });
+		const launch = makeSeams(directory).reaper({
+			leasePath: "l",
+			recordPath: "r",
+			sessionId: "s",
+		});
 
 		await expect(launch).rejects.toMatchObject({
 			code: "reaper_unavailable",
@@ -107,7 +124,7 @@ describe(createNodeSeams, () => {
 		expect.assertions(2);
 
 		// No platform package is installed in this repository.
-		const launch = makeSeams().reaper({ leasePath: "l", sessionId: "s" });
+		const launch = makeSeams().reaper({ leasePath: "l", recordPath: "r", sessionId: "s" });
 
 		await expect(launch).rejects.toMatchObject({ code: "reaper_unavailable" });
 		await expect(launch).rejects.toThrow(/^Could not find @rbx-forge\/native-/);
@@ -151,6 +168,7 @@ describe(createNodeSeams, () => {
 			input,
 			nativeDirectory: undefined,
 			output: new PassThrough(),
+			supervisorEntry: "/forge/supervisor.mjs",
 		});
 		const answer = prompter.confirm("Go?", false);
 		setImmediate(() => {

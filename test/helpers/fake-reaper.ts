@@ -3,11 +3,12 @@ import type { WorkerReport, WorkerSpec } from "../../src/reaper/protocol.ts";
 import type {
 	Reaper,
 	ReaperEnd,
+	ReaperLaunch,
 	ReaperLauncher,
-	ReaperOptions,
 	SpawnedWorker,
 } from "../../src/reaper/reaper-client.ts";
 import type { Signals } from "../../src/seams/signals.ts";
+import type { OnStop, StopRequest } from "../../src/session/stop-source.ts";
 
 /** How `terminateAsync` reports a tree it stopped. */
 const STOPPED: WorkerReport = { exitCode: null, forced: false, incomplete: false, signal: 15 };
@@ -24,7 +25,7 @@ export interface FakeReaper {
 	/** The launcher seam; it records its options. */
 	launch: ReaperLauncher;
 	/** Every launch's options. */
-	launches: Array<Pick<ReaperOptions, "leasePath" | "sessionId">>;
+	launches: Array<ReaperLaunch>;
 	/** Every worker the code under test asked for. */
 	spawned: Array<WorkerSpec>;
 }
@@ -38,6 +39,8 @@ export interface FakeReaperOptions {
 	autoExit?: (worker: WorkerSpec) => undefined | WorkerReport;
 	/** What `terminateAsync` resolves with. */
 	end?: ReaperEnd;
+	/** Every launch rejects with this: the reaper did not start. */
+	launchError?: Error;
 	/** Runs inside the launch, before it resolves (for example, a signal). */
 	onLaunch?: () => void;
 	/** Runs inside every spawn, before it resolves. */
@@ -46,12 +49,16 @@ export interface FakeReaperOptions {
 	spawnError?: Error;
 }
 
-/** Stop signals a unit test sends by hand. */
+/** Stop signals and stop requests a unit test sends by hand. */
 export interface FakeSignals {
 	/** Send a stop signal to every listener. */
 	fire: (signal: NodeJS.Signals) => void;
 	/** How many listeners are on. */
 	listeners: () => number;
+	/** The same listeners as a stop-request seam. */
+	onStop: OnStop;
+	/** Send any stop request, such as `owner_gone`, to every listener. */
+	request: (request: StopRequest) => void;
 	signals: Signals;
 }
 
@@ -75,7 +82,7 @@ interface FakeReaperState {
 export function createFakeReaper(options: FakeReaperOptions = {}): FakeReaper {
 	const calls: Array<string> = [];
 	const exits = new Map<string, (report: WorkerReport) => void>();
-	const launches: Array<Pick<ReaperOptions, "leasePath" | "sessionId">> = [];
+	const launches: Array<ReaperLaunch> = [];
 	const spawned: Array<WorkerSpec> = [];
 	const reaper = makeReaper({ calls, exits, isTerminated: false, options, spawned });
 
@@ -89,6 +96,10 @@ export function createFakeReaper(options: FakeReaperOptions = {}): FakeReaper {
 			launches.push(launchOptions);
 			options.onLaunch?.();
 			await nextTickAsync();
+			if (options.launchError !== undefined) {
+				throw options.launchError;
+			}
+
 			return reaper;
 		},
 		launches,
@@ -97,28 +108,33 @@ export function createFakeReaper(options: FakeReaperOptions = {}): FakeReaper {
 }
 
 /**
- * A fake stop-signal seam.
+ * A fake stop-signal seam, also usable as a stop-request seam.
  *
- * @returns The seam and its controls.
+ * @returns The seams and their controls.
  */
 export function createFakeSignals(): FakeSignals {
-	const listeners = new Set<(signal: NodeJS.Signals) => void>();
+	const listeners = new Set<(request: StopRequest) => void>();
+	function onStop(listener: (request: StopRequest) => void): () => void {
+		listeners.add(listener);
+		return () => {
+			listeners.delete(listener);
+		};
+	}
+
+	function request(stop: StopRequest): void {
+		for (const listener of listeners) {
+			listener(stop);
+		}
+	}
 
 	return {
 		fire: (signal) => {
-			for (const listener of listeners) {
-				listener(signal);
-			}
+			request({ signal, type: "signal" });
 		},
 		listeners: () => listeners.size,
-		signals: {
-			onStop: (listener) => {
-				listeners.add(listener);
-				return () => {
-					listeners.delete(listener);
-				};
-			},
-		},
+		onStop,
+		request,
+		signals: { onStop: (listener) => onStop(signalsOnly(listener)) },
 	};
 }
 
@@ -201,5 +217,19 @@ function makeReaper(state: FakeReaperState): Reaper {
 			await terminateAsync(state, graceMs);
 			return end;
 		},
+	};
+}
+
+/**
+ * Pass only stop signals on, as the signal seam does.
+ *
+ * @param listener - Gets each signal.
+ * @returns A stop-request listener.
+ */
+function signalsOnly(listener: (signal: NodeJS.Signals) => void): (stop: StopRequest) => void {
+	return (stop) => {
+		if (stop.type === "signal") {
+			listener(stop.signal);
+		}
 	};
 }

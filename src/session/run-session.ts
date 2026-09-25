@@ -1,15 +1,16 @@
 import type { WorkerReport, WorkerSpec } from "../reaper/protocol.ts";
 import type { Reaper, ReaperEnd, ReaperLauncher, SpawnedWorker } from "../reaper/reaper-client.ts";
-import type { Signals } from "../seams/signals.ts";
+import type { Pause } from "./pause.ts";
+import type { OnStop, StopRequest } from "./stop-source.ts";
 
 /** Why a session ended. */
 export type SessionEndReason =
+	/** A stop request: the owner pipe closed, or a stop signal. */
+	| StopRequest
 	/** A step before the services failed, or a service could not start. */
 	| { error: unknown; type: "failed" }
 	/** A service's tree is gone: it exited, or its reaper died. */
 	| { report: WorkerReport; service: string; type: "service_exited" }
-	/** A stop signal (Ctrl+C, `kill`, a closed terminal). */
-	| { signal: NodeJS.Signals; type: "signal" }
 	/** Studio closed the place the session opened. */
 	| { type: "studio_closed" };
 
@@ -27,10 +28,13 @@ export interface SessionOptions {
 	/** The lease file, in the session's directory. */
 	leasePath: string;
 	/**
-	 * Listens for stop requests: the stop signals of `forge start`. A
-	 * detached session's supervisor passes its own.
+	 * Listens for stop requests: the supervisor's owner pipe and stop
+	 * signals. A request that came before the session started ends it at
+	 * once.
 	 */
-	onStop: Signals["onStop"];
+	onStop: OnStop;
+	/** The reaper record, in the session's directory. */
+	recordPath: string;
 	sessionId: string;
 }
 
@@ -56,8 +60,8 @@ export interface SessionScope {
 	track: (task: Promise<unknown>) => void;
 }
 
-/** What starts a session: its reaper launcher. */
-export type SessionSeams = Readonly<{ reaper: ReaperLauncher }>;
+/** What starts a session: its reaper launcher, and the test pause points. */
+export type SessionSeams = Readonly<{ pause: Pause; reaper: ReaperLauncher }>;
 
 /** The parts of a session the helpers below share. */
 interface SessionState {
@@ -76,9 +80,10 @@ interface SessionState {
  * process dies, however it dies.
  *
  * Admission (spec #28): the reaper gets `go` only while no end trigger has
- * fired, and nothing starts after one.
+ * fired, and nothing starts after one. Once the session ends, admission is
+ * closed for good: `go` is never sent later, and the body never runs.
  *
- * @param seams - The reaper launcher.
+ * @param seams - The reaper launcher and the test pause points.
  * @param options - The session's files, grace time, and stop requests.
  * @param body - Starts what the session runs. A rejection ends the session
  *   with `failed`.
@@ -91,21 +96,14 @@ export async function runSessionAsync(
 	body: (scope: SessionScope) => Promise<void>,
 ): Promise<SessionOutcome> {
 	const state = createState();
-	const dispose = options.onStop((signal) => {
-		state.finish({ signal, type: "signal" });
-	});
+	const dispose = options.onStop(state.finish);
 	try {
 		const reaper = await seams.reaper({
 			leasePath: options.leasePath,
+			recordPath: options.recordPath,
 			sessionId: options.sessionId,
 		});
-		if (!state.abort.signal.aborted) {
-			reaper.go();
-			const setup = body(makeScope(state, reaper)).catch((err: unknown) => {
-				state.finish({ error: err, type: "failed" });
-			});
-			state.tasks.push(setup);
-		}
+		admit(seams.pause, state, reaper, body);
 
 		const reason = await state.ended;
 		const end = await reaper.terminateAsync(options.graceMs);
@@ -114,35 +112,6 @@ export async function runSessionAsync(
 	} finally {
 		dispose();
 	}
-}
-
-/**
- * Wait until every task has settled, including tasks that settling ones
- * added meanwhile.
- *
- * @param tasks - The tracked tasks; it may grow while this waits.
- */
-async function settleTasksAsync(tasks: ReadonlyArray<Promise<unknown>>): Promise<void> {
-	let settled = 0;
-	while (settled < tasks.length) {
-		settled = tasks.length;
-		await Promise.allSettled(tasks);
-	}
-}
-
-function createState(): SessionState {
-	const abort = new AbortController();
-	const { promise, resolve } = Promise.withResolvers<SessionEndReason>();
-	return {
-		abort,
-		ended: promise,
-		finish: (reason) => {
-			// Both do nothing after the first call: the first reason wins.
-			abort.abort();
-			resolve(reason);
-		},
-		tasks: [],
-	};
 }
 
 /**
@@ -179,5 +148,87 @@ function makeScope(state: SessionState, reaper: Reaper): SessionScope {
 		track: (task) => {
 			state.tasks.push(task);
 		},
+	};
+}
+
+function hasEnded(state: SessionState): boolean {
+	return state.abort.signal.aborted;
+}
+
+/**
+ * The steps of {@link admit}.
+ *
+ * @param pause - The test pause points.
+ * @param state - The session.
+ * @param reaper - The leased reaper.
+ * @param body - What the session runs.
+ * @rejects What the body rejects with.
+ */
+async function admitAsync(
+	pause: Pause,
+	state: SessionState,
+	reaper: Reaper,
+	body: (scope: SessionScope) => Promise<void>,
+): Promise<void> {
+	await pause("leased", state.abort.signal);
+	if (hasEnded(state)) {
+		return;
+	}
+
+	reaper.go();
+	await pause("admitted", state.abort.signal);
+	if (!hasEnded(state)) {
+		await body(makeScope(state, reaper));
+	}
+}
+
+/**
+ * Admit the reaper and run the body, unless the session ended first. Runs
+ * as a tracked task, so the test pause points before and after `go` never
+ * hold up the session's end.
+ *
+ * @param pause - The test pause points.
+ * @param state - The session.
+ * @param reaper - The leased reaper.
+ * @param body - What the session runs.
+ */
+function admit(
+	pause: Pause,
+	state: SessionState,
+	reaper: Reaper,
+	body: (scope: SessionScope) => Promise<void>,
+): void {
+	const admitted = admitAsync(pause, state, reaper, body).catch((err: unknown) => {
+		state.finish({ error: err, type: "failed" });
+	});
+	state.tasks.push(admitted);
+}
+
+/**
+ * Wait until every task has settled, including tasks that settling ones
+ * added meanwhile.
+ *
+ * @param tasks - The tracked tasks; it may grow while this waits.
+ */
+async function settleTasksAsync(tasks: ReadonlyArray<Promise<unknown>>): Promise<void> {
+	let settled = 0;
+	while (settled < tasks.length) {
+		settled = tasks.length;
+		await Promise.allSettled(tasks);
+	}
+}
+
+function createState(): SessionState {
+	const abort = new AbortController();
+	const { promise, resolve } = Promise.withResolvers<SessionEndReason>();
+	return {
+		abort,
+		ended: promise,
+		finish: (reason) => {
+			// Both do nothing after the first call: the first reason wins.
+			abort.abort();
+			resolve(reason);
+		},
+		tasks: [],
 	};
 }

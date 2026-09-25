@@ -37,7 +37,11 @@ async function setupAsync(options: FakeReaperOptions = {}): Promise<RunnerSetup>
 	const memory = createMemoryFileSystem();
 	const clock = createManualClock(1000);
 	const fake = createFakeReaper(options);
-	const reaper = await fake.launch({ leasePath: "/lease", sessionId: "s" });
+	const reaper = await fake.launch({
+		leasePath: "/lease",
+		recordPath: "/record",
+		sessionId: "s",
+	});
 	const abort = new AbortController();
 	const runner = createReaperRunner({
 		name: "start",

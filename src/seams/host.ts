@@ -16,7 +16,11 @@ export interface Host {
 	 * Send `signal` to a process, or to a process group with a negative pid.
 	 */
 	kill: (pid: number, signal: NodeJS.Signals) => void;
+	/** This process's PID. */
+	pid: number;
 	platform: NodeJS.Platform;
+	/** POSIX: the user id this process runs as. Windows: `undefined`. */
+	userId: number | undefined;
 }
 
 export const nodeHost: Host = {
@@ -26,5 +30,7 @@ export const nodeHost: Host = {
 	kill: (pid, signal) => {
 		process.kill(pid, signal);
 	},
+	pid: process.pid,
 	platform: process.platform,
+	userId: process.getuid?.(),
 };

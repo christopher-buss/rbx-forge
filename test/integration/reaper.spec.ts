@@ -61,7 +61,12 @@ async function startSessionAsync(): Promise<TestSession> {
 			host: nodeHost,
 			native: () => native,
 		},
-		{ file: REAPER_PATH, leasePath, sessionId },
+		{
+			file: REAPER_PATH,
+			leasePath,
+			recordPath: path.join(directory, "reaper.json"),
+			sessionId,
+		},
 	);
 	onTestFinished(async () => {
 		if (isProcessAlive(reaper.pid)) {

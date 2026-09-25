@@ -12,7 +12,7 @@ export const unitProject = {
 	test: {
 		name: "unit",
 		clearMocks: true,
-		exclude: [...defaultExclude, "./src/cli.ts"],
+		exclude: [...defaultExclude, "./src/cli.ts", "./src/supervisor.ts"],
 		include: ["src/**/*.spec.ts"],
 		// `vi.mock` is banned (lint), so no spec needs a fresh module graph.
 		isolate: false,
@@ -32,7 +32,7 @@ export const unitProject = {
 export default defineConfig({
 	test: {
 		coverage: {
-			exclude: ["src/cli.ts", "src/**/*.spec-d.ts"],
+			exclude: ["src/cli.ts", "src/supervisor.ts", "src/**/*.spec-d.ts"],
 			include: ["src/**/*.ts"],
 			thresholds: {
 				branches: 100,

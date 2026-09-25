@@ -18,12 +18,17 @@
 //!   whole tree when `graceMs` runs out. Once the leader exits, whatever is
 //!   left of its tree is killed, emptiness is confirmed within a bound, and
 //!   `exited` is written.
+//! - The reaper record names every live worker: it is written before
+//!   `leased`, after each `spawned`, and before each `exited` (see
+//!   [`Platform::record`]).
 
 use std::io::{self, Write};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use serde::Serialize;
 
 pub use crate::os::worker::{ExitStatus, Finished};
 use crate::protocol::{
@@ -53,11 +58,24 @@ pub trait Tree: Send + Sync + 'static {
     fn finish(&self, bound: Duration) -> io::Result<Finished>;
 }
 
+/// One live worker, as the reaper record names it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordedWorker {
+    pub id: String,
+    pub pid: u32,
+    /// OS start time of the leader, as in `spawned`.
+    pub start_time: String,
+}
+
 /// Creates trees.
 pub trait Platform {
     type Tree: Tree;
     /// Create the worker, held so it runs no code until [`Tree::release`].
     fn spawn(&mut self, serial: u64, request: &SpawnRequest) -> io::Result<Self::Tree>;
+    /// The live workers are now `workers`: keep the reaper record current,
+    /// so a cleanup can find them when the reaper hangs.
+    fn record(&mut self, workers: &[RecordedWorker]);
     /// Once every tree is finished, before `terminated`: kill what no tree
     /// names (Linux: orphans the subreaper adopted).
     fn sweep_orphans(&mut self);
@@ -113,8 +131,9 @@ impl<P: Platform, W: Write> Reaper<P, W> {
     }
 
     /// Write `leased`, then run until every tree is empty after `terminate`
-    /// or stdin EOF. Returns the writer.
-    pub fn run(mut self, pid: u32, inputs: &Receiver<Input>) -> W {
+    /// or stdin EOF. Returns the platform and the writer.
+    pub fn run(mut self, pid: u32, inputs: &Receiver<Input>) -> (P, W) {
+        self.record();
         self.emit(&Event::Leased { pid });
         while !(self.terminating && self.workers.is_empty()) {
             let input = match self.next_deadline() {
@@ -137,7 +156,7 @@ impl<P: Platform, W: Write> Reaper<P, W> {
         self.platform.sweep_orphans();
         let reports = std::mem::take(&mut self.reports);
         self.emit(&Event::Terminated { reports });
-        self.out
+        (self.platform, self.out)
     }
 
     fn emit(&mut self, event: &Event) {
@@ -146,6 +165,19 @@ impl<P: Platform, W: Write> Reaper<P, W> {
             .out
             .write_all(encode_event(event).as_bytes())
             .and_then(|()| self.out.flush());
+    }
+
+    fn record(&mut self) {
+        let workers: Vec<RecordedWorker> = self
+            .workers
+            .iter()
+            .map(|worker| RecordedWorker {
+                id: worker.id.clone(),
+                pid: worker.tree.pid(),
+                start_time: worker.tree.start_time().to_string(),
+            })
+            .collect();
+        self.platform.record(&workers);
     }
 
     fn next_deadline(&self) -> Option<Instant> {
@@ -243,6 +275,7 @@ impl<P: Platform, W: Write> Reaper<P, W> {
             deadline: None,
             forced: false,
         });
+        self.record();
     }
 
     /// Start the stop sequence, or move its forced kill earlier.
@@ -301,6 +334,8 @@ impl<P: Platform, W: Write> Reaper<P, W> {
                 survivors: Vec::new(),
             }
         });
+        // The tree is gone (or reported incomplete): the record drops it.
+        self.record();
         let report = Report {
             exit_code: finished.status.code,
             signal: finished.status.signal,
@@ -321,7 +356,7 @@ impl<P: Platform, W: Write> Reaper<P, W> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExitStatus, Finished, Input, Platform, Reaper, Tree};
+    use super::{ExitStatus, Finished, Input, Platform, Reaper, RecordedWorker, Tree};
     use crate::protocol::SpawnRequest;
     use std::io;
     use std::sync::mpsc::{self, Sender};
@@ -427,6 +462,14 @@ mod tests {
             })
         }
 
+        fn record(&mut self, workers: &[RecordedWorker]) {
+            let ids: Vec<&str> = workers.iter().map(|worker| worker.id.as_str()).collect();
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("record [{}]", ids.join(",")));
+        }
+
         fn sweep_orphans(&mut self) {
             self.log.lock().unwrap().push("sweep".to_owned());
         }
@@ -450,7 +493,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         feed(&sender, lines, eof);
         let reaper = Reaper::new(platform, Vec::new(), sender);
-        let out = reaper.run(1, &receiver);
+        let (_, out) = reaper.run(1, &receiver);
         let events = String::from_utf8(out)
             .unwrap()
             .lines()
@@ -503,7 +546,7 @@ mod tests {
 
         assert_eq!(types(&run), ["leased", "rejected", "terminated"]);
         assert_eq!(run.events[1]["reason"], "not_admitted");
-        assert_eq!(run.log, ["sweep"]);
+        assert_eq!(run.log, ["record []", "sweep"]);
     }
 
     #[test]
@@ -520,11 +563,14 @@ mod tests {
         assert_eq!(
             run.log,
             [
+                "record []",
                 "spawn 0 a",
                 "release 0",
+                "record [a]",
                 "graceful 0",
                 "kill 0",
                 "finish 0",
+                "record []",
                 "sweep"
             ]
         );
@@ -577,12 +623,15 @@ mod tests {
         assert_eq!(
             run.log,
             [
+                "record []",
                 "spawn 0 a",
                 "release 0",
+                "record [a]",
                 "graceful 0",
                 "kill 0",
                 "kill 0",
                 "finish 0",
+                "record []",
                 "sweep"
             ]
         );
@@ -649,6 +698,23 @@ mod tests {
             .count();
         assert_eq!(spawned + rejected, 2);
         assert_eq!(types(&run).last().unwrap(), "terminated");
+    }
+
+    #[test]
+    fn records_every_live_worker() {
+        let run = run(
+            platform(false),
+            &[go(), spawn_line("a"), spawn_line("b")],
+            true,
+        );
+
+        let records: Vec<&String> = run
+            .log
+            .iter()
+            .filter(|entry| entry.starts_with("record"))
+            .collect();
+        assert_eq!(records[..3], ["record []", "record [a]", "record [a,b]"]);
+        assert_eq!(records.last().unwrap().as_str(), "record []");
     }
 
     #[test]

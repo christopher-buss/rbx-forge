@@ -13,6 +13,7 @@ import { createChildProcessRunner } from "../process/process-runner.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
 import { createReaperLauncher } from "../reaper/reaper-client.ts";
 import { createStudioLauncher } from "../studio/launcher.ts";
+import { createSupervisorLauncher } from "../supervisor/launcher.ts";
 import { nodeChildProcessRunner } from "./child-process.ts";
 import { nodeClock } from "./clock.ts";
 import { loadConfigFileAsync } from "./config-loader.ts";
@@ -34,6 +35,8 @@ export interface NodeSeamsOptions {
 	nativeDirectory: string | undefined;
 	/** Prompt output: the process stdout. */
 	output: NodeJS.WritableStream;
+	/** The supervisor entry script: `supervisor.mjs` next to the CLI. */
+	supervisorEntry: string;
 }
 
 /** What every process-starting seam is built from. */
@@ -42,10 +45,16 @@ const PROCESS_BACKEND = { childProcess: nodeChildProcessRunner, clock: nodeClock
 /**
  * The real seams. Only the CLI entry calls this.
  *
- * @param options - Prompt streams and the native addon directory.
+ * @param options - Prompt streams, the native addon directory, and the
+ *   supervisor entry.
  * @returns Seams backed by Node, c12, the native addon, and the terminal.
  */
-export function createNodeSeams({ input, nativeDirectory, output }: NodeSeamsOptions): Seams {
+export function createNodeSeams({
+	input,
+	nativeDirectory,
+	output,
+	supervisorEntry,
+}: NodeSeamsOptions): Seams {
 	const requireModule = createRequire(import.meta.url);
 	const native = createNativeLoader({
 		directory: nativeDirectory,
@@ -66,6 +75,7 @@ export function createNodeSeams({ input, nativeDirectory, output }: NodeSeamsOpt
 		reaper: createNodeReaperLauncher(nativeDirectory, native, requireModule),
 		signals: createSignals(process),
 		studioLauncher: createStudioLauncher(PROCESS_BACKEND),
+		supervisor: createSupervisorLauncher(PROCESS_BACKEND, supervisorEntry),
 	};
 }
 

@@ -1,4 +1,4 @@
-import type { NativeAddon, PinnedProcess } from "../../src/native/addon.ts";
+import type { FileLock, LockMode, NativeAddon, PinnedProcess } from "../../src/native/addon.ts";
 
 /** One process in the fake process table. */
 export interface FakeProcess {
@@ -18,9 +18,11 @@ export interface FakeProcess {
 	waits?: Array<number>;
 }
 
-/** A fake addon over an in-memory process table. */
+/** A fake addon over an in-memory process table and lock table. */
 export interface FakeNative {
 	addon: NativeAddon;
+	/** The locks held now, by path: one mode per holder. */
+	locks: Map<string, Array<LockMode>>;
 	/** The process table, by PID. Tests read `alive` after a run. */
 	processes: Map<number, FakeProcess>;
 }
@@ -35,6 +37,7 @@ export interface FakeNative {
  */
 export function createFakeNative(processes: Record<number, FakeProcess> = {}): FakeNative {
 	const table = new Map(Object.entries(processes).map(([pid, entry]) => [Number(pid), entry]));
+	const locks = new Map<string, Array<LockMode>>();
 
 	return {
 		addon: {
@@ -51,11 +54,50 @@ export function createFakeNative(processes: Record<number, FakeProcess> = {}): F
 				const entry = table.get(pid);
 				return entry?.alive === true ? startTimeOf(pid, entry) : null;
 			},
-			tryLockFile: () => {
-				throw new Error("the fake addon has no file locks");
-			},
+			tryLockFile: (path, mode) => lockIn(locks, path, mode),
 		},
+		locks,
 		processes: table,
+	};
+}
+
+/**
+ * Take a lock in the lock table, as `flock` or `LockFileEx` would: shared
+ * locks coexist; an exclusive one excludes every other.
+ *
+ * @param locks - The lock table.
+ * @param path - The lock file.
+ * @param mode - How to lock it.
+ * @returns The lock, or `null` when a held lock conflicts.
+ */
+function lockIn(
+	locks: Map<string, Array<LockMode>>,
+	path: string,
+	mode: LockMode,
+): FileLock | null {
+	const held = locks.get(path) ?? [];
+	const isBlocked = mode === "exclusive" ? held.length > 0 : held.includes("exclusive");
+	if (isBlocked) {
+		return null;
+	}
+
+	locks.set(path, [...held, mode]);
+	let isHeld = true;
+	return {
+		release: () => {
+			if (!isHeld) {
+				return;
+			}
+
+			isHeld = false;
+			const rest = [...(locks.get(path) ?? [])];
+			rest.splice(rest.indexOf(mode), 1);
+			if (rest.length === 0) {
+				locks.delete(path);
+			} else {
+				locks.set(path, rest);
+			}
+		},
 	};
 }
 

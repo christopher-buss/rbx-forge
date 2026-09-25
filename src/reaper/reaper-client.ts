@@ -5,6 +5,7 @@ import type { Readable, Writable } from "node:stream";
 
 import { ForgeError } from "../errors.ts";
 import type { NativeLoader } from "../native/addon.ts";
+import { keepTail } from "../process/stream-tail.ts";
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { Host } from "../seams/host.ts";
@@ -32,6 +33,12 @@ export interface ReaperOptions {
 	file: string;
 	/** The lease file; the reaper holds a shared lock on it. */
 	leasePath: string;
+	/**
+	 * The reaper record (`reaper.json`): the reaper keeps its own PID and
+	 * start time and every live worker there, and deletes it before it
+	 * exits. Forced cleanup reads it when the reaper hangs.
+	 */
+	recordPath: string;
 	/** Tags every worker (`RBX_FORGE_SESSION`) and names its jobs. */
 	sessionId: string;
 }
@@ -86,21 +93,19 @@ export interface Reaper {
 	terminateAsync: (graceMs: number) => Promise<ReaperEnd>;
 }
 
+/** One session's reaper files and id: what a launch varies by. */
+export type ReaperLaunch = Pick<ReaperOptions, "leasePath" | "recordPath" | "sessionId">;
+
 /**
  * Starts one session's reaper: {@link launchReaperAsync} with the binary
  * found for this host.
  */
-export type ReaperLauncher = (
-	options: Pick<ReaperOptions, "leasePath" | "sessionId">,
-) => Promise<Reaper>;
+export type ReaperLauncher = (options: ReaperLaunch) => Promise<Reaper>;
 
 /** Extra time the reaper gets at each step of `terminateAsync`. */
 export const TERMINATE_MARGIN_MS = 5000;
 /** How long the host waits for a worker it killed after the reaper died. */
 export const ORPHAN_WAIT_MS = 2000;
-
-/** How much of the reaper's stderr an error message repeats. */
-const STDERR_TAIL = 2000;
 
 type ReaperProcess = ChildProcessByStdio<Writable, Readable, Readable>;
 
@@ -192,7 +197,15 @@ function ignore(): void {
 function spawnReaper(backend: ReaperBackend, options: ReaperOptions): ReaperProcess {
 	const child: ReaperProcess = backend.childProcess.spawn(
 		options.file,
-		["serve", "--session", options.sessionId, "--lease", options.leasePath],
+		[
+			"serve",
+			"--session",
+			options.sessionId,
+			"--lease",
+			options.leasePath,
+			"--record",
+			options.recordPath,
+		],
 		{
 			// POSIX: its own session, so terminal signals never reach it.
 			detached: backend.host.platform !== "win32",
@@ -351,15 +364,6 @@ async function watchAsync(session: Session): Promise<ReaperEnd> {
 			resolve(end(session));
 		});
 	});
-}
-
-function keepTail(stream: Readable): () => string {
-	let text = "";
-	stream.setEncoding("utf8");
-	stream.on("data", (chunk: string) => {
-		text = `${text}${chunk}`.slice(-STDERR_TAIL);
-	});
-	return () => text.trim();
 }
 
 function send(session: Session, request: ReaperRequest): void {

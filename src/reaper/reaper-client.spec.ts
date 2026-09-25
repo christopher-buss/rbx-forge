@@ -16,7 +16,12 @@ import {
 	TERMINATE_MARGIN_MS,
 } from "./reaper-client.ts";
 
-const OPTIONS = { file: "/bin/forge-reaper", leasePath: "/p/workers.lock", sessionId: "s-1" };
+const OPTIONS = {
+	file: "/bin/forge-reaper",
+	leasePath: "/p/workers.lock",
+	recordPath: "/p/reaper.json",
+	sessionId: "s-1",
+};
 const WORKER: WorkerSpec = { id: "rojo", args: ["serve"], cwd: "/p", env: {}, file: "/bin/rojo" };
 const REPORT: WorkerReport = { exitCode: 0, forced: false, incomplete: false, signal: null };
 /** A worker leader the fake native addon knows; its start time is its PID. */
@@ -113,6 +118,8 @@ describe(launchReaperAsync, () => {
 			"s-1",
 			"--lease",
 			"/p/workers.lock",
+			"--record",
+			"/p/reaper.json",
 		]);
 		expect([call.options, reaper.pid]).toStrictEqual([
 			{ detached: true, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
@@ -448,7 +455,9 @@ describe(createReaperLauncher, () => {
 
 		const { launch, spawner } = makeLauncher(() => "/native/forge-reaper");
 
-		await expect(launch({ leasePath: "/l", sessionId: "s" })).resolves.toMatchObject({
+		await expect(
+			launch({ leasePath: "/l", recordPath: "/r", sessionId: "s" }),
+		).resolves.toMatchObject({
 			pid: 3,
 		});
 		expect(spawner.calls.map(({ file }) => file)).toStrictEqual(["/native/forge-reaper"]);
@@ -462,7 +471,9 @@ describe(createReaperLauncher, () => {
 			throw error;
 		});
 
-		await expect(launch({ leasePath: "/l", sessionId: "s" })).rejects.toBe(error);
+		await expect(launch({ leasePath: "/l", recordPath: "/r", sessionId: "s" })).rejects.toBe(
+			error,
+		);
 		expect(spawner.calls).toStrictEqual([]);
 	});
 });

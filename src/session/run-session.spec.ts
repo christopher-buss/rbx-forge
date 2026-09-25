@@ -5,12 +5,19 @@ import type { FakeReaper, FakeReaperOptions, FakeSignals } from "../../test/help
 import { ForgeError } from "../errors.ts";
 import type { WorkerReport, WorkerSpec } from "../reaper/protocol.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
+import { neverPauseAsync } from "./pause.ts";
+import type { Pause, PausePoint } from "./pause.ts";
 import type { SessionOutcome, SessionScope } from "./run-session.ts";
 import { runSessionAsync } from "./run-session.ts";
 
 const REPORT: WorkerReport = { exitCode: 3, forced: false, incomplete: false, signal: null };
 const END = { reports: [{ id: "rojo", report: REPORT }], terminated: true };
-const OPTIONS = { graceMs: 250, leasePath: "/p/.forge/sessions/s/workers.lock", sessionId: "s" };
+const OPTIONS = {
+	graceMs: 250,
+	leasePath: "/p/.forge/sessions/s/workers.lock",
+	recordPath: "/p/.forge/sessions/s/reaper.json",
+	sessionId: "s",
+};
 
 interface SessionRun {
 	fake: FakeReaper;
@@ -34,14 +41,34 @@ function startSession(
 	},
 	reaperOptions: FakeReaperOptions = {},
 	signals: FakeSignals = createFakeSignals(),
+	pause: Pause = neverPauseAsync,
 ): SessionRun {
 	const fake = createFakeReaper({ end: END, ...reaperOptions });
 	const outcome = runSessionAsync(
-		{ reaper: fake.launch },
-		{ ...OPTIONS, onStop: signals.signals.onStop },
+		{ pause, reaper: fake.launch },
+		{ ...OPTIONS, onStop: signals.onStop },
 		body,
 	);
 	return { fake, outcome, signals };
+}
+
+/**
+ * A pause that closes the owner pipe at `point` and records each point it
+ * passes, with whether the session had ended by the end of the pause.
+ *
+ * @param point - Where the owner goes.
+ * @param signals - Sends the request.
+ * @param points - Gets `<point>` or `<point> aborted`.
+ * @returns The pause.
+ */
+function ownerGoesAt(point: PausePoint, signals: FakeSignals, points: Array<string>): Pause {
+	return async (at, signal) => {
+		if (at === point) {
+			signals.request({ type: "owner_gone" });
+		}
+
+		points.push(signal.aborted ? `${at} aborted` : at);
+	};
 }
 
 async function flushAsync(): Promise<void> {
@@ -65,7 +92,11 @@ describe(runSessionAsync, () => {
 			reason: { signal: "SIGINT", type: "signal" },
 		});
 		expect(fake.launches).toStrictEqual([
-			{ leasePath: "/p/.forge/sessions/s/workers.lock", sessionId: "s" },
+			{
+				leasePath: "/p/.forge/sessions/s/workers.lock",
+				recordPath: "/p/.forge/sessions/s/reaper.json",
+				sessionId: "s",
+			},
 		]);
 		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "spawn compiler", "terminate 250"]);
 		expect(signals.listeners()).toBe(0);
@@ -234,12 +265,84 @@ describe(runSessionAsync, () => {
 		const signals = createFakeSignals();
 		const error = new ForgeError("reaper_unavailable", "no reaper");
 		const outcome = runSessionAsync(
-			{ reaper: vi.fn<ReaperLauncher>().mockRejectedValue(error) },
-			{ ...OPTIONS, onStop: signals.signals.onStop },
+			{ pause: neverPauseAsync, reaper: vi.fn<ReaperLauncher>().mockRejectedValue(error) },
+			{ ...OPTIONS, onStop: signals.onStop },
 			vi.fn<(scope: SessionScope) => Promise<void>>(),
 		);
 
 		await expect(outcome).rejects.toBe(error);
 		expect(signals.listeners()).toBe(0);
+	});
+
+	it("should end with owner_gone when the owner pipe closes", async () => {
+		expect.assertions(1);
+
+		const { outcome, signals } = startSession();
+		await flushAsync();
+		signals.request({ type: "owner_gone" });
+
+		await expect(outcome).resolves.toMatchObject({ reason: { type: "owner_gone" } });
+	});
+
+	it("should end at once on a stop request that came before the session", async () => {
+		expect.assertions(2);
+
+		const signals = createFakeSignals();
+		const body = vi.fn<(scope: SessionScope) => Promise<void>>();
+		const { fake, outcome } = startSession(
+			body,
+			{},
+			{
+				...signals,
+				onStop: (listener) => {
+					listener({ type: "owner_gone" });
+					return signals.onStop(listener);
+				},
+			},
+		);
+
+		await expect(outcome).resolves.toMatchObject({ reason: { type: "owner_gone" } });
+		expect([fake.calls, body.mock.calls]).toStrictEqual([["terminate 250"], []]);
+	});
+
+	it.for<[PausePoint, Array<string>]>([
+		["leased", ["terminate 250"]],
+		["admitted", ["go", "terminate 250"]],
+	])(
+		"should close admission for good when the owner goes while paused at %s",
+		async ([point, calls]) => {
+			expect.assertions(2);
+
+			const signals = createFakeSignals();
+			const points: Array<string> = [];
+			const body = vi.fn<(scope: SessionScope) => Promise<void>>();
+			const pause = ownerGoesAt(point, signals, points);
+			const { fake, outcome } = startSession(body, {}, signals, pause);
+			await outcome;
+
+			expect(fake.calls).toStrictEqual(calls);
+			expect([points.at(-1), body.mock.calls]).toStrictEqual([`${point} aborted`, []]);
+		},
+	);
+
+	it("should pause at leased before go and at admitted before the body", async () => {
+		expect.assertions(1);
+
+		const order: Array<string> = [];
+		const { fake, outcome, signals } = startSession(
+			async () => {
+				order.push(...fake.calls, "body");
+			},
+			{},
+			createFakeSignals(),
+			async (point) => {
+				order.push(...fake.calls.splice(0), point);
+			},
+		);
+		await flushAsync();
+		signals.fire("SIGINT");
+		await outcome;
+
+		expect(order).toStrictEqual(["leased", "go", "admitted", "body"]);
 	});
 });
