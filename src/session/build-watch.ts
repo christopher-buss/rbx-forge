@@ -1,5 +1,5 @@
-import type { DiagnosticsParser } from "../compiler/diagnostics.ts";
-import { createDiagnosticsParser } from "../compiler/diagnostics.ts";
+import type { CompileEvent } from "../compiler/diagnostics.ts";
+import { createWatchEventReader } from "../compiler/sloptor.ts";
 import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
@@ -58,14 +58,16 @@ interface Watch {
 	change: PromiseWithResolvers<void> | undefined;
 	clock: Clock;
 	failure: ForgeError | undefined;
-	parser: DiagnosticsParser;
+	/** Turns each output line into its build event (rbxtsc or sloptor). */
+	parse: (line: string) => CompileEvent | undefined;
 	recorder: BuildWatchOptions["recorder"];
 	tracker: FreshnessTracker;
 }
 
 /**
- * Watch the builds of a session's roblox-ts compiler, for a status wait: its
- * output lines become build events for a freshness tracker.
+ * Watch the builds of a session's roblox-ts compiler (rbxtsc or sloptor), for
+ * a status wait: its output lines become build events for a freshness
+ * tracker.
  *
  * @param options - The clock, the status, and whether a compiler is read.
  * @returns A watch with no build.
@@ -75,7 +77,7 @@ export function createBuildWatch({ clock, recorder, tracks }: BuildWatchOptions)
 		change: undefined,
 		clock,
 		failure: undefined,
-		parser: createDiagnosticsParser(),
+		parse: createWatchEventReader(),
 		recorder,
 		tracker: createFreshnessTracker(),
 	};
@@ -129,11 +131,11 @@ function tick(watch: Watch, now: number): void {
 }
 
 function read(watch: Watch, line: string): LastBuild | undefined {
-	const { clock, parser, recorder, tracker } = watch;
+	const { clock, parse, recorder, tracker } = watch;
 	const now = clock.now();
 	tick(watch, now);
 	const wasBuilding = tracker.building();
-	const build = tracker.record(parser.read(line), now);
+	const build = tracker.record(parse(line), now);
 	if (build !== undefined) {
 		recorder.compiled(build, tracker.building());
 	} else if (tracker.building() !== wasBuilding) {
