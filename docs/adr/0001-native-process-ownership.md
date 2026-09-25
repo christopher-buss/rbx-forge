@@ -154,6 +154,34 @@ both):
   parent-death signal and is a child subreaper. Before it writes `terminated`,
   it kills every child that is not a worker leader: orphans it adopted, also
   ones that scrubbed their markers.
+- **Forced-stop bound (#42).** The reaper's per-worker loop keeps its 5 s bound,
+  not the spec's 10 s. The host escalates `terminate` after `graceMs + 5 s`; a
+  10 s loop could never report `incomplete` before that escalation fires. Forced
+  cleanup (below) uses the spec's 10 s.
+- **Session evidence (#42).** A process belongs to a session when its
+  environment holds `RBX_FORGE_SESSION=<id>`, or it holds a descriptor on the
+  session's lease (POSIX: `/proc/<pid>/fd`; macOS: `PROC_PIDLISTFDS` and
+  `PROC_PIDFDVNODEINFO`, compared by device and inode), or it is the reaper the
+  record names (PID and start time). On Windows the evidence is the session's
+  named jobs, found through the job serials in the reaper record, and recorded
+  leaders that still die after their job closed. The calling process and its
+  ancestors never count.
+- **Barriers (#42).** A barrier is clear when the lease can be taken exclusively
+  and a scan finds no process of the session. Startup waits `graceMs + 15 s` per
+  old session, then fails with `previous_generation_alive` and the PIDs. The
+  final barrier waits 5 s, then fails with `cleanup_in_progress`.
+- **Forced cleanup (#42).** `start --force` (and the host's last escalation
+  step) runs it in the addon on a libuv thread. POSIX: each pass pins every
+  member, reads its evidence again through the pin, and kills it, deepest in the
+  tree first; the recorded reaper only when nothing else is alive or
+  unverifiable. The loop ends after two empty passes or at 10 s. Windows:
+  terminate each recorded job, wait until it is empty, then kill the verified
+  reaper. A member whose evidence cannot be read again is reported
+  (`cleanup_unverifiable`) and never killed.
+- **Accepted limit C9.** A POSIX descendant that removes the marker from its
+  environment **and** closes the inherited lease leaves no evidence; no scan
+  finds it. Node closes inherited descriptors in its children, so a Node
+  worker's descendants keep only the marker.
 - **Pipe security.** Keep the spec: explicit current-user DACL, reject remote
   clients, first-instance flag, token as the first message.
 - **Remote-client test (S4).** An integration test on Windows creates the real
