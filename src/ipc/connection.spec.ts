@@ -172,7 +172,7 @@ describe(streamConnection, () => {
 		onTestFinished(() => {
 			vi.useRealTimers();
 		});
-		const stream = new PassThrough();
+		const stream = new PassThrough({ autoDestroy: false });
 		const closed = new Promise((resolve) => {
 			stream.once("close", resolve);
 		});

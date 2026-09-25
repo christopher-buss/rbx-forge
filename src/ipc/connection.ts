@@ -119,11 +119,10 @@ export function streamConnection(stream: Duplex, maxBytes: number = MAX_LINE_BYT
 		close: () => {
 			// Let go once the end is written, or after the wait bound: a
 			// peer that never reads or closes (a hung supervisor) must not
-			// keep this process alive.
+			// keep this process alive for longer than the bound.
 			const timer = setTimeout(() => {
 				stream.destroy();
 			}, IPC_WAIT_MS);
-			timer.unref();
 			stream.end(() => {
 				clearTimeout(timer);
 				stream.destroy();
