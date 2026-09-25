@@ -8,6 +8,7 @@ import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
 import { runStartAsync, START_FLAGS } from "../commands/start.ts";
 import { runStatusAsync } from "../commands/status.ts";
 import { runStopAsync } from "../commands/stop.ts";
+import { runSyncAsync } from "../commands/sync.ts";
 import { runSyncbackCommandAsync, SYNCBACK_FLAGS } from "../commands/syncback.ts";
 import { runTypegenCommandAsync, TYPEGEN_FLAGS } from "../commands/typegen.ts";
 import { runUpAsync, UP_FLAGS } from "../commands/up.ts";
@@ -80,6 +81,13 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		run: runStatusAsync,
 		summary:
 			"Show the running session: each service, the Rojo port, the last compile with its diagnostics, and the last syncback with its hooks.",
+	},
+	{
+		name: "sync",
+		flags: [],
+		run: runSyncAsync,
+		summary:
+			"Run syncback and its hooks through the running session, one run at a time with its save watch, and report the result.",
 	},
 	{
 		name: "logs",
