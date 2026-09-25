@@ -8,10 +8,13 @@ import nodeFs from "node:fs";
  */
 export type FileSystem = Pick<
 	typeof nodeFs,
+	| "closeSync"
 	| "existsSync"
 	| "mkdirSync"
+	| "openSync"
 	| "readdirSync"
 	| "readFileSync"
+	| "readSync"
 	| "renameSync"
 	| "rmSync"
 	| "statSync"
