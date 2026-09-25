@@ -15,6 +15,8 @@ export interface ToolCall {
 	missing: Extract<ForgeErrorCode, "compiler_missing" | "rojo_missing">;
 	/** What to install or configure when the tool is missing. */
 	missingHint: string;
+	/** Gets every output line, for a log or a parser. */
+	onLine?: (line: string) => void;
 	/** The step name the reporter shows, such as `rojo build`. */
 	step: string;
 }
@@ -29,19 +31,19 @@ export interface ToolSuccess {
 const MESSAGE_TAIL_LINES = 20;
 
 /**
- * Resolve a tool (`process/resolve-tool.ts`), run it in the project root, and
- * wait for it. Reports the run as a step.
+ * Like {@link runToolAsync}, but return how the tool ended, for a caller that
+ * reads a failure itself. Pass the outcome to {@link checkToolOutcome} for the
+ * usual errors.
  *
  * @param context - The run: project root, environment, seams, reporter.
  * @param call - The tool and its arguments.
- * @returns Its duration and output tail when it exits with code 0.
- * @rejects {ForgeError} `call.missing` when the tool is not installed, or
- *   `process_failed` when it fails.
+ * @returns How the tool ended.
+ * @rejects {ForgeError} `call.missing` when the tool is not installed.
  */
-export async function runToolAsync(
+export async function spawnToolAsync(
 	{ cwd, env, reporter, seams }: CommandContext,
 	call: ToolCall,
-): Promise<ToolSuccess> {
+): Promise<ProcessOutcome> {
 	const lookup = { cwd, env, fileSystem: seams.fileSystem, host: seams.host };
 	const tool = resolveTool(call.command, lookup);
 	if (tool === undefined) {
@@ -53,22 +55,24 @@ export async function runToolAsync(
 		...toolInvocation(tool, call.args, lookup),
 		cwd,
 		env,
+		...(call.onLine === undefined ? {} : { onLine: call.onLine }),
 	});
 	const isOk = outcome.type === "exited" && outcome.exitCode === 0;
 	reporter.emit({ name: call.step, status: isOk ? "succeeded" : "failed", type: "step" });
 
-	return checkOutcome(call, outcome);
+	return outcome;
 }
 
-function missingError(call: ToolCall): ForgeError {
-	return new ForgeError(
-		call.missing,
-		`${call.label} ("${call.command}") is not installed: it is not a bin of a project dependency or on PATH.`,
-		{ hint: call.missingHint },
-	);
-}
-
-function checkOutcome(call: ToolCall, outcome: ProcessOutcome): ToolSuccess {
+/**
+ * Turn how a tool ended into its success, or the error for its failure.
+ *
+ * @param call - The tool that ran.
+ * @param outcome - How it ended.
+ * @returns Its duration and output tail when it exited with code 0.
+ * @throws {ForgeError} `call.missing` when it could not start because it is
+ *   gone, else `process_failed`.
+ */
+export function checkToolOutcome(call: ToolCall, outcome: ProcessOutcome): ToolSuccess {
 	if (outcome.type === "spawn_failed") {
 		if (outcome.errorCode === "ENOENT") {
 			throw missingError(call);
@@ -90,5 +94,27 @@ function checkOutcome(call: ToolCall, outcome: ProcessOutcome): ToolSuccess {
 		"process_failed",
 		[`${call.step} failed (${reason}).`, ...tail].join("\n"),
 		{ details: { outputTail: outcome.outputTail } },
+	);
+}
+
+/**
+ * Resolve a tool (`process/resolve-tool.ts`), run it in the project root, and
+ * wait for it. Reports the run as a step.
+ *
+ * @param context - The run: project root, environment, seams, reporter.
+ * @param call - The tool and its arguments.
+ * @returns Its duration and output tail when it exits with code 0.
+ * @rejects {ForgeError} `call.missing` when the tool is not installed, or
+ *   `process_failed` when it fails.
+ */
+export async function runToolAsync(context: CommandContext, call: ToolCall): Promise<ToolSuccess> {
+	return checkToolOutcome(call, await spawnToolAsync(context, call));
+}
+
+function missingError(call: ToolCall): ForgeError {
+	return new ForgeError(
+		call.missing,
+		`${call.label} ("${call.command}") is not installed: it is not a bin of a project dependency or on PATH.`,
+		{ hint: call.missingHint },
 	);
 }
