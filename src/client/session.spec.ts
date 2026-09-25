@@ -80,7 +80,11 @@ describe(fetchStatusAsync, () => {
 		const session = findSession(memory.fileSystem, FORGE);
 		const fetched = fetchStatusAsync(transport, session!);
 
-		await expect(fetched).rejects.toMatchObject({ code: "internal_error" });
+		await expect(fetched).rejects.toMatchObject({
+			code: "internal_error",
+			hint: "The session may run another forge version. Stop it, then start it again.",
+			message: "The session answered status with something else.",
+		});
 	});
 });
 

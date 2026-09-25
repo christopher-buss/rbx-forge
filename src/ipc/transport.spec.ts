@@ -113,6 +113,8 @@ describe(createNodeTransport, () => {
 
 		await expect(createNodeTransport(backend).listenAsync(ENDPOINT)).rejects.toMatchObject({
 			code: "endpoint_in_use",
+			hint: "Another program uses it. Stop that program, then start again.",
+			message: `Cannot open the control endpoint ${ENDPOINT}: ${DIRECTORY} is not a directory of this user.`,
 		});
 		expect(backend.server.listen).not.toHaveBeenCalled();
 	});
@@ -124,7 +126,9 @@ describe(createNodeTransport, () => {
 		const noListen = posixBackend(undefined, { listenError: new Error("EADDRINUSE") });
 
 		await expect(createNodeTransport(noDirectory).listenAsync(ENDPOINT)).rejects.toMatchObject({
+			cause: { code: "EACCES" },
 			code: "endpoint_in_use",
+			message: `Cannot open the control endpoint ${ENDPOINT}: its directory cannot be created.`,
 		});
 		await expect(createNodeTransport(noListen).listenAsync(ENDPOINT)).rejects.toThrow(
 			`Cannot open the control endpoint ${ENDPOINT}: EADDRINUSE`,
@@ -175,6 +179,8 @@ describe(createNodeTransport, () => {
 
 		await expect(transport.listenAsync("\\\\.\\pipe\\x")).rejects.toMatchObject({
 			code: "endpoint_in_use",
+			message:
+				"Cannot open the control endpoint \\\\.\\pipe\\x: another process holds the pipe.",
 		});
 	});
 
@@ -212,6 +218,37 @@ describe(createNodeTransport, () => {
 
 		expect(connection).toBeDefined();
 	});
+
+	it.for([
+		["connect", 0],
+		["error", 1],
+	] as const)(
+		"should leave no timer behind once the connect ends with %s",
+		async ([event, destroys]) => {
+			expect.assertions(2);
+
+			vi.useFakeTimers();
+			onTestFinished(() => {
+				vi.useRealTimers();
+			});
+			const socket = Object.assign(new EventEmitter(), {
+				destroy: vi.fn<() => void>(),
+				end: vi.fn<() => void>(),
+				on: EventEmitter.prototype.on,
+				setEncoding: vi.fn<() => void>(),
+			});
+			const transport = createNodeTransport({
+				...posixBackend(undefined),
+				net: { connect: () => fromAny(socket), createServer },
+			});
+			const connecting = transport.connectAsync("x", 60_000);
+			socket.emit(event, new Error(event));
+			await connecting;
+
+			expect(vi.getTimerCount()).toBe(0);
+			expect(socket.destroy).toHaveBeenCalledTimes(destroys);
+		},
+	);
 
 	it("should give up on a connect that does not finish in time", async () => {
 		expect.assertions(2);

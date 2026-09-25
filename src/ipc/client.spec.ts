@@ -42,7 +42,11 @@ describe(callSessionAsync, () => {
 
 		await expect(
 			callSessionAsync(createMemoryTransport(), TARGET, "status"),
-		).rejects.toMatchObject({ code: "not_running" });
+		).rejects.toMatchObject({
+			code: "not_running",
+			hint: 'Start one with "forge up".',
+			message: "No session answers at session.",
+		});
 	});
 
 	it("should report a session that closes without an answer, as on a wrong token", async () => {
@@ -52,7 +56,11 @@ describe(callSessionAsync, () => {
 
 		await expect(
 			callSessionAsync(transport, { ...TARGET, token: "wrong" }, "status"),
-		).rejects.toMatchObject({ code: "supervisor_unresponsive" });
+		).rejects.toMatchObject({
+			code: "supervisor_unresponsive",
+			hint: "It may be stopping. Try again, or check its logs.",
+			message: "The session at session gave no answer to status.",
+		});
 	});
 
 	it("should throw the session's failure with its code", async () => {

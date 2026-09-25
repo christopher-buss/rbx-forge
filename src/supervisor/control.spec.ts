@@ -63,6 +63,7 @@ describe(controlHandlers, () => {
 			expect.objectContaining({
 				code: "session_replaced",
 				details: { sessionId: "s1" },
+				message: "Session old is gone; session s1 runs in its place.",
 			}),
 		);
 		expect(request).not.toHaveBeenCalled();

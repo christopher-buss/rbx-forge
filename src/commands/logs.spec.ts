@@ -106,6 +106,9 @@ describe(runLogsAsync, () => {
 		memory.fileSystem.writeFileSync(ROJO_LOG, "ee\n", { flag: "a" });
 		clock.advance(FOLLOW_POLL_MS);
 		await flushAsync();
+		// Nothing new: nothing is read again.
+		clock.advance(FOLLOW_POLL_MS);
+		await flushAsync();
 		memory.fileSystem.writeFileSync(ROJO_LOG, "new\n");
 		clock.advance(FOLLOW_POLL_MS);
 		await flushAsync();

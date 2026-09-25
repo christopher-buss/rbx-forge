@@ -101,7 +101,7 @@ function detachUnsupported(): ForgeError {
  */
 function breakAway(backend: Pick<DetachedBackend, "native">, spawn: DetachedSpawn): number {
 	const { spawnDetached } = backend.native();
-	assert(spawnDetached !== undefined, "the Windows addon has spawnDetached");
+	assert(spawnDetached !== undefined);
 	const pid = spawnDetached(spawn);
 	if (pid === null) {
 		throw detachUnsupported();

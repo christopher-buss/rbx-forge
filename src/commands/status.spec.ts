@@ -117,7 +117,11 @@ describe(runStatusAsync, () => {
 		const { context, ipc, memory } = makeContext();
 		const none = runStatusAsync(context);
 
-		await expect(none).rejects.toMatchObject({ code: "not_running" });
+		await expect(none).rejects.toMatchObject({
+			code: "not_running",
+			hint: 'Start one with "forge up".',
+			message: "No session runs for this project.",
+		});
 
 		const session = await serveFakeSessionAsync(memory, ipc);
 		await session.stop();

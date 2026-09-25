@@ -23,9 +23,13 @@ function backendFor(
 	spawnDetached?: (spawn: DetachedSpawn) => null | number,
 ): DetachedBackend & { spawner: ReturnType<typeof createFakeSpawner> } {
 	const spawner = createFakeSpawner();
+	const { fileSystem } = createMemoryFileSystem();
 	return {
 		childProcess: spawner.runner,
-		fileSystem: createMemoryFileSystem().fileSystem,
+		fileSystem: {
+			...fileSystem,
+			closeSync: vi.fn<typeof fileSystem.closeSync>(fileSystem.closeSync),
+		},
 		host: { execPath: "/node", platform },
 		native: () => {
 			return {
@@ -71,6 +75,27 @@ describe(createDetachedLauncher, () => {
 		expect(backend.spawner.children[0]!.referenced).toBeFalse();
 	});
 
+	it.for(["started", "failed"] as const)("should close the log once the spawn %s", (outcome) => {
+		expect.assertions(1);
+
+		const backend = backendFor("linux");
+		const spawns = { failed: createFailingSpawner("ENOENT"), started: backend.childProcess };
+		try {
+			createDetachedLauncher(
+				{ ...backend, childProcess: spawns[outcome] },
+				ENTRY,
+			)({
+				cwd: PROJECT,
+				env: {},
+				request: REQUEST,
+			});
+		} catch {
+			// The failed spawn throws; the log closes either way.
+		}
+
+		expect(backend.fileSystem.closeSync).toHaveBeenCalledOnce();
+	});
+
 	it("should keep a thread pool size the caller set", () => {
 		expect.assertions(1);
 
@@ -94,7 +119,13 @@ describe(createDetachedLauncher, () => {
 
 		expect(() => {
 			createDetachedLauncher(backend, ENTRY)({ cwd: PROJECT, env: {}, request: REQUEST });
-		}).toThrow(expect.objectContaining({ code: "internal_error" }));
+		}).toThrow(
+			expect.objectContaining({
+				code: "internal_error",
+				hint: "This is a bug in forge. Please report it.",
+				message: "The supervisor did not start.",
+			}),
+		);
 	});
 
 	it("should start it through the addon with breakaway on Windows", () => {
@@ -128,6 +159,13 @@ describe(createDetachedLauncher, () => {
 
 		expect(() => {
 			createDetachedLauncher(backend, ENTRY)({ cwd: PROJECT, env: {}, request: REQUEST });
-		}).toThrow(expect.objectContaining({ code: "detach_unsupported" }));
+		}).toThrow(
+			expect.objectContaining({
+				code: "detach_unsupported",
+				hint: 'Run "forge start" in this terminal instead, or run forge up from another terminal.',
+				message:
+					"This terminal runs forge in a job that does not let a process outlive it, so forge up cannot start a session here.",
+			}),
+		);
 	});
 });

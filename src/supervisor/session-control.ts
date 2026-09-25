@@ -72,12 +72,12 @@ export async function openSessionAsync(
 		}),
 		token,
 	});
-	const disposeStop = setup.stop.onStop(() => {
+	// The stop source lives as long as this supervisor: no removal needed.
+	setup.stop.onStop(() => {
 		status.phase("stopping");
 	});
 	return {
 		closeAsync: async () => {
-			disposeStop();
 			await server.closeAsync();
 		},
 		files,
@@ -124,7 +124,7 @@ function tokenWriter(
 
 	return (file, text) => {
 		const { writePrivateFile } = seams.native();
-		assert(writePrivateFile !== undefined, "the Windows addon has writePrivateFile");
+		assert(writePrivateFile !== undefined);
 		writePrivateFile(file, text);
 	};
 }

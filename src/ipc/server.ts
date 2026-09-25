@@ -31,6 +31,8 @@ export interface IpcServer {
 	 * answered.
 	 */
 	closeAsync: () => Promise<void>;
+	/** How many requests are in progress. */
+	pending: () => number;
 }
 
 /**
@@ -101,6 +103,7 @@ export function startIpcServer(listener: IpcListener, options: IpcServerOptions)
 			await loop;
 			await Promise.all(serving);
 		},
+		pending: () => serving.size,
 	};
 }
 

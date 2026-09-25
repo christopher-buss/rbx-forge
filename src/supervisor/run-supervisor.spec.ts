@@ -960,6 +960,25 @@ describe("forge start hooks and syncback", () => {
 		expect(stateOf(run)).toMatchObject({ services: { syncback: { status: "running" } } });
 	});
 
+	it.for([
+		["succeeded", OK, true],
+		["failed", EXITED, false],
+	] as const)("should keep how long a syncback run that %s took", async ([, report, isOk]) => {
+		expect.assertions(1);
+
+		const run = await savedAsync({
+			...SYNCBACK,
+			oneShot: oneShotsWith({ "syncback-2": "hold" }),
+		});
+		await passAsync(run, 1000);
+		run.fake.exit("syncback-2", report);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		expect(stateOf(run)).toMatchObject({
+			services: { syncback: { lastRun: { durationMs: 1250, ok: isOk } } },
+		});
+	});
+
 	it("should not report a syncback the session's end cut short", async () => {
 		expect.assertions(1);
 
@@ -1304,6 +1323,39 @@ describe("forge up control channel", () => {
 				},
 			},
 		});
+	});
+
+	it("should be ready once a Luau watch command runs, with no compile", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			file: { luau: { watch: { command: "darklua" } } },
+			files: { ...TOOL_FILES, "tools/darklua": "" },
+			flags: { open: false },
+		});
+		await flushAsync();
+
+		expect(stateOf(run)).toMatchObject({
+			phase: "ready",
+			services: { compiler: { status: "ready" } },
+		});
+	});
+
+	it("should show Studio closed once it closes the place", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: { compiler: false } });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, "1");
+		await passAsync(run, FILE_POLL_MS);
+		// Keep the session's files while its end runs.
+		run.native.addon.tryLockFile(path.join(SESSION, "workers.lock"), "shared");
+		run.memory.fileSystem.rmSync(LOCK);
+		const caught = run.result.catch((err: unknown) => err);
+		await passAsync(run, 5750);
+		await caught;
+
+		expect(stateOf(run)).toMatchObject({ services: { studio: { status: "closed" } } });
 	});
 
 	it("should show a stopping session, with Studio still open, while its workers go", async () => {

@@ -153,7 +153,7 @@ async function listenSocketAsync(
 
 function listenPipe(backend: NodeTransportBackend, endpoint: string): IpcListener {
 	const { createPipeServer } = backend.native();
-	assert(createPipeServer !== undefined, "the Windows addon has createPipeServer");
+	assert(createPipeServer !== undefined);
 	try {
 		return nativeListener(createPipeServer(endpoint, true));
 	} catch (err) {

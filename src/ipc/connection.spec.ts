@@ -88,6 +88,50 @@ describe(streamConnection, () => {
 		await expect(connection.readLineAsync(1000)).resolves.toStrictEqual({ type: "closed" });
 	});
 
+	it("should report a stream closed on this side", async () => {
+		expect.assertions(1);
+
+		const [near] = duplexPair();
+		const connection = streamConnection(near);
+		const read = connection.readLineAsync(1000);
+		near.destroy();
+
+		await expect(read).resolves.toStrictEqual({ type: "closed" });
+	});
+
+	it("should let an earlier read's timeout never cut a later read short", async () => {
+		expect.assertions(2);
+
+		const [near, far] = duplexPair();
+		const connection = streamConnection(near);
+		const first = connection.readLineAsync(50);
+		setTimeout(() => {
+			far.write("one\n");
+		}, 10);
+		const firstRead = await first;
+		const second = connection.readLineAsync(5000);
+		setTimeout(() => {
+			far.write("two\n");
+		}, 150);
+
+		expect(firstRead).toStrictEqual({ line: "one", type: "line" });
+		await expect(second).resolves.toStrictEqual({ line: "two", type: "line" });
+	});
+
+	it("should leave no timer behind after a write", async () => {
+		expect.assertions(2);
+
+		vi.useFakeTimers();
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+		const [near] = duplexPair();
+		const connection = streamConnection(near);
+
+		await expect(connection.writeAsync("x\n", 60_000)).resolves.toBeTrue();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
 	it("should stop reading past the line limit", async () => {
 		expect.assertions(2);
 
@@ -231,6 +275,27 @@ async function listenAsync(): Promise<{
 	return { listener, port: (server.address() as AddressInfo).port };
 }
 
+/**
+ * Connect to a TCP port and report how the connect failed.
+ *
+ * @param port - A port of `127.0.0.1`.
+ * @returns The error code, or `connected`.
+ */
+async function refusedAsync(port: number): Promise<string> {
+	const socket = connect({ host: "127.0.0.1", port });
+	onTestFinished(() => {
+		socket.destroy();
+	});
+	return new Promise((resolve) => {
+		socket.once("connect", () => {
+			resolve("connected");
+		});
+		socket.once("error", (err: NodeJS.ErrnoException) => {
+			resolve(String(err.code));
+		});
+	});
+}
+
 async function sendAsync(port: number, text: string): Promise<void> {
 	const socket = connect({ host: "127.0.0.1", port });
 	onTestFinished(() => {
@@ -263,14 +328,15 @@ describe(socketListener, () => {
 	});
 
 	it("should end a pending accept and every later one on close", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
-		const { listener } = await listenAsync();
+		const { listener, port } = await listenAsync();
 		const pending = listener.acceptAsync();
 		listener.close();
 
 		await expect(pending).resolves.toBeUndefined();
 		await expect(listener.acceptAsync()).resolves.toBeUndefined();
+		await expect(refusedAsync(port)).resolves.toBe("ECONNREFUSED");
 	});
 
 	it("should drop clients nobody accepted on close", async () => {

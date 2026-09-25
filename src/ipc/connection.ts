@@ -264,17 +264,13 @@ async function waitForTextAsync(source: LineSource, timeoutMs: number): Promise<
 }
 
 async function writeWithinAsync(stream: Duplex, text: string, timeoutMs: number): Promise<boolean> {
-	if (!stream.writable) {
-		return false;
-	}
-
 	return new Promise((resolve) => {
 		const timer = setTimeout(() => {
 			resolve(false);
 		}, timeoutMs);
 		stream.write(text, (err) => {
 			clearTimeout(timer);
-			resolve(err === undefined || err === null);
+			resolve(!(err instanceof Error));
 		});
 	});
 }

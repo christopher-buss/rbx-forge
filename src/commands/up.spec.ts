@@ -118,6 +118,29 @@ describe(runUpAsync, () => {
 		expect(launchFiles(up)).toStrictEqual([]);
 	});
 
+	it("should relay an event the supervisor wrote in two parts once", async () => {
+		expect.assertions(1);
+
+		const { run, up } = makeUp((request, self) => {
+			const line = encodeMessage({ event: { message: "half", type: "info" }, type: "event" });
+			const { report } = request.detached!;
+			self.memory.fileSystem.mkdirSync(LAUNCH_DIRECTORY, { recursive: true });
+			self.memory.fileSystem.writeFileSync(report, line.slice(0, 10));
+			self.ticks.push(
+				() => {
+					self.memory.fileSystem.writeFileSync(report, line.slice(10), { flag: "a" });
+				},
+				async () => {
+					await serveFakeSessionAsync(self.memory, self.ipc, makeStatus({ pid: 700 }));
+				},
+			);
+			return 700;
+		});
+		await run();
+
+		expect(up.reporter.events).toStrictEqual([{ message: "half", type: "info" }]);
+	});
+
 	it("should pass --no-compiler, --no-open, and the flags' config on", async () => {
 		expect.assertions(1);
 
@@ -247,6 +270,7 @@ describe(runUpAsync, () => {
 		await expect(run()).rejects.toMatchObject({
 			code: "internal_error",
 			hint: `Its output is in ${path.join(PROJECT, ".forge", "logs", "supervisor.log")}.`,
+			message: "The session's supervisor exited without a result.",
 		});
 		expect(launchFiles(up)).toStrictEqual([]);
 	});
@@ -258,6 +282,7 @@ describe(runUpAsync, () => {
 
 		await expect(run()).rejects.toMatchObject({
 			code: "supervisor_unresponsive",
+			hint: 'Check "forge logs start" and "forge status", or stop the session and try again.',
 			message: `The session was not ready within ${UP_TIMEOUT_MS / 1000} s.`,
 		});
 		expect(up.now()).toBe(UP_TIMEOUT_MS);

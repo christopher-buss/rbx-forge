@@ -159,7 +159,7 @@ describe(serveConnectionAsync, () => {
 
 describe(startIpcServer, () => {
 	it("should serve each client on its own until closed", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const listener = queueListener();
 		const { promise: held, resolve: release } =
@@ -174,10 +174,19 @@ describe(startIpcServer, () => {
 		await vi.waitFor(() => {
 			assert(fast.isClosed(), "the fast client is served");
 		});
-		const closing = server.closeAsync();
+		let isClosed = false;
+		const closing = (async () => {
+			await server.closeAsync();
+			isClosed = true;
+		})();
+		await new Promise((resolve) => {
+			setImmediate(resolve);
+		});
+		const wasClosedEarly = isClosed;
 		release({ accepted: true });
 		await closing;
 
+		expect([wasClosedEarly, server.pending()]).toStrictEqual([false, 0]);
 		expect(slow.written).toHaveLength(1);
 		expect(listener.isClosed()).toBeTrue();
 	});

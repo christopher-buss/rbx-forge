@@ -93,6 +93,26 @@ describe(createStatusStore, () => {
 		expect(store.snapshot()).toMatchObject({ phase: "stopped", running: false });
 	});
 
+	it("should tell every phase change", () => {
+		expect.assertions(1);
+
+		const { onChange, store } = makeStore();
+		store.phase("stopped");
+
+		expect(onChange).toHaveBeenLastCalledWith(
+			expect.objectContaining({ phase: "stopped", running: false }),
+		);
+	});
+
+	it("should not be ready while Rojo starts, even after a compile", () => {
+		expect.assertions(1);
+
+		const { store } = makeStore();
+		store.compiled({ diagnostics: [], errors: 0 });
+
+		expect(store.snapshot().phase).toBe("starting");
+	});
+
 	it("should record syncback runs and Studio", () => {
 		expect.assertions(3);
 

@@ -39,9 +39,9 @@ export function readIdentity(
 	fileSystem: Pick<FileSystem, "readFileSync">,
 	file: string,
 ): IdentityRecord | undefined {
-	const text = readText(fileSystem, file);
-	const parsed = text === undefined ? undefined : identityLine(text);
-	return parsed === undefined || parsed instanceof type.errors ? undefined : parsed;
+	// A missing file reads as no text, which is no record either.
+	const parsed = identityLine(readText(fileSystem, file));
+	return parsed instanceof type.errors ? undefined : parsed;
 }
 
 /**
@@ -57,7 +57,7 @@ export function findSession(
 	forge: ForgeFiles,
 ): KnownSession | undefined {
 	const sessionId = readText(fileSystem, forge.current)?.trim();
-	if (sessionId === undefined || sessionId === "") {
+	if (sessionId === undefined) {
 		return undefined;
 	}
 
