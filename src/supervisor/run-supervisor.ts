@@ -16,6 +16,8 @@ import type { SessionOutcome } from "../session/run-session.ts";
 import { runSessionAsync } from "../session/run-session.ts";
 import type { SessionSetup } from "../session/session-body.ts";
 import { createSessionBody } from "../session/session-body.ts";
+import type { SessionSync } from "../session/session-sync.ts";
+import { createSessionSync } from "../session/session-sync.ts";
 import type { StatusStore } from "../session/status.ts";
 import type { StopRequest, StopSource } from "../session/stop-source.ts";
 import type { ClearOptions, ForcedCleanup } from "./barrier.ts";
@@ -61,6 +63,8 @@ interface OwnSession {
 	forge: ForgeFiles;
 	services: Pick<SessionSetup, "compiler" | "config" | "context" | "plan" | "rojo">;
 	status: StatusStore;
+	/** Links `forge sync` on the control channel to the session body. */
+	sync: SessionSync;
 }
 
 /**
@@ -78,8 +82,8 @@ interface OwnSession {
  *    bound is cleaned up by force first.
  * 4. Check the fixed Rojo port.
  * 5. Create the session directory: write-once identity record, token,
- *    `current`. Open the control endpoint (`status`, `shutdown`), and keep
- *    `state.json` up to date.
+ *    `current`. Open the control endpoint (`status`, `sync`, `shutdown`), and
+ *    keep `state.json` up to date.
  * 6. Run the session (`runSessionAsync`): launch the reaper, admit it only
  *    while no stop request came, and run the body.
  * 7. Final barrier: no process of the session is left once the reaper and
@@ -239,7 +243,7 @@ async function clearOldAsync(
 async function runSessionOnceAsync(
 	seams: CommandContext["seams"],
 	{ pause, stop }: SupervisorOptions,
-	{ config, files, forge, services, status }: OwnSession,
+	{ config, files, forge, services, status, sync }: OwnSession,
 ): Promise<SessionOutcome> {
 	try {
 		return await runSessionAsync(
@@ -252,7 +256,7 @@ async function runSessionOnceAsync(
 				recordPath: files.record,
 				sessionId: files.sessionId,
 			},
-			createSessionBody({ ...services, directory: files.directory, status }),
+			createSessionBody({ ...services, directory: files.directory, status, sync }),
 		);
 	} catch (err) {
 		removeSession(seams.fileSystem, forge, files.sessionId);
@@ -325,6 +329,7 @@ async function runLockedAsync(
 		return late;
 	}
 
+	const sync = createSessionSync();
 	const { files, status, ...control } = await openSessionAsync(seams, {
 		forge,
 		identity: identityOf(context, config, options.version),
@@ -333,11 +338,14 @@ async function runLockedAsync(
 		plan: { ...services.plan, compiler: services.compiler !== undefined },
 		port: config.rojoPort,
 		stop: options.stop,
+		sync,
 	});
 	try {
-		const session = { config, files, forge, services, status };
+		const session = { config, files, forge, services, status, sync };
 		return await runOpenSessionAsync(context, options, session, cleanups);
 	} finally {
+		// A body that never ran syncback leaves no `forge sync` waiting.
+		sync.close();
 		await control.closeAsync();
 	}
 }

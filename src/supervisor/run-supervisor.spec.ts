@@ -27,7 +27,7 @@ import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { Pause, PausePoint } from "../session/pause.ts";
 import { neverPauseAsync } from "../session/pause.ts";
-import { FILE_POLL_MS, OUTPUT_POLL_MS } from "../session/session-body.ts";
+import { FILE_POLL_MS, OUTPUT_POLL_MS, ROJO_LISTEN_BOUND_MS } from "../session/session-body.ts";
 import type { StopSource } from "../session/stop-source.ts";
 import { createStopSource } from "../session/stop-source.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
@@ -67,6 +67,8 @@ interface StartSetup {
 	flags?: FlagValues;
 	/** Makes the control endpoint's transport; in memory by default. */
 	ipc?: () => MemoryTransport;
+	/** Whether Rojo listens on its port, each time the session looks. */
+	isListening?: Network["isListeningAsync"];
 	/** Whether the Rojo port is free. */
 	isPortFree?: boolean;
 	/** How a one-shot run ends; services never end on their own. */
@@ -87,6 +89,7 @@ interface StartRun {
 	clock: ManualClock;
 	fake: FakeReaper;
 	ipc: MemoryTransport;
+	isListeningAsync: ReturnType<typeof vi.fn<Network["isListeningAsync"]>>;
 	isPortFreeAsync: ReturnType<typeof vi.fn<Network["isPortFreeAsync"]>>;
 	memory: MemoryFileSystem;
 	native: FakeNative;
@@ -161,6 +164,7 @@ function startCommand({
 	files = TOOL_FILES,
 	flags = ROJO_ONLY,
 	ipc: makeTransport = createMemoryTransport,
+	isListening = async () => true,
 	isPortFree = true,
 	oneShot = succeedOneShots,
 	onReady,
@@ -181,6 +185,7 @@ function startCommand({
 	const native = createFakeNative({ 4242: { alive: true, executablePath: "/node" } });
 	const reporter = createRecordingReporter();
 	const isPortFreeAsync = vi.fn<Network["isPortFreeAsync"]>().mockResolvedValue(isPortFree);
+	const isListeningAsync = vi.fn<Network["isListeningAsync"]>(isListening);
 	const studioLauncher = vi.fn<StudioLauncher>().mockResolvedValue({ type: "launched" });
 	const configLoader = vi.fn<ConfigLoader>().mockResolvedValue({
 		path: path.join(PROJECT, "rbx-forge.config.ts"),
@@ -201,7 +206,7 @@ function startCommand({
 					...(writePrivateFile === undefined ? {} : { writePrivateFile }),
 				};
 			},
-			network: { isPortFreeAsync },
+			network: { isListeningAsync, isPortFreeAsync },
 			randomId: () => "session-1",
 			reaper: fake.launch,
 			studioLauncher,
@@ -212,6 +217,7 @@ function startCommand({
 		clock,
 		fake,
 		ipc,
+		isListeningAsync,
 		isPortFreeAsync,
 		memory,
 		native,
@@ -567,6 +573,97 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
+	it("should keep Rojo starting until its port listens, then report it ready", async () => {
+		expect.assertions(3);
+
+		const answers = [false, false, true];
+		const run = startCommand({ isListening: async () => answers.shift()! });
+		await flushAsync();
+		const before = stateOf(run);
+		// Each pass wakes the check once.
+		await passAsync(run, 2 * OUTPUT_POLL_MS);
+		const after = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(before).toMatchObject({
+			phase: "starting",
+			services: { rojo: { status: "starting" } },
+		});
+		expect(after).toMatchObject({
+			phase: "ready",
+			services: { rojo: { status: "ready" } },
+		});
+		expect(run.isListeningAsync).toHaveBeenCalledWith(4000);
+	});
+
+	it("should not report Rojo ready when a stop signal came while it checked the port", async () => {
+		expect.assertions(1);
+
+		const run: StartRun = startCommand({
+			isListening: async () => {
+				run.signals.fire("SIGINT");
+				return true;
+			},
+		});
+		await run.result;
+
+		expect(run.reporter.events).not.toContainEqual(expect.objectContaining({ type: "info" }));
+	});
+
+	it("should show a stopping session while Rojo's port check is still going", async () => {
+		expect.assertions(1);
+
+		const listening = Promise.withResolvers<boolean>();
+		const run = startCommand({ isListening: async () => listening.promise });
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await flushAsync();
+		const during = stateOf(run);
+		listening.resolve(true);
+		await run.result;
+
+		expect(during).toMatchObject({ phase: "stopping", running: true });
+	});
+
+	it("should show a planned compiler as starting before anything runs", async () => {
+		expect.assertions(1);
+
+		const states: Array<Promise<unknown>> = [];
+		const run: StartRun = startCommand({
+			flags: { open: false },
+			projectType: "rbxts",
+			reaper: {
+				onLaunch: () => {
+					states.push(callSessionAsync(run.ipc, CONTROL_TARGET, "status"));
+					run.signals.fire("SIGTERM");
+				},
+			},
+		});
+		await run.result;
+
+		await expect(Promise.all(states)).resolves.toMatchObject([
+			{ services: { compiler: { status: "starting" } } },
+		]);
+	});
+
+	it("should fail with service_failed when Rojo never listens within the bound", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ isListening: async () => false });
+		const failed = run.result.catch((err: unknown) => err);
+		await flushAsync();
+		await passAsync(run, ROJO_LISTEN_BOUND_MS);
+
+		await expect(failed).resolves.toMatchObject({
+			code: "service_failed",
+			details: { reason: "service_failed:rojo" },
+			hint: `Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
+			message: "rojo did not listen on port 4000 within 60 s, so the session stopped.",
+		});
+		expect(run.reporter.events).not.toContainEqual(expect.objectContaining({ type: "info" }));
+	});
+
 	it("should fail with service_failed when the compiler exits", async () => {
 		expect.assertions(1);
 
@@ -888,9 +985,8 @@ describe("forge start hooks and syncback", () => {
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: syncback --help",
 			"rojo: serve default.project.json --port 4000",
-			"syncback-1: syncback --help",
-			"syncback-2: syncback default.project.json --input game.rbxl --non-interactive",
-			"syncback-3: -c lint",
+			"syncback-1: syncback default.project.json --input game.rbxl --non-interactive",
+			"syncback-2: -c lint",
 		]);
 		expect(run.reporter.events).toContainEqual({
 			message: `Synced ${PLACE} into default.project.json.`,
@@ -915,14 +1011,14 @@ describe("forge start hooks and syncback", () => {
 
 		const run = await savedAsync({
 			...SYNCBACK,
-			oneShot: oneShotsWith({ "syncback-2": "hold" }),
+			oneShot: oneShotsWith({ "syncback-1": "hold" }),
 		});
 		for (const day of [3, 4, 5]) {
 			run.memory.setModifiedTime("game.rbxl", Date.UTC(2026, 0, day));
 			await passAsync(run, FILE_POLL_MS);
 		}
 
-		run.fake.exit("syncback-2", OK);
+		run.fake.exit("syncback-1", OK);
 		await passAsync(run, FILE_POLL_MS);
 		run.signals.fire("SIGINT");
 		await run.result;
@@ -935,7 +1031,7 @@ describe("forge start hooks and syncback", () => {
 
 		const run = await savedAsync({
 			...SYNCBACK,
-			oneShot: oneShotsWith({ "syncback-2": EXITED }),
+			oneShot: oneShotsWith({ "syncback-1": EXITED }),
 		});
 		await passAsync(run, FILE_POLL_MS);
 
@@ -977,8 +1073,8 @@ describe("forge start hooks and syncback", () => {
 	});
 
 	it.for([
-		["the hook", "syncback-3", "hook_failed", 1],
-		["Rojo", "syncback-2", "process_failed", 0],
+		["the hook", "syncback-2", "hook_failed", 1],
+		["Rojo", "syncback-1", "process_failed", 0],
 	] as const)(
 		"should keep a syncback run that %s failed, with its error and hooks",
 		async ([, worker, code, hooks]) => {
@@ -1005,7 +1101,7 @@ describe("forge start hooks and syncback", () => {
 
 		const run = await savedAsync({
 			...SYNCBACK,
-			oneShot: oneShotsWith({ "syncback-2": "hold" }),
+			oneShot: oneShotsWith({ "syncback-1": "hold" }),
 		});
 
 		expect(stateOf(run)).toMatchObject({ services: { syncback: { status: "running" } } });
@@ -1019,10 +1115,10 @@ describe("forge start hooks and syncback", () => {
 
 		const run = await savedAsync({
 			...SYNCBACK,
-			oneShot: oneShotsWith({ "syncback-2": "hold" }),
+			oneShot: oneShotsWith({ "syncback-1": "hold" }),
 		});
 		await passAsync(run, 1000);
-		run.fake.exit("syncback-2", report);
+		run.fake.exit("syncback-1", report);
 		await passAsync(run, OUTPUT_POLL_MS);
 
 		expect(stateOf(run)).toMatchObject({
@@ -1035,7 +1131,7 @@ describe("forge start hooks and syncback", () => {
 
 		const run = await savedAsync({
 			...SYNCBACK,
-			oneShot: oneShotsWith({ "syncback-2": "hold" }),
+			oneShot: oneShotsWith({ "syncback-1": "hold" }),
 		});
 		run.signals.fire("SIGINT");
 		await run.result;
@@ -1552,3 +1648,157 @@ describe("forge up control channel", () => {
 		).toStrictEqual([".forge/sessions"]);
 	});
 });
+
+/** A sync call that may take as long as the test needs. */
+const SYNC_CALL = { responseTimeoutMs: 60_000 };
+const LINT_HOOK: StartSetup = {
+	file: { hooks: { syncback: { post: ["lint"] } } },
+	files: { ...TOOL_FILES, "game.rbxl": "v1" },
+};
+
+/**
+ * Ask the session for a sync, and let time pass until it answers.
+ *
+ * @param run - The session.
+ * @returns The answer, or the failure it rejected with.
+ */
+async function syncAsync(run: StartRun): Promise<unknown> {
+	const answer = callSessionAsync(run.ipc, CONTROL_TARGET, "sync", SYNC_CALL).catch(
+		(err: unknown) => err,
+	);
+	await passAsync(run, FILE_POLL_MS);
+	return answer;
+}
+
+describe("forge sync control channel", () => {
+	it("should run syncback with its hooks in a session without the save watch", async () => {
+		expect.assertions(3);
+
+		const run = startCommand(LINT_HOOK);
+		await flushAsync();
+		const answer = await syncAsync(run);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({
+			durationMs: 0,
+			hooks: [expect.objectContaining({ command: "lint", ok: true })],
+			input: PLACE,
+			project: "default.project.json",
+		});
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"rojo: serve default.project.json --port 4000",
+			"syncback-1: syncback --help",
+			"syncback-2: syncback default.project.json --input game.rbxl --non-interactive",
+			"syncback-3: -c lint",
+		]);
+		expect(state).toMatchObject({
+			services: { syncback: { lastRun: { ok: true }, status: "off" } },
+		});
+	});
+
+	it("should answer a failed run with its error code and its hooks", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			...LINT_HOOK,
+			oneShot: oneShotsWith({ "syncback-3": EXITED }),
+		});
+		await flushAsync();
+		const answer = await syncAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toMatchObject({
+			code: "hook_failed",
+			details: { hooks: [expect.objectContaining({ command: "lint", ok: false })] },
+		});
+	});
+
+	it("should check Rojo's syncback support once, and again only after a failed check", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			...LINT_HOOK,
+			oneShot: oneShotsWith({ "syncback-1": { ...OK, exitCode: 2 } }),
+		});
+		await flushAsync();
+		const first = await syncAsync(run);
+		await syncAsync(run);
+		await syncAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(first).toMatchObject({ code: "syncback_unsupported" });
+		expect(spawnedIds(run.fake).filter((id) => id.endsWith("--help"))).toStrictEqual([
+			"syncback-1: syncback --help",
+			"syncback-2: syncback --help",
+		]);
+	});
+
+	it("should run after the save watch's run, never alongside it", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			...SYNCBACK,
+			files: { ...TOOL_FILES, "game.rbxl": "v1" },
+			oneShot: oneShotsWith({ "syncback-1": "hold" }),
+		});
+		await flushAsync();
+		run.memory.setModifiedTime("game.rbxl", Date.UTC(2026, 0, 2));
+		const answer = syncAsync(run);
+		await passAsync(run, FILE_POLL_MS);
+		const during = spawnedIds(run.fake).filter((id) => id.includes("--input"));
+		run.fake.exit("syncback-1", OK);
+		await answer;
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(during).toStrictEqual([
+			"syncback-1: syncback default.project.json --input game.rbxl --non-interactive",
+		]);
+		expect(spawnedIds(run.fake).filter((id) => id.includes("--input"))).toHaveLength(2);
+	});
+
+	it("should answer not_running once a stop request came", async () => {
+		expect.assertions(1);
+
+		const run = startCommand(LINT_HOOK);
+		await flushAsync();
+		// A worker's lease holds the final barrier, so the session stays up.
+		run.native.addon.tryLockFile(path.join(SESSION, "workers.lock"), "shared");
+		run.signals.fire("SIGINT");
+		await flushAsync();
+		const answer = syncAsync(run);
+		const ended = run.result.catch((err: unknown) => err);
+		await passAsync(run, 5250);
+		await ended;
+
+		await expect(answer).resolves.toMatchObject({
+			code: "not_running",
+			hint: 'Start a session with "forge up", or run "forge syncback".',
+		});
+	});
+
+	it("should answer not_running when the session stops before syncback can run", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			flags: { open: false },
+			oneShot: oneShotsWith({ "start-1": "hold" }),
+			projectType: "rbxts",
+		});
+		await flushAsync();
+		const answer = callSessionAsync(run.ipc, CONTROL_TARGET, "sync", SYNC_CALL);
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await run.result.catch(ignoreFailure);
+
+		await expect(answer).rejects.toMatchObject({ code: "not_running" });
+	});
+});
+
+function ignoreFailure(): void {
+	// The compile the stop cut short fails; only the sync answer matters.
+}

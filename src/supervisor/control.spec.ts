@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { SessionSync } from "../session/session-sync.ts";
 import type { SessionStatus } from "../session/status.ts";
 import { createStatusStore } from "../session/status.ts";
 import type { StopRequest } from "../session/stop-source.ts";
@@ -20,9 +21,16 @@ function makeTarget() {
 		() => 0,
 		vi.fn<(next: SessionStatus) => void>(),
 	);
+	const runAsync = vi.fn<SessionSync["runAsync"]>().mockResolvedValue({ input: "game.rbxl" });
 	return {
-		handlers: controlHandlers({ sessionId: "s1", status, stop: { request } }),
+		handlers: controlHandlers({
+			sessionId: "s1",
+			status,
+			stop: { request },
+			sync: { runAsync },
+		}),
 		request,
+		runAsync,
 		status,
 	};
 }
@@ -88,5 +96,14 @@ describe(controlHandlers, () => {
 			}),
 		);
 		expect(request).not.toHaveBeenCalled();
+	});
+
+	it("should answer sync with the session's syncback run", async () => {
+		expect.assertions(2);
+
+		const { handlers, runAsync } = makeTarget();
+
+		await expect(handlers.sync!({})).resolves.toStrictEqual({ input: "game.rbxl" });
+		expect(runAsync).toHaveBeenCalledOnce();
 	});
 });

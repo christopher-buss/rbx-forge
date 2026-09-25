@@ -94,7 +94,7 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 			listenAsync: vi.fn<IpcTransport["listenAsync"]>(unreachable("ipc")),
 		},
 		native: unreachable("native addon"),
-		network: { isPortFreeAsync: vi.fn<Network["isPortFreeAsync"]>(unreachable("network")) },
+		network: unreachableNetwork(),
 		processRunner: vi.fn<ProcessRunner>(unreachable("process runner")),
 		prompter: {
 			choose: vi.fn<Prompter["choose"]>(unreachable("prompter")),
@@ -155,6 +155,13 @@ export function createCommandContext(overrides: Partial<CommandContext> = {}): C
 function unreachable(seam: string): () => never {
 	return () => {
 		throw new Error(`the test reached the ${seam} seam without providing it`);
+	};
+}
+
+function unreachableNetwork(): Network {
+	return {
+		isListeningAsync: vi.fn<Network["isListeningAsync"]>(unreachable("network")),
+		isPortFreeAsync: vi.fn<Network["isPortFreeAsync"]>(unreachable("network")),
 	};
 }
 

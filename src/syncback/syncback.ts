@@ -43,6 +43,33 @@ export function resolveSyncbackTarget(
 }
 
 /**
+ * {@link syncbackAsync} without the check of Rojo's syncback support, for a
+ * session that checked it once already.
+ *
+ * @param context - The run: project root, seams, and reporter.
+ * @param config - The Rojo command and the hooks.
+ * @param target - The place to read and the project to write.
+ * @returns The syncback outcome and every hook result.
+ * @rejects `rojo_missing`, `process_failed` (with Rojo's output),
+ *   `hook_failed`, or `hook_depth_exceeded`.
+ */
+export async function runSyncbackAsync(
+	context: CommandContext,
+	config: SyncbackConfig,
+	target: SyncbackTarget,
+): Promise<HookedRun<SyncbackOutcome>> {
+	return runWithHooksAsync(context, config, "syncback", async () => {
+		const args = rojoSyncbackArgs(target.project, target.input);
+		const { durationMs } = await runRojoAsync(context, config, args);
+		return {
+			durationMs,
+			input: path.resolve(context.cwd, target.input),
+			project: target.project,
+		};
+	});
+}
+
+/**
  * One syncback with its `syncback` hooks: write the place's instances back
  * into the project's files. `forge syncback` runs it, and so do the session's
  * save watcher and `forge sync`.
@@ -64,13 +91,5 @@ export async function syncbackAsync(
 	target: SyncbackTarget,
 ): Promise<HookedRun<SyncbackOutcome>> {
 	await requireSyncbackAsync(context, config);
-	return runWithHooksAsync(context, config, "syncback", async () => {
-		const args = rojoSyncbackArgs(target.project, target.input);
-		const { durationMs } = await runRojoAsync(context, config, args);
-		return {
-			durationMs,
-			input: path.resolve(context.cwd, target.input),
-			project: target.project,
-		};
-	});
+	return runSyncbackAsync(context, config, target);
 }
