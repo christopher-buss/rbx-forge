@@ -1686,10 +1686,15 @@ describe("forge up control channel", () => {
 			flags: { open: false },
 		});
 		await flushAsync();
+		const waiting = callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", {
+			params: { timeoutMs: 1 },
+		});
+		await flushAsync();
+		run.clock.advance(1);
 
-		await expect(
-			callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", { params: { timeoutMs: 0 } }),
-		).resolves.toMatchObject({ services: { compiler: { status: "ready" } } });
+		await expect(waiting).resolves.toMatchObject({
+			services: { compiler: { status: "ready" } },
+		});
 	});
 
 	it("should wait in freshStatus for the first build of a roblox-ts compiler", async () => {
