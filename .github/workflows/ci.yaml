@@ -92,11 +92,15 @@ jobs:
         shell: bash
 
       # A Node addon must link the C runtime dynamically; musl defaults to
-      # static, so the addon build turns `crt-static` off.
+      # static, so the addon build turns `crt-static` off. The napi CLI picks
+      # the cross linker `aarch64-linux-musl-gcc` for aarch64 musl, which
+      # cannot find `libgcc_s` on a native arm64 host, so use the host `cc`
+      # (the Rust default, as for x86_64 musl).
       - name: Build addon
         run: pnpm build:native --target ${{ matrix.target }}
         shell: bash
         env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: cc
           RUSTFLAGS: ${{ matrix.musl && '-C target-feature=-crt-static' || '' }}
 
       - name: Build reaper
