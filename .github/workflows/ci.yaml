@@ -122,12 +122,15 @@ jobs:
       # static, so the addon build turns `crt-static` off. The napi CLI picks
       # the cross linker `aarch64-linux-musl-gcc` for aarch64 musl, which
       # cannot find `libgcc_s` on a native arm64 host, so use the host `cc`
-      # (the Rust default, as for x86_64 musl).
+      # (the Rust default). For x86_64 musl the host `cc` links the glibc
+      # loader into the addon (Alpine: "ld-linux-x86-64.so.2: No such
+      # file"), so link with `musl-gcc` from musl-tools.
       - name: Build addon
         run: pnpm build:native --target ${{ matrix.target }}
         shell: bash
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: cc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
           RUSTFLAGS: ${{ matrix.musl && '-C target-feature=-crt-static' || '' }}
 
       - name: Build reaper
