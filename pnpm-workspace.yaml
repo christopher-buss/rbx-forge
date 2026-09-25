@@ -1,14 +1,74 @@
+# Settings and catalogs only. No `packages:` list: this repository is a single
+# package.
+autoInstallPeers: true
 catalogMode: prefer
 cleanupUnusedCatalogs: true
+dedupePeers: true
+enablePrePostScripts: true
+minimumReleaseAge: 1440 # 1 day
+minimumReleaseAgeExclude:
+  - "@isentinel/eslint-config"
+
+minimumReleaseAgeExcludePrune: true
 
 publicHoistPattern:
   - "@typescript/*"
 
+saveExact: true
 shellEmulator: true
+trustPolicy: no-downgrade
+trustPolicyIgnoreAfter: 10080 # 7 days
 
-packages:
-  - .
+updateConfig:
+  ignoreDependencies:
+    # Held below 6.1 by the typescript-eslint peer range. See
+    # docs/dependency-exceptions.md.
+    - typescript
 
-onlyBuiltDependencies:
-  - simple-git-hooks
-  - unrs-resolver
+overrides:
+  "@typescript-eslint/eslint-plugin": 8.70.1
+  "@typescript-eslint/parser": 8.70.1
+  "@typescript-eslint/scope-manager": 8.70.1
+  "@typescript-eslint/type-utils": 8.70.1
+  "@typescript-eslint/types": 8.70.1
+  "@typescript-eslint/typescript-estree": 8.70.1
+  "@typescript-eslint/utils": 8.70.1
+
+catalogs:
+  build:
+    tsdown: 0.23.0
+  lint:
+    "@isentinel/eslint-config": 6.0.0-beta.46
+    "@vitest/eslint-plugin": 1.6.27
+    eslint: 10.11.0
+    eslint-plugin-jest-extended: 3.0.1
+    eslint-plugin-n: 18.3.0
+    eslint-plugin-pnpm: 1.9.1
+    eslint_d: 15.0.3
+    jiti: 2.7.0
+    knip: 6.38.0
+    oxlint: 1.85.0
+    oxlint-tsgolint: 7.0.2002
+    publint: 0.3.24
+  mutation:
+    "@stryker-mutator/api": 10.0.0
+    "@stryker-mutator/core": 10.0.0
+    "@stryker-mutator/typescript-checker": 10.0.0
+    "@stryker-mutator/vitest-runner": 10.0.0
+  native:
+    "@napi-rs/cli": 3.10.5
+  test:
+    "@vitest/coverage-v8": 5.0.1
+    jest-extended: 7.0.0
+    vitest: 5.0.1
+  tsc:
+    "@isentinel/tsconfig": 2.0.0
+    "@typescript/native": npm:typescript@7.0.2
+    better-typescript-lib: 2.12.0
+    typescript: 6.0.3
+  types:
+    "@types/node": 26.6.2
+
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true

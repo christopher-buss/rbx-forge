@@ -1,0 +1,18 @@
+{
+	"extends": "@isentinel/tsconfig/typescript",
+	"compilerOptions": {
+		"composite": true,
+		"tsBuildInfoFile": "out-tsc/tsconfig.lib.tsbuildinfo",
+		"lib": ["esnext"],
+		"libReplacement": true,
+		"rootDir": ".",
+		"allowJs": false,
+		"emitDeclarationOnly": true,
+		"noEmit": false,
+		"outDir": "out-tsc/lib",
+		"isolatedDeclarations": true,
+		"rewriteRelativeImportExtensions": true
+	},
+	"include": ["src/**/*.ts", "package.json"],
+	"exclude": ["src/**/*.spec.ts", "src/**/*.spec-d.ts"]
+}

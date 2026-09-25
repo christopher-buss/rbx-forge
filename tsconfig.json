@@ -1,11 +1,13 @@
 {
 	"extends": "@isentinel/tsconfig/typescript",
-	"compilerOptions": {
-		"libReplacement": true,
-		"paths": {
-			"src/*": ["./src/*"]
+	"references": [
+		{
+			"path": "./tsconfig.lib.json"
 		},
-		"exactOptionalPropertyTypes": true
-	},
-	"exclude": ["node_modules", "dist", "out", ".vscode-test", "temp"]
+		{
+			"path": "./tsconfig.spec.json"
+		}
+	],
+	"files": [],
+	"include": []
 }

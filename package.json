@@ -1,6 +1,6 @@
 {
 	"name": "rbx-forge",
-	"version": "1.0.0-beta.10",
+	"version": "2.0.0-alpha.0",
 	"description": "A roblox-ts and Luau CLI tool for fully-managed Rojo projects",
 	"keywords": [
 		"rbxts",
@@ -29,76 +29,76 @@
 	"sideEffects": false,
 	"type": "module",
 	"exports": {
-		".": {
-			"import": "./dist/index.mjs"
-		}
+		"./package.json": "./package.json"
 	},
-	"types": "./dist/index.d.mts",
 	"bin": {
-		"rbx-forge": "dist/index.mjs",
-		"forge": "dist/index.mjs",
-		"fge": "dist/index.mjs"
+		"forge": "./bin/rbx-forge.js",
+		"rbx-forge": "./bin/rbx-forge.js"
 	},
 	"files": [
+		"bin",
 		"dist",
-		"scripts"
+		"!dist/**/*.map"
 	],
 	"scripts": {
-		"build": "tsdown --clean --dts",
-		"lint": "eslint_d --cache",
-		"lint:ci": "eslint --cache --cache-strategy content",
-		"prepack": "nr build",
-		"prepare": "simple-git-hooks",
-		"prepublishOnly": "nr build",
-		"release": "bumpp",
-		"stub": "tsdown",
-		"typecheck": "tsc --noEmit",
-		"watch": "tsdown --watch --dts"
-	},
-	"simple-git-hooks": {
-		"pre-commit": "pnpm lint-staged"
-	},
-	"lint-staged": {
-		"*": "eslint_d --fix --cache"
-	},
-	"dependencies": {
-		"@clack/prompts": "1.1.0",
-		"ansis": "^4.2.0",
-		"arktype": "^2.2.0",
-		"c12": "^v4.0.0-beta.3",
-		"chokidar": "^5.0.0",
-		"commander": "^14.0.3",
-		"dedent": "^1.7.2",
-		"execa": "^9.6.1",
-		"magicast": "^0.5.2",
-		"package-manager-detector": "^1.6.0",
-		"picomatch": "^4.0.3",
-		"type-fest": "^5.4.4"
+		"build": "tsdown",
+		"build:native": "napi build --manifest-path reaper/Cargo.toml --platform --release --no-js --output-dir reaper/target/napi",
+		"eslint-config": "pnpm dlx @eslint/config-inspector",
+		"knip": "knip",
+		"lint": "isentinel-lint",
+		"lint:fix": "isentinel-lint --fix",
+		"mutation": "stryker run",
+		"test": "pnpm test:unit && pnpm test:integration",
+		"test:e2e": "vitest run --project e2e",
+		"test:integration": "vitest run --project integration",
+		"test:unit": "vitest run --project unit --coverage",
+		"typecheck": "tsc --build",
+		"watch": "tsdown --watch"
 	},
 	"devDependencies": {
-		"@antfu/ni": "^28.2.0",
-		"@isentinel/eslint-config": "5.0.0-beta.8",
-		"@isentinel/tsconfig": "^1.2.0",
-		"@types/node": "^24.11.0",
-		"@types/picomatch": "^4.0.2",
-		"@typescript-eslint/eslint-plugin": "^8.56.1",
-		"@typescript-eslint/parser": "^8.56.1",
-		"better-typescript-lib": "^2.12.0",
-		"bumpp": "^10.4.1",
-		"eslint": "^9.39.3",
-		"eslint-plugin-n": "^17.24.0",
-		"eslint_d": "^14.3.0",
-		"jiti": "^2.6.1",
-		"lint-staged": "^16.3.2",
-		"publint": "^0.3.18",
-		"rbx-forge": "workspace:*",
-		"simple-git-hooks": "^2.13.1",
-		"tsdown": "^0.20.3",
-		"typescript": "^5.9.3",
-		"unplugin-unused": "^0.5.7"
+		"@isentinel/eslint-config": "catalog:lint",
+		"@isentinel/tsconfig": "catalog:tsc",
+		"@napi-rs/cli": "catalog:native",
+		"@stryker-mutator/api": "catalog:mutation",
+		"@stryker-mutator/core": "catalog:mutation",
+		"@stryker-mutator/typescript-checker": "catalog:mutation",
+		"@stryker-mutator/vitest-runner": "catalog:mutation",
+		"@types/node": "catalog:types",
+		"@typescript/native": "catalog:tsc",
+		"@vitest/coverage-v8": "catalog:test",
+		"@vitest/eslint-plugin": "catalog:lint",
+		"better-typescript-lib": "catalog:tsc",
+		"eslint": "catalog:lint",
+		"eslint-plugin-jest-extended": "catalog:lint",
+		"eslint-plugin-n": "catalog:lint",
+		"eslint-plugin-pnpm": "catalog:lint",
+		"eslint_d": "catalog:lint",
+		"jest-extended": "catalog:test",
+		"jiti": "catalog:lint",
+		"knip": "catalog:lint",
+		"oxlint": "catalog:lint",
+		"oxlint-tsgolint": "catalog:lint",
+		"publint": "catalog:lint",
+		"tsdown": "catalog:build",
+		"typescript": "catalog:tsc",
+		"vitest": "catalog:test"
 	},
-	"packageManager": "pnpm@10.28.1+sha512.7d7dbbca9e99447b7c3bf7a73286afaaf6be99251eb9498baefa7d406892f67b879adb3a1d7e687fc4ccc1a388c7175fbaae567a26ab44d1067b54fcb0d6a316",
+	"packageManager": "pnpm@11.24.0+sha512.bd27e345e976dcb0be0b7a1228217b049a817e21b1f355c90dbe7dc46671895a8bc1e6d06c24554505ea93ea0b45f489a27ec1bfbc8de6a9659fca0f16fa0000",
 	"engines": {
-		"node": ">=22.16.0"
+		"node": ">=24.12.0"
+	},
+	"napi": {
+		"binaryName": "forge-native",
+		"packageName": "@rbx-forge/native",
+		"targets": [
+			"x86_64-pc-windows-msvc",
+			"aarch64-pc-windows-msvc",
+			"x86_64-apple-darwin",
+			"aarch64-apple-darwin",
+			"x86_64-unknown-linux-gnu",
+			"aarch64-unknown-linux-gnu",
+			"x86_64-unknown-linux-musl",
+			"aarch64-unknown-linux-musl"
+		]
 	}
 }

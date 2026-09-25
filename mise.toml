@@ -1,0 +1,21 @@
+[env]
+_.path = [ '{{config_root}}/node_modules/.bin' ]
+
+[settings]
+experimental = true
+http_retries = 3
+
+[settings.node]
+corepack = true
+
+[tools]
+"github:rojo-rbx/rojo" = "7.7.0"
+"npm:corepack" = "latest"
+hk = "1.53.0"
+node = "26.5.0"
+pkl = "0.31.1"
+rust = { version = "1.98.1", components = "clippy,rustfmt" }
+
+[tasks.install-hk]
+description = "Install the hk git hooks"
+run = "hk install --mise"

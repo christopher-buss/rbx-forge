@@ -1,21 +1,11 @@
-// cspell:ignore publint
-import path from "node:path";
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-	alias: {
-		src: path.resolve(import.meta.dirname, "src"),
-	},
 	clean: true,
-	entry: ["src/index.ts"],
+	entry: ["src/cli.ts"],
 	fixedExtension: true,
 	format: ["esm"],
-	onSuccess() {
-		console.info("🙏 Build succeeded!");
-	},
 	publint: true,
-	shims: true,
-	unused: {
-		level: "warning",
-	},
+	target: ["node24.12"],
+	unbundle: false,
 });
