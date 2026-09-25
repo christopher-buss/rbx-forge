@@ -1,13 +1,15 @@
 import { type } from "arktype";
 
-import type { CompileEvent, Diagnostic } from "./diagnostics.ts";
+import type { CompileEvent, Diagnostic, DiagnosticsParser } from "./diagnostics.ts";
 import { createDiagnosticsParser } from "./diagnostics.ts";
+
+const jsonText = type("string.json.parse");
 
 /**
  * A line of sloptor's watch-mode output (`sloptor build -w --json`): a JSON
  * object with a string `event` field.
  */
-const eventLine = type("string.json.parse").pipe(type({ event: "string" }));
+const anyEvent = type({ event: "string" });
 
 /** A diagnostic as sloptor writes it: no location is `""` and `0`. */
 const sloptorDiagnostic = type({
@@ -30,17 +32,15 @@ const JSON_OBJECT_START = /^\s*\{/;
 /**
  * Read watch-mode compiler output line by line as build events. A line that
  * is a JSON object with a string `event` field is a sloptor event; every
- * other line is rbxtsc text for the rbxtsc parser.
+ * other line is rbxtsc text for the rbxtsc parser. A trailing `\r` is JSON
+ * whitespace, so CRLF output parses as it is.
  *
  * @returns A reader that gives the build event of each line, or
  *   `undefined` for any other line.
  */
 export function createWatchEventReader(): (line: string) => CompileEvent | undefined {
 	const parser = createDiagnosticsParser();
-	return (line) => {
-		const sloptor = readSloptorLine(line);
-		return sloptor === undefined ? parser.read(line) : sloptor.event;
-	};
+	return (line) => readLine(parser, line);
 }
 
 function toDiagnostic({
@@ -73,20 +73,24 @@ function toCompileEvent(event: typeof sloptorEvent.infer): CompileEvent {
 }
 
 /**
- * Read one line as a sloptor event.
+ * Read one line: a sloptor event, or rbxtsc text.
  *
- * @param line - The output line; a trailing `\r` is stripped first.
- * @returns `undefined` for a line that is not a sloptor event; else its build
- *   event, `undefined` for an event forge does not read (such as `watching`)
- *   or one with the wrong fields.
+ * @param parser - The rbxtsc parser, for every line that is not an event.
+ * @param line - The output line.
+ * @returns The build event; `undefined` for other output, and for a sloptor
+ *   event forge does not read (such as `watching`) or one with the wrong
+ *   fields.
  */
-function readSloptorLine(line: string): undefined | { event: CompileEvent | undefined } {
-	const text = line.endsWith("\r") ? line.slice(0, -1) : line;
-	const value = JSON_OBJECT_START.test(text) ? eventLine(text) : undefined;
+function readLine(parser: DiagnosticsParser, line: string): CompileEvent | undefined {
+	const value = JSON_OBJECT_START.test(line) ? jsonText(line) : undefined;
 	if (value === undefined || value instanceof type.errors) {
-		return undefined;
+		return parser.read(line);
 	}
 
 	const event = sloptorEvent(value);
-	return { event: event instanceof type.errors ? undefined : toCompileEvent(event) };
+	if (!(event instanceof type.errors)) {
+		return toCompileEvent(event);
+	}
+
+	return anyEvent.allows(value) ? undefined : parser.read(line);
 }

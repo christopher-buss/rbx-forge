@@ -31,7 +31,7 @@ interface WatchOutput {
 
 /**
  * Compile the watched file once, then again on each change. With no watched
- * file, print one summary line.
+ * file, print one roblox-ts summary line, in either output mode.
  *
  * @param environment - Holds `FIXTURE_COMPILER_WATCH` (the path of the file
  *   the compiler watches), the `FIXTURE_COMPILE_*` timing and counts, and
