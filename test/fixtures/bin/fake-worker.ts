@@ -27,12 +27,16 @@
  *   SIGINT, SIGTERM, SIGHUP, and SIGBREAK.
  * - `FIXTURE_EXIT_CODE`: exit code of a one-shot run (default 0).
  * - `FIXTURE_HANG=1`: a hook stays alive instead of exiting.
+ * - `FIXTURE_HOOK_MS`: a hook runs this long, then exits with code 0.
  * - `FIXTURE_HANG_ROLE`: a one-shot run of this role (such as `rbxtsc` for a
  *   compile, `rojo` for a build) stays alive instead of exiting.
  * - `FIXTURE_EXIT_AFTER_MS`: a long-running role exits on its own after this
  *   long, with `FIXTURE_EXIT_CODE`. Its grandchildren stay alive.
  * - `FIXTURE_EXIT_ROLE`: only this role exits after `FIXTURE_EXIT_AFTER_MS`.
  * - `FIXTURE_ROJO_NO_SYNCBACK=1`: rojo has no `syncback` command.
+ * - `rojo serve --port <port>` listens on that port of `127.0.0.1`, as Rojo
+ *   does, after `FIXTURE_ROJO_LISTEN_DELAY_MS` (default 0), or never with
+ *   `FIXTURE_ROJO_NO_LISTEN=1`.
  * - `FIXTURE_ROJO_ERROR`: `rojo syncback` prints this and exits with code 1.
  * - `FIXTURE_SOURCEMAP`: what `rojo sourcemap --output <file>` writes; no
  *   file when unset.
@@ -58,6 +62,7 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
+import { createServer } from "node:net";
 import path from "node:path";
 import process from "node:process";
 
@@ -290,6 +295,28 @@ function runSyncback(): void {
 	exitOnce();
 }
 
+/** Listen on `--port`, as `rojo serve` does, for the session's port check. */
+function listenOnPort(): void {
+	const index = ARGS.indexOf("--port");
+	const port = index === -1 ? undefined : ARGS[index + 1];
+	if (port === undefined || env["FIXTURE_ROJO_NO_LISTEN"] === "1") {
+		return;
+	}
+
+	setTimeout(
+		() => {
+			const server = createServer((socket) => {
+				socket.destroy();
+			});
+			server.on("error", (err) => {
+				process.stderr.write(`listen failed: ${err.message}\n`);
+			});
+			server.listen({ host: "127.0.0.1", port: Number(port) });
+		},
+		Number(env["FIXTURE_ROJO_LISTEN_DELAY_MS"] ?? "0"),
+	);
+}
+
 function runRojo(): void {
 	const [command] = ARGS;
 	if (command === "--version") {
@@ -299,6 +326,7 @@ function runRojo(): void {
 
 	if (command === "serve") {
 		process.stdout.write("Rojo server listening\n");
+		listenOnPort();
 		stayAlive();
 		return;
 	}
@@ -354,6 +382,12 @@ function runLauncher(): void {
 function runHook(): void {
 	if (env["FIXTURE_HANG"] === "1") {
 		stayAlive();
+		return;
+	}
+
+	const hookMs = env["FIXTURE_HOOK_MS"];
+	if (hookMs !== undefined) {
+		setTimeout(doNothing, Number(hookMs));
 		return;
 	}
 

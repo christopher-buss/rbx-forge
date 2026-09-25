@@ -49,3 +49,30 @@ describe(nodeNetwork.isPortFreeAsync, () => {
 		await expect(nodeNetwork.isPortFreeAsync(port)).resolves.toBeTrue();
 	});
 });
+
+describe(nodeNetwork.isListeningAsync, () => {
+	it("should report a port a server listens on as listening", async () => {
+		expect.assertions(1);
+
+		const port = await listenAsync();
+
+		await expect(nodeNetwork.isListeningAsync(port)).resolves.toBeTrue();
+	});
+
+	it("should report a port nothing listens on as not listening", async () => {
+		expect.assertions(1);
+
+		const server = createServer();
+		const port = await new Promise<number>((resolve) => {
+			server.listen({ host: "127.0.0.1", port: 0 }, () => {
+				// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a TCP server's address is an object
+				resolve((server.address() as AddressInfo).port);
+			});
+		});
+		await new Promise((resolve) => {
+			server.close(resolve);
+		});
+
+		await expect(nodeNetwork.isListeningAsync(port)).resolves.toBeFalse();
+	});
+});
