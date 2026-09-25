@@ -6,7 +6,7 @@
 //! if the pinned process is still unreaped after the read, the PID cannot
 //! have been reused during it.
 
-use super::StartTime;
+use super::{ProcessEntry, StartTime};
 use std::fs;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -14,11 +14,13 @@ use std::path::PathBuf;
 use std::ptr;
 use std::time::{Duration, Instant};
 
-/// State and start time from `/proc/<pid>/stat`.
+/// Fields of `/proc/<pid>/stat`.
 #[derive(Debug, Eq, PartialEq)]
 struct Stat {
     /// `Z` (zombie) or `X` (dead) mean the process has exited.
     state: char,
+    ppid: u32,
+    group: u32,
     start: StartTime,
 }
 
@@ -33,10 +35,17 @@ impl Stat {
 fn parse_stat(text: &str) -> Option<Stat> {
     let rest = &text[text.rfind(')')? + 1..];
     let mut fields = rest.split_whitespace();
+    // Fields 3 to 5: state, parent, group. The start time is field 22.
     let state = fields.next()?.chars().next()?;
-    // Field 3 is the state; the start time is field 22.
-    let start = fields.nth(18)?.parse().ok()?;
-    Some(Stat { state, start })
+    let ppid = fields.next()?.parse().ok()?;
+    let group = fields.next()?.parse().ok()?;
+    let start = fields.nth(16)?.parse().ok()?;
+    Some(Stat {
+        state,
+        ppid,
+        group,
+        start,
+    })
 }
 
 /// Read a process's stat. `Ok(None)` when no process has this PID.
@@ -54,6 +63,38 @@ pub fn start_time(pid: u32) -> io::Result<Option<StartTime>> {
     Ok(read_stat(pid)?
         .filter(|stat| !stat.has_exited())
         .map(|stat| stat.start))
+}
+
+pub fn processes() -> io::Result<Vec<ProcessEntry>> {
+    let mut entries = Vec::new();
+    for dir in fs::read_dir("/proc")? {
+        let Some(pid) = dir?
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        // A process that ended since the listing has no stat left.
+        if let Ok(Some(stat)) = read_stat(pid) {
+            entries.push(ProcessEntry {
+                pid,
+                ppid: stat.ppid,
+                group: stat.group,
+                start_time: stat.start,
+                exited: stat.has_exited() && !has_other_threads(pid),
+            });
+        }
+    }
+
+    Ok(entries)
+}
+
+/// Whether threads besides the main one still run. The main thread of a
+/// dying multi-threaded process (Node) shows `Z` before its other threads
+/// end; the parent can reap it only once they have.
+fn has_other_threads(pid: u32) -> bool {
+    fs::read_dir(format!("/proc/{pid}/task")).is_ok_and(|tasks| tasks.count() > 1)
 }
 
 /// A pidfd, closed on drop.
@@ -166,6 +207,21 @@ impl Pin {
         Ok(!self.wait(Duration::ZERO)?)
     }
 
+    /// The initial environment block. A zombie's reads empty.
+    pub fn environment(&self) -> io::Result<Option<Vec<u8>>> {
+        let block = match fs::read(format!("/proc/{}/environ", self.pid)) {
+            Ok(block) => block,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        // Still unreaped after the read: the PID named this process during it.
+        if !self.is_unreaped()? {
+            return Ok(None);
+        }
+
+        Ok(Some(block))
+    }
+
     pub fn kill(&self) -> io::Result<bool> {
         if self.wait(Duration::ZERO)? {
             return Ok(false);
@@ -208,14 +264,16 @@ mod tests {
     use super::{Stat, parse_stat};
 
     const STAT: &str =
-        "4242 (a) b) c) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 1000 200";
+        "4242 (a) b) c) S 1 4240 4240 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 1000 200";
 
     #[test]
-    fn parses_the_state_and_start_time_after_the_last_parenthesis() {
+    fn parses_the_fields_after_the_last_parenthesis() {
         assert_eq!(
             parse_stat(STAT),
             Some(Stat {
                 state: 'S',
+                ppid: 1,
+                group: 4240,
                 start: 987_654
             })
         );

@@ -74,6 +74,9 @@ pub struct Report {
     pub forced: bool,
     /// Members were still alive when the confirmation bound ran out.
     pub incomplete: bool,
+    /// POSIX: the PIDs of those members. Windows cannot name them, so it
+    /// reports `incomplete` with an empty list.
+    pub survivors: Vec<u32>,
 }
 
 /// Why a `spawn` started no worker.
@@ -214,7 +217,7 @@ mod tests {
                     ..Report::default()
                 }
             }),
-            "{\"type\":\"exited\",\"id\":\"a\",\"report\":{\"exitCode\":0,\"signal\":null,\"forced\":false,\"incomplete\":false}}\n"
+            "{\"type\":\"exited\",\"id\":\"a\",\"report\":{\"exitCode\":0,\"signal\":null,\"forced\":false,\"incomplete\":false,\"survivors\":[]}}\n"
         );
     }
 }

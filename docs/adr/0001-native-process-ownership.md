@@ -137,6 +137,23 @@ both):
   now more exact: a descendant hides from the scan only if it overwrites its
   environment strings in place or `exec`s without the marker, **and** closes the
   inherited lease descriptor.
+- **POSIX forced stop (#39).** Each pass sends `SIGKILL` to the worker's group
+  (its unreaped leader pins the group id), then lists the process table and
+  kills every process outside the group that started after the leader and
+  carries the session and worker markers. Such a kill goes only through a pin
+  (pidfd on Linux, start-time check on macOS) after the pinned process shows the
+  listed start time and both markers. A killed process counts as alive until its
+  pin sees it gone. The loop ends after two empty passes in a row (a process
+  inside `exec` reads an empty environment for a moment) or at the 5 s bound,
+  and the `exited` report lists the survivors. Nothing is reaped during a loop.
+  A Linux process whose main thread is a zombie while other threads still run
+  counts as alive: its parent cannot reap it yet.
+- **POSIX `SIGTERM` (#39).** The reaper blocks `SIGTERM` and waits for it on one
+  thread; it means the host is gone, as stdin EOF does: every tree is forced,
+  then `terminated` is written. On Linux the reaper sets `SIGTERM` as its
+  parent-death signal and is a child subreaper. Before it writes `terminated`,
+  it kills every child that is not a worker leader: orphans it adopted, also
+  ones that scrubbed their markers.
 - **Pipe security.** Keep the spec: explicit current-user DACL, reject remote
   clients, first-instance flag, token as the first message.
 - **Remote-client test (S4).** An integration test on Windows creates the real

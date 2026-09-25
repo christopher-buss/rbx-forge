@@ -3,7 +3,7 @@
 //! | OS      | Tree                                   | Graceful                     | Forced                         |
 //! | ------- | -------------------------------------- | ---------------------------- | ------------------------------ |
 //! | Windows | named job, `KILL_ON_JOB_CLOSE`, attached at creation (`PROC_THREAD_ATTRIBUTE_JOB_LIST`) | `CTRL_BREAK` to the group | `TerminateJobObject` |
-//! | POSIX   | process group led by the worker        | `SIGTERM` to the group       | `SIGKILL` to the group         |
+//! | POSIX   | process group led by the worker        | `SIGTERM` to the group       | discover–kill loop: `SIGKILL` to the group, and to every marked descendant outside it |
 //!
 //! A worker runs no code before the reaper has reported it: POSIX workers
 //! wait on a gate pipe between `fork` and `exec`; Windows workers start
@@ -12,11 +12,18 @@
 //! closes and kills it).
 //!
 //! On POSIX the leader is never reaped before [`WorkerTree::finish`], so its
-//! PID pins the group id for every group signal.
+//! PID pins the group id for every group signal. Descendants that left the
+//! group (`setsid`, double fork) are found by their markers (see
+//! [`Spec::markers`]) and killed only through a pin, after their start time
+//! and markers are verified (spec #28, L3–L3c). On Linux the reaper is a
+//! child subreaper ([`become_owner`]), so orphaned descendants become its
+//! children; [`sweep_orphans`] kills the ones no marker names.
 
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
+
+mod converge;
 
 #[cfg(unix)]
 mod unix;
@@ -36,10 +43,39 @@ pub struct ExitStatus {
 }
 
 /// The end of a tree: its leader's status and whether it emptied in time.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Finished {
     pub status: ExitStatus,
     pub empty: bool,
+    /// POSIX: the PIDs still alive when the bound ran out. Windows cannot
+    /// name them; there it stays empty.
+    pub survivors: Vec<u32>,
+}
+
+/// Set up the calling process to own every worker tree. Linux: become a
+/// child subreaper, so orphaned descendants are re-parented to it and not
+/// to init; and get `SIGTERM` when the parent dies. Call it once, from the
+/// thread that runs the reaper, before any worker exists. Elsewhere it does
+/// nothing.
+///
+/// # Errors
+///
+/// When the OS refuses the setting.
+pub fn become_owner() -> io::Result<()> {
+    sys::become_owner()
+}
+
+/// Once every tree is finished: kill and reap every child of this process
+/// that is not a worker leader. On Linux these are orphans the subreaper
+/// adopted, including ones that scrubbed their markers. Bounded by `bound`.
+///
+/// Returns the PIDs still alive at the bound.
+///
+/// # Errors
+///
+/// When the OS refuses the process listing.
+pub fn sweep_orphans(bound: Duration) -> io::Result<Vec<u32>> {
+    sys::sweep_orphans(bound)
 }
 
 /// Everything needed to create one worker.
@@ -50,6 +86,10 @@ pub struct Spec {
     pub cwd: PathBuf,
     /// The complete environment, markers included.
     pub env: Vec<(String, String)>,
+    /// POSIX: the `(name, value)` pairs of `env` that tag this worker's
+    /// processes. A forced stop kills a process outside the group only when
+    /// its environment holds every pair; empty: none outside the group.
+    pub markers: Vec<(String, String)>,
     /// stdout and stderr go here (appended); `None` discards them.
     pub log: Option<PathBuf>,
     /// Windows only: pass `args` joined with spaces, unquoted.
@@ -114,8 +154,9 @@ impl WorkerTree {
         self.0.wait_leader()
     }
 
-    /// After the leader exited: reap it, then wait up to `bound` for the
-    /// tree to be empty.
+    /// After the leader exited: make the tree empty within `bound`, then
+    /// reap the leader. POSIX runs the discover–kill loop; Windows waits
+    /// for the job to empty.
     ///
     /// # Errors
     ///

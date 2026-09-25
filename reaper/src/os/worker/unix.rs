@@ -6,7 +6,17 @@
 //!
 //! The leader is not reaped until [`Tree::finish`]: an unreaped leader keeps
 //! the group id from being reused, so every group signal before it reaches
-//! only this tree. After the reap, the group is only probed (signal 0).
+//! only this tree. No group is signalled after its leader's reap.
+//!
+//! Forced stop ([`Tree::finish`]) is the discover–kill loop of spec #28:
+//! every pass signals the group, then lists the process table and kills
+//! each process outside the group that carries the worker's markers. Such a
+//! process is killed only through a pin (Linux pidfd; macOS start-time
+//! check), after the pinned process shows the start time the listing saw
+//! and every marker, so a reused PID never receives the kill (L3c). Nothing
+//! is reaped during the loop: the leader's zombie pins the group id, and
+//! adopted zombies pin their PIDs. The loop is bounded; it reports its
+//! survivors instead of hanging.
 
 use std::ffi::{CString, c_char};
 use std::fs::{File, OpenOptions};
@@ -15,14 +25,21 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::ptr::null;
 use std::sync::Mutex;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
+use super::converge::converge;
 use super::{ExitStatus, Finished, Inherit, Spec};
-use crate::os::process;
+use crate::os::process::{self, PinnedProcess, ProcessEntry};
 
-/// How often [`Tree::finish`] probes the group.
+/// Pause between two passes of the discover–kill loop.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// Leaders not yet reaped. Only their own tree reaps them; every other
+/// child of the reaper is an adopted orphan.
+static LEADERS: Mutex<Vec<libc::pid_t>> = Mutex::new(Vec::new());
+/// Set by [`become_owner`]. Only then is every other child of this process
+/// an orphan it adopted; in a test process, other children are the tests'.
+static OWNER: AtomicBool = AtomicBool::new(false);
 /// Signals the reaper ignores; `exec` keeps an ignored signal ignored, so
 /// the child restores the default first.
 const RESET_SIGNALS: [libc::c_int; 5] = [
@@ -39,6 +56,11 @@ pub struct Tree {
     start: u64,
     /// The write end of the gate, until release.
     gate: Mutex<Option<OwnedFd>>,
+    markers: Vec<(String, String)>,
+}
+
+fn leaders() -> std::sync::MutexGuard<'static, Vec<libc::pid_t>> {
+    LEADERS.lock().expect("unpoisoned")
 }
 
 fn cstring(bytes: &[u8]) -> io::Result<CString> {
@@ -89,6 +111,9 @@ struct Child<'a> {
     file: &'a CString,
     argv: &'a [*const c_char],
     envp: &'a [*const c_char],
+    /// No blocked signal: the reaper blocks `SIGTERM` (see `main.rs`), and
+    /// `exec` keeps the mask.
+    unblocked: &'a libc::sigset_t,
 }
 
 impl Child<'_> {
@@ -105,6 +130,7 @@ impl Child<'_> {
             for signal in RESET_SIGNALS {
                 libc::signal(signal, libc::SIG_DFL);
             }
+            libc::pthread_sigmask(libc::SIG_SETMASK, self.unblocked, std::ptr::null_mut());
             if libc::dup2(self.stdin, 0) < 0
                 || libc::dup2(self.output, 1) < 0
                 || libc::dup2(self.output, 2) < 0
@@ -164,6 +190,10 @@ impl Tree {
         let stdin = File::open("/dev/null")?;
         let output = open_output(spec)?;
         let (gate_read, gate_write) = pipe()?;
+        // SAFETY: all-zero is a valid `sigset_t` for `sigemptyset` to fill.
+        let mut unblocked: libc::sigset_t = unsafe { std::mem::zeroed() };
+        // SAFETY: a valid local set.
+        unsafe { libc::sigemptyset(&raw mut unblocked) };
         let child = Child {
             gate_read: gate_read.as_raw_fd(),
             gate_write: gate_write.as_raw_fd(),
@@ -174,6 +204,7 @@ impl Tree {
             file: &file,
             argv: &argv,
             envp: &envp,
+            unblocked: &unblocked,
         };
 
         // SAFETY: the child runs only `Child::exec`, which is
@@ -187,6 +218,9 @@ impl Tree {
             unsafe { child.exec() };
         }
 
+        // Only the reaper's main thread forks and reaps adopted orphans, so
+        // no reap can pass between the fork and this registration.
+        leaders().push(pid);
         // SAFETY: plain call; the child may have set its group already.
         unsafe { libc::setpgid(pid, pid) };
         drop(gate_read);
@@ -194,6 +228,7 @@ impl Tree {
             pid,
             start: 0,
             gate: Mutex::new(Some(gate_write)),
+            markers: spec.markers.clone(),
         };
         let pid_u32 = u32::try_from(pid).map_err(io::Error::other)?;
         match process::start_time(pid_u32) {
@@ -215,6 +250,7 @@ impl Tree {
         let mut status = 0;
         // SAFETY: plain call on our own child.
         unsafe { libc::waitpid(self.pid, &mut status, 0) };
+        leaders().retain(|leader| *leader != self.pid);
     }
 
     pub fn pid(&self) -> u32 {
@@ -295,6 +331,7 @@ impl Tree {
                 return Err(err);
             }
         }
+        leaders().retain(|leader| *leader != self.pid);
 
         Ok(if libc::WIFEXITED(status) {
             ExitStatus {
@@ -309,31 +346,168 @@ impl Tree {
         })
     }
 
-    /// Whether the group still has a member. Signal 0 only: after the reap
-    /// the id may name another group.
-    fn group_exists(&self) -> bool {
-        // SAFETY: plain call; signal 0 checks without signalling.
-        let found = unsafe { libc::kill(-self.pid, 0) } == 0;
-        found || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    /// One pass of the loop: kill the group and every marked process
+    /// outside it. `killed` keeps the pins of earlier kills across passes.
+    /// Returns the PIDs that were alive.
+    fn pass(&self, killed: &mut Vec<PinnedProcess>) -> io::Result<Vec<u32>> {
+        // The leader is unreaped: the group id still names this tree.
+        if let Err(err) = self.signal_group(libc::SIGKILL) {
+            eprintln!("forge-reaper: kill group {}: {err}", self.pid);
+        }
+        let markers: Vec<(&str, &str)> = self
+            .markers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let own = std::process::id();
+        let group = self.pid();
+        let mut alive = Vec::new();
+        for entry in process::processes()? {
+            if entry.exited || entry.pid == own {
+                continue;
+            }
+            // A group member dies from the group signal; a process that
+            // started before the leader cannot descend from it.
+            if entry.group == group {
+                alive.push(entry.pid);
+            } else if entry.start_time >= self.start
+                && !killed.iter().any(|pin| pin.pid() == entry.pid)
+                && let Some(pin) = kill_marked(&entry, &markers)
+            {
+                killed.push(pin);
+            }
+        }
+        // Killed through a pin: alive until the pin sees the exit.
+        killed.retain(|pin| pin.is_alive().unwrap_or(false));
+        alive.extend(killed.iter().map(PinnedProcess::pid));
+
+        Ok(alive)
     }
 
     pub fn finish(&self, bound: Duration) -> io::Result<Finished> {
+        let mut killed = Vec::new();
+        let swept = converge(|| self.pass(&mut killed), bound, POLL_INTERVAL);
         let status = self.reap()?;
-        let deadline = Instant::now() + bound;
-        loop {
-            if !self.group_exists() {
-                return Ok(Finished {
-                    status,
-                    empty: true,
-                });
-            }
-            if Instant::now() >= deadline {
-                return Ok(Finished {
-                    status,
-                    empty: false,
-                });
-            }
-            thread::sleep(POLL_INTERVAL);
+        reap_adopted();
+        let survivors = swept?;
+        Ok(Finished {
+            status,
+            empty: survivors.is_empty(),
+            survivors,
+        })
+    }
+}
+
+/// Kill a process outside the group that carries every marker. Only
+/// through a pin, and only when the pinned process has the start time the
+/// listing saw (else the PID now names another process) and every marker.
+/// A process the reaper cannot inspect (another user's) is never killed.
+///
+/// Returns the pin of a process it killed: the process counts as alive
+/// until the pin sees it gone, as a dying multi-threaded process can no
+/// longer show its markers.
+pub(super) fn kill_marked(entry: &ProcessEntry, markers: &[(&str, &str)]) -> Option<PinnedProcess> {
+    if markers.is_empty() {
+        return None;
+    }
+
+    let verified_kill = || -> io::Result<Option<PinnedProcess>> {
+        let Some(pin) = PinnedProcess::open(entry.pid)? else {
+            return Ok(None);
+        };
+        if pin.start_time() != entry.start_time || pin.has_environment(markers)? != Some(true) {
+            return Ok(None);
+        }
+
+        Ok(pin.kill()?.then_some(pin))
+    };
+    verified_kill().ok().flatten()
+}
+
+/// Reap every exited child that is not a live worker's leader: orphans the
+/// Linux subreaper adopted. Called only between loops, never during one.
+fn reap_adopted() {
+    if !OWNER.load(Ordering::Relaxed) {
+        return;
+    }
+    let own = std::process::id();
+    let Ok(entries) = process::processes() else {
+        return;
+    };
+    let leaders = leaders();
+    for entry in entries {
+        let Ok(pid) = libc::pid_t::try_from(entry.pid) else {
+            continue;
+        };
+        if entry.ppid == own && entry.exited && !leaders.contains(&pid) {
+            let mut status = 0;
+            // SAFETY: plain call on our own exited child.
+            unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
         }
     }
+}
+
+/// See [`super::sweep_orphans`].
+pub fn sweep_orphans(bound: Duration) -> io::Result<Vec<u32>> {
+    if !OWNER.load(Ordering::Relaxed) {
+        return Ok(Vec::new());
+    }
+    let own = std::process::id();
+    let swept = converge(
+        || {
+            let leaders = leaders().clone();
+            let mut alive = Vec::new();
+            for entry in process::processes()? {
+                let is_leader =
+                    libc::pid_t::try_from(entry.pid).is_ok_and(|pid| leaders.contains(&pid));
+                if entry.ppid != own || entry.exited || is_leader {
+                    continue;
+                }
+                // An unreaped child: its PID cannot be reused, so the pin
+                // names this process. One whose main thread already exited
+                // cannot be pinned; it is dying and counts until it is gone.
+                if let Ok(Some(pin)) = PinnedProcess::open(entry.pid) {
+                    let _ = pin.kill();
+                }
+                alive.push(entry.pid);
+            }
+            Ok(alive)
+        },
+        bound,
+        POLL_INTERVAL,
+    );
+    reap_adopted();
+    swept
+}
+
+/// Linux: become a child subreaper and get `SIGTERM` when the parent dies.
+/// `PR_SET_PDEATHSIG` fires when the parent *thread* that spawned the
+/// reaper ends; Node spawns from its main thread, which lives as long as
+/// the host. A parent that died before this call is seen as stdin EOF.
+#[cfg(target_os = "linux")]
+pub fn become_owner() -> io::Result<()> {
+    let settings: [(libc::c_int, libc::c_ulong); 2] = [
+        (libc::PR_SET_CHILD_SUBREAPER, 1),
+        (
+            libc::PR_SET_PDEATHSIG,
+            libc::c_ulong::try_from(libc::SIGTERM).map_err(io::Error::other)?,
+        ),
+    ];
+    for (option, value) in settings {
+        // SAFETY: plain call with integer arguments.
+        if unsafe { libc::prctl(option, value, 0, 0, 0) } != 0 {
+            return last_error();
+        }
+    }
+    OWNER.store(true, Ordering::Relaxed);
+
+    Ok(())
+}
+
+/// macOS has no subreaper or parent-death signal: stdin EOF alone tells the
+/// reaper that the host died, and the marker scan finds orphans.
+#[cfg(not(target_os = "linux"))]
+pub fn become_owner() -> io::Result<()> {
+    OWNER.store(true, Ordering::Relaxed);
+    Ok(())
 }

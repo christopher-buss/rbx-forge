@@ -8,7 +8,9 @@
 //! the protocol in [`protocol`] on stdin and stdout until `terminate` or
 //! stdin EOF (see [`reaper`]). Diagnostics go to stderr. The host must hold
 //! the only write end of stdin: its EOF is how the reaper learns that the
-//! host died.
+//! host died. On POSIX, `SIGTERM` means the same; on Linux the reaper also
+//! asks for it as its parent-death signal, and is a child subreaper (see
+//! [`os::worker::become_owner`]).
 //!
 //! It compiles the same `os` module tree as the addon, without napi, so the
 //! `os` tests run through this target (`cargo test`).
@@ -25,7 +27,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use os::lock::{FileLock, LockMode};
-use os::worker::{Inherit, Spec, WorkerTree};
+use os::worker::{self, Inherit, Spec, WorkerTree};
 use protocol::SpawnRequest;
 use reaper::{Input, Platform, Reaper, Tree};
 
@@ -75,20 +77,61 @@ impl Platform for OsPlatform {
             .filter(|(name, _)| !is_marker(name))
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect();
-        env.push((SESSION_MARKER.to_owned(), self.session.clone()));
-        env.push((WORKER_MARKER.to_owned(), request.id.clone()));
+        let markers = vec![
+            (SESSION_MARKER.to_owned(), self.session.clone()),
+            (WORKER_MARKER.to_owned(), request.id.clone()),
+        ];
+        env.extend(markers.iter().cloned());
 
         let spec = Spec {
             file: PathBuf::from(&request.file),
             args: request.args.clone(),
             cwd: PathBuf::from(&request.cwd),
             env,
+            markers,
             log: request.log.as_ref().map(PathBuf::from),
             verbatim: request.verbatim,
             job_name: format!("Local\\rbx-forge-{}-{serial}", self.session),
         };
         WorkerTree::spawn(&spec, &self.inherit)
     }
+
+    fn sweep_orphans(&mut self) {
+        match worker::sweep_orphans(reaper::CONFIRM_BOUND) {
+            Ok(survivors) if survivors.is_empty() => {}
+            Ok(survivors) => eprintln!("forge-reaper: orphans outlived the sweep: {survivors:?}"),
+            Err(err) => eprintln!("forge-reaper: sweep orphans: {err}"),
+        }
+    }
+}
+
+/// POSIX: turn `SIGTERM` into the host-gone input, so a `SIGTERM` (on
+/// Linux also the parent-death signal) stops every tree before the reaper
+/// exits. `SIGTERM` is blocked in this thread before any other thread
+/// starts, so every thread inherits the block and only the waiting thread
+/// takes it. Workers unblock it before `exec`.
+#[cfg(unix)]
+fn watch_sigterm(inputs: mpsc::Sender<Input>) {
+    // SAFETY: all-zero is a valid `sigset_t` for `sigemptyset` to fill.
+    let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
+    // SAFETY: a valid local set; plain calls.
+    unsafe {
+        libc::sigemptyset(&raw mut set);
+        libc::sigaddset(&raw mut set, libc::SIGTERM);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &raw const set, std::ptr::null_mut());
+    }
+    thread::spawn(move || {
+        loop {
+            let mut signal = 0;
+            // SAFETY: a valid set and output.
+            if unsafe { libc::sigwait(&raw const set, &raw mut signal) } == 0
+                && signal == libc::SIGTERM
+                && inputs.send(Input::StdinClosed).is_err()
+            {
+                return;
+            }
+        }
+    });
 }
 
 /// Whether a variable is a marker. Windows names ignore case.
@@ -136,6 +179,13 @@ fn serve(session: &str, lease: &Path) -> ExitCode {
     };
 
     let (sender, receiver) = mpsc::channel();
+    // Before the first thread starts: see `watch_sigterm`.
+    #[cfg(unix)]
+    watch_sigterm(sender.clone());
+    if let Err(err) = worker::become_owner() {
+        eprintln!("forge-reaper: take ownership of descendants: {err}");
+        return ExitCode::FAILURE;
+    }
     let stdin_sender = sender.clone();
     thread::spawn(move || {
         for line in io::stdin().lock().lines() {
