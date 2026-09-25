@@ -4,13 +4,17 @@ version: "0.2"
 language: en
 
 words:
+  - FILETIME
   - arktype
   - catchable
   - codegen
   - darklua
   - defu
   - forgerc
+  - glibc
+  - libc
   - napi
+  - pidfd
   - pids
   - rbxl
   - rbxlx

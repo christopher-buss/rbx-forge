@@ -1,3 +1,4 @@
+import type { NativeLoader } from "../native/addon.ts";
 import type { ChildProcessRunner } from "./child-process.ts";
 import type { Clock } from "./clock.ts";
 import type { ConfigLoader } from "./config-loader.ts";
@@ -25,5 +26,7 @@ export interface Seams {
 	clock: Clock;
 	configLoader: ConfigLoader;
 	fileSystem: FileSystem;
+	/** The `@rbx-forge/native` addon, loaded on first use. */
+	native: NativeLoader;
 	prompter: Prompter;
 }

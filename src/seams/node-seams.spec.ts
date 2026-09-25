@@ -2,11 +2,16 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 
+import { catchForgeError } from "../../test/helpers/errors.ts";
 import { makeTemporaryDirectory } from "../../test/helpers/temporary-directory.ts";
 import { createNodeSeams } from "./node-seams.ts";
 
-function makeSeams(): ReturnType<typeof createNodeSeams> {
-	return createNodeSeams({ input: new PassThrough(), output: new PassThrough() });
+function makeSeams(nativeDirectory?: string): ReturnType<typeof createNodeSeams> {
+	return createNodeSeams({
+		input: new PassThrough(),
+		nativeDirectory,
+		output: new PassThrough(),
+	});
 }
 
 describe(createNodeSeams, () => {
@@ -40,6 +45,19 @@ describe(createNodeSeams, () => {
 		expect(makeSeams().childProcess.spawn.name).toBe("spawn");
 	});
 
+	it("should load the native addon for this host from the given directory", () => {
+		expect.assertions(2);
+
+		// An empty directory: the loader looks there and finds no build.
+		const directory = makeTemporaryDirectory();
+		const error = catchForgeError(makeSeams(directory).native);
+
+		expect(error.code).toBe("native_missing");
+		expect(error.message).toStartWith(
+			`Could not load ${path.join(directory, "forge-native.")}`,
+		);
+	});
+
 	it("should tell the time", () => {
 		expect.assertions(1);
 
@@ -50,7 +68,11 @@ describe(createNodeSeams, () => {
 		expect.assertions(1);
 
 		const input = new PassThrough();
-		const { prompter } = createNodeSeams({ input, output: new PassThrough() });
+		const { prompter } = createNodeSeams({
+			input,
+			nativeDirectory: undefined,
+			output: new PassThrough(),
+		});
 		const answer = prompter.confirm("Go?", false);
 		setImmediate(() => {
 			input.write("y\n");

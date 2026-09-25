@@ -70,6 +70,7 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 		},
 		configLoader: vi.fn<ConfigLoader>(unreachable("config loader")),
 		fileSystem: createMemoryFileSystem().fileSystem,
+		native: unreachable("native addon"),
 		prompter: {
 			choose: vi.fn<Prompter["choose"]>(unreachable("prompter")),
 			confirm: vi.fn<Prompter["confirm"]>(unreachable("prompter")),
