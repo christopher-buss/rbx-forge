@@ -13,6 +13,10 @@
  *   SIGINT, SIGTERM, SIGHUP, and SIGBREAK.
  * - `FIXTURE_EXIT_CODE`: exit code of a one-shot run (default 0).
  * - `FIXTURE_HANG=1`: a hook stays alive instead of exiting.
+ * - `FIXTURE_ROJO_NO_SYNCBACK=1`: rojo has no `syncback` command.
+ * - `FIXTURE_ROJO_ERROR`: `rojo syncback` prints this and exits with code 1.
+ * - `FIXTURE_SOURCEMAP`: what `rojo sourcemap --output <file>` writes; no
+ *   file when unset.
  *
  * Markers (`RBX_FORGE_SESSION`, `RBX_FORGE_WORKER`) are recorded as seen and
  * inherited by every grandchild unchanged.
@@ -85,6 +89,28 @@ function exitOnce(): void {
 	process.exitCode = Number(env["FIXTURE_EXIT_CODE"] ?? "0");
 }
 
+function runSyncback(): void {
+	if (env["FIXTURE_ROJO_NO_SYNCBACK"] === "1") {
+		process.stderr.write("error: unrecognized subcommand 'syncback'\n");
+		process.exitCode = 2;
+		return;
+	}
+
+	if (ARGS.includes("--help")) {
+		process.stdout.write("Usage: rojo syncback [PROJECT] --input <INPUT>\n");
+		return;
+	}
+
+	const error = env["FIXTURE_ROJO_ERROR"];
+	if (error !== undefined) {
+		process.stderr.write(`${error}\n`);
+		process.exitCode = 1;
+		return;
+	}
+
+	exitOnce();
+}
+
 function runRojo(): void {
 	const [command] = ARGS;
 	if (command === "--version") {
@@ -98,10 +124,20 @@ function runRojo(): void {
 		return;
 	}
 
+	if (command === "syncback") {
+		runSyncback();
+		return;
+	}
+
 	const outputIndex = ARGS.findIndex((argument) => argument === "--output" || argument === "-o");
 	const output = outputIndex === -1 ? undefined : ARGS[outputIndex + 1];
 	if (command === "build" && output !== undefined) {
 		writeFileSync(output, "fake place\n");
+	}
+
+	const sourcemap = env["FIXTURE_SOURCEMAP"];
+	if (command === "sourcemap" && output !== undefined && sourcemap !== undefined) {
+		writeFileSync(output, sourcemap);
 	}
 
 	exitOnce();
