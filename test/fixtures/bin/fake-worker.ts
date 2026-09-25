@@ -15,6 +15,8 @@
  * - `FIXTURE_HANG=1`: a hook stays alive instead of exiting.
  * - `FIXTURE_ROJO_NO_SYNCBACK=1`: rojo has no `syncback` command.
  * - `FIXTURE_ROJO_ERROR`: `rojo syncback` prints this and exits with code 1.
+ * - `FIXTURE_SOURCEMAP`: what `rojo sourcemap --output <file>` writes; no
+ *   file when unset.
  *
  * Markers (`RBX_FORGE_SESSION`, `RBX_FORGE_WORKER`) are recorded as seen and
  * inherited by every grandchild unchanged.
@@ -131,6 +133,11 @@ function runRojo(): void {
 	const output = outputIndex === -1 ? undefined : ARGS[outputIndex + 1];
 	if (command === "build" && output !== undefined) {
 		writeFileSync(output, "fake place\n");
+	}
+
+	const sourcemap = env["FIXTURE_SOURCEMAP"];
+	if (command === "sourcemap" && output !== undefined && sourcemap !== undefined) {
+		writeFileSync(output, sourcemap);
 	}
 
 	exitOnce();

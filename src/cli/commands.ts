@@ -4,6 +4,7 @@ import type { CommandRun } from "../commands/context.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
 import { runStopAsync } from "../commands/stop.ts";
 import { runSyncbackCommandAsync, SYNCBACK_FLAGS } from "../commands/syncback.ts";
+import { runTypegenCommandAsync, TYPEGEN_FLAGS } from "../commands/typegen.ts";
 import type { FlagDefinition } from "./flags.ts";
 
 /** One `forge <command>`: its flags, help line, and what it runs. */
@@ -48,5 +49,11 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		flags: SYNCBACK_FLAGS,
 		run: runSyncbackCommandAsync,
 		summary: "Sync the place file back into the project once (needs the Rojo syncback fork).",
+	},
+	{
+		name: "typegen",
+		flags: TYPEGEN_FLAGS,
+		run: runTypegenCommandAsync,
+		summary: "Write TypeScript types for the Rojo project's services from its sourcemap.",
 	},
 ];
