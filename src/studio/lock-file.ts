@@ -28,7 +28,8 @@ const STUDIO_EXECUTABLES: ReadonlySet<string> = new Set(["robloxstudio", "roblox
 /** A PID: digits only, no sign, no leading zero, below 2^32. */
 const PID = /^[1-9]\d{0,9}$/;
 const MAX_PID = 0xff_ff_ff_ff;
-const LINE_BREAK = /\r?\n/;
+/** The first line break and everything after it. */
+const AFTER_FIRST_LINE = /\r?\n.*/s;
 const EXE_EXTENSION = /\.exe$/i;
 
 /**
@@ -49,7 +50,7 @@ export function studioLockPath(placePath: string): string {
  *   PID.
  */
 export function parseStudioLock(text: string): StudioLock | undefined {
-	const [first = ""] = text.split(LINE_BREAK);
+	const first = text.replace(AFTER_FIRST_LINE, "");
 	const pid = Number(first);
 	return PID.test(first) && pid <= MAX_PID ? { pid } : undefined;
 }

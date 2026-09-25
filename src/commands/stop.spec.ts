@@ -201,7 +201,7 @@ describe(runStopAsync, () => {
 	});
 
 	it("should fail with identity_mismatch when the OS will not let forge check the process", async () => {
-		expect.assertions(3);
+		expect.assertions(4);
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
@@ -219,6 +219,7 @@ describe(runStopAsync, () => {
 		expect(error.message).toBe(
 			`Could not verify PID ${STUDIO_PID}: Access is denied. Nothing was killed.`,
 		);
+		expect(error.cause).toStrictEqual(new Error("Access is denied."));
 	});
 
 	it("should fail with process_failed when Studio does not exit in time", async () => {

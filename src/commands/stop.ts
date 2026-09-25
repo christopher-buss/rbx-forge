@@ -65,7 +65,7 @@ export async function runStopAsync(
 
 	killStudio(check.pinned);
 	// A killed Studio cannot remove its own lock file.
-	fileSystem.rmSync(lockPath, { force: true });
+	fileSystem.rmSync(lockPath);
 	return {
 		data: { pid, place, stopped: true },
 		summary: `Stopped Roblox Studio (PID ${pid}) for ${place}.`,

@@ -204,7 +204,7 @@ describe(createNativeLoader, () => {
 	});
 
 	it("should fail with native_missing when the module is not the addon", () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const load = makeLoader({ requireModule: () => ({ nativeVersion: () => "0.0.0" }) });
 		const error = catchForgeError(load);
@@ -213,5 +213,6 @@ describe(createNativeLoader, () => {
 		expect(error.message).toBe(
 			"@rbx-forge/native-win32-x64-msvc is not the rbx-forge native addon.",
 		);
+		expect(error.hint).toStartWith("Reinstall rbx-forge");
 	});
 });
