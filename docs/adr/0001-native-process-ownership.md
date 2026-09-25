@@ -176,7 +176,10 @@ both):
   because pnpm hard-links package files from its shared store.
 - **Development and tests.** The loader takes an explicit directory through its
   seam. Tests and local runs point it at `reaper/target` output.
-- **Targets.** The eight targets in `package.json#napi` stay.
+- **Targets.** The eight targets in `package.json#napi` stay. CI loads the addon
+  on each: musl targets build in `rust:alpine` (a glibc host links the glibc
+  loader into the addon) and load in `node:alpine`; `x86_64-apple-darwin` loads
+  on the Intel runner `macos-15-intel`.
 
 ## Consequences
 
