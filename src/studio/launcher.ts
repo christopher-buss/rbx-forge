@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 
 import type { Invocation } from "../process/command-line.ts";
-import { readVariable } from "../process/environment.ts";
+import { readVariable, withVariables } from "../process/environment.ts";
 import type { ChildProcessBackend } from "../process/process-runner.ts";
 import type { Environment } from "../seams/seams.ts";
 
@@ -38,30 +38,45 @@ type LauncherEnd =
 	| { type: "waiting" };
 
 /**
+ * The Windows shell reads the place from this variable: cmd.exe expands
+ * `%NAME%` in a command line even inside quotes, but never expands the
+ * text a variable expanded to.
+ */
+export const PLACE_VARIABLE = "RBX_FORGE_PLACE";
+
+/** The launcher to spawn, with the environment it runs with. */
+export interface StudioLaunchInvocation extends Invocation {
+	env: Environment;
+}
+
+/**
  * The platform launcher that opens a place with its registered app: `start`
- * in the Windows shell, `open` on macOS, `xdg-open` elsewhere. The Windows
- * place is quoted, and `start` gets an empty title first, so a path with
- * spaces is not read as the window title.
+ * in the Windows shell, `open` on macOS, `xdg-open` elsewhere. On Windows the
+ * place goes through {@link PLACE_VARIABLE}, so a `%` in its path is never
+ * expanded; it is quoted, and `start` gets an empty title first, so a path
+ * with spaces is not read as the window title.
  *
  * @param place - The absolute path of the place file.
  * @param platform - The OS.
- * @param environment - Holds `ComSpec`, the Windows shell.
- * @returns The executable and arguments to spawn.
+ * @param environment - The launcher's environment; holds `ComSpec`, the
+ *   Windows shell.
+ * @returns The executable, arguments, and environment to spawn.
  */
 export function studioLaunchInvocation(
 	place: string,
 	platform: NodeJS.Platform,
 	environment: Environment,
-): Invocation {
+): StudioLaunchInvocation {
 	if (platform === "win32") {
 		return {
-			args: ["/d", "/s", "/c", `"start "" "${place}""`],
+			args: ["/d", "/s", "/c", `"start "" "%${PLACE_VARIABLE}%""`],
+			env: withVariables(environment, { [PLACE_VARIABLE]: place }, "win32"),
 			file: readVariable(environment, "ComSpec", "win32") ?? "cmd.exe",
 			verbatimArguments: true,
 		};
 	}
 
-	return { args: [place], file: platform === "darwin" ? "open" : "xdg-open" };
+	return { args: [place], env: environment, file: platform === "darwin" ? "open" : "xdg-open" };
 }
 
 /**
@@ -111,7 +126,7 @@ async function launchAsync(
 	const child = childProcess.spawn(file, [...invocation.args], {
 		cwd,
 		detached: true,
-		env,
+		env: invocation.env,
 		stdio: "ignore",
 		windowsHide: true,
 		windowsVerbatimArguments: invocation.verbatimArguments === true,

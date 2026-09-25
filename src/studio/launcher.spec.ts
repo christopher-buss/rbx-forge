@@ -8,7 +8,12 @@ import { createTestSeams } from "../../test/helpers/seams.ts";
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Host } from "../seams/host.ts";
 import type { StudioLaunch, StudioLauncher } from "./launcher.ts";
-import { createStudioLauncher, LAUNCHER_WAIT_MS, studioLaunchInvocation } from "./launcher.ts";
+import {
+	createStudioLauncher,
+	LAUNCHER_WAIT_MS,
+	PLACE_VARIABLE,
+	studioLaunchInvocation,
+} from "./launcher.ts";
 
 const WINDOWS_PLACE = "C:\\My Games\\game.rbxl";
 const POSIX_PLACE = "/home/me/My Games/game.rbxl";
@@ -59,10 +64,21 @@ describe(studioLaunchInvocation, () => {
 		expect(
 			studioLaunchInvocation(WINDOWS_PLACE, "win32", { ComSpec: "C:\\Windows\\cmd.exe" }),
 		).toStrictEqual({
-			args: ["/d", "/s", "/c", `"start "" "${WINDOWS_PLACE}""`],
+			args: ["/d", "/s", "/c", `"start "" "%${PLACE_VARIABLE}%""`],
+			env: { ComSpec: "C:\\Windows\\cmd.exe", [PLACE_VARIABLE]: WINDOWS_PLACE },
 			file: "C:\\Windows\\cmd.exe",
 			verbatimArguments: true,
 		});
+	});
+
+	it("should pass a Windows place with % in its path only through the variable", () => {
+		expect.assertions(2);
+
+		const place = String.raw`C:\Users\me\%TEMP% 100%\game.rbxl`;
+		const { args, env } = studioLaunchInvocation(place, "win32", { rbx_forge_place: "old" });
+
+		expect(args.join(" ")).not.toContain("TEMP");
+		expect(env).toStrictEqual({ rbx_forge_place: place });
 	});
 
 	it("should fall back to cmd.exe when ComSpec is not set", () => {
@@ -74,8 +90,9 @@ describe(studioLaunchInvocation, () => {
 	it("should open the place with open on macOS", () => {
 		expect.assertions(1);
 
-		expect(studioLaunchInvocation(POSIX_PLACE, "darwin", {})).toStrictEqual({
+		expect(studioLaunchInvocation(POSIX_PLACE, "darwin", { HOME: "/home/me" })).toStrictEqual({
 			args: [POSIX_PLACE],
+			env: { HOME: "/home/me" },
 			file: "open",
 		});
 	});
@@ -85,6 +102,7 @@ describe(studioLaunchInvocation, () => {
 
 		expect(studioLaunchInvocation(POSIX_PLACE, "linux", {})).toStrictEqual({
 			args: [POSIX_PLACE],
+			env: {},
 			file: "xdg-open",
 		});
 	});
@@ -114,7 +132,7 @@ describe(createStudioLauncher, () => {
 		]);
 	});
 
-	it("should pass the Windows command line verbatim", async () => {
+	it("should pass the Windows command line verbatim, with the place in its environment", async () => {
 		expect.assertions(1);
 
 		const spawner = spawnerExiting(0);
@@ -123,6 +141,7 @@ describe(createStudioLauncher, () => {
 
 		expect(spawner.calls[0]!.options).toMatchObject({
 			detached: true,
+			env: { PATH: "/bin", [PLACE_VARIABLE]: WINDOWS_PLACE },
 			windowsVerbatimArguments: true,
 		});
 	});
