@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { describe, expect, it } from "vitest";
@@ -32,15 +33,19 @@ const NATIVE = nativeEnvironment(NATIVE_DIRECTORY);
  * Make a project whose place has a Studio lock file.
  *
  * @param pid - The PID the lock file names.
+ * @param host - The computer the lock file names.
  * @returns The project, its place, and the lock file.
  */
-function makeLockedProject(pid: number): { lockPath: string; place: string; project: string } {
+function makeLockedProject(
+	pid: number,
+	host = os.hostname(),
+): { lockPath: string; place: string; project: string } {
 	const project = makeProject({ "rbx-forge.config.json": '{ "projectType": "luau" }' });
 	const place = path.join(project, "game.rbxl");
 	const lockPath = `${place}.lock`;
 	writeFileSync(
 		lockPath,
-		`${pid}\nRobloxStudioBeta\nHOST\n00000000-0000-0000-0000-000000000000\n\n`,
+		`${pid}\nRobloxStudioBeta\n${host}\n00000000-0000-0000-0000-000000000000\n\n`,
 	);
 	return { lockPath, place, project };
 }
@@ -73,6 +78,35 @@ describe("forge stop", () => {
 		expect(parseResult(stdout).error!.code).toBe("identity_mismatch");
 		expect(isProcessAlive(pid)).toBeTrue();
 		expect(readFileSync(lockPath, "utf8")).toBe(lockFile);
+	});
+
+	it("should kill nothing when the lock file was written on another computer", async () => {
+		expect.assertions(4);
+
+		const pid = pidOf(spawnFakeStudio());
+		const { lockPath, project } = makeLockedProject(pid, "ANOTHER-COMPUTER");
+		const { status, stdout } = await runBinAsync(["stop", "--json"], project, NATIVE);
+
+		expect(status).toBe(EXIT_IDENTITY_UNVERIFIED);
+		expect(parseResult(stdout).error!.code).toBe("identity_mismatch");
+		expect(isProcessAlive(pid)).toBeTrue();
+		expect(existsSync(lockPath)).toBeTrue();
+	});
+
+	it("should kill nothing when a Studio that started after the lock file reused its PID", async () => {
+		expect.assertions(4);
+
+		const pid = pidOf(spawnFakeStudio());
+		const { lockPath, project } = makeLockedProject(pid);
+		// The Studio that wrote the lock file an hour ago is gone.
+		const anHourAgo = new Date(Date.now() - 3_600_000);
+		utimesSync(lockPath, anHourAgo, anHourAgo);
+		const { status, stdout } = await runBinAsync(["stop", "--json"], project, NATIVE);
+
+		expect(status).toBe(EXIT_IDENTITY_UNVERIFIED);
+		expect(parseResult(stdout).error!.message).toContain("started after the lock file");
+		expect(isProcessAlive(pid)).toBeTrue();
+		expect(existsSync(lockPath)).toBeTrue();
 	});
 
 	it("should report that Studio is not running when the lock names an exited PID", async () => {

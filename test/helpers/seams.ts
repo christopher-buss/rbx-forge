@@ -22,11 +22,16 @@ import type { Seams } from "../../src/seams/seams.ts";
 /** The project directory of every in-memory test project. */
 export const PROJECT: string = path.resolve("/project");
 
+/** The computer name of the test host. */
+export const TEST_HOSTNAME = "forge-test";
+
 /** An in-memory volume and the file system seam over it. */
 export interface MemoryFileSystem {
 	/** Every file in the project, by path relative to {@link PROJECT}. */
 	files: () => Record<string, null | string>;
 	fileSystem: FileSystem;
+	/** Set a file's modification time, in milliseconds since the Unix epoch. */
+	setModifiedTime: (file: string, mtimeMs: number) => void;
 }
 
 /** A reporter that records every call. */
@@ -52,6 +57,9 @@ export function createMemoryFileSystem(files: Record<string, string> = {}): Memo
 		// memfs implements the members the seam picks; its typings lag
 		// `@types/node` under `exactOptionalPropertyTypes`.
 		fileSystem: fromAny(fs),
+		setModifiedTime: (file, mtimeMs) => {
+			vol.utimesSync(path.resolve(PROJECT, file), mtimeMs / 1000, mtimeMs / 1000);
+		},
 	};
 }
 
@@ -73,7 +81,9 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 		configLoader: vi.fn<ConfigLoader>(unreachable("config loader")),
 		fileSystem: createMemoryFileSystem().fileSystem,
 		host: {
+			bootTimeMs: () => 0,
 			execPath: "/node",
+			hostname: TEST_HOSTNAME,
 			kill: vi.fn<Host["kill"]>(unreachable("host kill")),
 			platform: "linux",
 		},

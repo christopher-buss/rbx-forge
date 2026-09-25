@@ -10,6 +10,8 @@ export interface FakeProcess {
 	ignoresKill?: boolean;
 	/** `pinProcess` throws this message (for example, access denied). */
 	pinError?: string;
+	/** Its start time as the addon reports it; the PID when not set. */
+	startTime?: string;
 	/** The timeout of every `waitForExit` call on its pins. */
 	waits?: Array<number>;
 }
@@ -43,13 +45,20 @@ export function createFakeNative(processes: Record<number, FakeProcess> = {}): F
 
 				return entry?.alive === true ? pinEntry(pid, entry) : null;
 			},
-			processStartTime: (pid) => (table.get(pid)?.alive === true ? String(pid) : null),
+			processStartTime: (pid) => {
+				const entry = table.get(pid);
+				return entry?.alive === true ? startTimeOf(pid, entry) : null;
+			},
 			tryLockFile: () => {
 				throw new Error("the fake addon has no file locks");
 			},
 		},
 		processes: table,
 	};
+}
+
+function startTimeOf(pid: number, entry: FakeProcess): string {
+	return entry.startTime ?? String(pid);
 }
 
 function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
@@ -66,7 +75,7 @@ function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 			return wasAlive;
 		},
 		pid,
-		startTime: String(pid),
+		startTime: startTimeOf(pid, entry),
 		waitForExit: (timeoutMs) => {
 			entry.waits?.push(timeoutMs);
 			return !entry.alive;

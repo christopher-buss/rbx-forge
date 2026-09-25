@@ -7,6 +7,7 @@ import { createFailingSpawner, createFakeSpawner } from "../../test/helpers/fake
 import type { FakeChild, SpawnBehavior } from "../../test/helpers/fake-process.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { ManualClock } from "../../test/helpers/manual-clock.ts";
+import { createTestSeams } from "../../test/helpers/seams.ts";
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Host } from "../seams/host.ts";
 import type { ProcessRunner, ProcessSpec } from "./process-runner.ts";
@@ -43,7 +44,7 @@ function makeRunner({
 		run: createChildProcessRunner({
 			childProcess,
 			clock: clock.clock,
-			host: { execPath: "/node", kill, platform },
+			host: { ...createTestSeams().host, kill, platform },
 		}),
 	};
 }
