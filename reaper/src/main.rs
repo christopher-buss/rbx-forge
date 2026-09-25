@@ -31,7 +31,7 @@ use std::thread;
 use os::lock::{FileLock, LockMode};
 use os::session;
 use os::worker::{self, Inherit, Spec, WorkerTree};
-use protocol::SpawnRequest;
+use protocol::{Request, SpawnRequest};
 use reaper::{Input, Platform, Reaper, RecordedWorker, Tree};
 
 /// Exit code for a command line the reaper cannot read.
@@ -187,9 +187,9 @@ fn watch_sigterm(inputs: mpsc::Sender<Input>) {
 /// until the test deletes it. The points:
 ///
 /// - `reaper-lease`: before the reaper takes its lease.
-/// - `reaper-stop`: when the host is gone (stdin EOF, `SIGTERM`), before
-///   the reaper stops anything: a hung reaper that keeps its lease and every
-///   worker.
+/// - `reaper-stop`: at `terminate`, and when the host is gone (stdin EOF,
+///   `SIGTERM`), before the reaper stops anything: a hung reaper that keeps
+///   its lease and every worker. It still reaps workers that exit.
 fn pause(point: &str) {
     let Some(directory) = std::env::var_os("RBX_FORGE_TEST_PAUSE_DIR") else {
         return;
@@ -269,6 +269,12 @@ fn serve(session: &str, lease: &Path, record: &Path) -> ExitCode {
     thread::spawn(move || {
         for line in io::stdin().lock().lines() {
             let Ok(line) = line else { break };
+            if matches!(
+                protocol::parse_request(&line),
+                Ok(Request::Terminate { .. })
+            ) {
+                pause("reaper-stop");
+            }
             if stdin_sender.send(Input::Line(line)).is_err() {
                 return;
             }

@@ -81,8 +81,11 @@ struct Record {
 
 #[derive(Debug, Deserialize)]
 #[cfg_attr(not(windows), expect(dead_code, reason = "only Windows jobs use them"))]
+#[serde(rename_all = "camelCase")]
 struct RecordedWorker {
     pid: u32,
+    #[serde(default)]
+    start_time: String,
     #[serde(default)]
     serial: Option<u64>,
 }
@@ -456,6 +459,15 @@ mod sys {
         let mut members = Vec::new();
         for (_, job) in jobs(target, &record) {
             members.extend(job?.pids()?.into_iter().map(|pid| member(pid, false)));
+        }
+        // A leader still dying once its job closed (the reaper died): its
+        // job's name is gone, but the record names it.
+        for worker in &record.workers {
+            let alive = process::start_time(worker.pid).ok().flatten();
+            let listed = members.iter().any(|member| member.pid == worker.pid);
+            if !listed && alive.is_some_and(|start| start.to_string() == worker.start_time) {
+                members.push(member(worker.pid, false));
+            }
         }
         if let Some(pin) = reaper(&record)? {
             members.push(member(pin.pid(), true));
