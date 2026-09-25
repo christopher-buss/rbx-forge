@@ -17,7 +17,7 @@ const STOPPED: WorkerReport = { exitCode: null, forced: false, incomplete: false
 export interface FakeReaper {
 	/**
 	 * What the code under test did, in order: `go`, `spawn <id>`, `terminate
-	 * <ms>`.
+	 * <ms>` (`terminate <ms> hurried` after a forced shutdown).
 	 */
 	calls: Array<string>;
 	/** End a spawned worker's tree with this report. */
@@ -190,9 +190,14 @@ async function spawnAsync(state: FakeReaperState, worker: WorkerSpec): Promise<S
  *
  * @param state - The fake's record.
  * @param graceMs - The grace time asked for.
+ * @param hurry - A forced shutdown; recorded as `hurried` once aborted.
  */
-async function terminateAsync(state: FakeReaperState, graceMs: number): Promise<void> {
-	state.calls.push(`terminate ${graceMs}`);
+async function terminateAsync(
+	state: FakeReaperState,
+	graceMs: number,
+	hurry: AbortSignal | undefined,
+): Promise<void> {
+	state.calls.push(`terminate ${graceMs}${hurry?.aborted === true ? " hurried" : ""}`);
 	state.isTerminated = true;
 	await nextTickAsync();
 	for (const [id, resolve] of state.exits) {
@@ -213,8 +218,8 @@ function makeReaper(state: FakeReaperState): Reaper {
 		stop: (id, graceMs) => {
 			state.calls.push(`stop ${id} ${graceMs}`);
 		},
-		terminateAsync: async (graceMs) => {
-			await terminateAsync(state, graceMs);
+		terminateAsync: async (graceMs, hurry) => {
+			await terminateAsync(state, graceMs, hurry);
 			return end;
 		},
 	};

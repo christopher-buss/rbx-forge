@@ -1343,6 +1343,19 @@ describe("forge up control channel", () => {
 		});
 	});
 
+	it("should end the workers' grace on a forced shutdown", async () => {
+		expect.assertions(1);
+
+		const run = startCommand();
+		await flushAsync();
+		await callSessionAsync(run.ipc, CONTROL_TARGET, "shutdown", {
+			params: { force: true, sessionId: "session-1" },
+		});
+		await run.result;
+
+		expect(run.fake.calls.at(-1)).toBe("terminate 3000 hurried");
+	});
+
 	it("should call onReady once, when the session is first ready", async () => {
 		expect.assertions(2);
 

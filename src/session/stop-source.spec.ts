@@ -66,4 +66,27 @@ describe(createStopSource, () => {
 
 		expect(listener).not.toHaveBeenCalled();
 	});
+
+	it("should hurry on a forced shutdown, also after an earlier request", () => {
+		expect.assertions(3);
+
+		const stop = createStopSource();
+		stop.request(SIGINT);
+
+		expect(stop.hurry.aborted).toBeFalse();
+
+		stop.request({ force: true, type: "shutdown" });
+
+		expect(stop.hurry.aborted).toBeTrue();
+		expect(stop.reason()).toStrictEqual(SIGINT);
+	});
+
+	it("should not hurry on a shutdown that is not forced", () => {
+		expect.assertions(1);
+
+		const stop = createStopSource();
+		stop.request({ type: "shutdown" });
+
+		expect(stop.hurry.aborted).toBeFalse();
+	});
 });

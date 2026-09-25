@@ -246,6 +246,7 @@ async function runSessionOnceAsync(
 			{ pause, reaper: seams.reaper },
 			{
 				graceMs: config.gracefulTimeoutMs,
+				hurry: stop.hurry,
 				leasePath: files.lease,
 				onStop: stop.onStop,
 				recordPath: files.record,

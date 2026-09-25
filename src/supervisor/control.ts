@@ -17,7 +17,8 @@ export interface ControlTarget {
  * - `shutdown`: stop the session through its single shutdown path. Answers
  *   at once; the caller waits for the session to be gone. With a
  *   `sessionId` param, only that session stops: another one answers
- *   `session_replaced`.
+ *   `session_replaced`. With `force: true`, the workers get no more grace,
+ *   also when the session is already stopping (`forge down`, step 2).
  *
  * `sync` is not served yet; the server answers it as unavailable.
  *
@@ -36,7 +37,10 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 				);
 			}
 
-			target.stop.request({ type: "shutdown" });
+			const isForced = parameters["force"] === true;
+			target.stop.request(
+				isForced ? { force: true, type: "shutdown" } : { type: "shutdown" },
+			);
 			return { accepted: true, sessionId: target.sessionId };
 		},
 		status: () => ({ ...target.status.snapshot() }),

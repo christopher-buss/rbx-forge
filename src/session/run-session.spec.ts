@@ -129,6 +129,27 @@ describe(runSessionAsync, () => {
 		await expect(outcome).resolves.toMatchObject({ reason: { type: "studio_closed" } });
 	});
 
+	it("should let a forced shutdown hurry the reaper's end", async () => {
+		expect.assertions(1);
+
+		const fake = createFakeReaper({ end: END });
+		const signals = createFakeSignals();
+		const hurry = new AbortController();
+		const outcome = runSessionAsync(
+			{ pause: neverPauseAsync, reaper: fake.launch },
+			{ ...OPTIONS, hurry: hurry.signal, onStop: signals.onStop },
+			async (scope) => {
+				await startServicesAsync(scope, ["rojo"]);
+			},
+		);
+		await flushAsync();
+		hurry.abort();
+		signals.fire("SIGTERM");
+		await outcome;
+
+		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "terminate 250 hurried"]);
+	});
+
 	it("should never admit the reaper or run the body after a stop signal during its launch", async () => {
 		expect.assertions(3);
 

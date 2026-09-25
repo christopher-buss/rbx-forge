@@ -52,6 +52,27 @@ describe(controlHandlers, () => {
 		expect(request).toHaveBeenCalledWith({ type: "shutdown" });
 	});
 
+	it("should force the shutdown when asked with force", () => {
+		expect.assertions(2);
+
+		const { handlers, request } = makeTarget();
+
+		expect(handlers.shutdown!({ force: true, sessionId: "s1" })).toStrictEqual({
+			accepted: true,
+			sessionId: "s1",
+		});
+		expect(request).toHaveBeenCalledExactlyOnceWith({ force: true, type: "shutdown" });
+	});
+
+	it("should not force the shutdown for a force that is not true", () => {
+		expect.assertions(1);
+
+		const { handlers, request } = makeTarget();
+		void handlers.shutdown!({ force: "yes" });
+
+		expect(request).toHaveBeenCalledExactlyOnceWith({ type: "shutdown" });
+	});
+
 	it("should refuse to stop for another session's id", () => {
 		expect.assertions(2);
 

@@ -8,6 +8,7 @@ import type { NativeLoader, SessionTarget } from "../native/addon.ts";
 import { keepTail } from "../process/stream-tail.ts";
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Clock } from "../seams/clock.ts";
+import { settlesWithinAsync } from "../seams/clock.ts";
 import type { Host } from "../seams/host.ts";
 import type {
 	FinalReport,
@@ -93,8 +94,12 @@ export interface Reaper {
 	 * `graceMs`, and exits. When it does not exit within `graceMs` plus
 	 * {@link TERMINATE_MARGIN_MS}, the host closes its stdin; after one more
 	 * margin, it cleans up the session by force and kills a reaper left.
+	 *
+	 * When `hurry` aborts (a forced shutdown, `forge down`), the grace ends
+	 * at once: the reaper gets `terminate` without grace, and the steps
+	 * above follow one margin later.
 	 */
-	terminateAsync: (graceMs: number) => Promise<ReaperEnd>;
+	terminateAsync: (graceMs: number, hurry?: AbortSignal) => Promise<ReaperEnd>;
 }
 
 /** One session's reaper files and id: what a launch varies by. */
@@ -112,6 +117,9 @@ export const TERMINATE_MARGIN_MS = 5000;
 export const ORPHAN_WAIT_MS = 2000;
 /** The bound of one forced cleanup (spec #28: the forced-stop loop, 10 s). */
 export const FORCED_CLEANUP_MS = 10_000;
+
+/** A shutdown nothing hurries. */
+const NEVER = AbortSignal.any([]);
 
 type ReaperProcess = ChildProcessByStdio<Writable, Readable, Readable>;
 
@@ -384,43 +392,30 @@ function send(session: Session, request: ReaperRequest): void {
 }
 
 /**
- * Whether `promise` settles within `ms`.
- *
- * @param clock - Runs the timer.
- * @param promise - What to wait for; it never rejects.
- * @param ms - The limit.
- * @returns `true` when it settled first.
- */
-async function settlesWithinAsync(
-	clock: Clock,
-	promise: Promise<unknown>,
-	ms: number,
-): Promise<boolean> {
-	const abort = new AbortController();
-	// Once the abort fires the timer rejects, but the race has settled and
-	// ignores it.
-	const timer = clock.sleep(ms, abort.signal).then(() => false);
-	const hasSettled = await Promise.race([promise.then(() => true), timer]);
-	abort.abort();
-	return hasSettled;
-}
-
-/**
  * `terminate`, with the bounded escalation of {@link Reaper.terminateAsync}.
  *
  * @param session - The reaper's state.
  * @param ended - Resolves once the reaper has exited.
  * @param graceMs - The workers' graceful stop time.
+ * @param hurry - A forced shutdown: ends the grace at once.
  * @returns How the reaper ended.
  */
 async function terminateAsync(
 	session: Session,
 	ended: Promise<ReaperEnd>,
 	graceMs: number,
+	hurry: AbortSignal = NEVER,
 ): Promise<ReaperEnd> {
 	const { clock } = session.backend;
 	send(session, { graceMs, type: "terminate" });
-	if (await settlesWithinAsync(clock, ended, graceMs + TERMINATE_MARGIN_MS)) {
+	let isOnTime = await settlesWithinAsync(clock, ended, graceMs + TERMINATE_MARGIN_MS, hurry);
+	if (!isOnTime && hurry.aborted) {
+		// A second terminate moves every forced kill to now.
+		send(session, { graceMs: 0, type: "terminate" });
+		isOnTime = await settlesWithinAsync(clock, ended, TERMINATE_MARGIN_MS);
+	}
+
+	if (isOnTime) {
 		return ended;
 	}
 
@@ -465,6 +460,6 @@ function makeReaper(session: Session, ended: Promise<ReaperEnd>, pid: number): R
 		stop: (id, graceMs) => {
 			send(session, { id, graceMs, type: "stop" });
 		},
-		terminateAsync: async (graceMs) => terminateAsync(session, ended, graceMs),
+		terminateAsync: async (graceMs, hurry) => terminateAsync(session, ended, graceMs, hurry),
 	};
 }

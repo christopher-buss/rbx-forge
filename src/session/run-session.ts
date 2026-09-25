@@ -25,6 +25,8 @@ export interface SessionOutcome {
 export interface SessionOptions {
 	/** How long workers get to stop after the graceful signal. */
 	graceMs: number;
+	/** A forced shutdown: aborts to end the workers' grace at once. */
+	hurry?: AbortSignal | undefined;
 	/** The lease file, in the session's directory. */
 	leasePath: string;
 	/**
@@ -106,7 +108,7 @@ export async function runSessionAsync(
 		admit(seams.pause, state, reaper, body);
 
 		const reason = await state.ended;
-		const end = await reaper.terminateAsync(options.graceMs);
+		const end = await reaper.terminateAsync(options.graceMs, options.hurry);
 		await settleTasksAsync(state.tasks);
 		return { end, reason };
 	} finally {

@@ -287,6 +287,57 @@ describe("reaper end", () => {
 		expect(clock.pending()).toBe(0);
 	});
 
+	it("should kill every tree without grace at once when the shutdown is forced during the grace", async () => {
+		expect.assertions(2);
+
+		const { child, reaper, requests } = await launchedAsync();
+		const hurry = new AbortController();
+		void reaper.terminateAsync(60_000, hurry.signal);
+		await flushAsync();
+		hurry.abort();
+		await flushAsync();
+
+		expect(requests()).toStrictEqual([
+			{ graceMs: 60_000, type: "terminate" },
+			{ graceMs: 0, type: "terminate" },
+		]);
+		expect(child.stdin.writableEnded).toBeFalse();
+	});
+
+	it("should close stdin one margin after a forced shutdown when the reaper still runs", async () => {
+		expect.assertions(2);
+
+		const { child, clock, reaper } = await launchedAsync();
+		const hurry = new AbortController();
+		hurry.abort();
+		void reaper.terminateAsync(60_000, hurry.signal);
+		await flushAsync();
+		clock.advance(TERMINATE_MARGIN_MS - 1);
+		await flushAsync();
+
+		expect(child.stdin.writableEnded).toBeFalse();
+
+		clock.advance(1);
+		await flushAsync();
+
+		expect(child.stdin.writableEnded).toBeTrue();
+	});
+
+	it("should end without escalating when the reaper exits after a forced shutdown", async () => {
+		expect.assertions(1);
+
+		const { child, reaper, say } = await launchedAsync();
+		const hurry = new AbortController();
+		hurry.abort();
+		const ending = reaper.terminateAsync(60_000, hurry.signal);
+		await flushAsync();
+		say({ reports: [], type: "terminated" });
+		await flushAsync();
+		child.close(0);
+
+		await expect(ending).resolves.toStrictEqual({ reports: [], terminated: true });
+	});
+
 	it("should close stdin after the grace and margin, then clean up by force after one more margin", async () => {
 		expect.assertions(4);
 
