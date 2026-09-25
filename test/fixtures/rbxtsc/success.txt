@@ -1,0 +1,6 @@
+copy include files ( 4 ms )
+copy non-compiled files ( 1 ms )
+compiling as game..
+1/2 compile src\shared\module.ts ( 6 ms )
+2/2 compile src\shared\other.ts ( 1 ms )
+writing compiled files ( 0 ms )

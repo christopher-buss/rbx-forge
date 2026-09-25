@@ -1,0 +1,12 @@
+[96msrc/shared/module.ts[0m:[93m5[0m:[93m18[0m - [91merror[0m[90m TS roblox-ts: [0m`typeof` operator is not supported!
+Suggestion: Use `typeIs(value, type)` or `typeOf(value)` instead.
+
+[7m5[0m export const t = typeof x;
+[7m [0m [91m                 ~~~~~~~~[0m
+
+[96msrc/shared/module.ts[0m:[93m6[0m:[93m18[0m - [91merror[0m[90m TS roblox-ts: [0m`null` is not supported!
+Suggestion: Use `undefined` instead.
+
+[7m6[0m export const n = null;
+[7m [0m [91m                 ~~~~[0m
+
