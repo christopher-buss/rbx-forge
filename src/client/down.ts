@@ -11,9 +11,9 @@ import type { ForgeFiles, SessionFiles } from "../supervisor/session-files.ts";
 import { removeSession } from "../supervisor/session-files.ts";
 import type { KnownSession } from "./session.ts";
 
-/** How long `down` waits after its first shutdown request (spec #28). */
+/** How long `down` waits after its first shutdown request. */
 export const DOWN_TIMEOUT_MS = 15_000;
-/** How long `down` waits after a forced shutdown request (spec #28). */
+/** How long `down` waits after a forced shutdown request. */
 export const FORCED_SHUTDOWN_MS = 5000;
 /** How long `down --force` waits for the supervisor it killed. */
 export const KILL_WAIT_MS = 5000;
@@ -72,7 +72,7 @@ interface Target {
 }
 
 /**
- * Stop one session and prove it gone (spec #28, `down`). It acts on this
+ * Stop one session and prove it gone. It acts on this
  * session only: requests carry its id, pins its recorded supervisor, and
  * cleans up and deletes only its files. `stopped` needs both:
  *
@@ -288,7 +288,7 @@ async function stopSupervisorAsync(
 
 	// Kill only a supervisor of this project: pinned with its recorded start
 	// time, and holding the singleton lock. A live process with that PID and
-	// start time but no lock is not one (F6).
+	// start time but no lock is not one.
 	if (!isLockHeld(seams, target.forge)) {
 		throw unresponsive(target, true);
 	}

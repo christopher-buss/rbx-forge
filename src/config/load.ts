@@ -19,8 +19,8 @@ export interface ProjectConfig {
  * @param configLoader - Finds and evaluates the config file.
  * @param flags - Config values the flags set; they win over the file.
  * @returns The resolved config and the file's path.
- * @rejects {ForgeError} `config_not_found`, `config_load_failed`,
- *   `config_removed_key`, or `config_invalid`.
+ * @rejects {ForgeError} `config_not_found`, `config_load_failed`, or
+ *   `config_invalid`.
  */
 export async function loadProjectConfigAsync(
 	cwd: string,

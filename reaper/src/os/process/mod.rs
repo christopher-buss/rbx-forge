@@ -13,7 +13,7 @@
 //!
 //! macOS has no pidfd, so a pin there re-reads the start time before every
 //! call. A PID reused in the microseconds between that check and the call is
-//! an accepted limit (spec #28).
+//! an accepted limit.
 
 use std::io;
 use std::path::PathBuf;

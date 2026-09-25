@@ -30,13 +30,12 @@ const HOW: Readonly<Record<StoppedBy, string>> = {
 };
 
 /**
- * `forge down`: stop the project's session and prove it gone (spec #28,
- * `down`). It reports `stopped` only once the session's supervisor has
- * exited and none of its processes is left. It escalates from a shutdown
- * request to a forced one; with `--force`, it then kills the supervisor
- * through a pinned, start-time-verified handle and cleans up what is left
- * of the session. It only acts on the session `.forge/current` named when
- * it began.
+ * `forge down`: stop the project's session and prove it gone. It reports
+ * `stopped` only once the session's supervisor has exited and none of its
+ * processes is left. It escalates from a shutdown request to a forced one;
+ * with `--force`, it then kills the supervisor through a pinned,
+ * start-time-verified handle and cleans up what is left of the session. It
+ * only acts on the session `.forge/current` named when it began.
  *
  * @param context - The run: project root, seams, and reporter.
  * @param input - `--force` and `--timeout`.

@@ -19,7 +19,7 @@ const MISSING_HINT =
 	"Install Rojo (https://rojo.space), for example with rokit or mise, or set rojoAlias to its command.";
 
 const SYNCBACK_HINT =
-	"Install the UpliftGames Rojo fork (https://github.com/UpliftGames/rojo/releases), and set rojoAlias to its command if it is not rojo.";
+	"Install Rojo 7.7 or later (https://rojo.space), or set rojoAlias to its command.";
 
 /**
  * The arguments of `rojo build`.
@@ -72,7 +72,7 @@ export async function runRojoAsync(
 
 /**
  * The arguments of `rojo serve` on a fixed port. Rojo fails when the port is
- * busy; it never picks another (#27).
+ * busy; it never picks another.
  *
  * @param project - The Rojo project file.
  * @param port - The port to serve on.
@@ -119,8 +119,8 @@ export function rojoSyncbackArgs(project: string, input: string): RojoArgs {
 }
 
 /**
- * Check that the configured Rojo has a `syncback` command: only the
- * UpliftGames fork does. Asks for its help quietly, before any hook runs.
+ * Check that the configured Rojo has a `syncback` command (Rojo 7.7 or
+ * later). Asks for its help quietly, before any hook runs.
  *
  * @param context - The run: project root, seams.
  * @param config - Holds `rojoAlias`.
@@ -141,7 +141,7 @@ export async function requireSyncbackAsync(
 	if (!isSupported) {
 		throw new ForgeError(
 			"syncback_unsupported",
-			`Rojo ("${config.rojoAlias}") has no syncback command. Syncback needs the UpliftGames Rojo fork.`,
+			`Rojo ("${config.rojoAlias}") has no syncback command. Syncback needs Rojo 7.7 or later.`,
 			{ hint: SYNCBACK_HINT },
 		);
 	}

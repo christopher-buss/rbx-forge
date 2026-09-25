@@ -78,21 +78,6 @@ describe("forge config", () => {
 		]);
 	});
 
-	it("should exit 1 with config_removed_key for a removed key", async () => {
-		expect.assertions(2);
-
-		const project = makeProject({
-			"rbx-forge.config.json": JSON.stringify({ commandNames: {}, projectType: "rbxts" }),
-		});
-		const { status, stdout } = await runBinAsync(["config"], project);
-
-		expect(status).toBe(EXIT_FAILURE);
-		expect(parseResult(stdout)).toMatchObject({
-			error: { code: "config_removed_key" },
-			exitCode: EXIT_FAILURE,
-		});
-	});
-
 	it("should exit 1 with config_not_found in a project without a config file", async () => {
 		expect.assertions(2);
 

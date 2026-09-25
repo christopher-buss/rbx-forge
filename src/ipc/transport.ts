@@ -44,7 +44,7 @@ export interface NodeTransportBackend {
 	userId: number | undefined;
 }
 
-/** Owner-only: the socket's directory (spec #28). */
+/** Owner-only: the socket's directory. */
 const DIRECTORY_MODE = 0o700;
 /** Owner read and write: the socket. */
 const SOCKET_MODE = 0o600;

@@ -25,7 +25,6 @@ export type ForgeErrorCode =
 	| "config_invalid"
 	| "config_load_failed"
 	| "config_not_found"
-	| "config_removed_key"
 	| "declined"
 	| "detach_unsupported"
 	| "endpoint_in_use"
@@ -88,10 +87,6 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		text: "The config file could not be read or evaluated.",
 	},
 	config_not_found: { exitCode: EXIT_FAILURE, text: "No config file exists in the project." },
-	config_removed_key: {
-		exitCode: EXIT_FAILURE,
-		text: "The config file uses a key that was removed.",
-	},
 	declined: { exitCode: EXIT_FAILURE, text: "The user answered no to a confirmation." },
 	detach_unsupported: {
 		exitCode: EXIT_FAILURE,

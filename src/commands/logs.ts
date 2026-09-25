@@ -41,7 +41,7 @@ interface LogCursor {
 
 /**
  * `forge logs <name> [--follow]`: print a service's full log from
- * `.forge/logs` (spec #28: logs read files, not the session). With
+ * `.forge/logs` (logs read files, not the session). With
  * `--follow`, keep printing new lines until Ctrl+C; a rotated log is read
  * again from its start. Each line is one `log` event.
  *

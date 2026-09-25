@@ -25,7 +25,7 @@ const syncResult = type({
 
 /**
  * `forge sync`: run syncback with its hooks through the project's running
- * session (spec #28 story 20). The session runs it one at a time with its
+ * session. The session runs it one at a time with its
  * save watch: a sync asked during a run waits for it, then runs once more.
  *
  * @param context - The run: project root, seams, and reporter.

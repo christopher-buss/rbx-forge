@@ -1,6 +1,5 @@
 //! A whole session's processes: the evidence that ties a process to a
-//! session, the barrier's scan, and forced cleanup (spec #28, "Sessions,
-//! singleton, cleanup").
+//! session, the barrier's scan, and forced cleanup.
 //!
 //! A live process belongs to a session when:
 //!
@@ -22,7 +21,7 @@
 //! loop is bounded and reports its survivors.
 //!
 //! A POSIX descendant that both scrubs its environment and closes the lease
-//! leaves no evidence at all: an accepted limit (spec #28, scenario C9).
+//! leaves no evidence at all: an accepted limit.
 
 use std::io;
 use std::path::Path;
@@ -32,7 +31,7 @@ use serde::Deserialize;
 
 use super::process::StartTime;
 
-/// The marker every worker carries (spec #28).
+/// The marker every worker carries.
 pub const SESSION_MARKER: &str = "RBX_FORGE_SESSION";
 /// Pause between two passes of the cleanup loop.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);

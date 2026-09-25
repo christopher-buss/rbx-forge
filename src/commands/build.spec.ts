@@ -153,20 +153,20 @@ describe(runBuildCommandAsync, () => {
 		expect.assertions(1);
 
 		const { context, specs } = makeBuild({
-			file: { rojoAlias: "rojo-fork" },
+			file: { rojoAlias: "rojo-custom" },
 			files: {
-				"node_modules/rojo-fork/cli.js": "",
-				"node_modules/rojo-fork/package.json": JSON.stringify({
-					bin: { "rojo-fork": "cli.js" },
+				"node_modules/rojo-custom/cli.js": "",
+				"node_modules/rojo-custom/package.json": JSON.stringify({
+					bin: { "rojo-custom": "cli.js" },
 				}),
-				"package.json": JSON.stringify({ devDependencies: { "rojo-fork": "1.0.0" } }),
+				"package.json": JSON.stringify({ devDependencies: { "rojo-custom": "1.0.0" } }),
 			},
 		});
 		await runBuildCommandAsync(context, input());
 
 		expect(specs[0]).toMatchObject({
 			args: [
-				path.join(PROJECT, "node_modules", "rojo-fork", "cli.js"),
+				path.join(PROJECT, "node_modules", "rojo-custom", "cli.js"),
 				"build",
 				"default.project.json",
 				"--output",

@@ -1,7 +1,7 @@
 /**
  * The control channel over the real endpoint: a native named pipe on
- * Windows, a Unix socket elsewhere (spec #28, Testing: IPC security S1, S2,
- * S4, S5; S3 runs in the `other-user` project in CI).
+ * Windows, a Unix socket elsewhere. The other-user test runs in the
+ * `other-user` project in CI.
  */
 import { statSync } from "node:fs";
 import { connect } from "node:net";
@@ -88,7 +88,7 @@ function trustees({ aces, owner, protected: isProtected }: NativeSecurity): obje
 }
 
 describe("control channel", () => {
-	it("should answer a client with the right token (S1)", async () => {
+	it("should answer a client with the right token", async () => {
 		expect.assertions(1);
 
 		const transport = realTransport();
@@ -99,7 +99,7 @@ describe("control channel", () => {
 		).resolves.toStrictEqual({ ok: 1 });
 	});
 
-	it("should close on a wrong token without an answer, and keep serving (S2)", async () => {
+	it("should close on a wrong token without an answer, and keep serving", async () => {
 		expect.assertions(3);
 
 		const transport = realTransport();
@@ -156,7 +156,7 @@ describe("control channel", () => {
 	});
 
 	it.skipIf(!IS_WINDOWS)(
-		"should reject remote-style connects, which a remote-accepting pipe allows (S4)",
+		"should reject remote-style connects, which a remote-accepting pipe allows",
 		async () => {
 			expect.assertions(2);
 
@@ -180,30 +180,24 @@ describe("control channel", () => {
 		},
 	);
 
-	it.skipIf(!IS_WINDOWS)(
-		"should give the pipe and the token file an owner-only DACL (S5)",
-		() => {
-			expect.assertions(2);
+	it.skipIf(!IS_WINDOWS)("should give the pipe and the token file an owner-only DACL", () => {
+		expect.assertions(2);
 
-			const native = loadTestNative();
-			const user = native.currentUserSid!();
-			const server = native.createPipeServer!(
-				`\\\\.\\pipe\\rbx-forge-dacl-${process.pid}`,
-				true,
-			);
-			onTestFinished(() => {
-				server.close();
-			});
-			const token = path.join(makeTemporaryDirectory(), "token");
-			native.writePrivateFile!(token, "secret");
-			const expected = {
-				aces: [{ kind: "allow", sid: user }],
-				isProtected: true,
-				owner: user,
-			};
+		const native = loadTestNative();
+		const user = native.currentUserSid!();
+		const server = native.createPipeServer!(`\\\\.\\pipe\\rbx-forge-dacl-${process.pid}`, true);
+		onTestFinished(() => {
+			server.close();
+		});
+		const token = path.join(makeTemporaryDirectory(), "token");
+		native.writePrivateFile!(token, "secret");
+		const expected = {
+			aces: [{ kind: "allow", sid: user }],
+			isProtected: true,
+			owner: user,
+		};
 
-			expect(trustees(server.security())).toStrictEqual(expected);
-			expect(trustees(native.fileSecurity!(token))).toStrictEqual(expected);
-		},
-	);
+		expect(trustees(server.security())).toStrictEqual(expected);
+		expect(trustees(native.fileSecurity!(token))).toStrictEqual(expected);
+	});
 });

@@ -1,7 +1,7 @@
 import { type } from "arktype";
 
 /**
- * The control channel of a running session (spec #28, IPC): one request per
+ * The control channel of a running session: one request per
  * connection, as JSON lines. The client writes a {@link IpcHello} with the
  * session's token, then one {@link IpcRequest}; the supervisor answers with
  * one {@link IpcResponse} and closes. A wrong token or protocol closes the
@@ -11,7 +11,7 @@ import { type } from "arktype";
 /** The protocol version both ends speak. */
 export const IPC_PROTOCOL = 1;
 
-/** How long each read and write of the channel waits (spec #28). */
+/** How long each read and write of the channel waits. */
 export const IPC_WAIT_MS = 2000;
 
 /** The longest line either end reads. */

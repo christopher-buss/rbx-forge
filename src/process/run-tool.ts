@@ -8,7 +8,7 @@ import { resolveTool, toolInvocation } from "./resolve-tool.ts";
 /** A tool {@link probeToolAsync} runs quietly. */
 export interface ToolProbe {
 	args: ReadonlyArray<string>;
-	/** The configured command, such as `rojo` or a fork's alias. */
+	/** The configured command, such as `rojo` or `rbxtsc`. */
 	command: string;
 	/** Its display name, such as `Rojo`. */
 	label: string;

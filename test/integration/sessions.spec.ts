@@ -1,6 +1,6 @@
 /**
- * Sessions of real supervisors, reapers, and fixture workers: scenarios L1,
- * C3, and C6 of spec #28, and the escalation of a hung reaper.
+ * Sessions of real supervisors, reapers, and fixture workers, and the
+ * escalation of a hung reaper.
  */
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -63,7 +63,7 @@ function isLockFree(file: string): boolean {
 }
 
 describe("sessions", () => {
-	it("should stop gracefully with zero survivors and no escalation (L1)", async () => {
+	it("should stop gracefully with zero survivors and no escalation", async () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();
@@ -85,7 +85,7 @@ describe("sessions", () => {
 		}).toStrictEqual({ files: [], survivors: [] });
 	}, 60_000);
 
-	it("should clean up a reaper that hangs at terminate by force, leaf first (C7)", async () => {
+	it("should clean up a reaper that hangs at terminate by force, leaf first", async () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();
@@ -153,7 +153,7 @@ describe("sessions", () => {
 		});
 	}, 60_000);
 
-	it("should start a new session only once every worker of a hard-killed one is gone (C3)", async () => {
+	it("should start a new session only once every worker of a hard-killed one is gone", async () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();
@@ -188,7 +188,7 @@ describe("sessions", () => {
 		).resolves.toStrictEqual([]);
 	}, 60_000);
 
-	it("should never let a reaper paused before its lease spawn after its supervisor died (C6)", async () => {
+	it("should never let a reaper paused before its lease spawn after its supervisor died", async () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();

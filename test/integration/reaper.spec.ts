@@ -1,9 +1,8 @@
 /**
- * The reaper through its Node API, with real processes: lifecycle scenarios
- * L1, L3, L3b, L3c, L4, L5, and L9 of spec #28, and `terminate` semantics.
- * L2 (hard kill of the host) runs end to end in `test/e2e/start.spec.ts`.
- * The PID-reuse half of L3c needs a reused PID, which only the native tests
- * can stage (`reaper/src/os/worker/tests.rs`).
+ * The reaper through its Node API, with real processes: the worker lifecycle
+ * and `terminate` semantics. A hard kill of the host runs end to end in
+ * `test/e2e/start.spec.ts`. The PID-reuse check needs a reused PID, which only
+ * the native tests can stage (`reaper/src/os/worker/tests.rs`).
  */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -30,8 +29,8 @@ import {
 
 const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 const native = loadRealNative();
-/** L9's repetitions (spec #28: ×200). */
-const L9_ROUNDS = 200;
+/** Repetitions of the reaper-death race. */
+const RACE_ROUNDS = 200;
 
 interface TestSession {
 	directory: string;
@@ -123,7 +122,7 @@ describe("reaper", () => {
 		]);
 	});
 
-	it("should leave zero survivors after a graceful terminate (L1)", async () => {
+	it("should leave zero survivors after a graceful terminate", async () => {
 		expect.assertions(3);
 
 		const { log, reaper, worker } = await startSessionAsync();
@@ -164,7 +163,7 @@ describe("reaper", () => {
 		expect(native.tryLockFile(leasePath, "exclusive")).not.toBeNull();
 	});
 
-	it("should force-kill a worker that ignores the graceful stop (L4)", async () => {
+	it("should force-kill a worker that ignores the graceful stop", async () => {
 		expect.assertions(3);
 
 		const { log, reaper, worker } = await startSessionAsync();
@@ -181,7 +180,7 @@ describe("reaper", () => {
 		await expect(reaper.terminateAsync(1000)).resolves.toMatchObject({ terminated: true });
 	});
 
-	it("should kill descendants spawned at startup when the reaper dies (L5)", async () => {
+	it("should kill descendants spawned at startup when the reaper dies", async () => {
 		expect.assertions(2);
 
 		const { log, reaper, worker } = await startSessionAsync();
@@ -194,11 +193,11 @@ describe("reaper", () => {
 		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
 	});
 
-	it("should leave nothing when the reaper dies right after it creates a worker (L9)", async () => {
+	it("should leave nothing when the reaper dies right after it creates a worker", async () => {
 		expect.assertions(1);
 
 		const survivors: Array<number> = [];
-		for (let round = 0; round < L9_ROUNDS; round++) {
+		for (let round = 0; round < RACE_ROUNDS; round++) {
 			const { reaper, worker } = await startSessionAsync();
 			reaper.go();
 			const spawned = await reaper.spawnAsync(worker(`rojo-${round}`));
@@ -210,7 +209,7 @@ describe("reaper", () => {
 		expect(survivors).toStrictEqual([]);
 	}, 300_000);
 
-	it("should kill setsid and double-forked descendants (L3)", async () => {
+	it("should kill setsid and double-forked descendants", async () => {
 		expect.assertions(2);
 
 		const { log, reaper, worker } = await startSessionAsync();
@@ -251,7 +250,7 @@ describe("reaper", () => {
 		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
 	});
 
-	it("should kill an escaped chain that ignores SIGTERM and storms in one run (L3b)", async () => {
+	it("should kill an escaped chain that ignores SIGTERM and storms in one run", async () => {
 		expect.assertions(2);
 
 		const { log, reaper, worker } = await startSessionAsync();
@@ -275,7 +274,7 @@ describe("reaper", () => {
 		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
 	});
 
-	it("should never kill escaped descendants of another worker or session (L3c)", async () => {
+	it("should never kill escaped descendants of another worker or session", async () => {
 		expect.assertions(2);
 
 		const first = await startSessionAsync();
@@ -306,7 +305,7 @@ describe("reaper", () => {
 	});
 
 	// Only Linux has a subreaper. Windows jobs hold such orphans anyway; on
-	// macOS they are an accepted limit (spec #28).
+	// macOS they are an accepted limit.
 	it.skipIf(process.platform !== "linux")(
 		"should kill an orphan that scrubbed its markers once the session ends",
 		async () => {

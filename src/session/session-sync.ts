@@ -8,7 +8,7 @@ export type SyncbackAttempt =
 	| { hooks: Array<HookResult>; ok: true; value: SyncbackOutcome };
 
 /**
- * `forge sync` inside a session (spec #28 story 20): the control channel
+ * `forge sync` inside a session: the control channel
  * asks, the session body runs. The channel opens before the body can run
  * syncback, so a request waits until the body hands its runner over.
  */

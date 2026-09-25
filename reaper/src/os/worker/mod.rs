@@ -15,7 +15,7 @@
 //! PID pins the group id for every group signal. Descendants that left the
 //! group (`setsid`, double fork) are found by their markers (see
 //! [`Spec::markers`]) and killed only through a pin, after their start time
-//! and markers are verified (spec #28, L3–L3c). On Linux the reaper is a
+//! and markers are verified. On Linux the reaper is a
 //! child subreaper ([`become_owner`]), so orphaned descendants become its
 //! children; [`sweep_orphans`] kills the ones no marker names.
 

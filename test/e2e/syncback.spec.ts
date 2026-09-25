@@ -9,7 +9,7 @@ import { readWorkerLog } from "../helpers/worker-log.ts";
 
 const PROBE = { args: ["syncback", "--help"], role: "rojo" };
 const NO_SYNCBACK =
-	"Install the UpliftGames Rojo fork (https://github.com/UpliftGames/rojo/releases), and set rojoAlias to its command if it is not rojo.";
+	"Install Rojo 7.7 or later (https://rojo.space), or set rojoAlias to its command.";
 
 /**
  * A Luau project with a place file, with fake rojo and hook binaries on PATH.
@@ -66,7 +66,7 @@ describe("forge syncback", () => {
 		expect(ran(log).at(-1)).toStrictEqual(rojoSyncback("other.project.json", "out/place.rbxl"));
 	});
 
-	it("should name the fork when Rojo has no syncback, before any hook runs", async () => {
+	it("should report syncback_unsupported when Rojo has no syncback, before any hook runs", async () => {
 		expect.assertions(3);
 
 		const { forge, log } = makeFixture({ hooks: { syncback: { pre: ["hook pre"] } } });
@@ -78,8 +78,7 @@ describe("forge syncback", () => {
 		expect(parseResult(stdout).error).toMatchObject({
 			code: "syncback_unsupported",
 			hint: NO_SYNCBACK,
-			message:
-				'Rojo ("rojo") has no syncback command. Syncback needs the UpliftGames Rojo fork.',
+			message: 'Rojo ("rojo") has no syncback command. Syncback needs Rojo 7.7 or later.',
 		});
 		expect(ran(log)).toStrictEqual([PROBE]);
 	});

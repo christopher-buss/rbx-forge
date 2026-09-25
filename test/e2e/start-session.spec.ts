@@ -1,7 +1,7 @@
 /**
  * The supervisor of `forge start` as a real process tree: the singleton, and
- * scenario W2 of spec #28: killing `start` at each startup point ends the
- * session with zero survivors, and no worker starts after the kill.
+ * killing `start` at each startup point ends the session with zero survivors,
+ * and no worker starts after the kill.
  *
  * The supervisor's test pause points (`RBX_FORGE_TEST_PAUSE`) hold it at a
  * startup point until the test kills `start`. Real Roblox Studio never opens:
@@ -38,7 +38,7 @@ const QUIET_MS = 1000;
 /** How the test ends `start`. */
 type Kill = "SIGHUP" | "SIGKILL";
 
-/** One startup point of W2 and how the test reaches it. */
+/** One startup point and how the test reaches it. */
 interface StartupPoint {
 	name: string;
 	/**
@@ -237,7 +237,7 @@ describe("forge start supervisor", () => {
 		expect(rojo.map(({ pid }) => isProcessAlive(pid))).toStrictEqual([true]);
 	});
 
-	describe("killing start at a startup point (W2)", () => {
+	describe("killing start at a startup point", () => {
 		it.for(
 			STARTUP_POINTS.flatMap((point) => {
 				return KILLS.map((kill) => [point.name, kill, point] as const);

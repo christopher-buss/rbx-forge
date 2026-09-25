@@ -1,7 +1,7 @@
 /**
  * `forge sync` as a real process against a detached session, with fake Rojo
- * and hook on PATH and the real reaper (spec #28 story 20; Hooks: syncback
- * runs one at a time). Every test stops the session it left.
+ * and hook on PATH and the real reaper. Syncback runs one at a time. Every
+ * test stops the session it left.
  */
 import { utimesSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";

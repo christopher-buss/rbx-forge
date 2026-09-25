@@ -84,7 +84,7 @@ const PAUSE: Pause =
  * Test only (`RBX_FORGE_TEST_PAUSE=block`): once the test writes
  * `<dir>/block.request`, write `<dir>/block.blocked` (content: this PID)
  * and block the event loop for good, as a hung supervisor that answers
- * nothing (spec #28, F1 and F5). Only a kill ends it.
+ * nothing. Only a kill ends it.
  *
  * @param directory - The pause directory.
  */

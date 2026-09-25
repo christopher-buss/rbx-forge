@@ -89,7 +89,7 @@ export interface ForgeConfig {
 	open?: OpenOptions;
 	projectType: ProjectType;
 	rbxts?: RbxtsOptions;
-	/** The Rojo command, for example a fork with syncback support. */
+	/** The Rojo command. */
 	rojoAlias?: string;
 	/** The fixed port of `rojo serve`. A busy port is an error. */
 	rojoPort?: number;
@@ -162,18 +162,6 @@ const configFileSchema: Type<ForgeConfig> = fileSchema;
 /** The same rules for a partial layer, such as the values flags set. */
 const configLayerSchema: Type<ConfigLayer> = fileSchema.partial();
 
-/**
- * Keys an earlier forge accepted, with what to do instead. Checked before the
- * schema so the error says why, not only "must be removed".
- */
-const REMOVED_KEYS: ReadonlyArray<readonly [path: string, instead: string]> = [
-	["commandNames", "forge no longer writes task-runner scripts. Use `hooks`."],
-	["rbxts.watchOnOpen", "`forge start` always runs the compiler in watch mode."],
-	["suppressNoTaskRunnerWarning", "forge no longer uses a task runner."],
-	["syncbackInputPath", "Use `syncback.inputPath`."],
-	["typegenOutputPath", "Use `typegen.outputPath`."],
-];
-
 /** One thing the schema rejected. */
 export interface ConfigProblem {
 	/** A full sentence, such as `rojoPort must be a number (was a string)`. */
@@ -188,11 +176,9 @@ export interface ConfigProblem {
  * @param value - What the file exported.
  * @param file - The file's path, for the error message.
  * @returns The value, typed.
- * @throws {ForgeError} `config_removed_key` for a removed key, or
- *   `config_invalid` for anything else the schema rejects.
+ * @throws {ForgeError} `config_invalid` for anything the schema rejects.
  */
 export function validateConfigFile(value: unknown, file: string): ForgeConfig {
-	rejectRemovedKeys(value, file);
 	return check(configFileSchema, value, (problems) => {
 		const lines = problems.map(({ message }) => message).join("\n");
 		return new ForgeError("config_invalid", `Invalid config in ${file}:\n${lines}`, {
@@ -228,30 +214,4 @@ function check<T>(
 	}
 
 	return result;
-}
-
-function hasPath(value: unknown, keys: ReadonlyArray<string>): boolean {
-	let current = value;
-	for (const key of keys) {
-		if (typeof current !== "object" || current === null || !Object.hasOwn(current, key)) {
-			return false;
-		}
-
-		const next: unknown = Reflect.get(current, key);
-		current = next;
-	}
-
-	return true;
-}
-
-function rejectRemovedKeys(value: unknown, file: string): void {
-	for (const [path, instead] of REMOVED_KEYS) {
-		if (hasPath(value, path.split("."))) {
-			throw new ForgeError(
-				"config_removed_key",
-				`${file}: \`${path}\` was removed. ${instead}`,
-				{ hint: `Remove \`${path}\` from the config file.` },
-			);
-		}
-	}
 }

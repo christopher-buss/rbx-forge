@@ -1,7 +1,6 @@
 /**
  * `forge down` as a real process against a detached session with fake Rojo
- * and the real reaper (spec #28: stories 22 to 24; Testing: Sessions and
- * Forced stop). Only NDJSON output, exit codes, files, and the process
+ * and the real reaper. Only NDJSON output, exit codes, files, and the process
  * table are checked.
  */
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
@@ -77,7 +76,7 @@ describe("forge down", () => {
 		});
 	});
 
-	it("should report a hung supervisor as unresponsive, then kill it with --force (F1)", async () => {
+	it("should report a hung supervisor as unresponsive, then kill it with --force", async () => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync();

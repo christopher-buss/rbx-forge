@@ -876,7 +876,7 @@ describe(runSupervisorAsync, () => {
 		).toStrictEqual([]);
 	});
 
-	it("should stop without escalating when every worker stops in time (L1)", async () => {
+	it("should stop without escalating when every worker stops in time", async () => {
 		expect.assertions(2);
 
 		const run = await stoppedAsync();
@@ -1267,7 +1267,7 @@ describe("forge start session files", () => {
 		},
 	);
 
-	it("should pause at control with the session's files written and no endpoint yet, and start nothing once stopped there (C14)", async () => {
+	it("should pause at control with the session's files written and no endpoint yet, and start nothing once stopped there", async () => {
 		expect.assertions(2);
 
 		const seen: Array<unknown> = [];
@@ -1329,7 +1329,7 @@ describe("forge start session files", () => {
 		expect(run.fake.launches).toStrictEqual([]);
 	});
 
-	it("should kill an older session that outlives the wait with --force, then start (C4)", async () => {
+	it("should kill an older session that outlives the wait with --force, then start", async () => {
 		expect.assertions(4);
 
 		const run = startCommand({ files: WITH_OLD, flags: { ...ROJO_ONLY, force: true } });

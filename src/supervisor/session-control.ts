@@ -50,7 +50,7 @@ export type ControlSeams = Pick<
 >;
 
 /**
- * Step 5 of the supervisor (spec #28, "Startup order"): create the session
+ * Step 5 of `runSupervisorAsync`: create the session
  * directory with its identity record and token, keep `state.json` up to
  * date, and open the control endpoint (`status`, `sync`, `shutdown`). Call only
  * while holding the singleton lock. When the endpoint cannot open, nothing

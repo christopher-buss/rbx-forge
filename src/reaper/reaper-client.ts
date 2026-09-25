@@ -116,7 +116,7 @@ export type ReaperLauncher = (options: ReaperLaunch) => Promise<Reaper>;
 export const TERMINATE_MARGIN_MS = 5000;
 /** How long the host waits for a worker it killed after the reaper died. */
 export const ORPHAN_WAIT_MS = 2000;
-/** The bound of one forced cleanup (spec #28: the forced-stop loop, 10 s). */
+/** The bound of one forced cleanup (the forced-stop loop, 10 s). */
 export const FORCED_CLEANUP_MS = 10_000;
 
 /** A shutdown nothing hurries. */

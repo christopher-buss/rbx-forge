@@ -6,7 +6,7 @@
 //! groups, signals) sits behind [`Platform`] and [`Tree`], so tests drive the
 //! state machine with a fake.
 //!
-//! Rules (spec #28):
+//! Rules:
 //!
 //! - Nothing spawns before `go`. `go` after `terminate` is ignored.
 //! - `terminate` is irreversible: every later `spawn` is rejected; every

@@ -1,4 +1,4 @@
-//! The bounded discover–kill loop of a POSIX forced stop (spec #28).
+//! The bounded discover–kill loop of a POSIX forced stop.
 //!
 //! Each pass kills every target it finds and returns the PIDs that were
 //! still alive. New targets (a fork storm, a chain that forks as it dies)

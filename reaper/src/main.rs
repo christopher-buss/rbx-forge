@@ -37,7 +37,7 @@ use reaper::{Input, Platform, Reaper, RecordedWorker, Tree};
 
 /// Exit code for a command line the reaper cannot read.
 const EXIT_USAGE: u8 = 2;
-/// The markers every worker carries (spec #28).
+/// The markers every worker carries.
 const SESSION_MARKER: &str = session::SESSION_MARKER;
 const WORKER_MARKER: &str = "RBX_FORGE_WORKER";
 
@@ -173,7 +173,7 @@ fn watch_sigterm(inputs: mpsc::Sender<Input>) {
     });
 }
 
-/// Test-only fault injection (spec #28, Testing): when
+/// Test-only fault injection: when
 /// `RBX_FORGE_TEST_PAUSE_DIR` is set and `RBX_FORGE_TEST_PAUSE` lists
 /// `point`, write `<dir>/<point>.paused` (content: the reaper's PID) and wait
 /// until the test deletes it. The points:

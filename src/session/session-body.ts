@@ -68,7 +68,7 @@ const ROJO_LISTEN_POLL_MS = 100;
 export const ROJO_LISTEN_BOUND_MS = 60_000;
 
 /**
- * The body of a dev session (spec #28, Session lifecycle), for
+ * The body of a dev session, for
  * `runSessionAsync`:
  *
  * 1. With syncback on, check that Rojo has syncback, before anything runs.
@@ -373,7 +373,7 @@ function hasEnded(scope: SessionScope): boolean {
 
 /**
  * Wait until Rojo listens on its port, so `ready` means a client can
- * connect (spec #28 story 17), then mark it ready.
+ * connect, then mark it ready.
  *
  * @param session - The config, clock, network, and status.
  * @param scope - Its end signal.

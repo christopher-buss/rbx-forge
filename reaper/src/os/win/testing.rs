@@ -1,6 +1,6 @@
 //! Helpers only tests call (ADR 0001, "Consequences"): a job for the
 //! current process, to test detach under a host that forbids breakaway, and
-//! a pipe connect as another local user, to test the pipe's DACL (S3).
+//! a pipe connect as another local user, to test the pipe's DACL.
 
 use std::io;
 use std::mem::{size_of_val, zeroed};

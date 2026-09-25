@@ -81,7 +81,7 @@ interface SessionState {
  * tracked task has settled. The reaper also ends every worker when this
  * process dies, however it dies.
  *
- * Admission (spec #28): the reaper gets `go` only while no end trigger has
+ * Admission: the reaper gets `go` only while no end trigger has
  * fired, and nothing starts after one. Once the session ends, admission is
  * closed for good: `go` is never sent later, and the body never runs.
  *

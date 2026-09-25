@@ -27,7 +27,7 @@ export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
 ];
 
 /**
- * `forge start`: run the dev session in this terminal (spec #28): compile and
+ * `forge start`: run the dev session in this terminal: compile and
  * build, open Studio, serve Rojo, run the compiler in watch mode, and, with
  * `--syncback`, sync Studio's saves back.
  *

@@ -22,7 +22,7 @@ export const UP_FLAGS: typeof START_FLAGS = START_FLAGS;
 export const UP_TIMEOUT_MS = 300_000;
 /**
  * How long `up` waits for a session it did not start to answer before it
- * starts one itself (spec #28: a bounded wait for the endpoint).
+ * starts one itself (a bounded wait for the endpoint).
  */
 export const JOIN_SILENCE_MS = 30_000;
 /** How often `up` looks at the session. */
@@ -56,10 +56,9 @@ interface UpState {
 
 /**
  * `forge up`: start the dev session in the background and return once Rojo
- * serves and the compiler finished its first compile (spec #28, Detached
- * sessions). The session runs in a detached supervisor
- * (`supervisor/detached-launcher.ts`) until `forge down`, Studio closing the
- * place, or a service failing.
+ * serves and the compiler finished its first compile. The session runs in a
+ * detached supervisor (`supervisor/detached-launcher.ts`) until `forge down`,
+ * Studio closing the place, or a service failing.
  *
  * It is idempotent: when a session runs, it reports that session instead
  * (`started: false`); when one is starting, it waits for it. Two `up`s at
