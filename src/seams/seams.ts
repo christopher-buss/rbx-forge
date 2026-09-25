@@ -1,7 +1,9 @@
+import type { ProcessRunner } from "../process/process-runner.ts";
 import type { ChildProcessRunner } from "./child-process.ts";
 import type { Clock } from "./clock.ts";
 import type { ConfigLoader } from "./config-loader.ts";
 import type { FileSystem } from "./file-system.ts";
+import type { Host } from "./host.ts";
 import type { Prompter } from "./prompter.ts";
 
 /**
@@ -25,5 +27,11 @@ export interface Seams {
 	clock: Clock;
 	configLoader: ConfigLoader;
 	fileSystem: FileSystem;
+	host: Host;
+	/**
+	 * Runs tools and hooks to completion. Built from `childProcess` today;
+	 * the native reaper replaces it without changing its callers.
+	 */
+	processRunner: ProcessRunner;
 	prompter: Prompter;
 }

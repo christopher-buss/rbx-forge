@@ -5,9 +5,11 @@ import path from "node:path";
 import { vi } from "vitest";
 
 import type { CommandContext } from "../../src/commands/context.ts";
+import type { ProcessRunner } from "../../src/process/process-runner.ts";
 import type { Clock } from "../../src/seams/clock.ts";
 import type { ConfigLoader } from "../../src/seams/config-loader.ts";
 import type { FileSystem } from "../../src/seams/file-system.ts";
+import type { Host } from "../../src/seams/host.ts";
 import type { Prompter } from "../../src/seams/prompter.ts";
 import type {
 	CommandFailure,
@@ -70,6 +72,12 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 		},
 		configLoader: vi.fn<ConfigLoader>(unreachable("config loader")),
 		fileSystem: createMemoryFileSystem().fileSystem,
+		host: {
+			execPath: "/node",
+			kill: vi.fn<Host["kill"]>(unreachable("host kill")),
+			platform: "linux",
+		},
+		processRunner: vi.fn<ProcessRunner>(unreachable("process runner")),
 		prompter: {
 			choose: vi.fn<Prompter["choose"]>(unreachable("prompter")),
 			confirm: vi.fn<Prompter["confirm"]>(unreachable("prompter")),

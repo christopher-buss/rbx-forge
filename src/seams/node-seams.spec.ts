@@ -1,4 +1,5 @@
 import path from "node:path";
+import process from "node:process";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 
@@ -38,6 +39,24 @@ describe(createNodeSeams, () => {
 
 		// Only the function identity: unit tests never start a process.
 		expect(makeSeams().childProcess.spawn.name).toBe("spawn");
+	});
+
+	it("should describe this Node process and OS", () => {
+		expect.assertions(1);
+
+		expect(makeSeams().host).toMatchObject({
+			execPath: process.execPath,
+			platform: process.platform,
+		});
+	});
+
+	it("should signal processes through process.kill", () => {
+		expect.assertions(1);
+
+		// No process has this pid, so the real call fails without a target.
+		expect(() => {
+			makeSeams().host.kill(2 ** 30, "SIGTERM");
+		}).toThrow(expect.objectContaining({ code: "ESRCH" }));
 	});
 
 	it("should tell the time", () => {
