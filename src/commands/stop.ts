@@ -33,7 +33,10 @@ const STALE_HINT =
 	"The lock file is stale. Delete it if Roblox Studio does not have the place open.";
 
 /** The Studio process a lock file names, once verified. */
-type StudioCheck = { pinned: PinnedProcess; status: "studio" } | { status: "exited" };
+type StudioCheck =
+	| { pinned: PinnedProcess; status: "studio" }
+	| { status: "closed" }
+	| { status: "exited" };
 
 const EXITED: StudioCheck = { status: "exited" };
 
@@ -65,30 +68,76 @@ export async function runStopAsync(
 	);
 	const place = path.resolve(context.cwd, config.open.buildOutputPath ?? config.buildOutputPath);
 	const lockPath = studioLockPath(place);
-	const { fileSystem } = context.seams;
-
-	if (!fileSystem.existsSync(lockPath)) {
+	const text = readLockText(context.seams, lockPath);
+	if (text === undefined) {
 		return {
 			data: { place, stopped: false },
 			summary: `Roblox Studio does not have ${place} open.`,
 		};
 	}
 
-	const { pid } = readStudioLock(context.seams, lockPath);
+	const { pid } = readStudioLock(context.seams, text, lockPath);
 	const check = checkStudio(context.seams, pid, lockPath);
-	if (check.status === "exited") {
-		return {
-			data: { pid, place, stopped: false },
-			summary: `Roblox Studio is not running: the lock file names PID ${pid}, which has exited.`,
-		};
+	if (check.status !== "studio") {
+		return notStopped(check.status, pid, place);
 	}
 
 	killStudio(check.pinned);
-	// A killed Studio cannot remove its own lock file.
-	fileSystem.rmSync(lockPath);
+	// A killed Studio cannot remove its own lock file; one that was closing
+	// may have.
+	context.seams.fileSystem.rmSync(lockPath, { force: true });
 	return {
 		data: { pid, place, stopped: true },
 		summary: `Stopped Roblox Studio (PID ${pid}) for ${place}.`,
+	};
+}
+
+/**
+ * Whether a file system call failed because the file is gone: Studio
+ * deletes its lock file when it closes, at any time.
+ *
+ * @param err - What the call threw.
+ * @returns True for `ENOENT`.
+ */
+function isMissingFile(err: unknown): boolean {
+	return err instanceof Error && Reflect.get(err, "code") === "ENOENT";
+}
+
+/**
+ * Read a lock file that Studio may delete at any time.
+ *
+ * @param seams - The file system.
+ * @param lockPath - The lock file.
+ * @returns Its content, or `undefined` when there is none.
+ */
+function readLockText(seams: Seams, lockPath: string): string | undefined {
+	try {
+		return seams.fileSystem.readFileSync(lockPath, "utf8");
+	} catch (err) {
+		if (isMissingFile(err)) {
+			return undefined;
+		}
+
+		throw err;
+	}
+}
+
+/**
+ * The result when no Studio was stopped.
+ *
+ * @param status - Why: the PID `exited`, or Studio `closed` the place
+ *   while forge checked it.
+ * @param pid - The PID the lock file names.
+ * @param place - The absolute path of the place file.
+ * @returns The data and summary of a run that killed nothing.
+ */
+function notStopped(status: "closed" | "exited", pid: number, place: string): CommandResult {
+	return {
+		data: { pid, place, stopped: false },
+		summary:
+			status === "exited"
+				? `Roblox Studio is not running: the lock file names PID ${pid}, which has exited.`
+				: `Roblox Studio (PID ${pid}) closed ${place} while forge checked it.`,
 	};
 }
 
@@ -120,16 +169,17 @@ function checkHost(lockHost: string | undefined, hostname: string, lockPath: str
 }
 
 /**
- * Read a lock file and check that this computer wrote it.
+ * Parse a lock file and check that this computer wrote it.
  *
- * @param seams - The file system and this computer.
- * @param lockPath - The lock file.
+ * @param seams - This computer.
+ * @param text - The lock file's content.
+ * @param lockPath - The lock file, for messages.
  * @returns The PID and computer the lock file names.
  * @throws {ForgeError} `identity_mismatch` when it names no PID, or no
  *   computer or another one.
  */
-function readStudioLock(seams: Seams, lockPath: string): StudioLock {
-	const lock = parseStudioLock(seams.fileSystem.readFileSync(lockPath, "utf8"));
+function readStudioLock(seams: Seams, text: string, lockPath: string): StudioLock {
+	const lock = parseStudioLock(text);
 	if (lock === undefined) {
 		throw new ForgeError(
 			"identity_mismatch",
@@ -217,13 +267,34 @@ function queryProcess<T>(pid: number, query: () => T): T {
 }
 
 /**
+ * When a lock file was last written.
+ *
+ * @param seams - The file system.
+ * @param lockPath - The lock file.
+ * @returns Its modification time, in milliseconds since the Unix epoch;
+ *   `undefined` once Studio deleted it.
+ */
+function lockWrittenAt(seams: Seams, lockPath: string): number | undefined {
+	try {
+		return seams.fileSystem.statSync(lockPath).mtimeMs;
+	} catch (err) {
+		if (isMissingFile(err)) {
+			return undefined;
+		}
+
+		throw err;
+	}
+}
+
+/**
  * Pin the process a lock file names and check that it is the Studio that
  * wrote the lock file.
  *
  * @param seams - The addon, the OS, and the file system.
  * @param pid - The PID from the lock file.
  * @param lockPath - The lock file, for messages.
- * @returns The pinned Studio, or `exited` when no process has the PID.
+ * @returns The pinned Studio; `exited` when no process has the PID;
+ *   `closed` when Studio deleted the lock file meanwhile.
  * @throws {ForgeError} `identity_mismatch` when the process is not Studio,
  *   started after the lock file was written, or the OS refuses the check.
  */
@@ -249,9 +320,11 @@ function checkStudio(seams: Seams, pid: number, lockPath: string): StudioCheck {
 		);
 	}
 
-	checkStartTime(pinned, seams.host, {
-		lockPath,
-		lockWrittenMs: seams.fileSystem.statSync(lockPath).mtimeMs,
-	});
+	const lockWrittenMs = lockWrittenAt(seams, lockPath);
+	if (lockWrittenMs === undefined) {
+		return { status: "closed" };
+	}
+
+	checkStartTime(pinned, seams.host, { lockPath, lockWrittenMs });
 	return { pinned, status: "studio" };
 }

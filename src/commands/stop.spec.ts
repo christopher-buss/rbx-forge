@@ -84,6 +84,51 @@ function linuxStartTime(epochMs: number): string {
 	return String((epochMs - BOOT) / 10);
 }
 
+/**
+ * Let Studio close, and delete its lock file, just before forge's next call
+ * of `member` on the file system.
+ *
+ * @param project - The stop test project.
+ * @param project.context - Its run, whose file system is wrapped.
+ * @param member - The file system call the close comes before.
+ */
+function closeStudioBefore(
+	{ context }: StopProject,
+	member: "readFileSync" | "rmSync" | "statSync",
+): void {
+	const { fileSystem } = context.seams;
+	const original: (...args: Array<never>) => unknown = fileSystem[member];
+	let isClosed = false;
+	context.seams.fileSystem = {
+		...fileSystem,
+		[member]: (...args: Array<never>) => {
+			if (!isClosed) {
+				isClosed = true;
+				fileSystem.rmSync(`${PLACE}.lock`);
+			}
+
+			return original(...args);
+		},
+	};
+}
+
+/**
+ * Make forge's calls of `member` on the file system fail with an OS error.
+ *
+ * @param project - The stop test project.
+ * @param project.context - Its run, whose file system is wrapped.
+ * @param member - The failing call.
+ * @param code - The error's code, such as `EACCES`.
+ */
+function failOn({ context }: StopProject, member: "readFileSync" | "statSync", code: string): void {
+	context.seams.fileSystem = {
+		...context.seams.fileSystem,
+		[member]: () => {
+			throw Object.assign(new Error(`${code}: ${member}`), { code });
+		},
+	};
+}
+
 async function stopAsync({ context }: StopProject): Promise<CommandResult> {
 	return runStopAsync(context, { config: {}, flags: {} });
 }
@@ -389,5 +434,83 @@ describe(runStopAsync, () => {
 			`Roblox Studio (PID ${STUDIO_PID}) did not exit within ${STUDIO_EXIT_TIMEOUT_MS} ms.`,
 		);
 		expect(project.files()[LOCK]).toBe(studioLock(STUDIO_PID));
+	});
+
+	it("should report success without a kill when Studio deletes its lock file before forge reads it", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		closeStudioBefore(project, "readFileSync");
+
+		await expect(stopAsync(project)).resolves.toStrictEqual({
+			data: { place: PLACE, stopped: false },
+			summary: `Roblox Studio does not have ${PLACE} open.`,
+		});
+		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
+	});
+
+	it("should kill nothing when Studio deletes its lock file while forge checks it", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		closeStudioBefore(project, "statSync");
+
+		await expect(stopAsync(project)).resolves.toStrictEqual({
+			data: { pid: STUDIO_PID, place: PLACE, stopped: false },
+			summary: `Roblox Studio (PID ${STUDIO_PID}) closed ${PLACE} while forge checked it.`,
+		});
+		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
+	});
+
+	it("should report the stop when the killed Studio deleted its lock file itself", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		closeStudioBefore(project, "rmSync");
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { pid: STUDIO_PID, place: PLACE, stopped: true },
+		});
+		expect(project.files()).not.toHaveProperty(LOCK);
+	});
+
+	it.for(["readFileSync", "statSync"] as const)(
+		"should fail and kill nothing when %s fails for another reason than a missing file",
+		async (member) => {
+			expect.assertions(2);
+
+			const project = makeProject({
+				files: { [LOCK]: studioLock(STUDIO_PID) },
+				processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+			});
+			failOn(project, member, "EACCES");
+
+			await expect(stopAsync(project)).rejects.toThrow(`EACCES: ${member}`);
+			expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
+		},
+	);
+
+	it("should fail when a thrown value is not an error", async () => {
+		expect.assertions(1);
+
+		const project = makeProject({ files: { [LOCK]: studioLock(STUDIO_PID) } });
+		project.context.seams.fileSystem = {
+			...project.context.seams.fileSystem,
+			readFileSync: () => {
+				// oxlint-disable-next-line typescript/only-throw-error -- a thrown value that is not an Error
+				throw { code: "ENOENT" };
+			},
+		};
+
+		await expect(stopAsync(project)).rejects.toStrictEqual({ code: "ENOENT" });
 	});
 });
