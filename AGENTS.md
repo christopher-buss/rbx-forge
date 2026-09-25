@@ -1,18 +1,54 @@
-# AGENTS.md
+## Why the code is this way
 
-rbx-forge is a CLI for Rojo projects (roblox-ts and Luau): supervised sessions,
-a native process reaper, config hooks, and `--json` output for agents. It was
-rewritten from scratch under spec
-[#28](https://github.com/christopher-buss/rbx-forge/issues/28). The old
-commands, config keys, and task-runner integration are gone for good.
+Read the comment at the line, then walk the line's history:
+`git log -n 3 -L<n>,<n>:<file> -s --format='%h %s'` lists the last commits that
+touched line `n`, across renames. Rationale lives in those two places.
 
-- **Vocabulary**: [CONTEXT.md](CONTEXT.md). Use its terms (session, supervisor,
-  reaper, worker, lease, barrier, marker, ...) in code, tests, and issues.
-- **Decisions**: [docs/adr/](docs/adr/). Read the ADR before you change process
-  ownership (0001), sessions and `down` (0002), IPC (0003), or hooks (0004).
-- **User docs**: [README.md](README.md) (commands, exit codes, agent flow) and
-  [docs/config.md](docs/config.md). A change to a command, flag, error code, or
-  config option updates them in the same commit.
+A comment states an invariant, in a line or two. Most code does not need further
+explanation. The commit tells the story: what failed, what was measured, what
+the line replaced.
+
+A collateral change tempts the longest comment, because that comment argues for
+the edit. Put the argument in the commit; the line keeps its invariant. Long
+blocks already in the file are sediment, not a standard to match.
+
+## Living documents
+
+All project docs (`AGENTS.md`, `CONTEXT.md`, ADRs) are read cold and edited in
+place. Write in present tense; no amendments or change-history sections. Keep it
+tight.
+
+An ADR records the decision, not its tunables. Caps and thresholds change
+without the architecture changing, so an ADR naming them needs amending on every
+tuning pass; where they must appear, Consequences is the place to call them a
+tuning surface.
+
+When changing public-facing behavior, check README.md to see if the
+documentation needs updating.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues via `gh`; see `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Mapped to Linear workflow states (`Triage`, `Todo`, `Canceled`) plus three
+labels (`NeedsInfo`, `Agent`, `PRD`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: CONTEXT.md + docs/adr/ at the repo root (created lazily). See
+docs/agents/domain.md.
+
+### Git and PRs
+
+## Commits
+
+Conventional Commits
+([.github/commit-instructions.md](.github/commit-instructions.md)); hk's
+commit-msg hook checks the format. Merge commits too (`chore: merge ...`).
 
 ## Commands
 
@@ -88,30 +124,3 @@ Before a task is done, lint, typecheck, knip, and every test project must pass.
   `src/process/environment.ts`.
 - An e2e test that opens a place must use the Studio stand-in (a `.cmd`); a
   plain `.rbxl` opens real Studio.
-
-## Commits
-
-Conventional Commits
-([.github/commit-instructions.md](.github/commit-instructions.md)); hk's
-commit-msg hook checks the format. Merge commits too (`chore: merge ...`).
-
-## Agent skills
-
-Skills live in `.agents/skills/` (Claude Code reads them through the symlinks in
-`.claude/skills/`). Most come from
-[mattpocock/skills](https://github.com/mattpocock/skills) and are pinned in
-`skills-lock.json`. `create-pr` and `zoom-out` are local skills.
-
-Local edits to upstream skills (re-apply after `npx skills update`):
-
-- `grilling`: top-three rounds, skimmable format, ASD-STE100, `CONTEXT.md`
-  vocabulary.
-- `handoff`: handoffs into another repository.
-- `implement`: autonomous flow (`/simplify`, `/code-review`, frequent commits,
-  `/create-pr`).
-- `research`: escape `## Sources` brackets for GFM.
-- `to-spec`: assign to `@me`; every new module gets tests.
-- `to-tickets`: native sub-issue and blocked-by links; assign to `@me`.
-
-Issue tracker: GitHub Issues via `gh`; see `docs/agents/issue-tracker.md`.
-Domain docs: single context; see `docs/agents/domain.md`.
