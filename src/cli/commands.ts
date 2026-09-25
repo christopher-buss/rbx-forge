@@ -8,7 +8,7 @@ import { LOG_NAMES, LOGS_FLAGS, runLogsAsync } from "../commands/logs.ts";
 import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
 import { runStartAsync, START_FLAGS } from "../commands/start.ts";
 import { runStatusAsync } from "../commands/status.ts";
-import { runStopAsync } from "../commands/stop.ts";
+import { runStopAsync, STOP_FLAGS } from "../commands/stop.ts";
 import { runSyncAsync } from "../commands/sync.ts";
 import { runSyncbackCommandAsync, SYNCBACK_FLAGS } from "../commands/syncback.ts";
 import { runTypegenCommandAsync, TYPEGEN_FLAGS } from "../commands/typegen.ts";
@@ -109,7 +109,7 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 	},
 	{
 		name: "stop",
-		flags: [],
+		flags: STOP_FLAGS,
 		run: runStopAsync,
 		summary:
 			"Close Roblox Studio for this project's place, after verifying the process is Studio.",

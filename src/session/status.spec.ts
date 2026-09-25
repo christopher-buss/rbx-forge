@@ -120,7 +120,7 @@ describe(createStatusStore, () => {
 		store.syncbackStarted();
 		const running = store.snapshot().services.syncback.status;
 		store.syncbackFinished({ durationMs: 5, hooks: [], ok: true });
-		store.studio("open", "/project/game.rbxl");
+		store.studio("open", "/project/game.rbxl", null);
 
 		expect(running).toBe("running");
 		expect(store.snapshot().services.syncback).toStrictEqual({
@@ -130,6 +130,20 @@ describe(createStatusStore, () => {
 		expect(store.snapshot().services.studio).toStrictEqual({
 			place: "/project/game.rbxl",
 			status: "open",
+		});
+	});
+
+	it("should record the Studio forge started", () => {
+		expect.assertions(1);
+
+		const { store } = makeStore();
+		store.studio("opening", "/project/game.rbxl", { pid: 7, startTime: "70" });
+
+		expect(parseStatus(store.snapshot())!.services.studio).toStrictEqual({
+			pid: 7,
+			place: "/project/game.rbxl",
+			startTime: "70",
+			status: "opening",
 		});
 	});
 
@@ -153,7 +167,7 @@ describe(createStatusStore, () => {
 
 		const { onChange, store } = makeStore();
 		store.snapshot().services.rojo.port = 1;
-		store.studio("closed", "/project/game.rbxl");
+		store.studio("closed", "/project/game.rbxl", null);
 		onChange.mock.calls[0]![0].services.rojo.port = 2;
 
 		expect(store.snapshot().services.rojo.port).toBe(34_872);

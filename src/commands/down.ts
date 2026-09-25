@@ -2,8 +2,13 @@ import type { FlagDefinition, FlagValues } from "../cli/flags.ts";
 import type { DownStudio, StoppedBy } from "../client/down.ts";
 import { DOWN_TIMEOUT_MS, stopSessionAsync } from "../client/down.ts";
 import { findSession } from "../client/session.ts";
+import { RECOVERY_FLAG, recoveryOptions } from "../client/studio.ts";
+import { loadProjectConfigAsync } from "../config/load.ts";
+import type { ResolvedConfig } from "../config/resolve.ts";
+import { DEFAULT_CONFIG } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import type { StudioEnd } from "../studio/close-studio.ts";
 import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
@@ -17,8 +22,9 @@ export const DOWN_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
 		name: "keep-studio",
 		kind: "boolean",
-		text: "Leave the session's Roblox Studio open. By default down closes it, and ends it without a save when it does not close in time.",
+		text: "Leave the session's Roblox Studio open. By default down closes it, and ends it without a save when a dialog blocks it or it does not close in time.",
 	},
+	RECOVERY_FLAG,
 	{
 		name: "timeout",
 		kind: "number",
@@ -26,6 +32,13 @@ export const DOWN_FLAGS: ReadonlyArray<FlagDefinition> = [
 		value: "<seconds>",
 	},
 ];
+
+/** How the summary tells how Studio went, by how it was ended. */
+const ENDED: Readonly<Record<Exclude<StudioEnd, "exited" | "lock_released">, string>> = {
+	dialog: "a dialog blocked it",
+	no_window: "it had no window to close",
+	timeout: `it did not close within ${STUDIO_CLOSE_MS / 1000} s`,
+};
 
 /** The summary's first words when the session stopped as asked. */
 const STOPPED = "Stopped session";
@@ -50,7 +63,7 @@ const HOW: Readonly<Record<StoppedBy, string>> = {
  * only acts on the session `.forge/current` named when it began.
  *
  * @param context - The run: project root, seams, and reporter.
- * @param input - `--force`, `--keep-studio`, and `--timeout`.
+ * @param input - `--force`, `--keep-studio`, `--recovery`, and `--timeout`.
  * @returns The stopped session's id, how it stopped, what happened to its
  *   Studio, and any cleanup.
  * @rejects {ForgeError} `not_running` when no session is named;
@@ -73,6 +86,7 @@ export async function runDownAsync(
 	const report = await stopSessionAsync(context.seams, forge, session, {
 		force: input.flags["force"] === true,
 		keepStudio: input.flags["keep-studio"] === true,
+		recovery: recoveryOptions(context.env, forge, await studioConfigAsync(context, input)),
 		timeoutMs,
 	});
 	return {
@@ -91,9 +105,9 @@ export async function runDownAsync(
 function studioSentence(studio: DownStudio): string {
 	switch (studio.status) {
 		case "closed": {
-			return studio.forced
-				? ` Roblox Studio (PID ${studio.pid}) did not close within ${STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving.`
-				: ` Closed Roblox Studio (PID ${studio.pid}).`;
+			return studio.end === "exited" || studio.end === "lock_released"
+				? ` Closed Roblox Studio (PID ${studio.pid}).`
+				: ` Roblox Studio (PID ${studio.pid}): ${ENDED[studio.end]}, so forge ended it without saving.`;
 		}
 		case "failed": {
 			return ` Roblox Studio may still have ${studio.place} open: ${studio.message}`;
@@ -105,6 +119,31 @@ function studioSentence(studio: DownStudio): string {
 		case "unknown": {
 			return "";
 		}
+	}
+}
+
+/**
+ * The Studio options of the project. `down` must stop a session also when
+ * the config file is gone or broken: then only `--recovery` and the
+ * defaults count.
+ *
+ * @param context - The project root and config loader.
+ * @param input - The config values flags set.
+ * @returns The resolved `studio` options.
+ */
+async function studioConfigAsync(
+	context: CommandContext,
+	input: CommandInput,
+): Promise<Pick<ResolvedConfig, "studio">> {
+	try {
+		const { config } = await loadProjectConfigAsync(
+			context.cwd,
+			context.seams.configLoader,
+			input.config,
+		);
+		return config;
+	} catch {
+		return { studio: { ...DEFAULT_CONFIG.studio, ...input.config.studio } };
 	}
 }
 

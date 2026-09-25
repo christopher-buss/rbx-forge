@@ -18,7 +18,7 @@ import {
 	waitForWorkersAsync,
 } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { makeFixtureAsync } from "./session-fixture.ts";
+import { IS_MACOS, IS_WINDOWS, makeFixtureAsync } from "./session-fixture.ts";
 import { runForgeAsync, UP_ROJO_ONLY } from "./up-fixture.ts";
 
 const DOWN = ["down", "--json"];
@@ -26,6 +26,27 @@ const DOWN = ["down", "--json"];
 const UP_STUDIO = ["up", "--no-compiler", "--json"];
 /** How long a dead process may stay a zombie before its parent reaps it. */
 const REAP_MS = 2000;
+/**
+ * How a Studio that closes on the request goes: it exits right after it
+ * removes its lock file, and forge may see the gap and end it at once.
+ */
+const CLOSED_END: unknown = expect.toBeOneOf(["exited", "lock_released"]);
+/**
+ * How forge ends a Studio behind a dialog: POSIX sees no dialog, so the time
+ * limit.
+ */
+const BLOCKED_END = IS_WINDOWS ? "dialog" : "timeout";
+
+/**
+ * The AutoSaves folder the stand-in writes to, under a scratch home.
+ *
+ * @param home - `LOCALAPPDATA` (Windows) or `HOME` (macOS).
+ * @returns The folder.
+ */
+function autoSavesUnder(home: string): string {
+	const root = IS_WINDOWS ? home : path.join(home, "Library", "Application Support");
+	return path.join(root, "Roblox", "RobloxStudio", "AutoSaves");
+}
 
 /**
  * The session files left in the project.
@@ -45,9 +66,10 @@ function filesLeft(project: string): Array<string> {
  *
  * @param fixture - The project.
  * @param sessionId - The session's id, from the `up` result.
+ * @returns The PID the session recorded for the Studio it started.
  * @rejects When 30 seconds pass first.
  */
-async function waitForStudioOpenAsync(fixture: Fixture, sessionId: unknown): Promise<void> {
+async function waitForStudioOpenAsync(fixture: Fixture, sessionId: unknown): Promise<unknown> {
 	const state = path.join(fixture.project, ".forge", "sessions", String(sessionId), "state.json");
 	const deadline = Date.now() + 30_000;
 	while (!existsSync(state) || !readFileSync(state, "utf8").includes('"status":"open"')) {
@@ -57,6 +79,12 @@ async function waitForStudioOpenAsync(fixture: Fixture, sessionId: unknown): Pro
 
 		await sleep(50);
 	}
+
+	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the session's state contract
+	const status = JSON.parse(readFileSync(state, "utf8")) as {
+		services: { studio: { pid?: number } };
+	};
+	return status.services.studio.pid;
 }
 
 /**
@@ -70,6 +98,8 @@ async function waitForStudioOpenAsync(fixture: Fixture, sessionId: unknown): Pro
 async function upWithStudioAsync(variables: Record<string, string> = {}): Promise<{
 	fixture: Fixture;
 	other: number;
+	/** The PID the session recorded when it started Studio. */
+	recorded: unknown;
 	sessionId: unknown;
 	studio: number;
 }> {
@@ -77,24 +107,33 @@ async function upWithStudioAsync(variables: Record<string, string> = {}): Promis
 	const other = await openStudioStandInAsync(path.join(fixture.project, "other.rbxl"));
 	const up = await runForgeAsync(fixture, UP_STUDIO, variables);
 	const { sessionId } = up.result.data!;
-	await waitForStudioOpenAsync(fixture, sessionId);
+	const recorded = await waitForStudioOpenAsync(fixture, sessionId);
 	const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
-	return { fixture, other: pidOf(other), sessionId, studio: studio!.pid };
+	return { fixture, other: pidOf(other), recorded, sessionId, studio: studio!.pid };
 }
 
 describe("forge down", () => {
 	it("should close the session's Studio first, then stop the session, and touch no other Studio", async () => {
-		expect.assertions(3);
+		expect.assertions(4);
 
-		const { fixture, other, sessionId, studio } = await upWithStudioAsync();
+		const { fixture, other, recorded, sessionId, studio } = await upWithStudioAsync();
 		const down = await runForgeAsync(fixture, DOWN);
 
+		// forge started the stand-in itself: its PID is the one the lock names.
+		expect(recorded).toBe(studio);
 		expect(down.result).toMatchObject({
 			data: {
 				sessionId,
 				status: "stopped",
 				stoppedBy: "studio_closed",
-				studio: { forced: false, pid: studio, place: fixture.place, status: "closed" },
+				studio: {
+					end: CLOSED_END,
+					forced: false,
+					pid: studio,
+					place: fixture.place,
+					recovery: null,
+					status: "closed",
+				},
 			},
 			ok: true,
 		});
@@ -108,21 +147,84 @@ describe("forge down", () => {
 		}).toStrictEqual({ isOtherAlive: true, isOtherOpen: true });
 	});
 
-	it("should end a Studio that stays open after the close request, without a save", async () => {
+	it("should end a Studio behind a dialog, without a save", async () => {
 		expect.assertions(2);
 
-		const { fixture, studio } = await upWithStudioAsync({ FIXTURE_STUDIO_REFUSE_CLOSE: "1" });
+		const { fixture, studio } = await upWithStudioAsync({ FIXTURE_STUDIO_CLOSE: "dialog" });
 		const down = await runForgeAsync(fixture, DOWN);
 
+		// POSIX has no dialog to see: the time limit ends Studio there.
 		expect(down.result.data).toMatchObject({
 			status: "stopped",
-			studio: { forced: true, pid: studio, status: "closed" },
+			studio: {
+				end: BLOCKED_END,
+				forced: true,
+				pid: studio,
+				status: "closed",
+			},
 		});
 		expect({
 			alive: await waitForDeathAsync([studio], REAP_MS),
 			isOpen: existsSync(`${fixture.place}.lock`),
 		}).toStrictEqual({ alive: [], isOpen: false });
 	});
+
+	it("should end a Studio at once once it closed the place, without its slow exit", async () => {
+		expect.assertions(2);
+
+		const { fixture, studio } = await upWithStudioAsync({ FIXTURE_STUDIO_CLOSE: "linger" });
+		const down = await runForgeAsync(fixture, DOWN);
+
+		expect(down.result.data).toMatchObject({
+			studio: { end: "lock_released", forced: false, pid: studio, status: "closed" },
+		});
+		await expect(waitForDeathAsync([studio], REAP_MS)).resolves.toStrictEqual([]);
+	});
+
+	it("should wait for a Studio that is still opening its place, then close it", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
+		await runForgeAsync(fixture, UP_STUDIO, { FIXTURE_STUDIO_LOCK_DELAY_MS: "3000" });
+		const down = await runForgeAsync(fixture, DOWN);
+		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
+
+		expect(down.result.data).toMatchObject({
+			studio: { end: CLOSED_END, pid: studio!.pid, status: "closed" },
+		});
+		expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
+	});
+
+	it.skipIf(!IS_WINDOWS && !IS_MACOS)(
+		"should move the auto-recovery file of a Studio it ended into .forge/recovery",
+		async () => {
+			expect.assertions(2);
+
+			const home = makeTemporaryDirectory();
+			const { fixture } = await upWithStudioAsync({
+				FIXTURE_STUDIO_AUTOSAVE: "1",
+				FIXTURE_STUDIO_CLOSE: "dialog",
+				HOME: home,
+				LOCALAPPDATA: home,
+			});
+			const down = await runForgeAsync(fixture, DOWN, { HOME: home, LOCALAPPDATA: home });
+			const saves = autoSavesUnder(home);
+
+			expect(down.result.data).toMatchObject({
+				studio: {
+					recovery: {
+						mode: "move",
+						moved: [{ from: path.join(saves, "game_AutoRecovery_0.rbxl") }],
+						warnings: [],
+					},
+				},
+			});
+			expect({
+				left: readdirSync(saves),
+				moved: readdirSync(path.join(fixture.project, ".forge", "recovery")).length,
+			}).toStrictEqual({ left: [], moved: 2 });
+		},
+	);
 
 	it("should leave the session's Studio open with --keep-studio", async () => {
 		expect.assertions(2);

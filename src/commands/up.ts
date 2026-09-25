@@ -6,6 +6,7 @@ import type { PinnedProcess } from "../native/addon.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { SessionStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
+import { withStudioPath } from "../studio/discover.ts";
 import type { SessionRequest, SupervisorMessage } from "../supervisor/channel.ts";
 import { failureError, parseMessage } from "../supervisor/channel.ts";
 import type { ForgeFiles } from "../supervisor/session-files.ts";
@@ -65,7 +66,7 @@ interface UpState {
  * once start one session: the second supervisor finds the singleton lock
  * taken, and its `up` waits for the first one's session.
  *
- * @param context - The run: project root, environment, seams, and reporter.
+ * @param command - The run: project root, environment, seams, and reporter.
  * @param input - The parsed flags (as `start`).
  * @returns The session's status, and whether this `up` started it.
  * @rejects {ForgeError} `detach_unsupported` when the host forbids a
@@ -74,9 +75,12 @@ interface UpState {
  *   not ready in time.
  */
 export async function runUpAsync(
-	context: CommandContext,
+	command: CommandContext,
 	input: CommandInput,
 ): Promise<CommandResult> {
+	const { cwd, env, seams } = command;
+	// The session reads `--studio-path` from its environment.
+	const context = { ...command, env: withStudioPath(env, cwd, seams.host.platform, input.flags) };
 	const { clock } = context.seams;
 	const request: SessionRequest = {
 		compiler: input.flags["compiler"] !== false,

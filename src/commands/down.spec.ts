@@ -17,7 +17,7 @@ import { startIpcServer } from "../ipc/server.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { SessionStatus } from "../session/status.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
-import type { CommandContext } from "./context.ts";
+import type { CommandContext, CommandInput } from "./context.ts";
 import { runDownAsync } from "./down.ts";
 
 const FORGE = forgeFiles(PROJECT);
@@ -109,6 +109,9 @@ async function serveStudioAsync(
 	native.processes.set(STUDIO_PID, {
 		alive: true,
 		executablePath: String.raw`C:\Roblox\RobloxStudioBeta.exe`,
+		onClose: () => {
+			fileSystem.rmSync(`${PLACE}.lock`, { force: true });
+		},
 		...studio,
 	});
 	const status: SessionStatus = {
@@ -140,8 +143,12 @@ async function serveStudioAsync(
 	});
 }
 
-async function downAsync(context: CommandContext, flags: FlagValues = {}) {
-	return runDownAsync(context, { config: {}, flags });
+async function downAsync(
+	context: CommandContext,
+	flags: FlagValues = {},
+	config: CommandInput["config"] = {},
+) {
+	return runDownAsync(context, { config, flags });
 }
 
 describe(runDownAsync, () => {
@@ -164,10 +171,21 @@ describe(runDownAsync, () => {
 
 	it.for([
 		["closes", {}, " Closed Roblox Studio (PID 4242)."],
+		["closes and ends", { onCloseRequest: "linger" }, " Closed Roblox Studio (PID 4242)."],
 		[
 			"ends",
 			{ onCloseRequest: "refuse" },
-			" Roblox Studio (PID 4242) did not close within 5 s, so forge ended it without saving.",
+			" Roblox Studio (PID 4242): it did not close within 15 s, so forge ended it without saving.",
+		],
+		[
+			"ends behind a dialog",
+			{ onCloseRequest: "dialog" },
+			" Roblox Studio (PID 4242): a dialog blocked it, so forge ended it without saving.",
+		],
+		[
+			"ends with no window",
+			{ onCloseRequest: "no_window" },
+			" Roblox Studio (PID 4242): it had no window to close, so forge ended it without saving.",
 		],
 		[
 			"cannot verify",
@@ -187,6 +205,39 @@ describe(runDownAsync, () => {
 			});
 		},
 	);
+
+	it("should handle the auto-recovery files as --recovery says", async () => {
+		expect.assertions(1);
+
+		const project = makeContext({ isSupervisorAlive: true });
+		await serveStudioAsync(project, { onCloseRequest: "dialog" });
+
+		await expect(
+			downAsync(project.context, {}, { studio: { autoRecovery: "delete" } }),
+		).resolves.toMatchObject({
+			data: {
+				studio: { recovery: { deleted: [], mode: "delete", moved: [], warnings: [] } },
+			},
+		});
+	});
+
+	it("should take the auto-recovery mode from the config file", async () => {
+		expect.assertions(1);
+
+		const project = makeContext({ isSupervisorAlive: true });
+		project.context.seams.configLoader = async () => {
+			return {
+				path: path.join(PROJECT, "rbx-forge.config.json"),
+				value: { projectType: "luau", studio: { autoRecovery: "keep" } },
+			};
+		};
+
+		await serveStudioAsync(project, { onCloseRequest: "dialog" });
+
+		await expect(downAsync(project.context)).resolves.toMatchObject({
+			data: { studio: { recovery: { mode: "keep" } } },
+		});
+	});
 
 	it("should say nothing of Studio when the session has none open", async () => {
 		expect.assertions(1);

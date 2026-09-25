@@ -7,6 +7,8 @@ import { ForgeError } from "../errors.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
 import { runWithHooksAsync } from "../hooks/run-hooks.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
+import type { StudioProcess } from "../studio/launcher.ts";
 import { askAsync } from "./ask.ts";
 import type { BuildOutcome } from "./build.ts";
 import { buildAsync } from "./build.ts";
@@ -26,6 +28,7 @@ export const OPEN_FLAGS: ReadonlyArray<FlagDefinition> = [
 		kind: "boolean",
 		text: "Build the place before opening it; --no-build opens it as it is.",
 	},
+	STUDIO_PATH_FLAG,
 ];
 
 /** A build that ran before the place opened, with its `build` hooks. */
@@ -41,6 +44,16 @@ export interface OpenedPlace {
 	hooks: Array<HookResult>;
 	/** The absolute path of the place. */
 	place: string;
+	/** The Studio forge started directly; `null` for the platform launcher. */
+	studio: null | StudioProcess;
+}
+
+/** How the open step runs. */
+export interface OpenOptions {
+	/** The caller already built this place, so it is opened as it is. */
+	isBuilt: boolean;
+	/** The `--studio-path` flag, resolved. */
+	studioPath?: string | undefined;
 }
 
 /** The place, as the config names it and as an absolute path. */
@@ -59,37 +72,36 @@ const STEP = "open Roblox Studio";
  *
  * @param context - The run: project root, seams, and reporter.
  * @param config - The resolved config: the place, the build, and the hooks.
- * @param options - `isBuilt`: the caller already built this place, so it
- *   is opened as it is.
- * @returns The place, the build (or `null`), and the `open` hook results.
+ * @param options - Whether it is built, and the Studio executable flag.
+ * @returns The place, the build (or `null`), the Studio forge started, and
+ *   the `open` hook results.
  * @rejects {ForgeError} `place_not_found`, `declined`, `studio_launch_failed`, a build
  *   failure from `buildAsync`, or a hook failure.
  */
 export async function openPlaceAsync(
 	context: CommandContext,
 	config: ResolvedConfig,
-	options: { isBuilt: boolean },
+	options: OpenOptions,
 ): Promise<OpenedPlace> {
 	const output = openPlacePath(config);
 	const place = path.resolve(context.cwd, output);
 
-	const { hooks, value: build } = await runWithHooksAsync(context, config, "open", async () => {
+	const { hooks, value } = await runWithHooksAsync(context, config, "open", async () => {
 		const built = options.isBuilt
 			? null
 			: await prepareAsync(context, config, { output, place });
-		await launchAsync(context, place);
-		return built;
+		const studio = await launchAsync(context, place, options.studioPath);
+		return { built, studio };
 	});
 
-	return { build, hooks, place };
+	return { build: value.built, hooks, place, studio: value.studio };
 }
 
 /**
  * `forge open`: open the place file in Roblox Studio, building it first when
- * `open.buildFirst` or `--build` asks. Studio starts through the platform
- * launcher (`seams.studioLauncher`), so it is never a child of forge and
- * outlives it. A missing place is built when the user agrees; a run that
- * cannot ask fails.
+ * `open.buildFirst` or `--build` asks. Studio starts detached
+ * (`seams.studioLauncher`), so it is never a child of forge and outlives it. A
+ * missing place is built when the user agrees; a run that cannot ask fails.
  *
  * @param context - The run: project root, seams, and reporter.
  * @param input - The config values the flags set.
@@ -106,7 +118,12 @@ export async function runOpenAsync(
 		context.seams.configLoader,
 		input.config,
 	);
-	const opened = await openPlaceAsync(context, config, { isBuilt: false });
+	const studioPath = input.flags["studio-path"];
+	const opened = await openPlaceAsync(context, config, {
+		isBuilt: false,
+		studioPath:
+			typeof studioPath === "string" ? path.resolve(context.cwd, studioPath) : undefined,
+	});
 
 	return {
 		data: { ...opened },
@@ -189,9 +206,10 @@ async function prepareAsync(
 async function launchAsync(
 	{ cwd, env, reporter, seams }: CommandContext,
 	place: string,
-): Promise<void> {
+	studioPath: string | undefined,
+): Promise<null | StudioProcess> {
 	reporter.emit({ name: STEP, status: "started", type: "step" });
-	const outcome = await seams.studioLauncher({ cwd, env, place });
+	const outcome = await seams.studioLauncher({ cwd, env, place, studioPath });
 	reporter.emit({
 		name: STEP,
 		status: outcome.type === "launched" ? "succeeded" : "failed",
@@ -202,7 +220,12 @@ async function launchAsync(
 		throw new ForgeError(
 			"studio_launch_failed",
 			`Could not open ${place} in Roblox Studio: ${outcome.message}`,
-			{ hint: "Check that Roblox Studio is installed and opens .rbxl files." },
+			{
+				hint:
+					outcome.hint ?? "Check that Roblox Studio is installed and opens .rbxl files.",
+			},
 		);
 	}
+
+	return outcome.studio ?? null;
 }

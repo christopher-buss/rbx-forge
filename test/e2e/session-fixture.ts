@@ -1,8 +1,9 @@
 /**
  * A `forge start` session as a real process, for e2e tests: a temporary
  * project with fake Rojo, compiler, hook, and Studio
- * (`test/fixtures/bin/fake-worker.ts`) on PATH, the real reaper, and the
- * Studio stand-in place, so real Roblox Studio never opens.
+ * (`test/fixtures/bin/fake-worker.ts`) on PATH, the real reaper, and a
+ * Studio stand-in that forge starts directly, so real Roblox Studio never
+ * opens.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { spawn } from "node:child_process";
@@ -14,29 +15,34 @@ import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { onTestFinished } from "vitest";
 
+import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
 import { createFixtureBinDirectory } from "../helpers/fixture-bin.ts";
 import { makeStudioExecutable, NATIVE_DIRECTORY, studioVariables } from "../helpers/real-native.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { killWorkers, readWorkerLog } from "../helpers/worker-log.ts";
 import { BIN, makeProject } from "./run-bin.ts";
 
-const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 export const IS_WINDOWS = process.platform === "win32";
+export const IS_MACOS = process.platform === "darwin";
 
 const PATH_NAME = /^path$/i;
 export const ROJO_ONLY = ["start", "--no-open", "--no-compiler", "--json"];
 /** Roles that run as reaper workers; Studio and its launcher do not. */
 export const WORKER_ROLES: ReadonlySet<string> = new Set(["hook", "rbxtsc", "rojo"]);
 
-/** The place every session builds: the Studio stand-in of `open.spec.ts`. */
-export const PLACE = IS_WINDOWS ? "My Places/Studio Stand-in.cmd" : "My Places/game.rbxl";
+/**
+ * The place every session builds. It holds the stand-in's bootstrap
+ * (`studioPlaceContent`), which Node, started as Studio, runs.
+ */
+export const PLACE = "My Places/game.rbxl";
 
 /** What a fixture's Studio stand-in does. */
 export interface FixtureOptions {
 	/**
 	 * Behave as Studio: run as a Studio executable, write the place's lock
-	 * file, and close on a close request (`test/fixtures/bin/fake-worker.ts`).
-	 * Otherwise it only stays alive, and a test writes the lock file.
+	 * file, and close on a close request
+	 * (`test/fixtures/bin/studio-stand-in.ts`). Otherwise it is plain Node
+	 * that only stays alive, and a test writes the lock file.
 	 */
 	studio?: boolean;
 }
@@ -100,7 +106,8 @@ export async function makeFixtureAsync(
 			return {
 				...base,
 				FIXTURE_LOG: log,
-				FIXTURE_PLACE_CONTENT: placeContent(studio ?? process.execPath),
+				FIXTURE_PLACE_CONTENT: studioPlaceContent(),
+				RBX_FORGE_STUDIO_PATH: process.execPath,
 				...(studio === undefined ? {} : studioVariables(studio)),
 				PATH: bin,
 				RBX_FORGE_NATIVE_DIR: NATIVE_DIRECTORY,
@@ -192,20 +199,6 @@ export async function waitForRoleAsync(log: string, role: string): Promise<Worke
 
 		await sleep(50);
 	}
-}
-
-/**
- * What `rojo build` writes to the place: on Windows, the batch file that
- * stands in for Studio (see `open.spec.ts`).
- *
- * @param studio - The path of the program the stand-in runs: Node, or a
- *   copy of Node named as Studio.
- * @returns What the place file holds.
- */
-function placeContent(studio: string): string {
-	return IS_WINDOWS
-		? `@cd /d "%SystemRoot%" & "${studio}" "${FAKE_WORKER}" studio "%~f0" & exit\r\n`
-		: "fake place\n";
 }
 
 /**

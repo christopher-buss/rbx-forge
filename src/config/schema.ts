@@ -47,6 +47,18 @@ export interface OpenOptions {
 	projectPath?: string;
 }
 
+/**
+ * What `stop` and `down` do with the auto-recovery files of a Studio they
+ * end: `move` them to `.forge/recovery/`, `delete` them, or `keep` them.
+ */
+export type AutoRecoveryMode = "delete" | "keep" | "move";
+
+/** Options for the Roblox Studio forge opens and closes. */
+export interface StudioOptions {
+	/** What to do with the auto-recovery files of a Studio forge ends. */
+	autoRecovery?: AutoRecoveryMode;
+}
+
 /** Options for syncback (Studio edits back into the project). */
 export interface SyncbackOptions {
 	/** The place file syncback reads. Falls back to `buildOutputPath`. */
@@ -95,6 +107,7 @@ export interface ForgeConfig {
 	rojoPort?: number;
 	/** The Rojo project file. */
 	rojoProjectPath?: string;
+	studio?: StudioOptions;
 	syncback?: SyncbackOptions;
 	typegen?: TypegenOptions;
 }
@@ -142,6 +155,7 @@ const fileSchema = type({
 	"rojoAlias?": PATH,
 	"rojoPort?": "1 <= number.integer <= 65535",
 	"rojoProjectPath?": PATH,
+	"studio?": { "+": "reject", "autoRecovery?": "'delete' | 'keep' | 'move'" },
 	"syncback?": {
 		"+": "reject",
 		"inputPath?": PATH,

@@ -3,6 +3,7 @@
  */
 export { defineConfig } from "./config/define-config.ts";
 export type {
+	AutoRecoveryMode,
 	ForgeConfig,
 	HookCommand,
 	HookPhases,
@@ -11,6 +12,7 @@ export type {
 	OpenOptions,
 	ProjectType,
 	RbxtsOptions,
+	StudioOptions,
 	SyncbackOptions,
 	TypegenOptions,
 } from "./config/schema.ts";

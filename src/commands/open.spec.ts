@@ -113,7 +113,12 @@ describe(runOpenAsync, () => {
 		const { context, launcher, order, specs } = makeOpen();
 
 		await expect(runOpenAsync(context, input())).resolves.toStrictEqual({
-			data: { build: { durationMs: 900, hooks: [], output: GAME }, hooks: [], place: GAME },
+			data: {
+				build: { durationMs: 900, hooks: [], output: GAME },
+				hooks: [],
+				place: GAME,
+				studio: null,
+			},
 			summary: `Opened ${GAME} in Roblox Studio.`,
 		});
 		expect(specs[0]!.args).toStrictEqual([
@@ -123,7 +128,9 @@ describe(runOpenAsync, () => {
 			"game.rbxl",
 		]);
 		expect({ launches: launcher.mock.calls, order }).toStrictEqual({
-			launches: [[{ cwd: PROJECT, env: { PATH: TOOLS }, place: GAME }]],
+			launches: [
+				[{ cwd: PROJECT, env: { PATH: TOOLS }, place: GAME, studioPath: undefined }],
+			],
 			order: ["rojo", "studio"],
 		});
 	});
@@ -134,10 +141,37 @@ describe(runOpenAsync, () => {
 		const { context, order } = makeOpen({ files: { "game.rbxl": "place" } });
 
 		await expect(runOpenAsync(context, input(NO_BUILD))).resolves.toStrictEqual({
-			data: { build: null, hooks: [], place: GAME },
+			data: { build: null, hooks: [], place: GAME, studio: null },
 			summary: `Opened ${GAME} in Roblox Studio.`,
 		});
 		expect(order).toStrictEqual(["studio"]);
+	});
+
+	it("should start the Studio --studio-path names, and report it", async () => {
+		expect.assertions(2);
+
+		const { context, launcher } = makeOpen({
+			files: { "game.rbxl": "place" },
+			launch: { studio: { pid: 7, startTime: "70" }, type: "launched" },
+		});
+
+		await expect(
+			runOpenAsync(context, { config: NO_BUILD, flags: { "studio-path": "bin/Studio.exe" } }),
+		).resolves.toMatchObject({ data: { studio: { pid: 7, startTime: "70" } } });
+		expect(launcher.mock.calls[0]![0].studioPath).toBe(path.join(PROJECT, "bin/Studio.exe"));
+	});
+
+	it("should pass on the launcher's hint", async () => {
+		expect.assertions(1);
+
+		const { context } = makeOpen({
+			files: { "game.rbxl": "place" },
+			launch: { hint: "Fix it.", message: "--studio-path names x.", type: "failed" },
+		});
+
+		await expect(runOpenAsync(context, input(NO_BUILD))).rejects.toMatchObject({
+			hint: "Fix it.",
+		});
 	});
 
 	it("should skip the build when the config turns buildFirst off", async () => {

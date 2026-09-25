@@ -1,58 +1,93 @@
 import path from "node:path";
 
+import type { FlagDefinition } from "../cli/flags.ts";
+import { findSession } from "../client/session.ts";
+import {
+	RECOVERY_FLAG,
+	recoveryOptions,
+	sessionStudioTarget,
+	waitForSessionStudioAsync,
+} from "../client/studio.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { CommandResult } from "../seams/reporter.ts";
-import type { StudioStop } from "../studio/close-studio.ts";
-import { closeStudio, STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
+import type { StudioEnd, StudioStop, StudioTarget } from "../studio/close-studio.ts";
+import { closeStudioAsync, STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
+import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
+
+export const STOP_FLAGS: ReadonlyArray<FlagDefinition> = [RECOVERY_FLAG];
+
+/** How the summary tells how Studio went. */
+const HOW: Readonly<Record<StudioEnd, string>> = {
+	dialog: ": a dialog blocked it, so forge ended it without saving",
+	exited: "",
+	lock_released: "",
+	no_window: ": it had no window to close, so forge ended it without saving",
+	timeout: `: it did not close within ${STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving`,
+};
 
 /**
  * `forge stop`: close the Roblox Studio that has this project's place open.
- * Studio gets a close request; when it is still open after
- * {@link STUDIO_CLOSE_MS}, forge ends it without a save (`closeStudio`). It
- * acts only on the Studio its identity check verifies.
+ * When a session runs, it is the session's Studio (waiting while it is
+ * still opening); else the Studio the place's lock file names. Studio gets
+ * a close request; forge ends it once it closed the place, at once when a
+ * dialog blocks it, and else after {@link STUDIO_CLOSE_MS}, without a save
+ * (`closeStudioAsync`). It acts only on a Studio its identity check
+ * verifies. The auto-recovery files of a Studio it ended are moved,
+ * deleted, or kept (`studio.autoRecovery`, `--recovery`).
  *
  * @param context - The run: project directory, config loader, file system,
- *   and native addon.
+ *   clock, transport, and native addon.
  * @param input - The config values flags set.
- * @returns Whether a Studio was stopped, its PID, the place, and whether
- *   forge had to end it.
+ * @returns Whether a Studio was stopped, its PID, the place, how it went,
+ *   and what forge did with its auto-recovery files.
  * @rejects `identity_mismatch` when the lock file names no process or
  *   another computer, or a process that is not Studio, started after the
- *   lock file was written, or cannot be checked; `process_failed` when
- *   Studio does not exit in time; config errors from
- *   `loadProjectConfigAsync`.
+ *   lock file was written, is not the session's Studio, or cannot be
+ *   checked; `process_failed` when Studio does not exit in time; config
+ *   errors from `loadProjectConfigAsync`.
  */
 export async function runStopAsync(
 	context: CommandContext,
 	input: CommandInput,
 ): Promise<CommandResult> {
-	const { config } = await loadProjectConfigAsync(
-		context.cwd,
-		context.seams.configLoader,
-		input.config,
-	);
-	const place = path.resolve(context.cwd, config.open.buildOutputPath ?? config.buildOutputPath);
-	return stopResult(closeStudio(context.seams, place), place);
+	const { cwd, env, seams } = context;
+	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
+	const forge = forgeFiles(cwd);
+	const target = (await sessionTargetAsync(context)) ?? {
+		place: path.resolve(cwd, config.open.buildOutputPath ?? config.buildOutputPath),
+	};
+	const stop = await closeStudioAsync(seams, target, recoveryOptions(env, forge, config));
+	return stopResult(stop, target.place);
+}
+
+/**
+ * The Studio of the project's running session.
+ *
+ * @param context - The file system, clock, and transport.
+ * @returns It, or `undefined` when no session answers or it has no Studio.
+ */
+async function sessionTargetAsync(context: CommandContext): Promise<StudioTarget | undefined> {
+	const session = findSession(context.seams.fileSystem, forgeFiles(context.cwd));
+	const studio =
+		session === undefined ? undefined : await waitForSessionStudioAsync(context.seams, session);
+	return studio === undefined ? undefined : sessionStudioTarget(studio);
 }
 
 /**
  * The result of `forge stop` once Studio is gone.
  *
- * @param stop - How Studio went: its PID, and whether forge ended it.
+ * @param stop - How Studio went.
  * @param place - The absolute path of the place file.
  * @returns Its data and summary.
  */
 function stoppedResult(
-	{ forced: isForced, pid }: Extract<StudioStop, { status: "stopped" }>,
+	{ end, forced: isForced, pid, recovery }: Extract<StudioStop, { status: "stopped" }>,
 	place: string,
 ): CommandResult {
-	const how = isForced
-		? `: it did not close within ${STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving`
-		: "";
 	return {
-		data: { forced: isForced, pid, place, stopped: true },
-		summary: `Stopped Roblox Studio (PID ${pid}) for ${place}${how}.`,
+		data: { end, forced: isForced, pid, place, recovery, stopped: true },
+		summary: `Stopped Roblox Studio (PID ${pid}) for ${place}${HOW[end]}.`,
 	};
 }
 

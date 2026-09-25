@@ -46,12 +46,13 @@
  * - `FIXTURE_PLACE_CONTENT`: what `rojo build` writes to its output (default
  *   `fake place`).
  *
- * The `open` and `xdg-open` roles stand in for the platform launcher: they
- * start a detached `studio` with their arguments and exit at once, as the real
- * launchers hand a file to its app. A `studio` stays alive until killed. It
- * runs `FIXTURE_STUDIO_EXE` when set: a copy of Node named as Studio, so
- * forge's identity check takes it for Studio. With `FIXTURE_STUDIO_LOCK=1`
- * it behaves as Studio with its place open (`studio-stand-in.ts`).
+ * A `studio` stays alive until killed. Forge starts it directly when the
+ * place holds the stand-in's bootstrap and `RBX_FORGE_STUDIO_PATH` names
+ * Node, or a copy of Node named as Studio (so forge's identity check takes
+ * it for Studio). The `open` and `xdg-open` roles stand in for the platform
+ * launcher: they start a detached `studio` (`FIXTURE_STUDIO_EXE` when set)
+ * with their arguments and exit at once. With `FIXTURE_STUDIO_LOCK=1` it
+ * behaves as Studio with its place open (`studio-stand-in.ts`).
  *
  * Markers (`RBX_FORGE_SESSION`, `RBX_FORGE_WORKER`) are recorded as seen and
  * inherited by every grandchild unchanged.

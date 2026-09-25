@@ -3,6 +3,7 @@ import { type } from "arktype";
 
 import type { CompileReport, Diagnostic } from "../compiler/diagnostics.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
+import type { StudioProcess } from "../studio/launcher.ts";
 
 /**
  * The state contract of a session: what `forge status --json`
@@ -15,7 +16,7 @@ import type { HookResult } from "../hooks/run-hooks.ts";
  *     "rojo":     { "status": "ready", "port": 34872 },
  *     "compiler": { "status": "ready", "lastBuild": { "at": "…", "errors": 0, "diagnostics": [] } },
  *     "syncback": { "status": "idle", "lastRun": { "at": "…", "ok": true, "durationMs": 812, "hooks": [] } },
- *     "studio":   { "status": "open", "place": "…" }
+ *     "studio":   { "status": "open", "place": "…", "pid": 5678, "startTime": "…" }
  *   }
  * }
  * ```
@@ -50,6 +51,20 @@ export interface LastSyncback extends SyncbackRun {
 	at: string;
 }
 
+/**
+ * Where Studio is: `off` when the session does not open it; `opening`
+ * until its lock file shows the place open; then `open`, and `closed`.
+ */
+export type StudioStatus = "closed" | "off" | "open" | "opening";
+
+/** The Studio of a session. */
+export interface SessionStudio {
+	pid?: number;
+	place?: string;
+	startTime?: string;
+	status: StudioStatus;
+}
+
 /** One session's state. */
 export interface SessionStatus {
 	phase: SessionPhase;
@@ -59,8 +74,11 @@ export interface SessionStatus {
 	services: {
 		compiler: { lastBuild?: LastBuild; status: ServiceStatus };
 		rojo: { port: number; status: ServiceStatus };
-		/** `place`: the place Studio has open, once it has. */
-		studio: { place?: string; status: "closed" | "off" | "open" | "opening" };
+		/**
+		 * `place`: the place Studio opens or has open, once forge launched
+		 * it. `pid` and `startTime`: the Studio forge started directly.
+		 */
+		studio: SessionStudio;
 		/**
 		 * `off` when the session does not run syncback on save; `forge sync`
 		 * runs still show `running` and their `lastRun`.
@@ -80,8 +98,15 @@ export interface StatusRecorder {
 	 * compiles, `starting`) or its tree is gone.
 	 */
 	service: (id: "compiler" | "rojo", status: ServiceStatus) => void;
-	/** Studio has the place open, or closed it. */
-	studio: (status: "closed" | "open", place: string) => void;
+	/**
+	 * Studio was launched with the place, has it open, or closed it.
+	 * `process`: the Studio forge started directly, if it did.
+	 */
+	studio: (
+		status: Exclude<StudioStatus, "off">,
+		place: string,
+		process: null | StudioProcess,
+	) => void;
 	/** A syncback run ended. */
 	syncbackFinished: (run: SyncbackRun) => void;
 	/** A syncback run started. */
@@ -208,8 +233,8 @@ function createRecorder(
 			status.services[id].status = serviceStatus;
 			changed();
 		},
-		studio: (studioStatus, place) => {
-			status.services.studio = { place, status: studioStatus };
+		studio: (studioStatus, place, process) => {
+			status.services.studio = { ...process, place, status: studioStatus };
 			changed();
 		},
 		syncbackFinished: (run) => {
@@ -268,7 +293,12 @@ const statusSchema: Type<SessionStatus> = type({
 			"status": serviceStatus,
 		},
 		rojo: { port: INTEGER, status: serviceStatus },
-		studio: { "place?": TEXT, "status": "'closed' | 'off' | 'open' | 'opening'" },
+		studio: {
+			"pid?": INTEGER,
+			"place?": TEXT,
+			"startTime?": TEXT,
+			"status": "'closed' | 'off' | 'open' | 'opening'",
+		},
 		syncback: {
 			"lastRun?": {
 				"at": TEXT,

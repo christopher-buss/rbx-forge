@@ -32,6 +32,13 @@ export interface PinnedProcess {
 	/** Whether the pinned process still runs. */
 	isAlive: () => boolean;
 	/**
+	 * Whether a modal dialog blocks the process's main windows: on Windows
+	 * one of them is disabled, as Windows does to the owner of a modal
+	 * dialog, and it ignores a close request. Always `false` on POSIX, and
+	 * once the process has exited.
+	 */
+	isBlocked: () => boolean;
+	/**
 	 * Force-kill the pinned process only, not its children.
 	 *
 	 * @returns `false` when it had already exited.
@@ -49,7 +56,8 @@ export interface PinnedProcess {
 	readonly pid: number;
 	/**
 	 * Ask the pinned process to close, as a user would: `WM_CLOSE` to its
-	 * main windows (visible, unowned, not tool or console windows) on
+	 * main windows (visible, unowned, not tool or console windows; with no
+	 * visible one, hidden ones titled `<place> - Roblox Studio`) on
 	 * Windows, `SIGTERM` elsewhere. It does not wait, and the process may
 	 * refuse or ask its user first.
 	 *
@@ -203,6 +211,13 @@ export interface NativeAddon {
 	 * only on one machine. With the PID it names exactly one process.
 	 */
 	processStartTime: (pid: number) => null | string;
+	/**
+	 * Windows only: the default value of `HKEY_CURRENT_USER\<key>`, or
+	 * `null` when the key or value is missing.
+	 *
+	 * @throws When the value is not a string, or the read fails.
+	 */
+	readUserRegistryDefault?: (key: string) => null | string;
 	/**
 	 * Every live process of a session: marker or lease holders (POSIX),
 	 * members of its jobs (Windows), and its recorded reaper. Empty means
