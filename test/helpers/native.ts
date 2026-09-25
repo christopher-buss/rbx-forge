@@ -4,10 +4,14 @@ import type { NativeAddon, PinnedProcess } from "../../src/native/addon.ts";
 export interface FakeProcess {
 	alive: boolean;
 	executablePath: string;
+	/** It exits right after it is pinned, before any query on the pin. */
+	exitsAfterPin?: boolean;
 	/** `kill` leaves it running (a process the OS cannot end in time). */
 	ignoresKill?: boolean;
 	/** `pinProcess` throws this message (for example, access denied). */
 	pinError?: string;
+	/** The timeout of every `waitForExit` call on its pins. */
+	waits?: Array<number>;
 }
 
 /** A fake addon over an in-memory process table. */
@@ -49,6 +53,10 @@ export function createFakeNative(processes: Record<number, FakeProcess> = {}): F
 }
 
 function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
+	if (entry.exitsAfterPin === true) {
+		entry.alive = false;
+	}
+
 	return {
 		executablePath: () => (entry.alive ? entry.executablePath : null),
 		isAlive: () => entry.alive,
@@ -59,6 +67,9 @@ function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 		},
 		pid,
 		startTime: String(pid),
-		waitForExit: () => !entry.alive,
+		waitForExit: (timeoutMs) => {
+			entry.waits?.push(timeoutMs);
+			return !entry.alive;
+		},
 	};
 }

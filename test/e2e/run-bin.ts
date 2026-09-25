@@ -23,12 +23,17 @@ export interface BinRun {
  *
  * @param argv - Arguments after `forge`.
  * @param cwd - Working directory of the run.
+ * @param environment - Variables to set on top of this process's.
  * @returns Exit status and output.
  */
-export async function runBinAsync(argv: Array<string>, cwd = REPOSITORY): Promise<BinRun> {
+export async function runBinAsync(
+	argv: Array<string>,
+	cwd = REPOSITORY,
+	environment: Record<string, string> = {},
+): Promise<BinRun> {
 	const child = spawn(process.execPath, [BIN, ...argv], {
 		cwd,
-		env: { ...process.env, CI: undefined },
+		env: { ...process.env, CI: undefined, ...environment },
 		stdio: ["pipe", "pipe", "pipe"],
 		windowsHide: true,
 	});
