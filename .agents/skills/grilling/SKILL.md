@@ -13,7 +13,6 @@ Write every round, expansion, and summary in ASD-STE100 Simplified Technical Eng
 
 Format a round like so:
 
-```
 Round <n>. <settled> settled. <open> open. <waiting> waiting.
 Reply with only the numbers you disagree with. Silence accepts the recommendation.
 
@@ -22,7 +21,6 @@ Reply with only the numbers you disagree with. Silence accepts the recommendatio
    Question: <one or two sentences>
 
 2. ...
-```
 
 Header counts: settled = decisions answered so far; open = questions in this round; waiting = frontier questions held back.
 
