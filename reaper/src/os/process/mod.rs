@@ -162,7 +162,7 @@ impl PinnedProcess {
 
     /// Ask the pinned process to close, as a user would: `WM_CLOSE` to its
     /// main windows on Windows (visible, unowned, not tool or console
-    /// windows), `SIGTERM` elsewhere. The process may refuse or ask its user
+    /// windows; or hidden ones Studio titles), `SIGTERM` elsewhere. The process may refuse or ask its user
     /// first; this does not wait.
     ///
     /// Returns `Ok(false)` when the process had already exited, or on
@@ -173,6 +173,18 @@ impl PinnedProcess {
     /// When the OS refuses the request.
     pub fn request_close(&self) -> io::Result<bool> {
         self.pin.request_close()
+    }
+
+    /// Whether a modal dialog blocks the process's main windows: on Windows
+    /// one of them is disabled, as Windows does to the owner of a modal
+    /// dialog; such a window ignores a close request. Always `false` on
+    /// POSIX, and once the process has exited.
+    ///
+    /// # Errors
+    ///
+    /// When the OS refuses the query.
+    pub fn is_blocked(&self) -> io::Result<bool> {
+        self.pin.is_blocked()
     }
 
     /// Force-kill the process group the pinned process leads (`SIGKILL` to
@@ -373,7 +385,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn request_close_posts_wm_close_to_the_main_window() {
-        crate::os::win::testing::open_test_window().unwrap();
+        crate::os::win::testing::open_test_window("close test", true).unwrap();
         let before = crate::os::win::testing::close_requests();
         let pinned = PinnedProcess::open(std::process::id()).unwrap().unwrap();
 
@@ -386,6 +398,32 @@ mod tests {
         }
         assert!(crate::os::win::testing::close_requests() > before);
         assert!(pinned.is_alive().unwrap());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn is_blocked_while_a_main_window_is_disabled() {
+        use crate::os::win::testing::{open_test_window, set_window_enabled};
+        let window = open_test_window("blocked test", true).unwrap();
+        let pinned = PinnedProcess::open(std::process::id()).unwrap().unwrap();
+
+        assert!(!pinned.is_blocked().unwrap());
+        set_window_enabled(window, false);
+        assert!(pinned.is_blocked().unwrap());
+        set_window_enabled(window, true);
+        assert!(!pinned.is_blocked().unwrap());
+    }
+
+    #[test]
+    fn a_process_with_no_window_is_never_blocked() {
+        let mut child = sleeper();
+        let pinned = PinnedProcess::open(child.id()).unwrap().unwrap();
+        let blocked = pinned.is_blocked().unwrap();
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        assert!(!blocked);
+        assert!(!pinned.is_blocked().unwrap());
     }
 
     #[test]

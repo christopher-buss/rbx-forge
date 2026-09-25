@@ -11,7 +11,7 @@ use napi::bindgen_prelude::AsyncTask;
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
 
-use crate::os::win::{detach, pipe, security, testing};
+use crate::os::win::{detach, pipe, registry, security, testing};
 
 fn to_napi(context: &str, err: &std::io::Error) -> Error {
     Error::from_reason(format!("{context}: {err}"))
@@ -343,15 +343,41 @@ pub fn connect_pipe_as(path: String, user: String, password: String, write: bool
         .map_err(|err| to_napi(&format!("log on as {user}"), &err))
 }
 
-/// Tests only: open a main window (visible, unowned, off screen) that counts
-/// the close requests it gets and stays open.
+/// The default value of `HKEY_CURRENT_USER\<key>`, or `null` when it is
+/// missing.
+///
+/// # Errors
+///
+/// When the value is not a string, or the read fails.
+#[napi]
+pub fn read_user_registry_default(key: String) -> Result<Option<String>> {
+    registry::read_user_default(&key).map_err(|err| to_napi(&format!("read HKCU\\{key}"), &err))
+}
+
+/// Tests only: open a main window (unowned, off screen, titled `title`,
+/// never shown unless `visible`) that counts the close requests it gets
+/// and stays open. Returns its handle.
 ///
 /// # Errors
 ///
 /// When the window cannot be made.
 #[napi]
-pub fn open_test_window() -> Result<()> {
-    testing::open_test_window().map_err(|err| to_napi("open a test window", &err))
+#[allow(clippy::cast_precision_loss, reason = "window handles fit in 53 bits")]
+pub fn open_test_window(title: String, visible: bool) -> Result<f64> {
+    testing::open_test_window(&title, visible)
+        .map(|window| window as f64)
+        .map_err(|err| to_napi("open a test window", &err))
+}
+
+/// Tests only: enable or disable a test window, as Windows disables the
+/// owner of a modal dialog.
+#[napi]
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "a handle from openTestWindow"
+)]
+pub fn set_test_window_enabled(window: f64, enabled: bool) {
+    testing::set_window_enabled(window as isize, enabled);
 }
 
 /// Tests only: how many close requests the test window got.

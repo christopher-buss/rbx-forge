@@ -329,6 +329,16 @@ impl Pin {
         self.signal_live(libc::SIGTERM)
     }
 
+    /// POSIX has no window state to read: never blocked.
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "same shape as on Windows"
+    )]
+    pub fn is_blocked(&self) -> io::Result<bool> {
+        Ok(false)
+    }
+
     /// Send `signal` to the process, once its start time still names it.
     fn signal_live(&self, signal: libc::c_int) -> io::Result<bool> {
         if !self.is_alive()? {

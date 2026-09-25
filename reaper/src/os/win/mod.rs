@@ -3,13 +3,17 @@
 //! - [`security`]: the current user's SID, owner-only security descriptors,
 //!   private files, and security read-back.
 //! - [`pipe`]: the named-pipe server of a session's control channel.
-//! - [`detach`]: start a process outside the caller's job (`forge up`).
-//! - [`window`]: ask a process to close through its main windows.
+//! - [`detach`]: start a process outside the caller's job (`forge up`,
+//!   Roblox Studio).
+//! - [`registry`]: read the current user's registry.
+//! - [`window`]: ask a process to close through its main windows, and tell
+//!   whether a modal dialog blocks them.
 //! - [`testing`]: helpers that only tests call (jobs, other-user connects,
 //!   a window that counts close requests).
 
 pub mod detach;
 pub mod pipe;
+pub mod registry;
 pub mod security;
 pub mod testing;
 pub mod window;

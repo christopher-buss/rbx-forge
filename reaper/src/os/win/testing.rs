@@ -24,10 +24,11 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, RegisterClassW,
     SW_SHOWNOACTIVATE, ShowWindow, TranslateMessage, WM_CLOSE, WNDCLASSW, WS_EX_NOACTIVATE,
-    WS_POPUP, WS_VISIBLE,
+    WS_POPUP,
 };
 
 use super::{check, owned, raw, wide};
@@ -131,7 +132,7 @@ pub fn connect_pipe_as(path: &str, user: &str, password: &str, write: bool) -> i
     })
 }
 
-/// `WM_CLOSE` messages the test window got.
+/// `WM_CLOSE` messages the test windows got.
 static CLOSE_REQUESTS: AtomicU32 = AtomicU32::new(0);
 
 /// Window procedure of the test window: count `WM_CLOSE` and stay open, so
@@ -151,15 +152,20 @@ unsafe extern "system" fn test_window_proc(
     unsafe { DefWindowProcW(window, message, wparam, lparam) }
 }
 
-/// Create a window on its own thread with its own message loop: a visible
-/// top-level window with no owner (a main window, as Studio has), placed
-/// off screen and never activated. It lives until this process exits.
+/// Create a window on its own thread with its own message loop: a top-level
+/// window with no owner (a main window, as Studio has), titled `title`,
+/// placed off screen and never activated. With `visible` false it is never
+/// shown, as the main window of a Studio started hidden: no window and no
+/// taskbar button. It lives until this process exits.
+///
+/// Returns the window's handle.
 ///
 /// # Errors
 ///
 /// When the window cannot be made.
-pub fn open_test_window() -> io::Result<()> {
+pub fn open_test_window(title: &str, visible: bool) -> io::Result<isize> {
     let (sender, receiver) = mpsc::channel();
+    let title = wide(title);
     thread::spawn(move || {
         let class = wide("ForgeTestWindow");
         // SAFETY: null names this process's module.
@@ -177,8 +183,8 @@ pub fn open_test_window() -> io::Result<()> {
             CreateWindowExW(
                 WS_EX_NOACTIVATE,
                 class.as_ptr(),
-                class.as_ptr(),
-                WS_POPUP | WS_VISIBLE,
+                title.as_ptr(),
+                WS_POPUP,
                 -32_000,
                 -32_000,
                 1,
@@ -196,11 +202,12 @@ pub fn open_test_window() -> io::Result<()> {
 
         // A hidden start (`windowsHide`) sets the first show to hide: show it
         // twice, so the second one counts.
-        for _ in 0..2 {
+        let shows = if visible { 2 } else { 0 };
+        for _ in 0..shows {
             // SAFETY: a window this thread owns.
             unsafe { ShowWindow(window, SW_SHOWNOACTIVATE) };
         }
-        let _ = sender.send(Ok(()));
+        let _ = sender.send(Ok(window as isize));
         // SAFETY: all-zero is a valid value of this plain struct.
         let mut message: MSG = unsafe { zeroed() };
         // SAFETY: the message loop of the thread that owns the window.
@@ -217,7 +224,14 @@ pub fn open_test_window() -> io::Result<()> {
         .map_err(|_| io::Error::other("the window thread ended"))?
 }
 
-/// How many `WM_CLOSE` messages the test window got.
+/// Enable or disable a test window, as Windows disables the owner of a
+/// modal dialog while the dialog is up.
+pub fn set_window_enabled(window: isize, enabled: bool) {
+    // SAFETY: plain call; a closed window fails it, which is fine here.
+    unsafe { EnableWindow(window as HWND, i32::from(enabled)) };
+}
+
+/// How many `WM_CLOSE` messages the test windows got.
 #[must_use]
 pub fn close_requests() -> u32 {
     CLOSE_REQUESTS.load(Ordering::SeqCst)
