@@ -79,10 +79,10 @@ async function waitForStudioAsync(log: string): Promise<WorkerRecord> {
 
 describe("forge open", () => {
 	it("should build the place, then start Studio with it directly, and Studio outlives forge", async () => {
-		expect.assertions(5);
+		expect.assertions(4);
 
 		const { forge, log, place } = makeFixture();
-		const { pid, status, stdout } = await forge(["open", "--json", "--place", PLACE]);
+		const { status, stdout } = await forge(["open", "--json", "--place", PLACE]);
 		const studio = await waitForStudioAsync(log);
 
 		expect({ data: parseResult(stdout).data, status }).toMatchObject({
@@ -95,10 +95,20 @@ describe("forge open", () => {
 			status: EXIT_SUCCESS,
 		});
 		expect(studio.args).toStrictEqual([place]);
-		// Studio is forge's child, out of its job, and runs on without it.
-		expect(studio.ppid).toBe(pid);
 		// forge has exited; the Studio it opened lives on.
 		expect(isProcessAlive(studio.pid)).toBeTrue();
+	});
+
+	// POSIX gives an orphan a new parent (init or a subreaper) once forge
+	// exits, often before Studio starts; Windows keeps the creator's PID.
+	it.skipIf(!IS_WINDOWS)("should start Studio as forge's own child", async () => {
+		expect.assertions(2);
+
+		const { forge, log } = makeFixture({ hasPlace: true });
+		const { pid } = await forge(["open", "--no-build", "--place", PLACE]);
+		const studio = await waitForStudioAsync(log);
+
+		expect(studio.ppid).toBe(pid);
 	});
 
 	it("should open an existing place without building it with --no-build", async () => {
@@ -163,7 +173,7 @@ describe("forge open", () => {
 	it.skipIf(IS_WINDOWS)(
 		"should open the place through the platform launcher when it finds no Studio",
 		async () => {
-			expect.assertions(3);
+			expect.assertions(4);
 
 			const { forge, log, place } = makeFixture({ hasPlace: true });
 			const { status, stdout } = await forge(
