@@ -169,6 +169,18 @@ Options for the roblox-ts compiler (`projectType: "rbxts"`).
 
 The compiler command. A missing compiler gives `compiler_missing`.
 
+forge reads the watch-mode output of rbxtsc, and the NDJSON events of
+[sloptor](https://github.com/howmanyslop/sloptor) (`sloptor build -w --json`).
+It finds the format on each line: a JSON object with a string `event` field is a
+sloptor event, and all other lines are rbxtsc text. There is no option for it.
+For sloptor:
+
+```ts
+defineConfig({
+	rbxts: { args: ["build", "--json"], command: "sloptor" },
+});
+```
+
 #### `rbxts.args`
 
 - Type: `string[]`

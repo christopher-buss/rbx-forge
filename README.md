@@ -46,7 +46,10 @@ Requirements:
   `native_missing`.
 - [Rojo](https://rojo.space) on `PATH` or as a project dependency. Syncback
   needs Rojo 7.7 or later.
-- For roblox-ts projects: `roblox-ts` as a project dependency.
+- For roblox-ts projects: `roblox-ts` as a project dependency, or
+  [sloptor](https://github.com/howmanyslop/sloptor) with
+  `rbxts: { args: ["build", "--json"], command: "sloptor" }` in the config (see
+  [`rbxts.command`](./docs/config.md#rbxtscommand)).
 
 ```bash
 npm install --save-dev rbx-forge
