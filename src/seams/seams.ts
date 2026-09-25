@@ -1,3 +1,4 @@
+import type { NativeLoader } from "../native/addon.ts";
 import type { ProcessRunner } from "../process/process-runner.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
 import type { ChildProcessRunner } from "./child-process.ts";
@@ -29,6 +30,8 @@ export interface Seams {
 	configLoader: ConfigLoader;
 	fileSystem: FileSystem;
 	host: Host;
+	/** The `@rbx-forge/native` addon, loaded on first use. */
+	native: NativeLoader;
 	/**
 	 * Runs tools and hooks to completion. Built from `childProcess` today;
 	 * the native reaper replaces it without changing its callers.

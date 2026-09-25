@@ -7,10 +7,15 @@ description = "Process ownership for rbx-forge sessions: the forge-reaper binary
 license = "MIT"
 
 # The napi addon. `cdylib` only: the reaper binary never links napi symbols.
+# No test target: a test executable cannot link the napi symbols that Node
+# provides at load time. The logic lives in `src/os/`, and its tests run
+# through the binary target, which compiles the same module tree.
 [lib]
 name = "forge_native"
 crate-type = [ "cdylib" ]
 path = "src/lib.rs"
+test = false
+doctest = false
 
 [[bin]]
 name = "forge-reaper"
@@ -19,6 +24,15 @@ path = "src/main.rs"
 [dependencies]
 napi = { version = "3.13.0", default-features = false, features = [ "napi6" ] }
 napi-derive = "3.6.9"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_System_Threading",
+] }
 
 [build-dependencies]
 napi-build = "2.5.0"

@@ -3,6 +3,8 @@ import { runConfigAsync } from "../commands/config.ts";
 import type { CommandRun } from "../commands/context.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
 import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
+import { runStopAsync } from "../commands/stop.ts";
+import { runSyncbackCommandAsync, SYNCBACK_FLAGS } from "../commands/syncback.ts";
 import type { FlagDefinition } from "./flags.ts";
 
 /** One `forge <command>`: its flags, help line, and what it runs. */
@@ -40,5 +42,18 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		flags: OPEN_FLAGS,
 		run: runOpenAsync,
 		summary: "Open the place in Roblox Studio, building it first when configured or asked.",
+	},
+	{
+		name: "stop",
+		flags: [],
+		run: runStopAsync,
+		summary:
+			"Close Roblox Studio for this project's place, after verifying the process is Studio.",
+	},
+	{
+		name: "syncback",
+		flags: SYNCBACK_FLAGS,
+		run: runSyncbackCommandAsync,
+		summary: "Sync the place file back into the project once (needs the Rojo syncback fork).",
 	},
 ];

@@ -4,14 +4,18 @@ version: "0.2"
 language: en
 
 words:
+  - FILETIME
   - arktype
   - catchable
   - codegen
   - darklua
   - defu
   - forgerc
+  - glibc
+  - libc
   - napi
   - pathext
+  - pidfd
   - pids
   - rbxl
   - rbxlx
@@ -19,6 +23,8 @@ words:
   - rbxmx
   - rbxts
   - rbxtsc
+  - robloxstudio
+  - robloxstudiobeta
   - rojo
   - rokit
   - scriptable

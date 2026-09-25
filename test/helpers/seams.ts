@@ -78,6 +78,7 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 			kill: vi.fn<Host["kill"]>(unreachable("host kill")),
 			platform: "linux",
 		},
+		native: unreachable("native addon"),
 		processRunner: vi.fn<ProcessRunner>(unreachable("process runner")),
 		prompter: {
 			choose: vi.fn<Prompter["choose"]>(unreachable("prompter")),

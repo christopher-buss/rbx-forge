@@ -19,7 +19,7 @@ Tools are pinned in `mise.toml`: `mise install`, then `pnpm install`.
 | `pnpm lint` / `pnpm lint:fix` | oxlint, then ESLint (`isentinel-lint`)            |
 | `pnpm knip`                   | unused files, exports, and dependencies           |
 | `pnpm test:unit`              | unit project with 100% coverage                   |
-| `pnpm test:integration`       | real processes with fixture binaries              |
+| `pnpm test:integration`       | real processes and the addon (run `build:native`) |
 | `pnpm test:e2e`               | the built CLI as a subprocess (run `build` first) |
 | `pnpm build:native`           | the Rust crate in `reaper/` through napi-rs       |
 | `pnpm mutation`               | Stryker mutation testing                          |
