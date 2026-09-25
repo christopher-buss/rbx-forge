@@ -1,5 +1,6 @@
 import type { FlagDefinition } from "../cli/flags.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { STUDIO_PATH_FLAG, withStudioPath } from "../studio/discover.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
 export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
@@ -18,6 +19,7 @@ export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
 		kind: "boolean",
 		text: "Open the place in Studio and stop when Studio closes it (the default); --no-open leaves Studio alone.",
 	},
+	STUDIO_PATH_FLAG,
 	{
 		name: "syncback",
 		config: "syncback.runOnStart",
@@ -49,7 +51,7 @@ export async function runStartAsync(
 ): Promise<CommandResult> {
 	const run = seams.supervisor({
 		cwd,
-		env,
+		env: withStudioPath(env, cwd, seams.host.platform, input.flags),
 		onEvent: (event) => {
 			reporter.emit(event);
 		},

@@ -18,6 +18,7 @@ import type { FileLock, NativeAddon } from "../native/addon.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { SessionStatus } from "../session/status.ts";
+import type { RecoveryOptions } from "../studio/close-studio.ts";
 import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import type { IdentityRecord } from "../supervisor/session-files.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
@@ -25,6 +26,7 @@ import type { DownOptions, DownPoint, DownReport, DownStudio } from "./down.ts";
 import { FORCED_SHUTDOWN_MS, KILL_WAIT_MS, stopSessionAsync, STUDIO_END_WAIT_MS } from "./down.ts";
 import type { KnownSession } from "./session.ts";
 import { findSession } from "./session.ts";
+import { STUDIO_OPEN_WAIT_MS } from "./studio.ts";
 
 const FORGE = forgeFiles(PROJECT);
 const FILES = sessionFiles(FORGE, "s1");
@@ -35,6 +37,12 @@ const STUDIO = String.raw`C:\Roblox\Versions\version-1\RobloxStudioBeta.exe`;
 const PLACE = `${PROJECT}/game.rbxl`;
 const LOCK = `${PLACE}.lock`;
 const UNKNOWN: DownStudio = { status: "unknown" };
+const RECOVERY: RecoveryOptions = {
+	env: {},
+	mode: "keep",
+	recoveryDirectory: `${PROJECT}/.forge/recovery`,
+};
+const KEPT = { deleted: [], mode: "keep", moved: [], warnings: [] };
 const IDENTITY: IdentityRecord = {
 	endpoint: "endpoint-s1",
 	pid: SUPERVISOR,
@@ -248,7 +256,7 @@ async function downAsync(world: World, options: Partial<DownOptions> = {}): Prom
 		},
 		FORGE,
 		world.session,
-		{ force: false, keepStudio: false, timeoutMs: TIMEOUT_MS, ...options },
+		{ force: false, keepStudio: false, recovery: RECOVERY, timeoutMs: TIMEOUT_MS, ...options },
 	);
 }
 
@@ -366,7 +374,14 @@ describe(stopSessionAsync, () => {
 			removed: false,
 			sessionId: "s1",
 			stoppedBy: "studio_closed",
-			studio: { forced: false, pid: STUDIO_PID, place: PLACE, status: "closed" },
+			studio: {
+				end: "exited",
+				forced: false,
+				pid: STUDIO_PID,
+				place: PLACE,
+				recovery: null,
+				status: "closed",
+			},
 		});
 		expect(world.asked).toStrictEqual([]);
 		expect(studio).toMatchObject({ alive: false, closeRequests: 1 });
@@ -397,9 +412,90 @@ describe(stopSessionAsync, () => {
 		at(world, 100, world.exit);
 
 		await expect(downAsync(world)).resolves.toMatchObject({
-			studio: { forced: true, pid: STUDIO_PID, place: PLACE, status: "closed" },
+			studio: {
+				end: "timeout",
+				forced: true,
+				pid: STUDIO_PID,
+				place: PLACE,
+				recovery: KEPT,
+				status: "closed",
+			},
 		});
 		expect(studio.alive).toBeFalse();
+	});
+
+	it("should end a Studio behind a dialog at once", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		openStudio(world, { onCloseRequest: "dialog" });
+		await serveAsync(world, exitOnShutdown, STUDIO_OPEN);
+		at(world, 100, world.exit);
+
+		await expect(downAsync(world)).resolves.toMatchObject({
+			studio: { end: "dialog", forced: true, status: "closed" },
+		});
+		expect(world.memory.fileSystem.existsSync(LOCK)).toBeFalse();
+	});
+
+	it("should wait while the session's Studio is opening, then close it", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		const studio = openStudio(world);
+		let status = statusWith({ status: "opening" });
+		at(world, 2000, () => {
+			status = STUDIO_OPEN;
+		});
+		await serveAsync(world, exitOnShutdown, () => status());
+		at(world, 2100, world.exit);
+
+		await expect(downAsync(world)).resolves.toMatchObject({
+			studio: { end: "exited", status: "closed" },
+		});
+		expect(studio.closeRequests).toBe(1);
+	});
+
+	it("should close the Studio forge started through its pin, once the wait ends", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		const studio = openStudio(world);
+		world.memory.fileSystem.rmSync(LOCK);
+		await serveAsync(
+			world,
+			exitOnShutdown,
+			statusWith({
+				pid: STUDIO_PID,
+				place: PLACE,
+				startTime: String(STUDIO_PID),
+				status: "opening",
+			}),
+		);
+		at(world, STUDIO_OPEN_WAIT_MS + 100, world.exit);
+
+		await expect(downAsync(world)).resolves.toMatchObject({
+			studio: { end: "exited", pid: STUDIO_PID, status: "closed" },
+		});
+		expect(studio.alive).toBeFalse();
+	});
+
+	it("should touch no Studio when the lock file names another than the one forge started", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		const studio = openStudio(world);
+		await serveAsync(
+			world,
+			exitOnShutdown,
+			statusWith({ pid: 77, place: PLACE, startTime: "77", status: "open" }),
+		);
+		world.native.processes.set(77, { alive: true, executablePath: STUDIO });
+
+		await expect(downAsync(world)).resolves.toMatchObject({
+			studio: { code: "identity_mismatch", status: "failed" },
+		});
+		expect(studio.alive).toBeTrue();
 	});
 
 	it("should leave Studio open with keepStudio", async () => {
@@ -476,13 +572,12 @@ describe(stopSessionAsync, () => {
 		expect.assertions(1);
 
 		const world = makeWorld();
-		const waits: Array<number> = [];
-		openStudio(world, { onCloseRequest: "refuse", waits });
+		openStudio(world, { onCloseRequest: "refuse" });
 		await serveAsync(world, exitOnShutdown, STUDIO_OPEN);
 		at(world, 100, world.exit);
 		await downAsync(world);
 
-		expect(waits[0]).toBe(STUDIO_CLOSE_MS);
+		expect(world.clock.now()).toBeGreaterThanOrEqual(STUDIO_CLOSE_MS);
 	});
 
 	it("should wait for the supervisor after it accepted, asking once", async () => {

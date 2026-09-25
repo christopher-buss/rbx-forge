@@ -16,6 +16,7 @@ import {
 import { createChildProcessRunner } from "../process/process-runner.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
 import { createReaperLauncher } from "../reaper/reaper-client.ts";
+import type { StudioLauncher } from "../studio/launcher.ts";
 import { createStudioLauncher } from "../studio/launcher.ts";
 import { createDetachedLauncher } from "../supervisor/detached-launcher.ts";
 import { createSupervisorLauncher } from "../supervisor/launcher.ts";
@@ -84,7 +85,7 @@ export function createNodeSeams({
 		randomId: randomUUID,
 		reaper: createNodeReaperLauncher(nativeDirectory, native, requireModule),
 		signals: createSignals(process),
-		studioLauncher: createStudioLauncher(PROCESS_BACKEND),
+		studioLauncher: createNodeStudioLauncher(native),
 		supervisor: createSupervisorLauncher(PROCESS_BACKEND, supervisorEntry),
 	};
 }
@@ -113,4 +114,8 @@ function createNodeReaperLauncher(
 			resolveModule: (id) => requireModule.resolve(id),
 		}),
 	);
+}
+
+function createNodeStudioLauncher(native: NativeLoader): StudioLauncher {
+	return createStudioLauncher({ ...PROCESS_BACKEND, fileSystem: nodeFileSystem, native });
 }

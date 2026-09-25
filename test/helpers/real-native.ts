@@ -121,16 +121,18 @@ export function spawnFakeStudio(): ChildProcess {
 
 /**
  * The variables that make the fixture `studio` role behave as Studio (see
- * `test/fixtures/bin/fake-worker.ts`).
+ * `test/fixtures/bin/studio-stand-in.ts`), and make forge start it
+ * directly.
  *
  * @param executable - A Studio executable from {@link makeStudioExecutable}.
- * @returns The variables, for the stand-in's environment.
+ * @returns The variables, for forge's and the stand-in's environment.
  */
 export function studioVariables(executable: string): Record<string, string> {
 	return {
 		FIXTURE_NATIVE_ADDON: realNativePath(),
 		FIXTURE_STUDIO_EXE: executable,
 		FIXTURE_STUDIO_LOCK: "1",
+		RBX_FORGE_STUDIO_PATH: executable,
 	};
 }
 
@@ -158,7 +160,7 @@ export async function waitForFileAsync(file: string): Promise<void> {
  *
  * @param place - The absolute path of the place.
  * @param variables - More fixture variables, such as
- *   `FIXTURE_STUDIO_REFUSE_CLOSE`.
+ *   `FIXTURE_STUDIO_CLOSE`.
  * @returns The child process.
  */
 export async function openStudioStandInAsync(

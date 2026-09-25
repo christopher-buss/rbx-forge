@@ -6,8 +6,11 @@ language: en
 words:
   - DACL
   - FILETIME
+  - HKCU
+  - LOCALAPPDATA
   - NETBIOS
   - arktype
+  - autorecovery
   - catchable
   - codegen
   - darklua

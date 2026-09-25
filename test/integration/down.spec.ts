@@ -36,7 +36,13 @@ import {
 
 const LOCK_HOLDER = path.join(import.meta.dirname, "..", "fixtures", "bin", "lock-holder.ts");
 /** A short wait: the scenarios never need the 15 s default. */
-const SHORT = { force: false, keepStudio: false, timeoutMs: 1000 };
+const SHORT = {
+	force: false,
+	keepStudio: false,
+	// No Studio runs in these sessions; keep would touch no file either way.
+	recovery: { env: {}, mode: "keep", recoveryDirectory: "" },
+	timeoutMs: 1000,
+} satisfies DownOptions;
 
 type Outcome = { error: ForgeError; ok: false } | { ok: true; report: DownReport };
 

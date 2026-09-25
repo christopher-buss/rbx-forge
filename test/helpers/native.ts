@@ -11,6 +11,11 @@ import type {
 /** One process in the fake process table. */
 export interface FakeProcess {
 	alive: boolean;
+	/**
+	 * A modal dialog blocks its windows (`isBlocked`); `throw` makes the
+	 * query fail.
+	 */
+	blocked?: "throw" | boolean;
 	/** How many times `requestClose` reached it while it ran. */
 	closeRequests?: number;
 	executablePath: string;
@@ -20,15 +25,20 @@ export interface FakeProcess {
 	groupKilled?: boolean;
 	/** `kill` leaves it running (a process the OS cannot end in time). */
 	ignoresKill?: boolean;
-	/** Runs when a close request ends it, such as to delete a lock file. */
+	/**
+	 * Runs when a close request closes its place, such as to delete a lock
+	 * file.
+	 */
 	onClose?: () => void;
 	/**
 	 * What `requestClose` does: `exit` (the default); `refuse` (it stays
-	 * open, as Studio does while it asks to save); `no_window` (it has no
-	 * window to close: `false`); `exit_first` (it exits just before the
-	 * request: `false`); or `throw` (the OS refuses the request).
+	 * open and shows nothing); `dialog` (it stays open behind a modal
+	 * dialog: `blocked`); `linger` (it closes its place, `onClose`, but
+	 * the process runs on); `no_window` (it has no window to close:
+	 * `false`); `exit_first` (it exits just before the request: `false`);
+	 * or `throw` (the OS refuses the request).
 	 */
-	onCloseRequest?: "exit" | "exit_first" | "no_window" | "refuse" | "throw";
+	onCloseRequest?: "dialog" | "exit" | "exit_first" | "linger" | "no_window" | "refuse" | "throw";
 	/** `pinProcess` throws this message (for example, access denied). */
 	pinError?: string;
 	/** Its start time as the addon reports it; the PID when not set. */
@@ -75,38 +85,185 @@ export interface FakeNative {
  * what an older pin acts on, as with the real addon.
  *
  * @param processes - The process table, by PID.
+ * @param registry - Registry default values by key (see
+ *   {@link readFrom}); no registry read without it.
  * @returns The addon and its table.
  */
-export function createFakeNative(processes: Record<number, FakeProcess> = {}): FakeNative {
+export function createFakeNative(
+	processes: Record<number, FakeProcess> = {},
+	registry?: Readonly<Record<string, null | string>>,
+): FakeNative {
 	const table = new Map(Object.entries(processes).map(([pid, entry]) => [Number(pid), entry]));
 	const locks = new Map<string, Array<LockMode>>();
 	const sessions = new Map<string, Array<FakeSessionProcess>>();
 	const cleanups: Array<FakeCleanup> = [];
+	const values = new Map(Object.entries(registry ?? {}));
 
 	return {
 		addon: {
 			...sessionMembers(sessions, cleanups),
+			...processMembers(table),
 			isLockFree: (path) => !locks.has(path),
 			nativeVersion: () => "0.0.0",
-			pinProcess: (pid) => {
-				const entry = table.get(pid);
-				if (entry?.pinError !== undefined) {
-					throw new Error(entry.pinError);
-				}
-
-				return entry?.alive === true ? pinEntry(pid, entry) : null;
-			},
-			processStartTime: (pid) => {
-				const entry = table.get(pid);
-				return entry?.alive === true ? startTimeOf(pid, entry) : null;
-			},
 			tryLockFile: (path, mode) => lockIn(locks, path, mode),
+			...(registry === undefined
+				? {}
+				: { readUserRegistryDefault: (key) => readFrom(values, key) }),
 		},
 		cleanups,
 		locks,
 		processes: table,
 		sessions,
 	};
+}
+
+function startTimeOf(pid: number, entry: FakeProcess): string {
+	return entry.startTime ?? String(pid);
+}
+
+/**
+ * What a close request that reached a running process does to it.
+ *
+ * @param entry - The process.
+ */
+function receiveClose(entry: FakeProcess): void {
+	entry.closeRequests = (entry.closeRequests ?? 0) + 1;
+	switch (entry.onCloseRequest) {
+		case "dialog": {
+			entry.blocked = true;
+			break;
+		}
+		case "linger": {
+			entry.onClose?.();
+			break;
+		}
+		case "refuse": {
+			break;
+		}
+		case "exit":
+		case "exit_first":
+		case "no_window":
+		case "throw":
+		case undefined: {
+			entry.alive = false;
+			entry.onClose?.();
+		}
+	}
+}
+
+/**
+ * A close request on a fake process, as {@link FakeProcess.onCloseRequest}
+ * says.
+ *
+ * @param entry - The process.
+ * @returns `false` when it had already exited or has no window.
+ */
+function requestClose(entry: FakeProcess): boolean {
+	if (!entry.alive || entry.onCloseRequest === "no_window") {
+		return false;
+	}
+
+	if (entry.onCloseRequest === "exit_first") {
+		entry.alive = false;
+		return false;
+	}
+
+	if (entry.onCloseRequest === "throw") {
+		throw new Error("close process: Access is denied. (os error 5)");
+	}
+
+	receiveClose(entry);
+	return true;
+}
+
+/**
+ * The fake's `isBlocked`.
+ *
+ * @param pid - The PID, for the error.
+ * @param entry - The process.
+ * @returns Whether a dialog blocks it.
+ */
+function blockedNow(pid: number, entry: FakeProcess): boolean {
+	if (entry.blocked === "throw") {
+		throw new Error(`windows of process ${pid}: Access is denied. (os error 5)`);
+	}
+
+	return entry.alive && entry.blocked === true;
+}
+
+function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
+	if (entry.exitsAfterPin === true) {
+		entry.alive = false;
+	}
+
+	function kill(): boolean {
+		const wasAlive = entry.alive;
+		entry.alive = entry.ignoresKill === true && wasAlive;
+		return wasAlive;
+	}
+
+	return {
+		executablePath: () => (entry.alive ? entry.executablePath : null),
+		isAlive: () => entry.alive,
+		isBlocked: () => blockedNow(pid, entry),
+		kill,
+		killGroup: () => {
+			entry.groupKilled = true;
+			return kill();
+		},
+		pid,
+		requestClose: () => requestClose(entry),
+		startTime: startTimeOf(pid, entry),
+		waitForExit: (timeoutMs) => {
+			entry.waits?.push(timeoutMs);
+			return !entry.alive;
+		},
+	};
+}
+
+/**
+ * The process members of the fake addon, over its process table.
+ *
+ * @param table - The process table, by PID.
+ * @returns `pinProcess` and `processStartTime`.
+ */
+function processMembers(
+	table: ReadonlyMap<number, FakeProcess>,
+): Pick<NativeAddon, "pinProcess" | "processStartTime"> {
+	return {
+		pinProcess: (pid) => {
+			const entry = table.get(pid);
+			if (entry?.pinError !== undefined) {
+				throw new Error(entry.pinError);
+			}
+
+			return entry?.alive === true ? pinEntry(pid, entry) : null;
+		},
+		processStartTime: (pid) => {
+			const entry = table.get(pid);
+			return entry?.alive === true ? startTimeOf(pid, entry) : null;
+		},
+	};
+}
+
+/**
+ * A registry read over a table of keys; a `null` value fails the read.
+ *
+ * @param registry - Default values by key.
+ * @param key - The key to read.
+ * @returns Its value; `null` when the table has no such key.
+ */
+function readFrom(registry: ReadonlyMap<string, null | string>, key: string): null | string {
+	if (!registry.has(key)) {
+		return null;
+	}
+
+	const value = registry.get(key);
+	if (value === null || value === undefined) {
+		throw new Error(`read HKCU\\${key}: The data is invalid.`);
+	}
+
+	return value;
 }
 
 function toSessionProcess(entry: FakeSessionProcess, index: number): SessionProcess {
@@ -206,78 +363,6 @@ function lockIn(
 			} else {
 				locks.set(path, rest);
 			}
-		},
-	};
-}
-
-function startTimeOf(pid: number, entry: FakeProcess): string {
-	return entry.startTime ?? String(pid);
-}
-
-/**
- * A close request on a fake process, as {@link FakeProcess.onCloseRequest}
- * says.
- *
- * @param entry - The process.
- * @returns `false` when it had already exited or has no window.
- */
-function requestClose(entry: FakeProcess): boolean {
-	if (!entry.alive) {
-		return false;
-	}
-
-	switch (entry.onCloseRequest) {
-		case "exit_first": {
-			entry.alive = false;
-			return false;
-		}
-		case "no_window": {
-			return false;
-		}
-		case "throw": {
-			throw new Error("close process: Access is denied. (os error 5)");
-		}
-		case "exit":
-		case "refuse":
-		case undefined: {
-			break;
-		}
-	}
-
-	entry.closeRequests = (entry.closeRequests ?? 0) + 1;
-	if (entry.onCloseRequest !== "refuse") {
-		entry.alive = false;
-		entry.onClose?.();
-	}
-
-	return true;
-}
-
-function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
-	if (entry.exitsAfterPin === true) {
-		entry.alive = false;
-	}
-
-	function kill(): boolean {
-		const wasAlive = entry.alive;
-		entry.alive = entry.ignoresKill === true && wasAlive;
-		return wasAlive;
-	}
-
-	return {
-		executablePath: () => (entry.alive ? entry.executablePath : null),
-		isAlive: () => entry.alive,
-		kill,
-		killGroup: () => {
-			entry.groupKilled = true;
-			return kill();
-		},
-		pid,
-		requestClose: () => requestClose(entry),
-		startTime: startTimeOf(pid, entry),
-		waitForExit: (timeoutMs) => {
-			entry.waits?.push(timeoutMs);
-			return !entry.alive;
 		},
 	};
 }

@@ -18,8 +18,8 @@ export default defineConfig({
 ## Rules
 
 - **Required file.** With no config file, every command that reads it fails with
-  `config_not_found`. Only `init`, `status`, `sync`, `logs`, and `down` do not
-  read it.
+  `config_not_found`. Only `init`, `status`, `sync`, and `logs` do not read it;
+  `down` reads it for `studio.autoRecovery` only, and runs without it.
 - **Strict.** An unknown key is an error (`config_invalid`).
 - **Precedence.** Flags, then the config file, then the defaults. Objects merge
   key by key. Every other value, arrays included, replaces the value below it.
@@ -240,6 +240,31 @@ The Rojo project to build before opening.
 ```ts
 defineConfig({
 	open: { buildFirst: false, buildOutputPath: "test.rbxl" },
+});
+```
+
+The Studio executable is not a config option: its path differs per computer. Use
+`--studio-path` or `RBX_FORGE_STUDIO_PATH` (see the README, "Opening Studio").
+
+### `studio`
+
+Options for the Roblox Studio that `stop` and `down` close.
+
+#### `studio.autoRecovery`
+
+- Type: `"move" | "delete" | "keep"`
+- Default: `"move"`
+- Flag: `forge stop --recovery <mode>` / `forge down --recovery <mode>`
+
+What forge does with the auto-recovery files of a Studio it ended: `move` them
+to `.forge/recovery/` (the 5 newest stay), `delete` them, or `keep` them in
+Studio's AutoSaves folder, where the next launch offers to recover them. See the
+README, "Auto-recovery". `down` also runs when the config file is missing or
+invalid: then only `--recovery` and the default count.
+
+```ts
+defineConfig({
+	studio: { autoRecovery: "delete" },
 });
 ```
 

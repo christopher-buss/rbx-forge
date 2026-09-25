@@ -1,0 +1,14 @@
+{
+	"name": "unsaved",
+	"tree": {
+		"$className": "DataModel",
+		"Lighting": {
+			"$className": "Lighting",
+			"$properties": { "Technology": "ShadowMap" }
+		},
+		"Workspace": {
+			"$className": "Workspace",
+			"SpikePart": { "$className": "Part" }
+		}
+	}
+}

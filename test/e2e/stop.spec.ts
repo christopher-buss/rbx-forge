@@ -16,8 +16,10 @@ import {
 	waitForExitAsync,
 } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
-import { isProcessAlive } from "../helpers/worker-log.ts";
+import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
 import { makeProject, runBinAsync } from "./run-bin.ts";
+import { makeFixtureAsync } from "./session-fixture.ts";
+import { runForgeAsync } from "./up-fixture.ts";
 
 /**
  * This process's variables, without `CI`, with the native addon directory set.
@@ -30,6 +32,17 @@ function nativeEnvironment(directory: string): NodeJS.ProcessEnv {
 }
 
 const NATIVE = nativeEnvironment(NATIVE_DIRECTORY);
+
+/**
+ * How a Studio that closes on the request goes: it exits right after it
+ * removes its lock file, and forge may see the gap and end it at once.
+ */
+const CLOSED_END: unknown = expect.toBeOneOf(["exited", "lock_released"]);
+/**
+ * How forge ends a Studio behind a dialog: POSIX sees no dialog, so the time
+ * limit.
+ */
+const BLOCKED_END = process.platform === "win32" ? "dialog" : "timeout";
 
 /**
  * Make a project whose place has a Studio lock file.
@@ -82,9 +95,11 @@ describe("forge stop", () => {
 
 		expect(status).toBe(EXIT_SUCCESS);
 		expect(parseResult(stdout).data).toStrictEqual({
+			end: CLOSED_END,
 			forced: false,
 			pid: pidOf(studio),
 			place,
+			recovery: null,
 			stopped: true,
 		});
 		expect(existsSync(`${place}.lock`)).toBeFalse();
@@ -94,23 +109,66 @@ describe("forge stop", () => {
 		}).toStrictEqual({ isOtherAlive: true, isOtherOpen: true });
 	});
 
-	it("should end a Studio that stays open after the close request, and remove its lock file", async () => {
+	it("should end a Studio behind a dialog, and remove its lock file", async () => {
 		expect.assertions(3);
 
 		const { place, project, studio } = await makeStudioProjectAsync({
-			FIXTURE_STUDIO_REFUSE_CLOSE: "1",
+			FIXTURE_STUDIO_CLOSE: "dialog",
 		});
 		const { status, stdout } = await runBinAsync(["stop", "--json"], project, NATIVE);
 		await waitForExitAsync(studio);
 
 		expect(status).toBe(EXIT_SUCCESS);
+		// POSIX has no dialog to see: the time limit ends Studio there.
 		expect(parseResult(stdout).data).toStrictEqual({
+			end: BLOCKED_END,
 			forced: true,
 			pid: pidOf(studio),
 			place,
+			recovery: { deleted: [], mode: "move", moved: [], warnings: [] },
 			stopped: true,
 		});
 		expect(existsSync(`${place}.lock`)).toBeFalse();
+	});
+
+	it("should end a Studio at once once it closed the place, and keep auto-recovery files with --recovery keep", async () => {
+		expect.assertions(2);
+
+		const { project, studio } = await makeStudioProjectAsync({
+			FIXTURE_STUDIO_CLOSE: "linger",
+		});
+		const { stdout } = await runBinAsync(
+			["stop", "--json", "--recovery", "keep"],
+			project,
+			NATIVE,
+		);
+		await waitForExitAsync(studio);
+
+		expect(parseResult(stdout).data).toMatchObject({
+			end: "lock_released",
+			forced: false,
+			recovery: { mode: "keep" },
+		});
+		expect(isProcessAlive(pidOf(studio))).toBeFalse();
+	});
+
+	it("should wait for the Studio a session is opening, then close it through the session", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
+		await runForgeAsync(fixture, ["up", "--no-compiler", "--json"], {
+			FIXTURE_STUDIO_LOCK_DELAY_MS: "2000",
+		});
+		const stop = await runForgeAsync(fixture, ["stop", "--json"]);
+		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
+
+		expect(stop.result.data).toMatchObject({
+			end: CLOSED_END,
+			pid: studio!.pid,
+			place: fixture.place,
+			stopped: true,
+		});
+		expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
 	});
 
 	it("should kill nothing when a stale lock names a PID that another program reused", async () => {

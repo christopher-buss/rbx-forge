@@ -1,6 +1,7 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
+import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { FakeProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import {
@@ -10,12 +11,18 @@ import {
 	PROJECT,
 	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
+import { STUDIO_OPEN_WAIT_MS } from "../client/studio.ts";
 import { ForgeError } from "../errors.ts";
+import { startIpcServer } from "../ipc/server.ts";
+import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Host } from "../seams/host.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import type { Environment } from "../seams/seams.ts";
+import type { SessionStatus } from "../session/status.ts";
 import {
 	STUDIO_CLOSE_MS,
+	STUDIO_CLOSE_POLL_MS,
 	STUDIO_EXIT_TIMEOUT_MS,
 	STUDIO_START_SLACK_MS,
 } from "../studio/close-studio.ts";
@@ -31,21 +38,86 @@ const LOCK_WRITTEN = Date.UTC(2026, 0, 1);
 /** Boot time of the fake Linux host. */
 const BOOT = Date.UTC(2025, 11, 31);
 
+const KEPT = { deleted: [], mode: "keep", moved: [], warnings: [] };
+const MOVED_NONE = { deleted: [], mode: "move", moved: [], warnings: [] };
+const SESSION_FILES: Record<string, string> = {
+	".forge/current": "s1\n",
+	".forge/sessions/s1/supervisor.id": `${JSON.stringify({
+		endpoint: "endpoint-s1",
+		pid: 500,
+		processStartTime: "500",
+		sessionId: "s1",
+		startedAt: "2026-01-01T00:00:00.000Z",
+		version: "9.9.9",
+	})}\n`,
+	".forge/sessions/s1/token": "token",
+};
+
 interface StopProject {
 	context: CommandContext;
+	/** Milliseconds the clock moved. */
+	elapsed: () => number;
 	files: () => Record<string, null | string>;
 	processes: Map<number, FakeProcess>;
 }
 
+/**
+ * A sleep hook that runs `action` once the clock has moved `ms`.
+ *
+ * @param ms - When, in milliseconds after the start.
+ * @param action - What happens then, once.
+ * @returns The hook.
+ */
+function atElapsed(ms: number, action: () => void): (elapsed: number) => void {
+	let isDone = false;
+	return (elapsed) => {
+		if (isDone || elapsed < ms) {
+			return;
+		}
+
+		isDone = true;
+		action();
+	};
+}
+
+/**
+ * A clock whose sleeps move time, and run `onSleep` after each move.
+ *
+ * @param onSleep - Runs with the time now.
+ * @returns The clock and the time it moved.
+ */
+function steppingClock(onSleep: Array<(elapsed: number) => void>): {
+	clock: Clock;
+	elapsed: () => number;
+} {
+	let elapsed = 0;
+	return {
+		clock: {
+			now: () => LOCK_WRITTEN + elapsed,
+			sleep: async (ms) => {
+				elapsed += ms;
+				for (const hook of onSleep) {
+					hook(elapsed);
+				}
+			},
+		},
+		elapsed: () => elapsed,
+	};
+}
+
 function makeProject({
 	config = {},
+	env: environment = {},
 	files = {},
 	host = {},
+	onSleep = [],
 	processes = {},
 }: {
 	config?: Record<string, unknown>;
+	env?: Environment;
 	files?: Record<string, string>;
 	host?: Partial<Host>;
+	onSleep?: Array<(elapsed: number) => void>;
 	processes?: Record<number, FakeProcess>;
 } = {}): StopProject {
 	const memory = createMemoryFileSystem(files);
@@ -53,8 +125,15 @@ function makeProject({
 		memory.setModifiedTime(file, LOCK_WRITTEN);
 	}
 
+	for (const entry of Object.values(processes)) {
+		entry.onClose ??= () => {
+			memory.fileSystem.rmSync(`${PLACE}.lock`, { force: true });
+		};
+	}
+
 	const native = createFakeNative(processes);
 	const seams = createTestSeams();
+	const { clock, elapsed } = steppingClock(onSleep);
 	const configLoader = vi.fn<ConfigLoader>().mockResolvedValue({
 		path: path.join(PROJECT, "rbx-forge.config.ts"),
 		value: { projectType: "rbxts", ...config },
@@ -62,17 +141,64 @@ function makeProject({
 
 	return {
 		context: createCommandContext({
+			env: environment,
 			seams: {
 				...seams,
+				clock,
 				configLoader,
 				fileSystem: memory.fileSystem,
 				host: { ...seams.host, bootTimeMs: () => BOOT, ...host },
+				ipc: createMemoryTransport(),
 				native: () => native.addon,
 			},
 		}),
+		elapsed,
 		files: memory.files,
 		processes: native.processes,
 	};
+}
+
+/**
+ * Run session `s1` of the project: its files, and an endpoint whose
+ * `status` reports this Studio.
+ *
+ * @param project - The stop test project.
+ * @param studio - What the session reports about Studio, now.
+ */
+async function serveSessionAsync(
+	project: StopProject,
+	studio: () => SessionStatus["services"]["studio"],
+): Promise<void> {
+	const { fileSystem, ipc } = project.context.seams;
+	for (const [file, content] of Object.entries(SESSION_FILES)) {
+		const full = path.join(PROJECT, file);
+		fileSystem.mkdirSync(path.dirname(full), { recursive: true });
+		fileSystem.writeFileSync(full, content);
+	}
+
+	const server = startIpcServer(await ipc.listenAsync("endpoint-s1"), {
+		handlers: {
+			status: () => {
+				return {
+					phase: "ready",
+					pid: 500,
+					running: true,
+					services: {
+						compiler: { status: "off" },
+						rojo: { port: 34_872, status: "ready" },
+						studio: studio(),
+						syncback: { status: "off" },
+					},
+					sessionId: "s1",
+					startedAt: "2026-01-01T00:00:00.000Z",
+				};
+			},
+		},
+		token: "token",
+	});
+	onTestFinished(async () => {
+		await server.closeAsync();
+	});
 }
 
 function studioLock(pid: number, host = TEST_HOSTNAME): string {
@@ -97,10 +223,7 @@ function linuxStartTime(epochMs: number): string {
  * @param project.context - Its run, whose file system is wrapped.
  * @param member - The file system call the close comes before.
  */
-function closeStudioBefore(
-	{ context }: StopProject,
-	member: "readFileSync" | "rmSync" | "statSync",
-): void {
+function closeStudioBefore({ context }: StopProject, member: "readFileSync" | "statSync"): void {
 	const { fileSystem } = context.seams;
 	const original: (...args: Array<never>) => unknown = fileSystem[member];
 	let isClosed = false;
@@ -158,7 +281,14 @@ describe(runStopAsync, () => {
 		const result = await stopAsync(project);
 
 		expect(result).toStrictEqual({
-			data: { forced: false, pid: STUDIO_PID, place: PLACE, stopped: true },
+			data: {
+				end: "exited",
+				forced: false,
+				pid: STUDIO_PID,
+				place: PLACE,
+				recovery: null,
+				stopped: true,
+			},
 			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}.`,
 		});
 		expect(project.processes.get(STUDIO_PID)).toMatchObject({ alive: false, closeRequests: 1 });
@@ -166,17 +296,296 @@ describe(runStopAsync, () => {
 	});
 
 	it("should give Studio a bounded time to close on the close request", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: {
+				[STUDIO_PID]: { alive: true, executablePath: STUDIO, onCloseRequest: "refuse" },
+			},
+		});
+		await stopAsync(project);
+
+		expect(project.elapsed()).toBe(STUDIO_CLOSE_MS);
+		expect(STUDIO_CLOSE_MS).toBe(15_000);
+	});
+
+	it("should end Studio at once when a dialog blocks it", async () => {
+		expect.assertions(3);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: {
+				[STUDIO_PID]: { alive: true, executablePath: STUDIO, onCloseRequest: "dialog" },
+			},
+		});
+
+		await expect(stopAsync(project)).resolves.toStrictEqual({
+			data: {
+				end: "dialog",
+				forced: true,
+				pid: STUDIO_PID,
+				place: PLACE,
+				recovery: MOVED_NONE,
+				stopped: true,
+			},
+			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}: a dialog blocked it, so forge ended it without saving.`,
+		});
+		expect(project.elapsed()).toBe(0);
+		expect(project.files()).not.toHaveProperty(LOCK);
+	});
+
+	it("should end Studio at once once it closed the place, without waiting for its exit", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: {
+				[STUDIO_PID]: { alive: true, executablePath: STUDIO, onCloseRequest: "linger" },
+			},
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { end: "lock_released", forced: false, recovery: MOVED_NONE },
+			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}.`,
+		});
+		expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
+	});
+
+	it("should wait for the lock file or a dialog, looking every 50 ms", async () => {
+		expect.assertions(3);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			onSleep: [
+				atElapsed(4 * STUDIO_CLOSE_POLL_MS, () => {
+					project.processes.get(STUDIO_PID)!.blocked = true;
+				}),
+			],
+			processes: {
+				[STUDIO_PID]: { alive: true, executablePath: STUDIO, onCloseRequest: "refuse" },
+			},
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({ data: { end: "dialog" } });
+		expect(project.elapsed()).toBe(4 * STUDIO_CLOSE_POLL_MS);
+		expect(STUDIO_CLOSE_POLL_MS).toBe(50);
+	});
+
+	it("should count a failed dialog query as no dialog", async () => {
 		expect.assertions(1);
 
-		const waits: Array<number> = [];
-		await stopAsync(
-			makeProject({
-				files: { [LOCK]: studioLock(STUDIO_PID) },
-				processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO, waits } },
-			}),
-		);
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: {
+				[STUDIO_PID]: {
+					alive: true,
+					blocked: "throw",
+					executablePath: STUDIO,
+					onCloseRequest: "refuse",
+				},
+			},
+		});
 
-		expect(waits).toStrictEqual([STUDIO_CLOSE_MS]);
+		await expect(stopAsync(project)).resolves.toMatchObject({ data: { end: "timeout" } });
+	});
+
+	it("should handle the auto-recovery files as --recovery says", async () => {
+		expect.assertions(1);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: {
+				[STUDIO_PID]: { alive: true, executablePath: STUDIO, onCloseRequest: "dialog" },
+			},
+		});
+
+		await expect(
+			runStopAsync(project.context, {
+				config: { studio: { autoRecovery: "keep" } },
+				flags: {},
+			}),
+		).resolves.toMatchObject({ data: { recovery: KEPT } });
+	});
+
+	it("should move the ended Studio's auto-recovery file out of the AutoSaves folder", async () => {
+		expect.assertions(2);
+
+		const saves = path.join(PROJECT, "home", "Documents", "ROBLOX", "AutoSaves");
+		const file = path.join(saves, "game_AutoRecovery_0.rbxl");
+		const project = makeProject({
+			env: { HOME: path.join(PROJECT, "home") },
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			host: { platform: "darwin" },
+			processes: {
+				[STUDIO_PID]: {
+					alive: true,
+					executablePath: STUDIO,
+					onCloseRequest: "dialog",
+					startTime: String(LOCK_WRITTEN * 1000),
+				},
+			},
+		});
+		const { fileSystem } = project.context.seams;
+		fileSystem.mkdirSync(saves, { recursive: true });
+		fileSystem.writeFileSync(file, "place");
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { recovery: { mode: "move", moved: [{ from: file }], warnings: [] } },
+		});
+		expect(fileSystem.existsSync(file)).toBeFalse();
+	});
+
+	it("should close the session's Studio through its pin", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		await serveSessionAsync(project, () => {
+			return {
+				pid: STUDIO_PID,
+				place: path.join(PROJECT, "session.rbxl"),
+				startTime: String(STUDIO_PID),
+				status: "open",
+			};
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { end: "exited", pid: STUDIO_PID, place: path.join(PROJECT, "session.rbxl") },
+		});
+		expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
+	});
+
+	it("should wait while the session's Studio is opening", async () => {
+		expect.assertions(2);
+
+		let status: SessionStatus["services"]["studio"] = { status: "opening" };
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			onSleep: [
+				atElapsed(1000, () => {
+					status = { place: PLACE, status: "open" };
+				}),
+			],
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		await serveSessionAsync(project, () => status);
+
+		await expect(stopAsync(project)).resolves.toMatchObject({ data: { stopped: true } });
+		expect(project.elapsed()).toBe(1000);
+	});
+
+	it("should stop waiting for a session's Studio that stays opening", async () => {
+		expect.assertions(2);
+
+		const project = makeProject();
+		await serveSessionAsync(project, () => ({ status: "opening" }));
+
+		await expect(stopAsync(project)).resolves.toMatchObject({ data: { stopped: false } });
+		expect(project.elapsed()).toBe(STUDIO_OPEN_WAIT_MS);
+	});
+
+	it("should fall back to the lock file when the session's Studio is gone or closed", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		await serveSessionAsync(project, () => {
+			return { pid: 9, place: PLACE, startTime: "9", status: "open" };
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { pid: STUDIO_PID, stopped: true },
+		});
+
+		const closed = makeProject();
+		await serveSessionAsync(closed, () => ({ place: PLACE, status: "closed" }));
+
+		await expect(stopAsync(closed)).resolves.toMatchObject({ data: { stopped: false } });
+	});
+
+	it("should close a session's Studio that reused no PID, also with no lock file yet", async () => {
+		expect.assertions(1);
+
+		const project = makeProject({
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO, startTime: "1" } },
+		});
+		await serveSessionAsync(project, () => {
+			return { pid: STUDIO_PID, place: PLACE, startTime: "2", status: "open" };
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({ data: { stopped: false } });
+	});
+
+	it("should report recovery it cannot do on an OS with no start times", async () => {
+		expect.assertions(1);
+
+		const project = makeProject({
+			host: { platform: "freebsd" },
+			processes: {
+				[STUDIO_PID]: { alive: true, executablePath: STUDIO, onCloseRequest: "dialog" },
+			},
+		});
+		await serveSessionAsync(project, () => {
+			return {
+				pid: STUDIO_PID,
+				place: PLACE,
+				startTime: String(STUDIO_PID),
+				status: "open",
+			};
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: {
+				recovery: {
+					deleted: [],
+					mode: "move",
+					moved: [],
+					warnings: ["forge cannot read process start times on freebsd."],
+				},
+			},
+		});
+	});
+
+	it("should kill nothing when the lock file names another Studio than the session's", async () => {
+		expect.assertions(3);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: {
+				7: { alive: true, executablePath: STUDIO },
+				[STUDIO_PID]: { alive: true, executablePath: STUDIO },
+			},
+		});
+		await serveSessionAsync(project, () => {
+			return { pid: 7, place: PLACE, startTime: "7", status: "open" };
+		});
+		const error = await catchStopErrorAsync(project);
+
+		expect(error.message).toBe(
+			`${path.join(PROJECT, LOCK)} names PID ${STUDIO_PID}, not the Roblox Studio forge started (PID 7). Nothing was killed.`,
+		);
+		expect(error.hint).toBe("Close the other Roblox Studio that has the place open by hand.");
+	});
+
+	it("should close the session's Studio when the lock file names it too", async () => {
+		expect.assertions(1);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		await serveSessionAsync(project, () => {
+			return { pid: STUDIO_PID, place: PLACE, startTime: String(STUDIO_PID), status: "open" };
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { pid: STUDIO_PID, stopped: true },
+		});
 	});
 
 	it("should end a Studio that stays open after the close request, without a save", async () => {
@@ -197,10 +606,17 @@ describe(runStopAsync, () => {
 		const result = await stopAsync(project);
 
 		expect(result).toStrictEqual({
-			data: { forced: true, pid: STUDIO_PID, place: PLACE, stopped: true },
+			data: {
+				end: "timeout",
+				forced: true,
+				pid: STUDIO_PID,
+				place: PLACE,
+				recovery: MOVED_NONE,
+				stopped: true,
+			},
 			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}: it did not close within ${STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving.`,
 		});
-		expect(waits).toStrictEqual([STUDIO_CLOSE_MS, STUDIO_EXIT_TIMEOUT_MS]);
+		expect(waits).toStrictEqual([STUDIO_EXIT_TIMEOUT_MS]);
 		expect(project.processes.get(STUDIO_PID)).toMatchObject({ alive: false, closeRequests: 1 });
 		expect(project.files()).not.toHaveProperty(LOCK);
 	});
@@ -219,7 +635,7 @@ describe(runStopAsync, () => {
 			});
 			const { data } = await stopAsync(project);
 
-			expect(data).toMatchObject({ forced: true, stopped: true });
+			expect(data).toMatchObject({ end: "no_window", forced: true, stopped: true });
 			expect(waits).toStrictEqual([STUDIO_EXIT_TIMEOUT_MS]);
 			expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
 		},
@@ -242,7 +658,7 @@ describe(runStopAsync, () => {
 		});
 		const { data } = await stopAsync(project);
 
-		expect(data).toMatchObject({ forced: false, stopped: true });
+		expect(data).toMatchObject({ end: "exited", forced: false, recovery: null, stopped: true });
 		expect(waits).toStrictEqual([]);
 	});
 
@@ -554,7 +970,6 @@ describe(runStopAsync, () => {
 			files: { [LOCK]: studioLock(STUDIO_PID) },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		closeStudioBefore(project, "rmSync");
 
 		await expect(stopAsync(project)).resolves.toMatchObject({
 			data: { pid: STUDIO_PID, place: PLACE, stopped: true },

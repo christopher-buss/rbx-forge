@@ -177,7 +177,8 @@ impl PinnedProcess {
     }
 
     /// Ask the pinned process to close, as a user would: `WM_CLOSE` to its
-    /// main windows on Windows, `SIGTERM` elsewhere. It does not wait, and
+    /// main windows on Windows (hidden ones only when Studio titles them),
+    /// `SIGTERM` elsewhere. It does not wait, and
     /// the process may refuse. `false` when it had already exited, or on
     /// Windows has no main window.
     ///
@@ -189,6 +190,20 @@ impl PinnedProcess {
         self.inner
             .request_close()
             .map_err(|err| to_napi(&format!("close process {}", self.pid()), &err))
+    }
+
+    /// Whether a modal dialog blocks the process's main windows: on Windows
+    /// one of them is disabled, and ignores a close request. Always
+    /// `false` on POSIX, and once the process has exited.
+    ///
+    /// # Errors
+    ///
+    /// When the OS refuses the query.
+    #[napi]
+    pub fn is_blocked(&self) -> Result<bool> {
+        self.inner
+            .is_blocked()
+            .map_err(|err| to_napi(&format!("windows of process {}", self.pid()), &err))
     }
 
     /// Block until the process exits or `timeout_ms` passes. `true` once it

@@ -185,6 +185,22 @@ impl Pin {
         crate::os::win::window::close_main_windows(pid)
     }
 
+    /// Whether a main window of the process is disabled, as while a modal
+    /// dialog is up. `false` once it has exited.
+    pub fn is_blocked(&self) -> io::Result<bool> {
+        if self.0.has_exited()? {
+            return Ok(false);
+        }
+
+        // SAFETY: the handle is open and has query access.
+        let pid = unsafe { GetProcessId(self.0.0) };
+        if pid == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        crate::os::win::window::is_blocked(pid)
+    }
+
     pub fn wait_for_exit(&self, timeout: Duration) -> io::Result<bool> {
         self.0.wait(timeout)
     }

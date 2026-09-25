@@ -1,4 +1,11 @@
-import type { ConfigLayer, ForgeConfig, HookCommand, HookPhases, ProjectType } from "./schema.ts";
+import type {
+	AutoRecoveryMode,
+	ConfigLayer,
+	ForgeConfig,
+	HookCommand,
+	HookPhases,
+	ProjectType,
+} from "./schema.ts";
 
 /**
  * Every config value that has a default. Keys with no default stay
@@ -19,6 +26,7 @@ export interface ConfigDefaults {
 	rojoAlias: string;
 	rojoPort: number;
 	rojoProjectPath: string;
+	studio: { autoRecovery: AutoRecoveryMode };
 	syncback: {
 		inputPath: string | undefined;
 		projectPath: string | undefined;
@@ -49,6 +57,7 @@ export const DEFAULT_CONFIG: Readonly<ConfigDefaults> = {
 	rojoAlias: "rojo",
 	rojoPort: 34_872,
 	rojoProjectPath: "default.project.json",
+	studio: { autoRecovery: "move" },
 	syncback: { inputPath: undefined, projectPath: undefined, runOnStart: false },
 	typegen: {
 		exclude: ["**/node_modules/**"],

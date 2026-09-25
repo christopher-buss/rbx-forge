@@ -119,6 +119,30 @@ both):
 - On Linux and macOS, `npm pack` keeps the file mode and both npm and pnpm
   install it as packed: 0755 stays executable, 0644 stays not executable.
 
+### Roblox Studio (Windows)
+
+Studio 0.740, Windows 11. A direct `RobloxStudioBeta.exe <place>` (the command
+the registry gives for `.rbxl` files and `roblox-studio:` links) opens the place
+for normal use. It does not hand off to another process: the spawned PID stays,
+and the place's lock file names it. Studio survives the exit of its parent.
+Window states after `WM_CLOSE` to the main window:
+
+| Case                                 | Main window            | Lock file gone | Process exit |
+| ------------------------------------ | ---------------------- | -------------- | ------------ |
+| Studio-saved place, loaded           | enabled throughout     | 1.0-1.4 s      | 2.6-3.3 s    |
+| `rojo build` place ("Save changes?") | disabled after 80 ms   | never          | never        |
+| While "Opening place" shows          | disabled (from before) | never          | never        |
+
+- Studio is Qt: its dialogs are owned `Qt5159QWindowIcon` windows, not `#32770`.
+  A graceful close also shows a short-lived owned window, so a new owned window
+  is no dialog signal. A disabled main window is: Windows disables the owner of
+  a modal dialog, and the disabled window drops `WM_CLOSE`.
+- Studio has many hidden, unowned helper windows titled `RobloxStudio`; its main
+  window is titled `<place> - Roblox Studio` (`Roblox Studio` while it loads).
+- Through forge (`up`, then `down` or `stop`, CLI run included): open to loaded
+  10-11 s; close of a saved place 1.8-2.0 s (lock release, then kill); "Save
+  changes?" 1.3-1.5 s (dialog, then kill).
+
 ## Policy
 
 - **Detach.** `up` launches the supervisor with
@@ -183,6 +207,15 @@ both):
   so a Node worker's descendants keep only the marker.
 - **Pipe security.** Explicit current-user DACL, reject remote clients,
   first-instance flag, token as the first message.
+- **Studio.** forge starts the Studio executable directly with the place as its
+  only argument: on Windows through the addon with the flags of **Detach** (a
+  job that forbids breakaway falls back to the platform launcher), on POSIX
+  detached in a new session. It pins the process at once. A close is a close
+  request, then a poll every 50 ms: the kill comes at once when the lock file
+  goes or a main window is disabled (a modal dialog), else after 15 s. A main
+  window is a visible, unowned, non-tool, non-console window; with none, a
+  hidden unowned window titled `… - Roblox Studio` counts, so a Studio started
+  hidden (the e2e stand-in) still gets the request.
 - **Remote-client test.** An integration test on Windows creates the real forge
   pipe, then connects through `\\127.0.0.1\pipe\<name>` and
   `\\localhost\pipe\<name>` and expects `ERROR_ACCESS_DENIED`. The same test
@@ -241,6 +274,9 @@ both):
 
 ## Not measured
 
+- Studio: a direct launch on macOS; a logged-out Studio; whether moving an
+  auto-recovery file out of AutoSaves stops the recovery prompt (Studio writes
+  one only every few minutes).
 - VS Code terminal: whether closing the terminal panel kills a detached,
   broken-away process. We measured only that its shells are in no job. We expect
   the process to survive (no job, no console), as in Windows Terminal. Fallback:

@@ -6,13 +6,15 @@ import type { CleanupReport, PinnedProcess } from "../native/addon.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import type { Seams } from "../seams/seams.ts";
 import { STUDIO_CLOSED_SYNCBACK_MS } from "../session/session-body.ts";
-import { parseStatus } from "../session/status.ts";
-import { closeStudio } from "../studio/close-studio.ts";
+import type { RecoveryReport } from "../studio/auto-recovery.ts";
+import type { RecoveryOptions, StudioEnd, StudioStop } from "../studio/close-studio.ts";
+import { closeStudioAsync } from "../studio/close-studio.ts";
 import type { Barrier } from "../supervisor/barrier.ts";
 import { SETTLE_MS, targetOf, waitForBarrierAsync } from "../supervisor/barrier.ts";
 import type { ForgeFiles, SessionFiles } from "../supervisor/session-files.ts";
 import { removeSession } from "../supervisor/session-files.ts";
 import type { KnownSession } from "./session.ts";
+import { sessionStudioTarget, waitForSessionStudioAsync } from "./studio.ts";
 
 /** How long `down` waits after its first shutdown request. */
 export const DOWN_TIMEOUT_MS = 15_000;
@@ -49,6 +51,8 @@ export interface DownOptions {
 	keepStudio: boolean;
 	/** Test only: waits at each point. */
 	pause?: ((point: DownPoint) => Promise<void>) | undefined;
+	/** What to do with the auto-recovery files of a Studio `down` ends. */
+	recovery: RecoveryOptions;
 	/** How long to wait for the supervisor, and for the barrier. */
 	timeoutMs: number;
 }
@@ -67,8 +71,9 @@ export type StoppedBy = "forced_shutdown" | "gone" | "killed" | "shutdown" | "st
 /**
  * What `down` did with the session's Studio:
  *
- * - `closed`: Studio is gone. `forced`: it did not close on the close
- *   request, so forge ended it without a save.
+ * - `closed`: Studio is gone. `end`: how (see `StudioEnd`). `forced`:
+ *   forge ended it with the place open, without a save. `recovery`: what
+ *   forge did with its auto-recovery files; `null` when it ended none.
  * - `failed`: forge could not verify or end it (the error's `code` and
  *   `message`); Studio may still be open.
  * - `kept`: `--keep-studio` left it as it is.
@@ -78,7 +83,14 @@ export type StoppedBy = "forced_shutdown" | "gone" | "killed" | "shutdown" | "st
  */
 export type DownStudio =
 	| { code: string; message: string; place: string; status: "failed" }
-	| { forced: boolean; pid: number; place: string; status: "closed" }
+	| {
+			end: StudioEnd;
+			forced: boolean;
+			pid: number;
+			place: string;
+			recovery: null | RecoveryReport;
+			status: "closed";
+	  }
 	| { status: "kept" | "none" | "unknown" };
 
 /** What `down` did. */
@@ -105,11 +117,11 @@ interface Target {
  * session only: requests carry its id, pins its recorded supervisor, and
  * cleans up and deletes only its files.
  *
- * First it closes the session's Studio (unless `keepStudio`): the place the
- * session reports open, through `closeStudio` (a close request, then a kill
- * without a save). The session then ends by itself once syncback of a last
- * save is done; `down` waits {@link STUDIO_END_WAIT_MS} for that before it
- * asks. `stopped` needs both:
+ * First it closes the session's Studio (unless `keepStudio`): the one the
+ * session reports, once past `opening` (`waitForSessionStudioAsync`), through
+ * `closeStudioAsync` (a close request, then a kill). The session then ends by
+ * itself once syncback of a last save is done; `down` waits {@link
+ * STUDIO_END_WAIT_MS} for that before it asks. `stopped` needs both:
  *
  * 1. Its supervisor has exited: its pinned process (PID plus start time)
  *    is gone. A supervisor lets go of the singleton lock before it writes
@@ -157,37 +169,6 @@ export async function stopSessionAsync(
 }
 
 /**
- * The place the session's Studio has open, as the session reports it.
- *
- * @param seams - The transport.
- * @param session - The target's endpoint, token, and id.
- * @returns The place; `null` when Studio does not have it open;
- *   `undefined` when the session did not answer, or another one did.
- */
-async function studioPlaceAsync(
-	seams: Pick<DownSeams, "ipc">,
-	{ identity, token }: KnownSession,
-): Promise<null | string | undefined> {
-	let result: Record<string, unknown>;
-	try {
-		result = await callSessionAsync(
-			seams.ipc,
-			{ endpoint: identity.endpoint, token },
-			"status",
-		);
-	} catch {
-		return undefined;
-	}
-
-	const status = parseStatus(result);
-	if (status?.sessionId !== identity.sessionId) {
-		return undefined;
-	}
-
-	return status.services.studio.place ?? null;
-}
-
-/**
  * Condition 1 of {@link stopSessionAsync}: the target's supervisor has
  * exited.
  *
@@ -200,41 +181,66 @@ function isGone({ pin }: Target): boolean {
 }
 
 /**
+ * What `down` reports for a Studio it closed.
+ *
+ * @param stop - What closing it did.
+ * @param place - Its place.
+ * @returns `closed`, or `none` when it was not open.
+ */
+function downStudio(stop: StudioStop, place: string): DownStudio {
+	if (stop.status !== "stopped") {
+		return { status: "none" };
+	}
+
+	return {
+		end: stop.end,
+		forced: stop.forced,
+		pid: stop.pid,
+		place,
+		recovery: stop.recovery,
+		status: "closed",
+	};
+}
+
+/**
  * Close the Studio that has the session's place open, unless `keepStudio`.
  * A failure is reported, not thrown: the session still stops.
  *
- * @param seams - The transport, file system, OS, and native addon.
+ * @param seams - The clock, transport, file system, OS, and native addon.
  * @param target - The session and its pinned supervisor.
- * @param options - `keepStudio`.
+ * @param options - `keepStudio` and the auto-recovery options.
  * @returns What it did.
  */
 async function closeSessionStudioAsync(
 	seams: DownSeams,
 	target: Target,
-	{ keepStudio }: Pick<DownOptions, "keepStudio">,
+	{ keepStudio, recovery }: Pick<DownOptions, "keepStudio" | "recovery">,
 ): Promise<DownStudio> {
 	if (keepStudio) {
 		return { status: "kept" };
 	}
 
 	// Gone, silent, or replaced: which Studio is the session's is unknown.
-	const place = await (isGone(target) ? undefined : studioPlaceAsync(seams, target.session));
-	if (place === undefined) {
+	const studio = isGone(target)
+		? undefined
+		: await waitForSessionStudioAsync(seams, target.session);
+	if (studio === undefined) {
 		return { status: "unknown" };
 	}
 
-	if (place === null) {
+	const studioTarget = sessionStudioTarget(studio);
+	if (studioTarget === undefined) {
 		return { status: "none" };
 	}
 
 	try {
-		const stop = closeStudio(seams, place);
-		return stop.status === "stopped"
-			? { forced: stop.forced, pid: stop.pid, place, status: "closed" }
-			: { status: "none" };
+		return downStudio(
+			await closeStudioAsync(seams, studioTarget, recovery),
+			studioTarget.place,
+		);
 	} catch (err) {
 		const { code, message } = toForgeError(err);
-		return { code, message, place, status: "failed" };
+		return { code, message, place: studioTarget.place, status: "failed" };
 	}
 }
 

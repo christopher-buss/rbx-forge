@@ -65,7 +65,7 @@ export default defineConfig({
 					hookTimeout: 30_000,
 					include: ["test/e2e/**/*.spec.ts"],
 					restoreMocks: true,
-					setupFiles,
+					setupFiles: [...setupFiles, "./test/setup/studio-isolation.ts"],
 					testTimeout: 60_000,
 					unstubEnvs: true,
 				},
