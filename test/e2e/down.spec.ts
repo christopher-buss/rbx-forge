@@ -16,6 +16,8 @@ import { makeFixtureAsync } from "./session-fixture.ts";
 import { runForgeAsync, UP_ROJO_ONLY } from "./up-fixture.ts";
 
 const DOWN = ["down", "--json"];
+/** How long a dead process may stay a zombie before its parent reaps it. */
+const REAP_MS = 2000;
 
 /**
  * The session files left in the project.
@@ -58,7 +60,9 @@ describe("forge down", () => {
 		const workers = records.map((record) => record.pid);
 
 		const down = await runForgeAsync(fixture, DOWN);
-		const alive = [Number(pid), ...workers].filter(isProcessAlive);
+		// Dead already; on POSIX a zombie still answers a signal-0 probe
+		// until its parent reaps it.
+		const alive = await waitForDeathAsync([Number(pid), ...workers], REAP_MS);
 		const again = await runForgeAsync(fixture, DOWN);
 
 		expect([down.status, again.status]).toStrictEqual([EXIT_SUCCESS, EXIT_NOT_RUNNING]);

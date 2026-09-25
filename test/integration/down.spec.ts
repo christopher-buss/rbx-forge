@@ -244,17 +244,17 @@ describe("forge down", () => {
 		const started = Date.now();
 
 		const outcome = await downAsync(project, { force: false, timeoutMs: 15_000 });
-		const processes = [pid, ...pidsOf(project, sessionId)];
+		const elapsed = Date.now() - started;
+		// Dead already; on POSIX a zombie still answers a signal-0 probe
+		// until its parent reaps it.
+		const alive = await waitForDeathAsync([pid, ...pidsOf(project, sessionId)], 2000);
 
 		expect(outcome).toStrictEqual({
 			ok: true,
 			report: { removed: false, sessionId, stoppedBy: "shutdown" },
 		});
-		expect(Date.now() - started).toBeGreaterThanOrEqual(2000);
-		expect({
-			alive: processes.filter(isProcessAlive),
-			files: filesLeft(project),
-		}).toStrictEqual({ alive: [], files: [] });
+		expect(elapsed).toBeGreaterThanOrEqual(2000);
+		expect({ alive, files: filesLeft(project) }).toStrictEqual({ alive: [], files: [] });
 	}, 60_000);
 
 	it("should never report stopped while a worker lives, and clean it up with --force (C10)", async () => {
@@ -315,12 +315,14 @@ describe("forge down", () => {
 		await waitForReadyAsync(first);
 		const a = currentIdentity(project);
 		await waitForWorkersAsync(project.log, 1);
-		await blockSupervisorAsync(project);
+		const blocked = await blockSupervisorAsync(project);
 
 		const refused = await downAsync(project);
-		assert(!refused.ok, "expected supervisor_unresponsive");
 
-		expect(refused.error.code).toBe("supervisor_unresponsive");
+		expect({ blocked, refused }).toMatchObject({
+			blocked: a.pid,
+			refused: { error: { code: "supervisor_unresponsive" }, ok: false },
+		});
 
 		const replacement = replaceAt(project, "delete", 2);
 		const forced = await downAsync(project, {
@@ -350,9 +352,8 @@ describe("forge down", () => {
 		const { sessionId } = currentIdentity(project);
 
 		const refused = await downAsync(project);
-		assert(!refused.ok, "expected supervisor_unresponsive");
 
-		expect(refused.error.code).toBe("supervisor_unresponsive");
+		expect(refused).toMatchObject({ error: { code: "supervisor_unresponsive" }, ok: false });
 
 		// F5: the loop blocks too, with no endpoint.
 		await blockSupervisorAsync(project);
