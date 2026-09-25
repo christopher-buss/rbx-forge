@@ -29,13 +29,6 @@ export default isentinel(
 		},
 	},
 	{
-		name: "project/package-json",
-		files: ["package.json"],
-		// CLI only until the config ticket adds the `defineConfig` library
-		// entry and its types.
-		rules: { "package-json/require-types": "off" },
-	},
-	{
 		name: "project/type-tests",
 		files: ["**/*.spec-d.ts"],
 		rules: { "flawless/max-lines-per-function": "off" },
