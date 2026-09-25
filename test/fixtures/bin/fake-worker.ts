@@ -17,6 +17,12 @@
  * - `FIXTURE_STORM_MS`: the last link spawns one more plain grandchild this
  *   often, `FIXTURE_STORM_MAX` (default 20) in all: a bounded fork storm.
  * - `FIXTURE_SCRUB=1`: the worker's grandchildren start without the markers.
+ * - `FIXTURE_GRANDCHILD_MODES`: a comma list, one mode per grandchild in
+ *   order: `scrub` (starts without the markers), `close-lease` (closes the
+ *   session's inherited lease descriptor, POSIX), or empty for neither.
+ * - `FIXTURE_BEAT_LOG` and `FIXTURE_BEAT_MS`: every long-running process
+ *   appends `{ at, pid, session }` to this NDJSON file this often, so a test
+ *   sees when a process last ran.
  * - `FIXTURE_IGNORE_SIGNALS=1`: this process and its grandchildren ignore
  *   SIGINT, SIGTERM, SIGHUP, and SIGBREAK.
  * - `FIXTURE_EXIT_CODE`: exit code of a one-shot run (default 0).
@@ -43,13 +49,24 @@
  * inherited by every grandchild unchanged.
  */
 import { spawn } from "node:child_process";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	closeSync,
+	existsSync,
+	fstatSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import path from "node:path";
 import process from "node:process";
 
 const ROJO_VERSION = "7.7.0";
 const KEEP_ALIVE_MS = 60_000;
 const IGNORED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"] as const;
 const DEFAULT_STORM_MAX = 20;
+/** Descriptors past this are not searched for the lease. */
+const MAX_FD = 256;
 
 const [ROLE = "worker", ...ARGS] = process.argv.slice(2);
 const { env } = process;
@@ -70,6 +87,7 @@ function record(): void {
 		at: Date.now(),
 		event: "start",
 		markers: { session: env["RBX_FORGE_SESSION"], worker: env["RBX_FORGE_WORKER"] },
+		mode: env["FIXTURE_MODE"],
 		pid: process.pid,
 		ppid: process.ppid,
 		role: ROLE,
@@ -87,28 +105,103 @@ function ignoreSignals(): void {
 	}
 }
 
+/**
+ * The session's lease descriptor this process inherited (POSIX), found by
+ * the lease file's device and inode. The lease is
+ * `.forge/sessions/<session>/workers.lock` under the project (the cwd), or
+ * `workers.lock` in the cwd for a bare reaper test.
+ *
+ * @returns The descriptor, or `undefined` when it holds none.
+ */
+function findLease(): number | undefined {
+	const session = env["RBX_FORGE_SESSION"];
+	if (session === undefined || process.platform === "win32") {
+		return undefined;
+	}
+
+	const file = [path.join(".forge", "sessions", session, "workers.lock"), "workers.lock"].find(
+		(candidate) => existsSync(candidate),
+	);
+	if (file === undefined) {
+		return undefined;
+	}
+
+	const lease = statSync(file);
+	for (let fd = 3; fd < MAX_FD; fd++) {
+		try {
+			const stat = fstatSync(fd);
+			if (stat.dev === lease.dev && stat.ino === lease.ino) {
+				return fd;
+			}
+		} catch {
+			// Not open.
+		}
+	}
+
+	return undefined;
+}
+
 function spawnGrandchild(childEnvironment: NodeJS.ProcessEnv): ReturnType<typeof spawn> {
+	// Node closes every descriptor but the standard ones in a child, where a
+	// native program keeps them: pass the lease on, as `exec` would.
+	const lease = findLease();
 	const child = spawn(process.execPath, [import.meta.filename, "grandchild"], {
 		detached: env["FIXTURE_DETACH"] === "1",
 		env: childEnvironment,
-		stdio: "ignore",
+		stdio: lease === undefined ? "ignore" : ["ignore", "ignore", "ignore", lease],
 		windowsHide: true,
 	});
 	child.unref();
 	return child;
 }
 
+function withoutMarkers(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const scrubbed = { ...environment };
+	delete scrubbed["RBX_FORGE_SESSION"];
+	delete scrubbed["RBX_FORGE_WORKER"];
+	return scrubbed;
+}
+
 function spawnGrandchildren(): void {
 	const count = Number(env["FIXTURE_GRANDCHILDREN"] ?? "0");
-	const childEnvironment: NodeJS.ProcessEnv = { ...env, FIXTURE_GRANDCHILDREN: "0" };
-	if (env["FIXTURE_SCRUB"] === "1") {
-		delete childEnvironment["RBX_FORGE_SESSION"];
-		delete childEnvironment["RBX_FORGE_WORKER"];
+	const modes = (env["FIXTURE_GRANDCHILD_MODES"] ?? "").split(",");
+	const base: NodeJS.ProcessEnv = { ...env, FIXTURE_GRANDCHILDREN: "0" };
+	delete base["FIXTURE_GRANDCHILD_MODES"];
+	for (let index = 0; index < count; index++) {
+		const mode = modes[index] ?? "";
+		const isScrubbed = env["FIXTURE_SCRUB"] === "1" || mode === "scrub";
+		const childEnvironment = isScrubbed ? withoutMarkers(base) : base;
+		spawnGrandchild({ ...childEnvironment, FIXTURE_MODE: mode });
+	}
+}
+
+/** Close the session's lease descriptor this process inherited. */
+function closeLease(): void {
+	const lease = findLease();
+	if (lease !== undefined) {
+		closeSync(lease);
+	}
+}
+
+/**
+ * Append one beat record.
+ *
+ * @param file - The `FIXTURE_BEAT_LOG` path.
+ */
+function writeBeat(file: string): void {
+	const entry = { at: Date.now(), pid: process.pid, session: env["RBX_FORGE_SESSION"] };
+	appendFileSync(file, `${JSON.stringify(entry)}\n`);
+}
+
+/** Append a beat now and then while the process lives. */
+function beat(): void {
+	const beatLog = env["FIXTURE_BEAT_LOG"];
+	if (beatLog === undefined) {
+		return;
 	}
 
-	for (let index = 0; index < count; index++) {
-		spawnGrandchild(childEnvironment);
-	}
+	writeBeat(beatLog);
+	setInterval(writeBeat, Number(env["FIXTURE_BEAT_MS"] ?? "50"), beatLog);
 }
 
 /**
@@ -132,6 +225,11 @@ function storm(intervalMs: number): void {
 /** A grandchild: the next link of a chain, a storm, or nothing. */
 function runGrandchild(): void {
 	setInterval(doNothing, KEEP_ALIVE_MS);
+	beat();
+	if (env["FIXTURE_MODE"] === "close-lease") {
+		closeLease();
+	}
+
 	const links = Number(env["FIXTURE_CHAIN"] ?? "0");
 	if (links > 0) {
 		const link = spawnGrandchild({ ...env, FIXTURE_CHAIN: String(links - 1) });
@@ -151,6 +249,7 @@ function runGrandchild(): void {
 function stayAlive(): void {
 	spawnGrandchildren();
 	setInterval(doNothing, KEEP_ALIVE_MS);
+	beat();
 	const exitAfter = env["FIXTURE_EXIT_AFTER_MS"];
 	const exitRole = env["FIXTURE_EXIT_ROLE"];
 	if (exitAfter !== undefined && (exitRole === undefined || exitRole === ROLE)) {
