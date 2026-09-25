@@ -1,0 +1,29 @@
+[package]
+name = "forge-reaper"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Process ownership for rbx-forge sessions: the forge-reaper binary and the @rbx-forge/native addon."
+license = "MIT"
+
+# The napi addon. `cdylib` only: the reaper binary never links napi symbols.
+[lib]
+name = "forge_native"
+crate-type = [ "cdylib" ]
+path = "src/lib.rs"
+
+[[bin]]
+name = "forge-reaper"
+path = "src/main.rs"
+
+[dependencies]
+napi = { version = "3.13.0", default-features = false, features = [ "napi6" ] }
+napi-derive = "3.6.9"
+
+[build-dependencies]
+napi-build = "2.5.0"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = "symbols"
