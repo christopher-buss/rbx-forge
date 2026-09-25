@@ -44,9 +44,3 @@ set `RBX_FORGE_NATIVE_DIR` to that directory; without it, forge loads the
 [Conventional Commits](https://www.conventionalcommits.org/):
 `<type>(<scope>): <subject>`. The commit-msg hook checks the format. See
 [.github/commit-instructions.md](./.github/commit-instructions.md).
-
-## Dependencies
-
-Versions live in the `catalogs` of `pnpm-workspace.yaml`. Every dependency is on
-its latest usable version; each exception and its reason is in
-[docs/dependency-exceptions.md](./docs/dependency-exceptions.md).
