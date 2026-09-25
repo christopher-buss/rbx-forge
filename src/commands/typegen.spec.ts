@@ -144,19 +144,31 @@ interface Workspace {
 `);
 	});
 
-	it("should read the configured project and write to --output", async () => {
+	it("should read the configured project and write to --output, creating its folders", async () => {
 		expect.assertions(2);
 
 		const { context, memory, specs } = makeTypegen({
 			file: { rojoProjectPath: "place.project.json" },
 		});
+		const output = "types/generated/game.d.ts";
 		await runTypegenCommandAsync(
 			context,
-			input({ output: "types/game.d.ts" }, { typegen: { outputPath: "types/game.d.ts" } }),
+			input({ output }, { typegen: { outputPath: output } }),
 		);
 
 		expect(specs[0]!.args[1]).toBe("place.project.json");
-		expect(memory.files()).toContainKey("types/game.d.ts");
+		expect(memory.files()).toContainKey(output);
+	});
+
+	it("should run when the output and .forge folders already exist", async () => {
+		expect.assertions(1);
+
+		const { context, memory } = makeTypegen({
+			files: { ".forge/current": "", "src/index.ts": "", "tools/rojo": "" },
+		});
+		await runTypegenCommandAsync(context, input());
+
+		expect(memory.files()).toContainKey("src/services.d.ts");
 	});
 
 	it("should apply the configured filters", async () => {
