@@ -1,6 +1,6 @@
 //! macOS: no pidfd, so the pin is the PID plus its start time, and every call
 //! first checks that the PID still has that start time. A PID reused between
-//! the check and the call (microseconds) is an accepted limit (spec #28).
+//! the check and the call (microseconds) is an accepted limit.
 
 use super::{FileId, ProcessEntry, StartTime};
 use std::ffi::OsStr;

@@ -13,7 +13,7 @@ export interface ControlTarget {
 }
 
 /**
- * The methods a session serves on its control channel (spec #28, IPC):
+ * The methods a session serves on its control channel:
  *
  * - `status`: the state contract (`session/status.ts`).
  * - `shutdown`: stop the session through its single shutdown path. Answers
@@ -23,7 +23,7 @@ export interface ControlTarget {
  *   also when the session is already stopping (`forge down`, step 2).
  *
  * - `sync`: run syncback with its hooks in the session, one run at a time
- *   with the save watch (spec #28 story 20). Answers once the run ended,
+ *   with the save watch. Answers once the run ended,
  *   with what was synced and each hook result, or with the run's failure.
  *
  * @param target - The session's id, status, stop requests, and syncback.

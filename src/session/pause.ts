@@ -4,7 +4,7 @@ import type { Clock } from "../seams/clock.ts";
 import type { FileSystem } from "../seams/file-system.ts";
 
 /**
- * Fault-injection pause points of a supervisor's startup (spec #28, Testing).
+ * Fault-injection pause points of a supervisor's startup.
  * Tests stop the supervisor at one of them, act (kill `forge start`, run a
  * second session), and resume it. In order:
  *

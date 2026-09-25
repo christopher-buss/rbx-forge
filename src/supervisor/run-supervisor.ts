@@ -68,7 +68,7 @@ interface OwnSession {
 }
 
 /**
- * The supervisor of one `forge start` session (spec #28): the separate
+ * The supervisor of one `forge start` session: the separate
  * process `start` spawns with the owner pipe. It runs the whole session and
  * stops it on the first stop request, which can come at any point of the
  * startup:

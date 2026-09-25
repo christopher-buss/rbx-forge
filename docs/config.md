@@ -20,10 +20,7 @@ export default defineConfig({
 - **Required file.** With no config file, every command that reads it fails with
   `config_not_found`. Only `init`, `status`, `sync`, `logs`, and `down` do not
   read it.
-- **Strict.** An unknown key is an error (`config_invalid`). A key that an
-  earlier forge used gives `config_removed_key` with what to use instead:
-  `commandNames`, `rbxts.watchOnOpen`, `suppressNoTaskRunnerWarning`,
-  `syncbackInputPath`, `typegenOutputPath`.
+- **Strict.** An unknown key is an error (`config_invalid`).
 - **Precedence.** Flags, then the config file, then the defaults. Objects merge
   key by key. Every other value, arrays included, replaces the value below it.
 - **Paths** are relative to the project root and must not be empty.
@@ -69,12 +66,11 @@ defineConfig({
 - Type: `string`
 - Default: `"rojo"`
 
-The Rojo command. Set it to a fork, for example the UpliftGames fork that
-syncback needs.
+The Rojo command, for example a pinned or wrapped Rojo.
 
 ```ts
 defineConfig({
-	rojoAlias: "rojo-uplift",
+	rojoAlias: "rojo-7.7",
 });
 ```
 
@@ -249,8 +245,8 @@ defineConfig({
 
 ### `syncback`
 
-Options for syncback: Studio edits back into the project. Syncback needs the
-UpliftGames Rojo fork (`syncback_unsupported` otherwise); see `rojoAlias`.
+Options for syncback: Studio edits back into the project. Syncback needs Rojo
+7.7 or later (`syncback_unsupported` otherwise); see `rojoAlias`.
 
 #### `syncback.inputPath`
 

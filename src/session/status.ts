@@ -5,7 +5,7 @@ import type { CompileReport, Diagnostic } from "../compiler/diagnostics.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
 
 /**
- * The state contract of a session (spec #28): what `forge status --json`
+ * The state contract of a session: what `forge status --json`
  * returns and `.forge/sessions/<id>/state.json` holds.
  *
  * ```jsonc

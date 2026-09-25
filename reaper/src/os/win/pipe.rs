@@ -1,4 +1,4 @@
-//! The server end of a session's control pipe (spec #28, IPC): every
+//! The server end of a session's control pipe: every
 //! instance is created with an owner-only DACL and `PIPE_REJECT_REMOTE_CLIENTS`,
 //! and the first one with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so no other
 //! process owns the name first. All I/O is overlapped and bounded, and

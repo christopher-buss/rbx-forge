@@ -8,12 +8,12 @@
 //! the group id from being reused, so every group signal before it reaches
 //! only this tree. No group is signalled after its leader's reap.
 //!
-//! Forced stop ([`Tree::finish`]) is the discover–kill loop of spec #28:
+//! Forced stop ([`Tree::finish`]) is the discover–kill loop:
 //! every pass signals the group, then lists the process table and kills
 //! each process outside the group that carries the worker's markers. Such a
 //! process is killed only through a pin (Linux pidfd; macOS start-time
 //! check), after the pinned process shows the start time the listing saw
-//! and every marker, so a reused PID never receives the kill (L3c). Nothing
+//! and every marker, so a reused PID never receives the kill. Nothing
 //! is reaped during the loop: the leader's zombie pins the group id, and
 //! adopted zombies pin their PIDs. The loop is bounded; it reports its
 //! survivors instead of hanging.

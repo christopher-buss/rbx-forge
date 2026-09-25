@@ -1,6 +1,5 @@
 /**
- * `down` against real supervisors, reapers, and fixture workers: scenarios
- * C5, C10, C11, C12, C13, C14 and F1, F2, F3, F5, F6 of spec #28. Each test
+ * `down` against real supervisors, reapers, and fixture workers. Each test
  * drives `stopSessionAsync` (the use-case of `forge down`) with the real
  * seams; `test/e2e/down.spec.ts` runs the built CLI.
  */
@@ -251,7 +250,7 @@ function pidsOf(project: Project, sessionId: string): Array<number> {
 }
 
 describe("forge down", () => {
-	it("should wait through the workers' grace and report stopped only once all are gone (C5)", async () => {
+	it("should wait through the workers' grace and report stopped only once all are gone", async () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync({ gracefulTimeoutMs: 2000 });
@@ -278,7 +277,7 @@ describe("forge down", () => {
 		expect({ alive, files: filesLeft(project) }).toStrictEqual({ alive: [], files: [] });
 	}, 60_000);
 
-	it("should never report stopped while a worker lives, and clean it up with --force (C10)", async () => {
+	it("should never report stopped while a worker lives, and clean it up with --force", async () => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync();
@@ -307,7 +306,7 @@ describe("forge down", () => {
 		}).toStrictEqual({ files: [], survivors: [] });
 	}, 60_000);
 
-	it("should leave a replacement session that starts during down untouched (C11, C13)", async () => {
+	it("should leave a replacement session that starts during down untouched", async () => {
 		expect.assertions(2);
 
 		const project = await makeProjectAsync();
@@ -328,7 +327,7 @@ describe("forge down", () => {
 		}).toStrictEqual({ alive: true, files: ["current", b.sessionId].toSorted() });
 	}, 60_000);
 
-	it("should kill a blocked supervisor through its pin with --force, and never delete a new session's files (F1, C12)", async () => {
+	it("should kill a blocked supervisor through its pin with --force, and never delete a new session's files", async () => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync();
@@ -363,7 +362,7 @@ describe("forge down", () => {
 		).resolves.toStrictEqual([]);
 	}, 90_000);
 
-	it("should never report stopped for a stalled startup, and kill it before any worker with --force (C14, F5)", async () => {
+	it("should never report stopped for a stalled startup, and kill it before any worker with --force", async () => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync();
@@ -376,7 +375,7 @@ describe("forge down", () => {
 
 		expect(refused).toMatchObject({ error: { code: "supervisor_unresponsive" }, ok: false });
 
-		// F5: the loop blocks too, with no endpoint.
+		// The loop blocks too, with no endpoint.
 		await blockSupervisorAsync(project);
 		const forced = await downAsync(project, { ...SHORT, force: true });
 		rmSync(pause, { force: true });
@@ -401,7 +400,7 @@ describe("forge down", () => {
 		expect(atDelete.existed).toStrictEqual([false]);
 	});
 
-	it("should kill nothing for a record whose PID another process reused (F2)", async () => {
+	it("should kill nothing for a record whose PID another process reused", async () => {
 		expect.assertions(1);
 
 		const project = await makeProjectAsync();
@@ -412,7 +411,7 @@ describe("forge down", () => {
 		});
 	});
 
-	it("should kill nothing for a start time mismatch while the lock is held (F3)", async () => {
+	it("should kill nothing for a start time mismatch while the lock is held", async () => {
 		expect.assertions(1);
 
 		const project = await makeProjectAsync();
@@ -424,7 +423,7 @@ describe("forge down", () => {
 		});
 	});
 
-	it("should kill nothing for a record with a live start time while the lock is free, and never report it stopped (F6)", async () => {
+	it("should kill nothing for a record with a live start time while the lock is free, and never report it stopped", async () => {
 		expect.assertions(1);
 
 		const project = await makeProjectAsync();

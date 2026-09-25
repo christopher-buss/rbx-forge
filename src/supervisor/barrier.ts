@@ -11,7 +11,7 @@ import { listSessions, removeSession, sessionFiles } from "./session-files.ts";
 
 /**
  * How long a new session waits for an old session's workers beyond their
- * graceful stop time (spec #28: `graceMs + 15 s`).
+ * graceful stop time (`graceMs + 15 s`).
  */
 export const OLD_SESSION_MARGIN_MS = 15_000;
 /**
@@ -61,7 +61,7 @@ export function targetOf(files: SessionFiles): SessionTarget {
 }
 
 /**
- * The barrier of one session (spec #28): wait until its lease is free and
+ * The barrier of one session: wait until its lease is free and
  * a scan finds none of its processes (marker or lease holders on POSIX,
  * its jobs on Windows, its reaper). On POSIX every worker inherits the
  * lease, and a worker that closed it still carries the marker.
@@ -100,7 +100,7 @@ export async function waitForBarrierAsync(
 }
 
 /**
- * The startup barrier (spec #28): delete every older session's directory
+ * The startup barrier: delete every older session's directory
  * once its barrier is clear, so a new session never overlaps an old
  * session's workers. With `force`, an old session that outlives the bound
  * is cleaned up (see `forceCleanup` of the addon) and waited for again.
@@ -148,7 +148,7 @@ export async function clearOldSessionsAsync(
 }
 
 /**
- * The final barrier of a session whose reaper has exited (spec #28): the
+ * The final barrier of a session whose reaper has exited: the
  * session's files go once its barrier is clear and every tree was reported
  * empty; otherwise they stay, so the next session's barrier waits. Call
  * only while holding the singleton lock.

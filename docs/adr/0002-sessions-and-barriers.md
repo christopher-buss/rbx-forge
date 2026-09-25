@@ -7,10 +7,10 @@ status: accepted
 Every session runs in its own supervisor process (`dist/supervisor.mjs`), also
 for `forge start`. There is no in-process session mode, and no forge command
 starts another forge command: chained steps are function calls. We chose this
-because the old design (task-runner chains, cleanup that killed the task runner)
-leaked `rojo` and `rbxtsc` processes (#25), and because `start` must stop every
-process when it is hard-killed at any moment, which an in-process session cannot
-do.
+because a chain of processes (a task runner that starts a step that starts
+`rojo`) leaks the workers when cleanup kills only the outer process, and because
+`start` must stop every process when it is hard-killed at any moment, which an
+in-process session cannot do.
 
 ## Decisions
 
@@ -20,8 +20,8 @@ do.
   (Windows: breakaway, see ADR 0001) and returns when the session is ready.
 - **The supervisor is detached on every OS, also for `start`.** On Windows,
   libuv puts a non-detached child in a `KILL_ON_JOB_CLOSE` job, so a killed
-  `start` killed the supervisor before it could clean up. The owner pipe, not
-  the job, ties the session to `start`. `start` forwards its stop signals.
+  `start` would kill the supervisor before it could clean up. The owner pipe,
+  not the job, ties the session to `start`. `start` forwards its stop signals.
 - **Singleton.** The supervisor holds an exclusive lock on
   `.forge/supervisor.lock` for its whole life. Only the holder may remove a
   stale endpoint, create the endpoint, delete session directories, or rewrite

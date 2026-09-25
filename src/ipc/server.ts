@@ -38,7 +38,7 @@ export interface IpcServer {
 /**
  * Serve one connection: check the hello, answer one request, close. A
  * missing, malformed, or wrong hello closes the connection without an
- * answer (spec #28: wrong token closes). Every read and write is bounded.
+ * answer (wrong token closes). Every read and write is bounded.
  *
  * @param connection - The client.
  * @param options - The token and handlers.

@@ -196,7 +196,7 @@ fn kill_marked_kills_a_process_with_every_marker_through_its_pin() {
     );
 }
 
-/// L3c: the listing saw another process under this PID (another start
+/// The listing saw another process under this PID (another start
 /// time), so the process now under it is never killed.
 #[cfg(unix)]
 #[test]
@@ -229,7 +229,7 @@ fn kill_marked_never_kills_a_process_without_every_marker() {
     assert!(alive);
 }
 
-/// L3: a descendant that left the group (and outlived its parent) dies in
+/// A descendant that left the group (and outlived its parent) dies in
 /// the forced stop through its markers.
 #[cfg(unix)]
 #[test]

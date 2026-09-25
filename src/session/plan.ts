@@ -38,7 +38,7 @@ export const COMPILER_MISSING_HINT =
 const LUAU_MISSING_HINT = "Install it, or fix luau.watch.command in the config.";
 
 /**
- * Decide what a session runs (spec #28, Session lifecycle): Rojo always; the
+ * Decide what a session runs: Rojo always; the
  * compiler in watch mode unless `--no-compiler`; Studio unless `--no-open`;
  * syncback on save with `--syncback` or `syncback.runOnStart`. A session with
  * a compiler compiles (roblox-ts) and builds once before its services start.

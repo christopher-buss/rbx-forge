@@ -188,7 +188,7 @@ jobs:
           - { host: ubuntu-24.04-arm, musl: true, target: aarch64-unknown-linux-musl }
       fail-fast: false
 
-  # IPC security S3 (spec #28): another local user is denied the control
+  # IPC security: another local user is denied the control
   # channel. Needs a second local user, so it runs only here, never on a
   # developer machine.
   other-user:

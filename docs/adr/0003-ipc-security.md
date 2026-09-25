@@ -40,8 +40,8 @@ browsers, and a port number can collide across worktrees.
 ## Consequences
 
 - The tests cover each rule: wrong token rejected, remote-style pipe paths
-  rejected (S4, needs the SMB server service on Windows), the pipe DACL has
-  exactly one allow entry for the current user (S5), and another local user is
-  denied (S3, the `other-user` CI job creates a second user on each OS).
+  rejected (needs the SMB server service on Windows), the pipe DACL has exactly
+  one allow entry for the current user, and another local user is denied (the
+  `other-user` CI job creates a second user on each OS).
 - A directory that is not the user's, or a pipe another process already owns,
   gives `endpoint_in_use`; the session does not start.

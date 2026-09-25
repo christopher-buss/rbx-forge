@@ -17,7 +17,7 @@ import { parseHookResults } from "./status.ts";
 import type { WatchOptions } from "./watch.ts";
 import { watchSavesAsync } from "./watch.ts";
 
-// Syncback in a session (spec #28, Hooks): one runner per session, shared by
+// Syncback in a session: one runner per session, shared by
 // the save watch and `forge sync`, so syncback and its hooks run one at a
 // time, with requests during a run folded into one more run.
 

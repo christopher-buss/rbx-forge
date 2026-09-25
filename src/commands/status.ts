@@ -6,9 +6,9 @@ import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext } from "./context.ts";
 
 /**
- * `forge status`: the state of the project's running session (spec #28,
- * state contract): each service's state, the Rojo port, the compiler's last
- * build with its diagnostics, and the last syncback run with its hooks.
+ * `forge status`: the state of the project's running session: each service's
+ * state, the Rojo port, the compiler's last build with its diagnostics, and
+ * the last syncback run with its hooks.
  *
  * @param context - The run: project root, seams, and reporter.
  * @returns The session's status as `data`, and one line per service as

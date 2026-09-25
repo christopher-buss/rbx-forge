@@ -52,7 +52,7 @@ describe(ForgeError, () => {
 		expect(error.details).toStrictEqual({ hooks: [] });
 	});
 
-	// The exit code of each class the spec names, written out so that a moved
+	// The exit code of each error class, written out so that a moved
 	// code fails here.
 	it.for([
 		["config_invalid", EXIT_FAILURE],

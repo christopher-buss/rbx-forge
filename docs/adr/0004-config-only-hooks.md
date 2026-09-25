@@ -6,11 +6,11 @@ status: accepted
 
 Hooks are declared in `rbx-forge.config.ts` under `hooks`, keyed by command,
 with `pre` and `post` lists of shell commands. forge does not read
-`package.json` scripts or mise tasks, and it never writes them. The old design
-ran each step as `pnpm run forge:X` so that package-manager `pre`/`post` scripts
-could act as hooks. That worked only with pnpm's `enable-pre-post-scripts`,
-added a pnpm, shell, and node layer per step, and made cleanup kill the task
-runner instead of the real worker (#25).
+`package.json` scripts or mise tasks, and it never writes them. Package-manager
+`pre`/`post` scripts as hooks need each step to run as `pnpm run <script>`: that
+works only with pnpm's `enable-pre-post-scripts`, adds a pnpm, shell, and node
+layer per step, and makes cleanup kill the task runner instead of the real
+worker.
 
 ## Decisions
 
@@ -35,13 +35,11 @@ runner instead of the real worker (#25).
 
 ## Considered options
 
-- **Keep task-runner hooks next to config hooks.** Two hook systems, and the
-  recursive process design stays. Rejected: out of scope in spec #28.
-- **Hooks for `start` and `up`.** Not added yet: nothing needs them, and the
-  step hooks cover the known uses.
+- **Task-runner hooks next to config hooks.** Two hook systems, and a recursive
+  process design. Rejected.
+- **Hooks for `start` and `up`.** Rejected: nothing needs them, and the step
+  hooks cover the known uses.
 
 ## Consequences
 
-- A user who had `prebuild`/`postsyncback` scripts must move them to `hooks`.
-  The schema rejects the old `commandNames` key with that advice.
 - Hooks work the same with pnpm, npm, bun, mise, or no task runner.

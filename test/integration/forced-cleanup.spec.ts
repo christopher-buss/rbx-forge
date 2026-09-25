@@ -1,12 +1,12 @@
 /**
  * The startup barrier and `--force` against an earlier session whose
- * processes outlive the bound: scenarios C4, C7, C8, and C15 of spec #28.
+ * processes outlive the bound.
  * Each test stages the earlier session by hand (its directory and a real
  * reaper that keeps its lease, with no supervisor), as after its supervisor
  * died while its reaper hung. The bound is the 15 s margin (the graceful
  * stop time is 0).
  *
- * C9, a POSIX descendant that scrubs its environment and closes the lease,
+ * A POSIX descendant that scrubs its environment and closes the lease,
  * leaves no evidence of its session: an accepted limit (ADR 0001).
  */
 import assert from "node:assert/strict";
@@ -78,13 +78,13 @@ async function forcedCleanupAsync(run: Launched): Promise<CleanupReport> {
 
 describe("forced cleanup", () => {
 	it(
-		"should refuse with the surviving PIDs, then kill the tree and the reaper last with --force (C4, C7, C8)",
+		"should refuse with the surviving PIDs, then kill the tree and the reaper last with --force",
 		async () => {
 			expect.assertions(5);
 
 			const project = await makeProjectAsync();
 			// Two detached grandchildren; on POSIX the first closes its lease
-			// before it writes its record, and is found by its marker alone (C8).
+			// before it writes its record, and is found by its marker alone.
 			const old = await stageOldSessionAsync(project, [
 				{
 					FIXTURE_DETACH: "1",
@@ -120,7 +120,7 @@ describe("forced cleanup", () => {
 
 	// Windows: the reaper's jobs kill every descendant when it dies.
 	it.skipIf(process.platform === "win32")(
-		"should find a scrubbed descendant that keeps the lease after the reaper died, and kill it (C15)",
+		"should find a scrubbed descendant that keeps the lease after the reaper died, and kill it",
 		async () => {
 			expect.assertions(4);
 

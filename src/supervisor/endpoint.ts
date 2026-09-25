@@ -43,9 +43,9 @@ export function endpointKey(projectRoot: string, buildOutputPath: string): strin
 }
 
 /**
- * The IPC endpoint of a project's session (spec #28, IPC): a named pipe on
+ * The IPC endpoint of a project's session: a named pipe on
  * Windows, a Unix socket inside a per-user directory elsewhere. The
- * supervisor records it in the identity record; the IPC server (#43)
+ * supervisor records it in the identity record; the IPC server
  * creates it, with a current-user access list or a 0700 directory.
  *
  * @param input - The project, build output, and host facts.

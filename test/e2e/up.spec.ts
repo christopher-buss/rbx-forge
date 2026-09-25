@@ -1,7 +1,6 @@
 /**
  * `forge up`, `status`, and `logs` as real processes, with fake Rojo and
- * compiler on PATH and the real reaper (spec #28, Detached sessions and
- * agents; Testing: Sessions C1, C2). Every test stops the session it left
+ * compiler on PATH and the real reaper. Every test stops the session it left
  * and waits until its supervisor is gone.
  */
 import { spawn } from "node:child_process";
@@ -101,7 +100,7 @@ describe("forge up", () => {
 		await expect(waitForDeathAsync([pid, ...workers])).resolves.toStrictEqual([]);
 	});
 
-	it("should start one session when three ups run at once (C1)", async () => {
+	it("should start one session when three ups run at once", async () => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync();
@@ -123,7 +122,7 @@ describe("forge up", () => {
 		}).toStrictEqual({ serves: 1, started: 1 });
 	});
 
-	it("should join a session that is starting (C2)", async () => {
+	it("should join a session that is starting", async () => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync();

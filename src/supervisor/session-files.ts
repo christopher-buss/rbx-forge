@@ -3,8 +3,7 @@ import path from "node:path";
 import type { FileSystem } from "../seams/file-system.ts";
 
 /**
- * The session files of a project, under `.forge` (see spec #28, "Sessions,
- * singleton, cleanup").
+ * The session files of a project, under `.forge`.
  *
  * ```text
  * .forge/supervisor.lock               singleton: exclusive lock, held for the supervisor's life

@@ -1,6 +1,6 @@
 /**
  * `forge up` returns once Rojo listens on its port, not once its process
- * started (spec #28 story 17), with fake Rojo on PATH and the real reaper.
+ * started, with fake Rojo on PATH and the real reaper.
  */
 import { connect } from "node:net";
 import { describe, expect, it } from "vitest";

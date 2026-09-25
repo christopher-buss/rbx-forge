@@ -20,7 +20,7 @@ export interface LockSeams {
 /**
  * Take the project's singleton lock (`.forge/supervisor.lock`) without
  * waiting. The supervisor holds it for its whole life: only the holder
- * creates or deletes session directories, rewrites `current`, or (#43)
+ * creates or deletes session directories, rewrites `current`, or
  * opens the endpoint. The OS releases it when the supervisor dies.
  *
  * @param seams - The native addon and file system.

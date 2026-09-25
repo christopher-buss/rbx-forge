@@ -323,7 +323,7 @@ describe(stopSessionAsync, () => {
 		expect(world.clock.now()).toBe(TIMEOUT_MS);
 	});
 
-	it("should report supervisor_unresponsive and kill nothing without --force (C14)", async () => {
+	it("should report supervisor_unresponsive and kill nothing without --force", async () => {
 		expect.assertions(3);
 
 		const world = makeWorld();
@@ -345,7 +345,7 @@ describe(stopSessionAsync, () => {
 		}).toStrictEqual({ alive: true, files: true, waited: TIMEOUT_MS + FORCED_SHUTDOWN_MS });
 	});
 
-	it("should kill a supervisor that does not stop through its pin with --force (F1, F5)", async () => {
+	it("should kill a supervisor that does not stop through its pin with --force", async () => {
 		expect.assertions(2);
 
 		const world = makeWorld();
@@ -371,8 +371,8 @@ describe(stopSessionAsync, () => {
 	});
 
 	it.for([
-		["a reused PID (F2)", { startTime: "999" }, false],
-		["a start time mismatch under a held lock (F3)", { startTime: "999" }, true],
+		["a reused PID", { startTime: "999" }, false],
+		["a start time mismatch under a held lock", { startTime: "999" }, true],
 	] as const)(
 		"should kill nothing for %s, and report it gone",
 		async ([, supervisor, holdsLock]) => {
@@ -411,7 +411,7 @@ describe(stopSessionAsync, () => {
 		expect(world.clock.now()).toBe(2500);
 	});
 
-	it("should report a live process without the lock unresponsive, and kill nothing with --force (F6)", async () => {
+	it("should report a live process without the lock unresponsive, and kill nothing with --force", async () => {
 		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false });
@@ -478,7 +478,7 @@ describe(stopSessionAsync, () => {
 		});
 	});
 
-	it("should report cleanup_in_progress with the PIDs while a worker lives (C10)", async () => {
+	it("should report cleanup_in_progress with the PIDs while a worker lives", async () => {
 		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
@@ -572,7 +572,7 @@ describe(stopSessionAsync, () => {
 		await expect(downAsync(world)).rejects.toThrow("isLockFree: denied");
 	});
 
-	it("should keep the files while another session holds the lock (C12)", async () => {
+	it("should keep the files while another session holds the lock", async () => {
 		expect.assertions(3);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });

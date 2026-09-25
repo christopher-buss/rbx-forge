@@ -6,9 +6,8 @@ status: accepted
 
 ## Context
 
-Spec #28 puts all process ownership in one Rust crate (`reaper/`): the
-`forge-reaper` binary and the `@rbx-forge/native` addon. Four questions were
-open before we build it (ticket #36):
+All process ownership is in one Rust crate (`reaper/`): the `forge-reaper`
+binary and the `@rbx-forge/native` addon. Four questions shape its design:
 
 1. Does job breakaway work for a detached `up` in Windows Terminal, the VS Code
    terminal, and an agent shell?
@@ -17,10 +16,8 @@ open before we build it (ticket #36):
 3. How do we ship the addon and the reaper binary prebuilt?
 4. How do we test that the Windows pipe rejects remote clients?
 
-We answered them with a throwaway spike (Rust, `windows-sys` and `libc`). It was
-in commit `654ca6e` on branch `ticket/36-native-spike` under
-`spikes/36-native/`, run locally and by a one-off workflow (run `36086083999`).
-We removed it after this ADR; the product does not contain it.
+The measurements below come from a throwaway probe (Rust, `windows-sys` and
+`libc`), run locally and on CI. The product does not contain it.
 
 ## Measurements
 
@@ -133,71 +130,68 @@ both):
   breakaway.
 - **macOS marker scan.** Use `KERN_PROCARGS2` for the environment and
   `PROC_PIDTBSDINFO` for uid and start time (second and microsecond). Scan only
-  processes of the current uid. The accepted limit from spec #28 stays, and is
-  now more exact: a descendant hides from the scan only if it overwrites its
-  environment strings in place or `exec`s without the marker, **and** closes the
-  inherited lease descriptor.
-- **POSIX forced stop (#39).** Each pass sends `SIGKILL` to the worker's group
-  (its unreaped leader pins the group id), then lists the process table and
-  kills every process outside the group that started after the leader and
-  carries the session and worker markers. Such a kill goes only through a pin
-  (pidfd on Linux, start-time check on macOS) after the pinned process shows the
-  listed start time and both markers. A killed process counts as alive until its
-  pin sees it gone. The loop ends after two empty passes in a row (a process
-  inside `exec` reads an empty environment for a moment) or at the 5 s bound,
-  and the `exited` report lists the survivors. Nothing is reaped during a loop.
-  A Linux process whose main thread is a zombie while other threads still run
-  counts as alive: its parent cannot reap it yet.
-- **POSIX `SIGTERM` (#39).** The reaper blocks `SIGTERM` and waits for it on one
+  processes of the current uid. Accepted limit: a descendant hides from the scan
+  only if it overwrites its environment strings in place or `exec`s without the
+  marker, **and** closes the inherited lease descriptor.
+- **POSIX forced stop.** Each pass sends `SIGKILL` to the worker's group (its
+  unreaped leader pins the group id), then lists the process table and kills
+  every process outside the group that started after the leader and carries the
+  session and worker markers. Such a kill goes only through a pin (pidfd on
+  Linux, start-time check on macOS) after the pinned process shows the listed
+  start time and both markers. A killed process counts as alive until its pin
+  sees it gone. The loop ends after two empty passes in a row (a process inside
+  `exec` reads an empty environment for a moment) or at the 5 s bound, and the
+  `exited` report lists the survivors. Nothing is reaped during a loop. A Linux
+  process whose main thread is a zombie while other threads still run counts as
+  alive: its parent cannot reap it yet.
+- **POSIX `SIGTERM`.** The reaper blocks `SIGTERM` and waits for it on one
   thread; it means the host is gone, as stdin EOF does: every tree is forced,
   then `terminated` is written. On Linux the reaper sets `SIGTERM` as its
   parent-death signal and is a child subreaper. Before it writes `terminated`,
   it kills every child that is not a worker leader: orphans it adopted, also
   ones that scrubbed their markers.
-- **Forced-stop bound (#42).** The reaper's per-worker loop keeps its 5 s bound,
-  not the spec's 10 s. The host escalates `terminate` after `graceMs + 5 s`; a
-  10 s loop could never report `incomplete` before that escalation fires. Forced
-  cleanup (below) uses the spec's 10 s.
-- **Session evidence (#42).** A process belongs to a session when its
-  environment holds `RBX_FORGE_SESSION=<id>`, or it holds a descriptor on the
-  session's lease (POSIX: `/proc/<pid>/fd`; macOS: `PROC_PIDLISTFDS` and
+- **Forced-stop bound.** The reaper's per-worker loop has a 5 s bound. The host
+  escalates `terminate` after `graceMs + 5 s`; a 10 s loop could never report
+  `incomplete` before that escalation fires. Forced cleanup (below) has a 10 s
+  bound.
+- **Session evidence.** A process belongs to a session when its environment
+  holds `RBX_FORGE_SESSION=<id>`, or it holds a descriptor on the session's
+  lease (POSIX: `/proc/<pid>/fd`; macOS: `PROC_PIDLISTFDS` and
   `PROC_PIDFDVNODEINFO`, compared by device and inode), or it is the reaper the
   record names (PID and start time). On Windows the evidence is the session's
   named jobs, found through the job serials in the reaper record, and recorded
   leaders that still die after their job closed. The calling process and its
   ancestors never count.
-- **Barriers (#42).** A barrier is clear when the lease can be taken exclusively
-  and a scan finds no process of the session. The probe (`isLockFree`) never
-  creates the lease, so `down`, which probes without the singleton lock, never
-  races the delete of a session directory. The reaper exits with its lease held
-  and its record kept, so no barrier reads clear while it still runs. Startup
-  waits `graceMs + 15 s` per old session, then fails with
-  `previous_generation_alive` and the PIDs. The final barrier waits 5 s, then
-  fails with `cleanup_in_progress`.
-- **Forced cleanup (#42).** `start --force` (and the host's last escalation
-  step) runs it in the addon on a libuv thread. POSIX: each pass pins every
-  member, reads its evidence again through the pin, and kills it, deepest in the
-  tree first; the recorded reaper only when nothing else is alive or
-  unverifiable. The loop ends after two empty passes or at 10 s. Windows:
-  terminate each recorded job, wait until it is empty, then kill the verified
-  reaper. A member whose evidence cannot be read again is reported
-  (`cleanup_unverifiable`) and never killed.
-- **Accepted limit C9.** A POSIX descendant that removes the marker from its
-  environment **and** closes the inherited lease leaves no evidence; no scan
-  finds it. Node closes inherited descriptors in its children, so a Node
-  worker's descendants keep only the marker.
-- **Pipe security.** Keep the spec: explicit current-user DACL, reject remote
-  clients, first-instance flag, token as the first message.
-- **Remote-client test (S4).** An integration test on Windows creates the real
-  forge pipe, then connects through `\\127.0.0.1\pipe\<name>` and
+- **Barriers.** A barrier is clear when the lease can be taken exclusively and a
+  scan finds no process of the session. The probe (`isLockFree`) never creates
+  the lease, so `down`, which probes without the singleton lock, never races the
+  delete of a session directory. The reaper exits with its lease held and its
+  record kept, so no barrier reads clear while it still runs. Startup waits
+  `graceMs + 15 s` per old session, then fails with `previous_generation_alive`
+  and the PIDs. The final barrier waits 5 s, then fails with
+  `cleanup_in_progress`.
+- **Forced cleanup.** `start --force` (and the host's last escalation step) runs
+  it in the addon on a libuv thread. POSIX: each pass pins every member, reads
+  its evidence again through the pin, and kills it, deepest in the tree first;
+  the recorded reaper only when nothing else is alive or unverifiable. The loop
+  ends after two empty passes or at 10 s. Windows: terminate each recorded job,
+  wait until it is empty, then kill the verified reaper. A member whose evidence
+  cannot be read again is reported (`cleanup_unverifiable`) and never killed.
+- **Accepted limit: scrubbed descendants.** A POSIX descendant that removes the
+  marker from its environment **and** closes the inherited lease leaves no
+  evidence; no scan finds it. Node closes inherited descriptors in its children,
+  so a Node worker's descendants keep only the marker.
+- **Pipe security.** Explicit current-user DACL, reject remote clients,
+  first-instance flag, token as the first message.
+- **Remote-client test.** An integration test on Windows creates the real forge
+  pipe, then connects through `\\127.0.0.1\pipe\<name>` and
   `\\localhost\pipe\<name>` and expects `ERROR_ACCESS_DENIED`. The same test
   first proves that the loopback path is live: a control pipe with
   `PIPE_ACCEPT_REMOTE_CLIENTS` must accept a client through the same path. If
   the control fails (for example `LanmanServer` is stopped), the test fails; it
   never passes without proof.
-- **Pipe DACL test (S5).** Read back the security descriptor and assert the
-  owner and exactly one allow ACE, both the current user's SID, compared as
-  SIDs.
+- **Pipe DACL test.** Read back the security descriptor and assert the owner and
+  exactly one allow ACE, both the current user's SID, compared as SIDs.
 
 ## Architecture
 
@@ -233,17 +227,17 @@ both):
 ## Consequences
 
 - On GitHub-hosted Windows runners, a plain `up` from a step shell gets
-  `detach_unsupported`, because the step's job has no breakaway rights. In
-  practice (#43) the `up` e2e tests need no harness: vitest's own libuv job
-  allows breakaway, so the nested breakaway succeeds (the rule above). The
-  `detach_unsupported` e2e test runs the CLI inside a job without `BREAKAWAY_OK`
+  `detach_unsupported`, because the step's job has no breakaway rights. The `up`
+  e2e tests need no harness: vitest's own libuv job allows breakaway, so the
+  nested breakaway succeeds (the rule above). The `detach_unsupported` e2e test
+  runs the CLI inside a job without `BREAKAWAY_OK`
   (`test/fixtures/bin/in-job.ts`).
-- The terminals we use today put no job on their shells, so `up` works there.
-  Hosts that change this get a clear error, not a leaked or killed supervisor.
+- The terminals we use put no job on their shells, so `up` works there. Hosts
+  that change this get a clear error, not a leaked or killed supervisor.
 - The release workflow owns a step that the napi CLI does not have (adding the
   reaper binary). We must keep it when we update `@napi-rs/cli`.
-- The S4 test needs the SMB server service on the Windows machine. It is running
-  on `windows-latest` and by default on Windows 10 and 11.
+- The remote-client test needs the SMB server service on the Windows machine. It
+  is running on `windows-latest` and by default on Windows 10 and 11.
 
 ## Not measured
 
@@ -254,9 +248,6 @@ both):
   that forbids detach.
 - Survival after the Codex and VS Code hosts end: not measured; same
   expectation.
-- A real second local user against the pipe DACL (S3). Since #43 the
-  `other-user` CI job creates one on each OS and runs `pnpm test:other-user`
-  (ADR 0003).
 - A full publish dry run (`napi artifacts` and `napi pre-publish`) and the
-  static MSVC runtime for the Windows binary: to verify in the release ticket.
-- macOS lease detection through `PROC_PIDLISTFDS`: out of scope for this spike.
+  static MSVC runtime for the Windows binary.
+- macOS lease detection through `PROC_PIDLISTFDS`.

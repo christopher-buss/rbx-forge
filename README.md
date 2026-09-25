@@ -7,11 +7,6 @@ and sync Studio edits back. It owns every process it starts: when the session
 stops, however it stops, every process stops with it. Every command has `--json`
 output, so an AI agent can drive it.
 
-**Pre-release.** This is the rewrite for the next major version
-([#28](https://github.com/christopher-buss/rbx-forge/issues/28)). It is not
-released yet. The last release of the old design is `1.0.0-beta.10`, and nothing
-of the old commands, config keys, or task-runner scripts carries over.
-
 ## Requirements
 
 - Node.js 24.12 or later.
@@ -20,7 +15,7 @@ of the old commands, config keys, or task-runner scripts carries over.
   (`@rbx-forge/native-<platform>`); a platform without one gets
   `native_missing`.
 - [Rojo](https://rojo.space) on `PATH` or as a project dependency. Syncback
-  needs the [UpliftGames Rojo fork](https://github.com/UpliftGames/rojo).
+  needs Rojo 7.7 or later.
 - For roblox-ts projects: `roblox-ts` as a project dependency.
 
 ## Quick start
@@ -152,17 +147,18 @@ The intended flow:
 
 Tools are pinned in `mise.toml`: `mise install`, then `pnpm install`.
 
-| Script                        | What it runs                                      |
-| ----------------------------- | ------------------------------------------------- |
-| `pnpm build`                  | tsdown bundle of the CLI into `dist/`             |
-| `pnpm typecheck`              | `tsc --build` with TypeScript 7                   |
-| `pnpm lint` / `pnpm lint:fix` | oxlint, then ESLint (`isentinel-lint`)            |
-| `pnpm knip`                   | unused files, exports, and dependencies           |
-| `pnpm test:unit`              | unit project with 100% coverage                   |
-| `pnpm test:integration`       | real processes and the addon (run `build:native`) |
-| `pnpm test:e2e`               | the built CLI as a subprocess (run `build` first) |
-| `pnpm build:native`           | the Rust crate in `reaper/` through napi-rs       |
-| `pnpm mutation`               | Stryker mutation testing                          |
+| Script                        | What it runs                                        |
+| ----------------------------- | --------------------------------------------------- |
+| `pnpm build`                  | tsdown bundle of the CLI into `dist/`               |
+| `pnpm typecheck`              | `tsc --build` with TypeScript 7                     |
+| `pnpm lint` / `pnpm lint:fix` | oxlint, then ESLint (`isentinel-lint`)              |
+| `pnpm knip`                   | unused files, exports, and dependencies             |
+| `pnpm test:unit`              | unit project with 100% coverage                     |
+| `pnpm test:integration`       | real processes (run `build:native`, `build:reaper`) |
+| `pnpm test:e2e`               | the built CLI as a subprocess (run `build` first)   |
+| `pnpm build:native`           | the Rust crate in `reaper/` through napi-rs         |
+| `pnpm build:reaper`           | the `forge-reaper` binary, next to the addon        |
+| `pnpm mutation`               | Stryker mutation testing                            |
 
 Git hooks: `mise run install-hk`. See [CONTRIBUTING.md](./CONTRIBUTING.md) and
 [AGENTS.md](./AGENTS.md).

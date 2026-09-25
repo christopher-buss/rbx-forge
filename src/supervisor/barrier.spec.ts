@@ -92,7 +92,7 @@ describe(waitForBarrierAsync, () => {
 		expect([native.locks.size, manual.pending()]).toStrictEqual([0, 0]);
 	});
 
-	it("should wait while a process that closed the lease still carries the marker (C8)", async () => {
+	it("should wait while a process that closed the lease still carries the marker", async () => {
 		expect.assertions(2);
 
 		const { manual, native, seams } = makeSeams();
@@ -173,7 +173,7 @@ describe(clearOldSessionsAsync, () => {
 		expect([cleanups, native.cleanups]).toStrictEqual([[], []]);
 	});
 
-	it("should fail with previous_generation_alive and the PIDs when an old session outlives the bound (C4)", async () => {
+	it("should fail with previous_generation_alive and the PIDs when an old session outlives the bound", async () => {
 		expect.assertions(3);
 
 		const { manual, memory, native, seams } = makeSeams(OLD_FILES);
@@ -213,7 +213,7 @@ describe(clearOldSessionsAsync, () => {
 		});
 	});
 
-	it("should force-clean an old session that outlives the bound, then delete it (C4, C7)", async () => {
+	it("should force-clean an old session that outlives the bound, then delete it", async () => {
 		expect.assertions(3);
 
 		const { manual, memory, native, seams } = makeSeams(OLD_FILES);

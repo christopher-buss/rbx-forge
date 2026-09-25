@@ -41,7 +41,7 @@ function describeWorker({ args, role }: WorkerRecord): string {
 }
 
 describe("forge start", () => {
-	it("should run the whole workflow and leave zero survivors once Studio closes the place (W1)", async () => {
+	it("should run the whole workflow and leave zero survivors once Studio closes the place", async () => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync({
@@ -143,7 +143,7 @@ describe("forge start", () => {
 });
 
 describe("forge start --no-open --no-compiler", () => {
-	it("should serve on the fixed port and leave zero survivors when start is hard-killed (L2)", async () => {
+	it("should serve on the fixed port and leave zero survivors when start is hard-killed", async () => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync();
@@ -184,7 +184,7 @@ describe("forge start --no-open --no-compiler", () => {
 	});
 
 	// Windows cannot send SIGTERM to another process: `kill` terminates it.
-	it.skipIf(IS_WINDOWS)("should stop every worker on SIGTERM and exit 0 (L1)", async () => {
+	it.skipIf(IS_WINDOWS)("should stop every worker on SIGTERM and exit 0", async () => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync();

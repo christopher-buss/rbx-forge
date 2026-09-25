@@ -1,7 +1,7 @@
 /**
- * IPC security S3 (spec #28): another local user cannot reach a session's
+ * IPC security: another local user cannot reach a session's
  * control channel. Runs only in CI's `other-user` job, which creates that
- * user (decisions: never on a developer machine). `RBX_FORGE_OTHER_USER`
+ * user (never on a developer machine). `RBX_FORGE_OTHER_USER`
  * names it; on Windows `RBX_FORGE_OTHER_PASSWORD` holds its password.
  *
  * Each test first proves that the other user can reach an endpoint that
@@ -86,7 +86,7 @@ function connectAsOther(socket: string): string {
 
 describe("another local user", () => {
 	it.skipIf(!IS_WINDOWS)(
-		"should be denied the control pipe, though a default pipe lets it in (S3)",
+		"should be denied the control pipe, though a default pipe lets it in",
 		async () => {
 			expect.assertions(2);
 
@@ -114,7 +114,7 @@ describe("another local user", () => {
 	);
 
 	it.skipIf(IS_WINDOWS)(
-		"should be denied the control socket, though an open socket lets it in (S3)",
+		"should be denied the control socket, though an open socket lets it in",
 		async () => {
 			expect.assertions(2);
 
