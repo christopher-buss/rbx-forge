@@ -179,6 +179,17 @@ describe(runStartAsync, () => {
 		).toStrictEqual([]);
 	});
 
+	it("should keep the log directory and what an earlier session logged", async () => {
+		expect.assertions(1);
+
+		const { memory, result } = await stoppedAsync({
+			files: { ".forge/logs/rojo.log": "earlier\n", "tools/rojo": "" },
+		});
+		await result;
+
+		expect(memory.files()[".forge/logs/rojo.log"]).toBe("earlier\n");
+	});
+
 	it("should fail with port_in_use when the fixed port is busy, starting nothing", async () => {
 		expect.assertions(2);
 
@@ -231,13 +242,15 @@ describe(runStartAsync, () => {
 		const reports = [
 			{ id: "rojo", report: { ...EXITED, incomplete: true } },
 			{ id: "hook", report: EXITED },
+			{ id: "compiler", report: { ...EXITED, incomplete: true } },
 		];
 		const { memory, result } = await failedAsync(EXITED, { reports, terminated: true });
 
 		await expect(result).rejects.toMatchObject({
 			code: "cleanup_in_progress",
 			details: { reports },
-			message: "Processes of rojo were still alive when forge stopped waiting.",
+			hint: "Check for them, and stop them by hand.",
+			message: "Processes of rojo, compiler were still alive when forge stopped waiting.",
 		});
 		expect(
 			Object.keys(memory.files()).filter((file) => file.includes("sessions/")),

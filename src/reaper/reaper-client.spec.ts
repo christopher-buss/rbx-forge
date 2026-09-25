@@ -261,10 +261,10 @@ describe("reaper requests", () => {
 });
 
 describe("reaper end", () => {
-	it("should return the reaper's own reports after terminated", async () => {
-		expect.assertions(1);
+	it("should return the reaper's own reports after terminated, without escalating", async () => {
+		expect.assertions(3);
 
-		const { child, reaper, say } = await launchedAsync();
+		const { child, clock, reaper, say } = await launchedAsync();
 		const ending = reaper.terminateAsync(1000);
 		say({ reports: [{ id: "rojo", report: REPORT }], type: "terminated" });
 		await flushAsync();
@@ -274,6 +274,9 @@ describe("reaper end", () => {
 			reports: [{ id: "rojo", report: REPORT }],
 			terminated: true,
 		});
+		expect(child.stdin.writableEnded).toBeFalse();
+		// The wait's timer is gone once the reaper exited.
+		expect(clock.pending()).toBe(0);
 	});
 
 	it("should close stdin after the grace and margin, then kill the reaper after one more margin", async () => {
@@ -309,10 +312,11 @@ describe("reaper end", () => {
 		await flushAsync();
 		child.close(0);
 		await ending;
+		const pending = clock.pending();
 		clock.advance(TERMINATE_MARGIN_MS);
 
 		expect(child.kills).toStrictEqual([]);
-		expect(clock.pending()).toBe(0);
+		expect(pending).toBe(0);
 	});
 
 	it("should kill the tree of every worker a dead reaper left, through a verified pin", async () => {

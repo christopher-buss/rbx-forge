@@ -167,16 +167,18 @@ describe(rojoInvocation, () => {
 	});
 
 	it("should fail with rojo_missing when the command is not installed", () => {
-		expect.assertions(2);
+		expect.assertions(1);
 
 		const { context } = makeProbe(exited(0), {});
 		const error = catchForgeError(() => {
 			rojoInvocation(context, { rojoAlias: "rojo" }, ["serve"]);
 		});
 
-		expect(error.code).toBe("rojo_missing");
-		expect(error.hint).toBe(
-			"Install Rojo (https://rojo.space), for example with rokit or mise, or set rojoAlias to its command.",
-		);
+		expect(error).toMatchObject({
+			code: "rojo_missing",
+			hint: "Install Rojo (https://rojo.space), for example with rokit or mise, or set rojoAlias to its command.",
+			message:
+				'Rojo ("rojo") is not installed: it is not a bin of a project dependency or on PATH.',
+		});
 	});
 });

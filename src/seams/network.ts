@@ -16,7 +16,7 @@ export const nodeNetwork: Network = {
 			server.once("error", () => {
 				resolve(false);
 			});
-			server.listen({ exclusive: true, host: "127.0.0.1", port }, () => {
+			server.listen({ host: "127.0.0.1", port }, () => {
 				server.close(() => {
 					resolve(true);
 				});

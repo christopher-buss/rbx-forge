@@ -76,7 +76,7 @@ export async function runStartAsync(
 		});
 		return startResult(outcome, files, port);
 	} finally {
-		seams.fileSystem.rmSync(files.directory, { force: true, recursive: true });
+		seams.fileSystem.rmSync(files.directory, { recursive: true });
 	}
 }
 

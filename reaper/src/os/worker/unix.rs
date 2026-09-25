@@ -313,8 +313,8 @@ impl Tree {
     /// the id may name another group.
     fn group_exists(&self) -> bool {
         // SAFETY: plain call; signal 0 checks without signalling.
-        unsafe { libc::kill(-self.pid, 0) == 0 }
-        || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+        let found = unsafe { libc::kill(-self.pid, 0) } == 0;
+        found || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
     }
 
     pub fn finish(&self, bound: Duration) -> io::Result<Finished> {

@@ -210,19 +210,29 @@ function tailOf(session: Session): string {
 	return tail === "" ? "" : `\n${tail}`;
 }
 
+/**
+ * Remove and return an entry the reaper named.
+ *
+ * @template T - The entry type.
+ * @param entries - Pending spawns or live workers.
+ * @param id - The worker id from the event.
+ * @returns The entry.
+ */
+function take<T>(entries: Map<string, T>, id: string): T {
+	const entry = entries.get(id);
+	// The reaper answers only spawns it was sent, and reports only workers
+	// it spawned.
+	assert(entry !== undefined);
+	entries.delete(id);
+	return entry;
+}
+
 function settle(session: Session, id: string): PendingSpawn {
-	const pending = session.pending.get(id);
-	// The reaper answers only spawns it was sent.
-	assert(pending !== undefined, `the reaper answered an unknown spawn of ${id}`);
-	session.pending.delete(id);
-	return pending;
+	return take(session.pending, id);
 }
 
 function onExited(session: Session, id: string, report: WorkerReport): void {
-	const worker = session.live.get(id);
-	// The reaper reports only workers it spawned.
-	assert(worker !== undefined, `the reaper reported unknown worker ${id}`);
-	session.live.delete(id);
+	const worker = take(session.live, id);
 	session.reports.push({ id, report });
 	worker.resolve(report);
 }
@@ -296,7 +306,6 @@ function end(session: Session): ReaperEnd {
 		pending.reject(exitedBefore(session, id));
 	}
 
-	session.pending.clear();
 	if (session.terminated !== undefined) {
 		return { reports: session.terminated, terminated: true };
 	}
@@ -312,7 +321,6 @@ function end(session: Session): ReaperEnd {
 		worker.resolve(report);
 	}
 
-	session.live.clear();
 	return { reports: session.reports, terminated: false };
 }
 
@@ -372,11 +380,9 @@ async function settlesWithinAsync(
 	ms: number,
 ): Promise<boolean> {
 	const abort = new AbortController();
-	// Once the abort fires, the timer rejects; nobody waits for it then.
-	const timer = clock
-		.sleep(ms, abort.signal)
-		.then(() => false)
-		.catch(() => false);
+	// Once the abort fires the timer rejects, but the race has settled and
+	// ignores it.
+	const timer = clock.sleep(ms, abort.signal).then(() => false);
 	const hasSettled = await Promise.race([promise.then(() => true), timer]);
 	abort.abort();
 	return hasSettled;
