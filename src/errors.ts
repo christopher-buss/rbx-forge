@@ -19,6 +19,7 @@ export type ForgeErrorCode =
 	| "cleanup_in_progress"
 	| "cleanup_unverifiable"
 	| "command_unavailable"
+	| "compile_failed"
 	| "compiler_missing"
 	| "config_exists"
 	| "config_invalid"
@@ -72,6 +73,7 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		exitCode: EXIT_FAILURE,
 		text: "The command does not apply to this project type.",
 	},
+	compile_failed: { exitCode: EXIT_FAILURE, text: "The compiler reported errors or failed." },
 	compiler_missing: { exitCode: EXIT_FAILURE, text: "The compiler is not installed." },
 	config_exists: {
 		exitCode: EXIT_FAILURE,
