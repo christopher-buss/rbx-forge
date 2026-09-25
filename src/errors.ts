@@ -20,6 +20,7 @@ export type ForgeErrorCode =
 	| "cleanup_unverifiable"
 	| "command_unavailable"
 	| "compile_failed"
+	| "compile_timeout"
 	| "compiler_missing"
 	| "config_exists"
 	| "config_invalid"
@@ -76,6 +77,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		text: "The command does not apply to this project type.",
 	},
 	compile_failed: { exitCode: EXIT_FAILURE, text: "The compiler reported errors or failed." },
+	compile_timeout: {
+		exitCode: EXIT_FAILURE,
+		text: "No fresh build came within the wait bound of `status --wait`.",
+	},
 	compiler_missing: { exitCode: EXIT_FAILURE, text: "The compiler is not installed." },
 	config_exists: {
 		exitCode: EXIT_FAILURE,

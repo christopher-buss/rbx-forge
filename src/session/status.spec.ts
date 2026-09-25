@@ -38,7 +38,7 @@ describe(createStatusStore, () => {
 			pid: 42,
 			running: true,
 			services: {
-				compiler: { status: "starting" },
+				compiler: { building: false, status: "starting" },
 				rojo: { port: 34_872, status: "starting" },
 				studio: { status: "opening" },
 				syncback: { status: "idle" },
@@ -47,7 +47,7 @@ describe(createStatusStore, () => {
 			startedAt: AT,
 		});
 		expect(bare.snapshot().services).toStrictEqual({
-			compiler: { status: "off" },
+			compiler: { building: false, status: "off" },
 			rojo: { port: 34_872, status: "starting" },
 			studio: { status: "off" },
 			syncback: { status: "off" },
@@ -60,14 +60,34 @@ describe(createStatusStore, () => {
 		const { onChange, store } = makeStore();
 		store.service("rojo", "ready");
 		const withRojo = store.snapshot().phase;
-		store.compiled({ diagnostics: [], errors: 0 });
+		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT });
 
 		expect(withRojo).toBe("starting");
 		expect(store.snapshot().services.compiler).toStrictEqual({
-			lastBuild: { at: AT, diagnostics: [], errors: 0 },
+			building: false,
+			lastBuild: { at: AT, diagnostics: [], errors: 0, startedAt: AT },
 			status: "ready",
 		});
 		expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "ready" }));
+	});
+
+	it("should tell while a compile runs, and keep it across its build", () => {
+		expect.assertions(3);
+
+		const { onChange, store } = makeStore();
+		store.building(true);
+		const building = store.snapshot().services.compiler;
+		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT });
+		const isStillBuilding = store.snapshot().services.compiler.building;
+		store.building(false);
+
+		expect(building).toStrictEqual({ building: true, status: "starting" });
+		expect(isStillBuilding).toBeTrue();
+		expect(onChange.mock.lastCall![0].services.compiler).toStrictEqual({
+			building: false,
+			lastBuild: { at: AT, diagnostics: [], errors: 0, startedAt: AT },
+			status: "ready",
+		});
 	});
 
 	it("should be ready with Rojo alone when there is no compiler", () => {
@@ -108,7 +128,7 @@ describe(createStatusStore, () => {
 		expect.assertions(1);
 
 		const { store } = makeStore();
-		store.compiled({ diagnostics: [], errors: 0 });
+		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT });
 
 		expect(store.snapshot().phase).toBe("starting");
 	});
@@ -181,6 +201,7 @@ describe(parseStatus, () => {
 
 		const { store } = makeStore();
 		store.compiled({
+			at: AT,
 			diagnostics: [
 				{
 					code: "TS1",
@@ -192,7 +213,9 @@ describe(parseStatus, () => {
 				},
 			],
 			errors: 1,
+			startedAt: AT,
 		});
+		store.building(true);
 		store.syncbackFinished({
 			durationMs: 1,
 			error: { code: "hook_failed", message: "m" },

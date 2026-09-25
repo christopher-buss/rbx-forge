@@ -7,7 +7,7 @@ import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts"
 import { LOG_NAMES, LOGS_FLAGS, runLogsAsync } from "../commands/logs.ts";
 import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
 import { runStartAsync, START_FLAGS } from "../commands/start.ts";
-import { runStatusAsync } from "../commands/status.ts";
+import { runStatusAsync, STATUS_FLAGS } from "../commands/status.ts";
 import { runStopAsync, STOP_FLAGS } from "../commands/stop.ts";
 import { runSyncAsync } from "../commands/sync.ts";
 import { runSyncbackCommandAsync, SYNCBACK_FLAGS } from "../commands/syncback.ts";
@@ -78,10 +78,10 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 	},
 	{
 		name: "status",
-		flags: [],
+		flags: STATUS_FLAGS,
 		run: runStatusAsync,
 		summary:
-			"Show the running session: each service, the Rojo port, the last compile with its diagnostics, and the last syncback with its hooks.",
+			"Show the running session: each service, the Rojo port, the last compile with its diagnostics, and the last syncback with its hooks. --wait first waits for a build that reflects your last edit.",
 	},
 	{
 		name: "sync",

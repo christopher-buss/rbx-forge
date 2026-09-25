@@ -5,7 +5,6 @@ import { buildAsync } from "../commands/build.ts";
 import { compileAsync } from "../commands/compile.ts";
 import type { CommandContext } from "../commands/context.ts";
 import { openPlaceAsync } from "../commands/open.ts";
-import { createDiagnosticsParser } from "../compiler/diagnostics.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import { logFilePath, openLogFile } from "../output/log-file.ts";
@@ -14,6 +13,7 @@ import type { SpawnedWorker } from "../reaper/reaper-client.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
+import type { BuildWatch } from "./build-watch.ts";
 import type { OutputFollower } from "./output-follower.ts";
 import { followOutput } from "./output-follower.ts";
 import type { SessionPlan } from "./plan.ts";
@@ -36,6 +36,8 @@ export interface ServiceInvocation extends Invocation {
 
 /** Everything one dev session runs with. */
 export interface SessionSetup {
+	/** Reads the compiler's builds, for `status` and `status --wait`. */
+	builds: Pick<BuildWatch, "fail" | "read">;
 	/** The compiler service, when the plan has one. */
 	compiler: undefined | { parsesDiagnostics: boolean; service: ServiceInvocation };
 	config: ResolvedConfig;
@@ -139,19 +141,17 @@ function noSaveWatch(): void {
 }
 
 /**
- * Read the watch-mode compiler's output as diagnostics, and report each
- * compile its summary line ends.
+ * Read the watch-mode compiler's output as builds, and report each one.
  *
- * @param session - The session's reporter.
+ * @param session - The session's builds and reporter.
  * @returns Reads one line.
  */
 function compileReader(session: SessionSetup): (line: string) => void {
-	const parser = createDiagnosticsParser();
 	return (line) => {
-		const report = parser.read(line);
-		if (report !== undefined) {
-			session.status.compiled(report);
-			session.context.reporter.emit({ ...report, type: "compiled" });
+		const build = session.builds.read(line);
+		if (build !== undefined) {
+			const { diagnostics, errors } = build;
+			session.context.reporter.emit({ diagnostics, errors, type: "compiled" });
 		}
 	};
 }
@@ -197,9 +197,10 @@ async function followUntilExitAsync(
 }
 
 /**
- * Read a service's output until its tree is gone, then mark it stopped.
+ * Read a service's output until its tree is gone, then mark it stopped. A
+ * stopped compiler fails every wait for a build.
  *
- * @param session - Its status.
+ * @param session - Its status and builds.
  * @param id - Which service: its entry in the status.
  * @param watch - The clock, the service's worker, and its output reader.
  */
@@ -210,6 +211,14 @@ async function followServiceAsync(
 ): Promise<void> {
 	await followUntilExitAsync(clock, worker, follower);
 	session.status.service(id, "stopped");
+	if (id === "compiler") {
+		session.builds.fail(
+			new ForgeError("service_failed", "The compiler stopped, so no build comes.", {
+				details: { reason: "service_failed:compiler" },
+				hint: `Its output is in ${logFilePath(session.context.cwd, "compiler")}.`,
+			}),
+		);
+	}
 }
 
 /**

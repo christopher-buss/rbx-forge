@@ -1554,7 +1554,7 @@ describe("forge up control channel", () => {
 			pid: 4242,
 			running: true,
 			services: {
-				compiler: { status: "off" },
+				compiler: { building: false, status: "off" },
 				rojo: { port: 4000, status: "ready" },
 				studio: { status: "off" },
 				syncback: { status: "off" },
@@ -1647,14 +1647,33 @@ describe("forge up control channel", () => {
 			phase: "ready",
 			services: {
 				compiler: {
+					building: false,
 					lastBuild: {
 						at: "2026-01-01T00:00:00.250Z",
 						diagnostics: [{ code: "TS2322", file: "src/a.ts", line: 3 }],
 						errors: 1,
+						startedAt: "2026-01-01T00:00:00.250Z",
 					},
 					status: "ready",
 				},
 			},
+		});
+	});
+
+	it("should show in state.json while a compile runs", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "compiler.log"),
+			"[10:00:00] Starting compilation in watch mode...\n",
+		);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		expect(stateOf(run)).toMatchObject({
+			phase: "starting",
+			services: { compiler: { building: true, status: "starting" } },
 		});
 	});
 

@@ -9,6 +9,7 @@ import type { ReaperEnd } from "../reaper/reaper-client.ts";
 import { rojoInvocation, rojoServeArgs } from "../rojo/rojo.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import type { BuildWatch } from "../session/build-watch.ts";
 import type { Pause } from "../session/pause.ts";
 import type { SessionPlan } from "../session/plan.ts";
 import { planSession } from "../session/plan.ts";
@@ -26,6 +27,7 @@ import type { SessionRequest } from "./channel.ts";
 import { endedResult } from "./end-result.ts";
 import { endpointFor } from "./endpoint.ts";
 import { acquireSingleton } from "./locks.ts";
+import type { ControlSetup } from "./session-control.ts";
 import { openSessionAsync } from "./session-control.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "./session-files.ts";
 import { forgeFiles, removeSession } from "./session-files.ts";
@@ -58,6 +60,8 @@ export interface SupervisorOptions {
 
 /** One session's config, files, and resolved services. */
 interface OwnSession {
+	/** The compiler's builds, for `status --wait`. */
+	builds: BuildWatch;
 	config: ResolvedConfig;
 	files: SessionFiles;
 	forge: ForgeFiles;
@@ -82,8 +86,8 @@ interface OwnSession {
  *    bound is cleaned up by force first.
  * 4. Check the fixed Rojo port.
  * 5. Create the session directory: write-once identity record, token,
- *    `current`. Open the control endpoint (`status`, `sync`, `shutdown`), and
- *    keep `state.json` up to date.
+ *    `current`. Open the control endpoint (`status`, `freshStatus`, `sync`,
+ *    `shutdown`), and keep `state.json` up to date.
  * 6. Run the session (`runSessionAsync`): launch the reaper, admit it only
  *    while no stop request came, and run the body.
  * 7. Final barrier: no process of the session is left once the reaper and
@@ -243,7 +247,7 @@ async function clearOldAsync(
 async function runSessionOnceAsync(
 	seams: CommandContext["seams"],
 	{ pause, stop }: SupervisorOptions,
-	{ config, files, forge, services, status, sync }: OwnSession,
+	{ builds, config, files, forge, services, status, sync }: OwnSession,
 ): Promise<SessionOutcome> {
 	try {
 		return await runSessionAsync(
@@ -256,7 +260,7 @@ async function runSessionOnceAsync(
 				recordPath: files.record,
 				sessionId: files.sessionId,
 			},
-			createSessionBody({ ...services, directory: files.directory, status, sync }),
+			createSessionBody({ ...services, builds, directory: files.directory, status, sync }),
 		);
 	} catch (err) {
 		removeSession(seams.fileSystem, forge, files.sessionId);
@@ -281,9 +285,10 @@ async function runOpenSessionAsync(
 	session: OwnSession,
 	cleanups: Array<ForcedCleanup>,
 ): Promise<CommandResult> {
-	const { config, files, forge, status } = session;
+	const { builds, config, files, forge, status } = session;
 	const { end, reason } = await runSessionOnceAsync(seams, options, session);
 	status.phase("stopping");
+	builds.close();
 	const { escalation } = end;
 	if (escalation !== undefined) {
 		reporter.emit({ message: ESCALATIONS[escalation], type: "warning" });
@@ -297,6 +302,24 @@ async function runOpenSessionAsync(
 		...(cleanups.length > 0 ? { cleanups } : {}),
 		...(escalation === undefined ? {} : { escalation }),
 	});
+}
+
+/**
+ * What the control channel needs to know of the session's plan.
+ *
+ * @param services - The plan and the resolved compiler.
+ * @returns What the session runs, and whether it reads builds.
+ */
+function controlPlan({
+	compiler,
+	plan,
+}: Pick<OwnSession["services"], "compiler" | "plan">): ControlSetup["plan"] {
+	return {
+		builds: compiler?.parsesDiagnostics === true,
+		compiler: compiler !== undefined,
+		open: plan.open,
+		syncback: plan.syncback,
+	};
 }
 
 /**
@@ -330,18 +353,18 @@ async function runLockedAsync(
 	}
 
 	const sync = createSessionSync();
-	const { files, status, ...control } = await openSessionAsync(seams, {
+	const { builds, files, status, ...control } = await openSessionAsync(seams, {
 		forge,
 		identity: identityOf(context, config, options.version),
 		onReady: options.onReady,
 		pause: async () => options.pause("control", options.stop.signal),
-		plan: { ...services.plan, compiler: services.compiler !== undefined },
+		plan: controlPlan(services),
 		port: config.rojoPort,
 		stop: options.stop,
 		sync,
 	});
 	try {
-		const session = { config, files, forge, services, status, sync };
+		const session = { builds, config, files, forge, services, status, sync };
 		return await runOpenSessionAsync(context, options, session, cleanups);
 	} finally {
 		// A body that never ran syncback leaves no `forge sync` waiting.

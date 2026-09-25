@@ -18,7 +18,7 @@ export const IPC_WAIT_MS = 2000;
 export const MAX_LINE_BYTES = 1_048_576;
 
 /** What a client can ask a session. */
-export type IpcMethod = "shutdown" | "status" | "sync";
+export type IpcMethod = "freshStatus" | "shutdown" | "status" | "sync";
 
 /** The first line: who is asking. */
 export interface IpcHello {
@@ -54,7 +54,7 @@ const helloLine = jsonLine.pipe(type({ protocol: "number", token: "string", type
 
 const requestLine = jsonLine.pipe(
 	type({
-		"method": "'shutdown' | 'status' | 'sync'",
+		"method": "'freshStatus' | 'shutdown' | 'status' | 'sync'",
 		"params?": RECORD,
 		"type": "'request'",
 	}),

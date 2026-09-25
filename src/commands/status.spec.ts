@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -7,8 +7,14 @@ import {
 	createMemoryFileSystem,
 	createTestSeams,
 } from "../../test/helpers/seams.ts";
-import type { CommandContext } from "./context.ts";
+import { ForgeError } from "../errors.ts";
+import type { IpcHandler } from "../ipc/server.ts";
+import type { CommandContext, CommandInput } from "./context.ts";
 import { runStatusAsync } from "./status.ts";
+
+function withFlags(flags: CommandInput["flags"]): CommandInput {
+	return { config: {}, flags };
+}
 
 function makeContext(): {
 	context: CommandContext;
@@ -34,7 +40,8 @@ describe(runStatusAsync, () => {
 		const status = makeStatus({
 			services: {
 				compiler: {
-					lastBuild: { at: "t", diagnostics: [], errors: 2 },
+					building: false,
+					lastBuild: { at: "t", diagnostics: [], errors: 2, startedAt: "t" },
 					status: "ready",
 				},
 				rojo: { port: 4000, status: "ready" },
@@ -70,7 +77,8 @@ describe(runStatusAsync, () => {
 				phase: "starting",
 				services: {
 					compiler: {
-						lastBuild: { at: "t", diagnostics: [], errors: 1 },
+						building: false,
+						lastBuild: { at: "t", diagnostics: [], errors: 1, startedAt: "t" },
 						status: "ready",
 					},
 					rojo: { port: 1, status: "starting" },
@@ -127,5 +135,83 @@ describe(runStatusAsync, () => {
 		await session.stop();
 
 		await expect(runStatusAsync(context)).rejects.toMatchObject({ code: "not_running" });
+	});
+
+	it("should ask the session for a fresh build with --wait, for 300 s by default", async () => {
+		expect.assertions(2);
+
+		const { context, ipc, memory } = makeContext();
+		const status = makeStatus();
+		const session = await serveFakeSessionAsync(memory, ipc, status);
+		const asked = vi.fn<IpcHandler>(() => ({ ...status }));
+		session.freshStatus = asked;
+
+		await expect(runStatusAsync(context, withFlags({ wait: true }))).resolves.toMatchObject({
+			data: status,
+		});
+		expect(asked).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 300_000 });
+	});
+
+	it("should pass --timeout on to the wait", async () => {
+		expect.assertions(1);
+
+		const { context, ipc, memory } = makeContext();
+		const session = await serveFakeSessionAsync(memory, ipc);
+		const asked = vi.fn<IpcHandler>(() => ({ ...session.status }));
+		session.freshStatus = asked;
+		await runStatusAsync(context, withFlags({ timeout: "2000", wait: true }));
+
+		expect(asked).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 2000 });
+	});
+
+	it("should fail with the session's compile_timeout", async () => {
+		expect.assertions(1);
+
+		const { context, ipc, memory } = makeContext();
+		const session = await serveFakeSessionAsync(memory, ipc);
+		session.freshStatus = () => {
+			throw new ForgeError("compile_timeout", "No fresh build within 2000 ms.");
+		};
+
+		await expect(runStatusAsync(context, withFlags({ wait: true }))).rejects.toMatchObject({
+			code: "compile_timeout",
+		});
+	});
+
+	it.for([
+		[{ timeout: "2000" }, "--timeout needs --wait."],
+		[{ timeout: "soon", wait: true }, '--timeout takes a number of milliseconds, not "soon".'],
+		[{ timeout: "-1", wait: true }, '--timeout takes a number of milliseconds, not "-1".'],
+		[{ timeout: " ", wait: true }, '--timeout takes a number of milliseconds, not " ".'],
+		[{ timeout: true, wait: true }, '--timeout takes a number of milliseconds, not "true".'],
+	] as const)("should fail with usage for the flags %j", async ([flags, message]) => {
+		expect.assertions(1);
+
+		const { context } = makeContext();
+
+		await expect(runStatusAsync(context, withFlags(flags))).rejects.toMatchObject({
+			code: "usage",
+			message,
+		});
+	});
+
+	it("should show a compile that runs", async () => {
+		expect.assertions(1);
+
+		const { context, ipc, memory } = makeContext();
+		await serveFakeSessionAsync(
+			memory,
+			ipc,
+			makeStatus({
+				services: {
+					...makeStatus().services,
+					compiler: { building: true, status: "starting" },
+				},
+			}),
+		);
+
+		const { summary } = await runStatusAsync(context);
+
+		expect(summary).toContain("  compiler: starting, building\n");
 	});
 });

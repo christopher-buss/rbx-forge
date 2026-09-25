@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ForgeError } from "../errors.ts";
+import type { BuildWatch } from "../session/build-watch.ts";
+import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { SessionStatus } from "../session/status.ts";
 import { createStatusStore } from "../session/status.ts";
@@ -22,8 +25,14 @@ function makeTarget() {
 		vi.fn<(next: SessionStatus) => void>(),
 	);
 	const runAsync = vi.fn<SessionSync["runAsync"]>().mockResolvedValue({ input: "game.rbxl" });
+	const builds = {
+		tick: vi.fn<BuildWatch["tick"]>(),
+		waitAsync: vi.fn<BuildWatch["waitAsync"]>().mockResolvedValue(),
+	};
 	return {
+		builds,
 		handlers: controlHandlers({
+			builds,
 			sessionId: "s1",
 			status,
 			stop: { request },
@@ -36,12 +45,45 @@ function makeTarget() {
 }
 
 describe(controlHandlers, () => {
-	it("should answer status with the status now", () => {
-		expect.assertions(1);
+	it("should answer status with the status now, once merged compiles settled", () => {
+		expect.assertions(2);
 
-		const { handlers, status } = makeTarget();
+		const { builds, handlers, status } = makeTarget();
 
 		expect(handlers.status!({})).toStrictEqual(status.snapshot());
+		expect(builds.tick).toHaveBeenCalledOnce();
+	});
+
+	it("should answer freshStatus with the status once the build is fresh", async () => {
+		expect.assertions(2);
+
+		const { builds, handlers, status } = makeTarget();
+
+		await expect(handlers.freshStatus!({ timeoutMs: 5000 })).resolves.toStrictEqual(
+			status.snapshot(),
+		);
+		expect(builds.waitAsync).toHaveBeenCalledExactlyOnceWith(5000);
+	});
+
+	it.for([[{}], [{ timeoutMs: "5" }], [{ timeoutMs: -1 }]] as const)(
+		"should wait the default time for freshStatus params %j",
+		async ([parameters]) => {
+			expect.assertions(1);
+
+			const { builds, handlers } = makeTarget();
+			await handlers.freshStatus!(parameters);
+
+			expect(builds.waitAsync).toHaveBeenCalledExactlyOnceWith(FRESH_BUILD_TIMEOUT_MS);
+		},
+	);
+
+	it("should fail freshStatus as the wait fails", async () => {
+		expect.assertions(1);
+
+		const { builds, handlers } = makeTarget();
+		builds.waitAsync.mockRejectedValue(new ForgeError("compile_timeout", "late"));
+
+		await expect(handlers.freshStatus!({})).rejects.toMatchObject({ code: "compile_timeout" });
 	});
 
 	it("should stop the session on shutdown, for its own id or none", () => {
