@@ -1,13 +1,43 @@
-# rbx-forge
+<h1 align="center">rbx-forge</h1>
 
-> A roblox-ts and Luau CLI tool for fully-managed Rojo projects
+<div align="center">
 
-forge runs your Roblox dev loop: compile, build, open Studio, serve Rojo, watch,
-and sync Studio edits back. It owns every process it starts: when the session
-stops, however it stops, every process stops with it. Every command has `--json`
-output, so an AI agent can drive it.
+[![npm](https://raw.githubusercontent.com/maneetoo/Roblox-OSS-Badges/5959dc76990e4dc70d697f8b39db48da5a282837/Badges/Community/Package/link-npm.svg)](https://npmx.dev/package/rbx-forge)
+[![Sponsor me](https://raw.githubusercontent.com/maneetoo/Roblox-OSS-Badges/b880ff3b8ca27e95914b12adcb784e29ef5c7222/Badges/Roblox-Styled/Original/sponsor-me-var2.svg)](https://github.com/sponsors/christopher-buss)
 
-## Requirements
+[![CI](https://github.com/christopher-buss/rbx-forge/actions/workflows/ci.yaml/badge.svg)](https://github.com/christopher-buss/rbx-forge/actions/workflows/ci.yaml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
+</div>
+
+forge runs the dev loop of a roblox-ts or Luau Rojo project: compile, build,
+open Studio, serve Rojo, watch, and sync Studio edits back. It owns every
+process it starts, so when the session stops, however it stops, every process
+stops with it. Every command has `--json` output, so an AI agent can drive it.
+
+## What forge does
+
+One command, `forge start`, compiles the project, builds the place, opens it in
+Studio, serves Rojo, and starts the watch-mode compiler. With syncback on, each
+save in Studio syncs the place back into the project and runs your hooks, such
+as `eslint --fix`.
+
+A session runs in its own supervisor process. A native reaper process starts
+every worker (Rojo, the compiler, syncback, hooks) and owns it at OS level.
+Ctrl+C, a closed terminal, or a killed `forge start` stops every worker.
+
+`forge down` closes the session's Studio too. forge ends Studio when a "Save
+changes?" dialog blocks it, and moves the auto-recovery files out of Studio's
+AutoSaves folder, so the next launch does not offer to recover a place forge
+builds anyway. forge closes only a Studio that it can verify, never another one.
+See [docs/studio.md](./docs/studio.md).
+
+forge is a fork of [rbxts-build](https://github.com/roblox-ts/rbxts-build) by
+osyrisrblx, rewritten.
+
+## Install
+
+Requirements:
 
 - Node.js 24.12 or later.
 - Windows 10 1607 / Server 2016 or later, Linux (glibc or musl), or macOS; x64
@@ -17,8 +47,6 @@ output, so an AI agent can drive it.
 - [Rojo](https://rojo.space) on `PATH` or as a project dependency. Syncback
   needs Rojo 7.7 or later.
 - For roblox-ts projects: `roblox-ts` as a project dependency.
-
-## Quick start
 
 ```bash
 npm install --save-dev rbx-forge
@@ -55,89 +83,16 @@ Session commands:
 - `--force`: when a crashed earlier session still has processes after the wait,
   kill them, each verified as that session's own.
 - `--studio-path <path>`: the Roblox Studio executable to start (see
-  [Opening Studio](#opening-studio)).
+  [Opening Studio](./docs/studio.md#opening-studio)).
 
 `down` takes `--timeout <seconds>` (default 15), `--force` (kill a supervisor
 that does not stop, and what is left of its session, each verified),
 `--keep-studio` (leave the session's Studio open), and `--recovery <mode>` (see
-[Auto-recovery](#auto-recovery)).
+[Auto-recovery](./docs/studio.md#auto-recovery)).
 
-### Opening Studio
-
-`open`, `start`, and `up` start the Studio executable directly, with the place
-as its only argument, as a double-click on the place does. Studio runs outside
-every process group and job of forge, so it outlives forge. forge pins the
-process at the start (PID and start time) and the session records both. forge
-finds the executable in this order:
-
-1. `--studio-path <path>` (`open`, `start`, `up`).
-2. The `RBX_FORGE_STUDIO_PATH` environment variable (empty means unset).
-3. Windows: the command that opens `roblox-studio:` links
-   (`HKCU\Software\Classes\roblox-studio\shell\open\command`), then the command
-   that opens `.rbxl` files (`HKCU\Software\Classes\Roblox.Place`).
-4. macOS: `/Applications/RobloxStudio.app/Contents/MacOS/RobloxStudio`.
-
-A path from 1 or 2 that is not a file fails with `studio_launch_failed`. When
-forge finds no executable, or the terminal's job forbids breakaway (Windows), it
-opens the place through the platform launcher (`start`, `open`, `xdg-open`), and
-the session knows Studio only by the place's lock file.
-
-### Closing Studio
-
-`down` and `stop` close Studio the same way. forge sends a close request, as
-when you close its window (`WM_CLOSE` to its main windows; `SIGTERM` on macOS
-and Linux), then looks at Studio every 50 ms:
-
-- When the place's lock file goes, Studio has closed the place: forge ends the
-  process at once, instead of waiting for Studio's slow exit.
-- When a modal dialog blocks Studio (Windows), forge ends it at once, without a
-  save. A place fresh from `rojo build` always counts as changed in Studio, so
-  "Save changes?" is the common case. Studio also shows a modal dialog while it
-  opens a place.
-- When Studio is still open after 15 seconds, forge ends it without a save.
-
-After it ends Studio, forge deletes the place's lock file, which an ended Studio
-cannot delete. Which Studio: the one the session started, when it still runs
-with its recorded start time; the lock file, when there is one, must name the
-same process. Else the Studio the place's lock file names, after forge verifies
-that the process is that Studio (this computer, the Studio executable, started
-before the lock file). It never touches another Studio.
-
-`stop` asks the running session for its Studio, and falls back to the lock file
-of the configured place. When the session reports Studio as `opening` (started,
-the place not open yet), `stop` and `down` wait up to 60 seconds for it to be
-`open`, then close it. When `down` closes Studio, the session ends by itself
-once a syncback run for a last save is done. `--force` does not change how
-Studio closes.
-
-### Auto-recovery
-
-Studio deletes its auto-recovery files only when it closes by itself. After
-forge ends a Studio it verified (a dialog, the time limit, or the kill after the
-lock file went), it handles that Studio's auto-recovery files, so the next
-launch does not offer to recover a place forge builds anyway:
-
-- `move` (the default): move them to `.forge/recovery/<time>_<file>`, and keep
-  the 5 newest there. They are normal place files: open one in Studio to get
-  back changes made in Studio.
-- `delete`: delete them.
-- `keep`: leave them.
-
-Set the mode with `studio.autoRecovery` in the config, or `--recovery <mode>` on
-`stop` and `down`. forge acts only when it ended a Studio, and only on
-`<place>_AutoRecovery_<n>.rbxl` files (any case) for the place, written since
-that Studio started (2 seconds of slack). It searches:
-
-- Windows: `%LOCALAPPDATA%\Roblox\RobloxStudio\AutoSaves` and
-  `%USERPROFILE%\Documents\ROBLOX\AutoSaves`.
-- macOS: `~/Library/Application Support/Roblox/RobloxStudio/AutoSaves` and
-  `~/Documents/ROBLOX/AutoSaves`.
-
-forge tries a busy file again for 5 seconds (Windows can hold the file of a
-killed process), and copies and deletes a file on another drive. A failure is a
-warning in `recovery.warnings`; it never fails `stop` or `down`. Limit: two
-projects with the same place file name, open at the same time, can match each
-other's file. `move` keeps the file, so nothing is lost.
+One session runs per project (per worktree and build output). A second `start`
+fails with `session_running`; a second `up` joins the running session. A new
+session waits until every process of a crashed old one is gone.
 
 One-shot commands:
 
@@ -154,15 +109,11 @@ One-shot commands:
 
 `forge --help` and `forge <command> --help` show every flag.
 
-One session runs per project (per worktree and build output). A second `start`
-fails with `session_running`; a second `up` joins the running session. A new
-session waits until every process of a crashed old one is gone.
-
 ## Configuration
 
-See [docs/config.md](./docs/config.md) for every option, and for hooks: shell
+forge reads `rbx-forge.config.ts` from the project root. Hooks are shell
 commands that run before or after `build`, `compile`, `open`, `syncback`, and
-`typegen`, declared in the config file.
+`typegen`:
 
 ```ts
 import { defineConfig } from "rbx-forge";
@@ -177,85 +128,31 @@ export default defineConfig({
 });
 ```
 
-## Output and exit codes
-
-With `--json`, or when stdout is not a terminal, forge writes NDJSON: one event
-per line (`step`, `info`, `warning`, `compiled`, `log`), then one final line:
-
-```text
-{"type":"result","command":"status","ok":true,"data":{...}}
-{"type":"result","command":"down","ok":false,"exitCode":6,"error":{"code":"cleanup_in_progress","message":"...","hint":"...","details":{...}}}
-```
-
-A run that cannot prompt (not a terminal, `--json`, or `CI`) never prompts: it
-takes a safe default or fails with `needs_confirmation`.
-
-| Exit | Meaning                                                 | Error codes                                                                   |
-| ---- | ------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| 0    | success                                                 |                                                                               |
-| 1    | failure (config, tool, hook, or declined prompt)        | every code not listed below                                                   |
-| 2    | unreadable command line                                 | `usage`                                                                       |
-| 3    | no session is running                                   | `not_running`, `session_replaced`                                             |
-| 4    | needs confirmation, and the run cannot prompt           | `needs_confirmation`                                                          |
-| 5    | cannot verify a process identity; nothing was killed    | `identity_mismatch`, `cleanup_unverifiable`                                   |
-| 6    | cleanup in progress, or the supervisor does not respond | `cleanup_in_progress`, `previous_generation_alive`, `supervisor_unresponsive` |
-| 130  | interrupted                                             | `interrupted`                                                                 |
-
-Error codes are stable: a code is never renamed or reused. The full list is in
-[`src/errors.ts`](./src/errors.ts).
+See [docs/config.md](./docs/config.md) for every option.
 
 ## For agents
 
-The intended flow:
+With `--json`, or when stdout is not a terminal, forge writes NDJSON and ends
+with one `result` line. A run that cannot prompt never prompts. Error codes are
+stable, and each maps to one exit code. The loop:
 
-1. `forge up --json`: start the session, or find the running one
-   (`data.started`). Returns when Rojo listens and the first compile is done.
+1. `forge up --json` starts the session, or finds the running one.
 2. Edit code.
-3. `forge status --json`: `data.services.compiler.lastBuild` has `errors` and
-   `diagnostics` (`file`, `line`, `column`, `code`, `message`, `severity`).
-   `data.services.studio` has `status` (`opening`, `open`, `closed`, `off`),
-   `place`, and, for a Studio forge started, `pid` and `startTime`.
+3. `forge status --json` gives the compile errors with file, line, and column.
 4. Play and read the console with the Roblox Studio MCP.
-5. `forge sync --json`: pull Studio edits into the project, with the syncback
-   hooks. It waits for a running save-triggered run, then runs once more.
-   Failures keep their code, with hook results in `error.details.hooks`.
-6. `forge down --json`: `data.stoppedBy` is `shutdown`, `forced_shutdown`,
-   `killed`, `gone`, or `studio_closed` (the session ended by itself once `down`
-   closed its Studio). `data.studio.status` is `closed`, `kept`
-   (`--keep-studio`), `none` (no Studio open), `unknown` (the supervisor did not
-   answer, so forge touched no Studio), or `failed` (with the error's `code` and
-   `message`: Studio may still be open; the session still stops). A `closed`
-   Studio has `end`: `exited`, `lock_released` (closed the place, then forge
-   ended the process), `dialog`, `timeout`, or `no_window`; `forced: true` when
-   forge ended it without a save; and `recovery` (`null`, or `mode`, `moved`
-   (`from`, `to`), `deleted`, `warnings`). `forge stop` reports the same fields
-   in `data`, with `stopped`. Exit 6 means processes still live or the
-   supervisor does not answer: retry with `--force`. Exit 5 means forge could
-   not verify a process, so it killed nothing.
+5. `forge sync --json` pulls Studio edits into the project.
+6. `forge down --json` closes Studio and stops the session.
 
-`forge logs <name> --json` gives one `log` event per line.
+See [docs/json-output.md](./docs/json-output.md) for the result fields and exit
+codes.
 
-## Development
+## Contributing
 
-Tools are pinned in `mise.toml`: `mise install`, then `pnpm install`.
-
-| Script                        | What it runs                                    |
-| ----------------------------- | ----------------------------------------------- |
-| `pnpm build`                  | tsdown bundle of the CLI into `dist/`           |
-| `pnpm build:all`              | `build:native`, `build:reaper`, then `build`    |
-| `pnpm typecheck`              | `tsc --build` with TypeScript 7                 |
-| `pnpm lint` / `pnpm lint:fix` | oxlint, then ESLint (`isentinel-lint`)          |
-| `pnpm knip`                   | unused files, exports, and dependencies         |
-| `pnpm test:unit`              | unit project with 100% coverage                 |
-| `pnpm test:integration`       | real processes (run `build:all` first)          |
-| `pnpm test:e2e`               | the built CLI as a subprocess (run `build:all`) |
-| `pnpm build:native`           | the Rust crate in `reaper/` through napi-rs     |
-| `pnpm build:reaper`           | the `forge-reaper` binary, next to the addon    |
-| `pnpm mutation`               | Stryker mutation testing                        |
-
-Git hooks: `hk install --global --mise`. See
-[CONTRIBUTING.md](./CONTRIBUTING.md) and [AGENTS.md](./AGENTS.md).
+Tools are pinned in `mise.toml`: `mise install`, then `pnpm install`. Read
+[CONTRIBUTING.md](./CONTRIBUTING.md) for the scripts and checks, and
+[AGENTS.md](./AGENTS.md) for the code layout and test rules.
 
 ## License
 
-[MIT](./LICENSE)
+[MIT](./LICENSE) (c) Christopher Buss. Portions (c) osyrisrblx, from
+rbxts-build.

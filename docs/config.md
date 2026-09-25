@@ -17,9 +17,10 @@ export default defineConfig({
 
 ## Rules
 
-- **Required file.** With no config file, every command that reads it fails with
-  `config_not_found`. Only `init`, `status`, `sync`, and `logs` do not read it;
-  `down` reads it for `studio.autoRecovery` only, and runs without it.
+- **Required file.** A command that reads the config fails with
+  `config_not_found` when the file is missing. `init`, `status`, `sync`, and
+  `logs` do not read it. `down` reads only `studio.autoRecovery`, and runs
+  without the file.
 - **Strict.** An unknown key is an error (`config_invalid`).
 - **Precedence.** Flags, then the config file, then the defaults. Objects merge
   key by key. Every other value, arrays included, replaces the value below it.
@@ -52,8 +53,8 @@ defineConfig({
 - Flag: `forge build --output <path>`
 
 The place or model file that `forge build` and the session build write. `open`
-and `syncback` fall back to it. It is also part of the session endpoint key: two
-build outputs of one tree are two sessions.
+and `syncback` fall back to it. forge runs one session per project tree and
+build output, so two build outputs of one tree are two sessions.
 
 ```ts
 defineConfig({
@@ -114,9 +115,10 @@ defineConfig({
 - Default: `3000`
 
 How long workers get to stop after a graceful stop request (Ctrl+Break on
-Windows, `SIGTERM` elsewhere), before forge kills their process trees. It also
-sets the startup wait for an old session: `gracefulTimeoutMs + 15 s`.
-`forge down`'s forced shutdown ends this grace at once.
+Windows, `SIGTERM` elsewhere), before forge kills their process trees. A new
+session waits up to `gracefulTimeoutMs` + 15 s for the processes of an old
+session to go. When `forge down`'s stop request times out, its second, forced
+request ends this grace at once.
 
 ```ts
 defineConfig({
@@ -130,7 +132,8 @@ defineConfig({
   `{ build?, compile?, open?, syncback?, typegen?: { pre?: string[], post?: string[] } }`
 - Default: `{}`
 
-Shell commands to run around a command's step. See [Hooks](#hooks).
+Shell commands to run around a command's step. See
+[How hooks run](#how-hooks-run).
 
 ```ts
 defineConfig({
@@ -244,7 +247,8 @@ defineConfig({
 ```
 
 The Studio executable is not a config option: its path differs per computer. Use
-`--studio-path` or `RBX_FORGE_STUDIO_PATH` (see the README, "Opening Studio").
+`--studio-path` or `RBX_FORGE_STUDIO_PATH` (see
+[Opening Studio](./studio.md#opening-studio)).
 
 ### `studio`
 
@@ -258,9 +262,9 @@ Options for the Roblox Studio that `stop` and `down` close.
 
 What forge does with the auto-recovery files of a Studio it ended: `move` them
 to `.forge/recovery/` (the 5 newest stay), `delete` them, or `keep` them in
-Studio's AutoSaves folder, where the next launch offers to recover them. See the
-README, "Auto-recovery". `down` also runs when the config file is missing or
-invalid: then only `--recovery` and the default count.
+Studio's AutoSaves folder, where the next launch offers to recover them. See
+[Auto-recovery](./studio.md#auto-recovery). `down` also runs when the config
+file is missing or invalid: then only `--recovery` and the default count.
 
 ```ts
 defineConfig({
@@ -296,8 +300,8 @@ The Rojo project syncback writes.
 - Flag: `forge start --syncback` / `forge up --syncback`
 
 Run syncback and its hooks each time the place file is saved during a session.
-Saves during a run fold into one more run. `forge sync` works in every session,
-with or without this option.
+Saves during a run start one more run after it. `forge sync` works in every
+session, with or without this option.
 
 ```ts
 defineConfig({
@@ -354,16 +358,11 @@ defineConfig({
 });
 ```
 
-## Hooks
+## How hooks run
 
-```ts
-defineConfig({
-	hooks: {
-		syncback: { post: ["pnpm eslint --fix src"] },
-	},
-	projectType: "rbxts",
-});
-```
+A hook is a shell command that forge runs before (`pre`) or after (`post`) a
+command's step. Declare hooks in the config file with the [`hooks`](#hooks)
+option.
 
 - Hook keys: `build`, `compile`, `open`, `syncback`, `typegen`. `start` and `up`
   have none; their steps run the hooks of the commands above.
