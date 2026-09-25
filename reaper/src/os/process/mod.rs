@@ -201,6 +201,50 @@ impl PinnedProcess {
             .environment()?
             .map(|block| block_contains(&block, pairs)))
     }
+
+    /// Whether the pinned process has a descriptor open on `file`.
+    ///
+    /// Returns `Ok(None)` when the process has exited.
+    ///
+    /// # Errors
+    ///
+    /// When the OS refuses the read, for example for a process of another
+    /// user.
+    #[cfg(unix)]
+    pub fn holds_file(&self, file: FileId) -> io::Result<Option<bool>> {
+        self.pin.holds_file(file)
+    }
+}
+
+/// A file by device and inode: what an open descriptor names, whatever path
+/// reached it.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileId {
+    pub device: u64,
+    pub inode: u64,
+}
+
+#[cfg(unix)]
+impl FileId {
+    /// The id of the file at `path`.
+    ///
+    /// Returns `Ok(None)` when there is no such file.
+    ///
+    /// # Errors
+    ///
+    /// When the OS refuses the query.
+    pub fn of(path: &std::path::Path) -> io::Result<Option<Self>> {
+        use std::os::unix::fs::MetadataExt;
+        match std::fs::metadata(path) {
+            Ok(metadata) => Ok(Some(Self {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+            })),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
 }
 
 #[cfg(test)]

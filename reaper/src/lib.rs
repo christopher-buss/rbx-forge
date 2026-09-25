@@ -11,10 +11,11 @@
 #[allow(dead_code, reason = "the worker layer serves only the reaper binary")]
 mod os;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use napi::{Error, Result};
+use napi::bindgen_prelude::AsyncTask;
+use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
 
 fn to_napi(context: &str, err: &std::io::Error) -> Error {
@@ -184,4 +185,123 @@ pub fn pin_process(pid: u32) -> Result<Option<PinnedProcess>> {
     os::process::PinnedProcess::open(pid)
         .map(|pinned| pinned.map(|inner| PinnedProcess { inner }))
         .map_err(|err| to_napi(&format!("pin process {pid}"), &err))
+}
+
+/// One session's files: what the barrier and forced cleanup read.
+#[napi(object)]
+pub struct SessionTarget {
+    pub session_id: String,
+    /// The lease file (`workers.lock`).
+    pub lease_path: String,
+    /// The reaper record (`reaper.json`).
+    pub record_path: String,
+}
+
+/// A live process of a session.
+#[napi(object)]
+pub struct SessionProcess {
+    pub pid: u32,
+    /// Its parent's PID (POSIX); 0 on Windows.
+    pub parent_pid: u32,
+    /// Its start time (see `processStartTime`).
+    pub start_time: String,
+    /// It is the session's reaper, as the reaper record names it.
+    pub is_reaper: bool,
+}
+
+/// What a forced cleanup did.
+#[napi(object)]
+pub struct CleanupReport {
+    /// The PIDs it killed, in kill order: leaves first, the reaper last.
+    pub killed: Vec<u32>,
+    /// Processes of the session still alive at the bound.
+    pub survivors: Vec<u32>,
+    /// Processes whose ownership could not be read again: not killed.
+    pub unverifiable: Vec<u32>,
+}
+
+/// Owned copies of a [`SessionTarget`]'s paths, for a worker thread.
+struct OwnedTarget {
+    session: String,
+    lease: PathBuf,
+    record: PathBuf,
+}
+
+impl OwnedTarget {
+    fn new(target: SessionTarget) -> Self {
+        Self {
+            session: target.session_id,
+            lease: PathBuf::from(target.lease_path),
+            record: PathBuf::from(target.record_path),
+        }
+    }
+
+    fn borrow(&self) -> os::session::Target<'_> {
+        os::session::Target {
+            session: &self.session,
+            lease: &self.lease,
+            record: &self.record,
+        }
+    }
+}
+
+/// Every live process of a session: marker or lease holders (POSIX),
+/// members of its jobs (Windows), and its recorded reaper. None means the
+/// session's barrier is clear.
+///
+/// # Errors
+///
+/// When the OS refuses the process listing or the record cannot be read.
+#[napi]
+pub fn scan_session(target: SessionTarget) -> Result<Vec<SessionProcess>> {
+    let target = OwnedTarget::new(target);
+    os::session::scan(&target.borrow())
+        .map(|members| {
+            members
+                .into_iter()
+                .map(|member| SessionProcess {
+                    pid: member.pid,
+                    parent_pid: member.parent,
+                    start_time: member.start_time.to_string(),
+                    is_reaper: member.reaper,
+                })
+                .collect()
+        })
+        .map_err(|err| to_napi(&format!("scan session {}", target.session), &err))
+}
+
+/// Forced cleanup on a libuv worker thread, so the loop never blocks Node.
+pub struct CleanupTask {
+    target: OwnedTarget,
+    bound: Duration,
+}
+
+impl Task for CleanupTask {
+    type Output = os::session::Cleanup;
+    type JsValue = CleanupReport;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        os::session::force_cleanup(&self.target.borrow(), self.bound)
+            .map_err(|err| to_napi(&format!("clean up session {}", self.target.session), &err))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(CleanupReport {
+            killed: output.killed,
+            survivors: output.survivors,
+            unverifiable: output.unverifiable,
+        })
+    }
+}
+
+/// Kill every process of a session within `bound_ms`: each pinned and
+/// re-verified, leaves first, the reaper last. Resolves with what it did;
+/// unverifiable processes are reported, never killed.
+#[napi(ts_return_type = "Promise<CleanupReport>")]
+#[must_use]
+pub fn force_cleanup(target: SessionTarget, bound_ms: u32) -> AsyncTask<CleanupTask> {
+    AsyncTask::new(CleanupTask {
+        target: OwnedTarget::new(target),
+        bound: Duration::from_millis(u64::from(bound_ms)),
+    })
 }

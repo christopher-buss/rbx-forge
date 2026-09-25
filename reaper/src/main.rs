@@ -29,6 +29,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use os::lock::{FileLock, LockMode};
+use os::session;
 use os::worker::{self, Inherit, Spec, WorkerTree};
 use protocol::SpawnRequest;
 use reaper::{Input, Platform, Reaper, RecordedWorker, Tree};
@@ -36,7 +37,7 @@ use reaper::{Input, Platform, Reaper, RecordedWorker, Tree};
 /// Exit code for a command line the reaper cannot read.
 const EXIT_USAGE: u8 = 2;
 /// The markers every worker carries (spec #28).
-const SESSION_MARKER: &str = "RBX_FORGE_SESSION";
+const SESSION_MARKER: &str = session::SESSION_MARKER;
 const WORKER_MARKER: &str = "RBX_FORGE_WORKER";
 
 impl Tree for WorkerTree {
@@ -126,7 +127,7 @@ impl Platform for OsPlatform {
             markers,
             log: request.log.as_ref().map(PathBuf::from),
             verbatim: request.verbatim,
-            job_name: format!("Local\\rbx-forge-{}-{serial}", self.session),
+            job_name: session::job_name(&self.session, serial),
         };
         WorkerTree::spawn(&spec, &self.inherit)
     }
@@ -170,12 +171,45 @@ fn watch_sigterm(inputs: mpsc::Sender<Input>) {
             // SAFETY: a valid set and output.
             if unsafe { libc::sigwait(&raw const set, &raw mut signal) } == 0
                 && signal == libc::SIGTERM
-                && inputs.send(Input::StdinClosed).is_err()
             {
-                return;
+                pause("reaper-stop");
+                if inputs.send(Input::StdinClosed).is_err() {
+                    return;
+                }
             }
         }
     });
+}
+
+/// Test-only fault injection (spec #28, Testing): when
+/// `RBX_FORGE_TEST_PAUSE_DIR` is set and `RBX_FORGE_TEST_PAUSE` lists
+/// `point`, write `<dir>/<point>.paused` (content: the reaper's PID) and wait
+/// until the test deletes it. The points:
+///
+/// - `reaper-lease`: before the reaper takes its lease.
+/// - `reaper-stop`: when the host is gone (stdin EOF, `SIGTERM`), before
+///   the reaper stops anything: a hung reaper that keeps its lease and every
+///   worker.
+fn pause(point: &str) {
+    let Some(directory) = std::env::var_os("RBX_FORGE_TEST_PAUSE_DIR") else {
+        return;
+    };
+    let points = std::env::var("RBX_FORGE_TEST_PAUSE").unwrap_or_default();
+    if !points.split(',').any(|listed| listed == point) {
+        return;
+    }
+
+    let directory = PathBuf::from(directory);
+    let file = directory.join(format!("{point}.paused"));
+    let written = std::fs::create_dir_all(&directory)
+        .and_then(|()| std::fs::write(&file, std::process::id().to_string()));
+    if let Err(err) = written {
+        eprintln!("forge-reaper: write {}: {err}", file.display());
+        return;
+    }
+    while file.exists() {
+        thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 /// Whether a variable is a marker. Windows names ignore case.
@@ -207,6 +241,7 @@ fn ignore_terminal_signals() {
 
 fn serve(session: &str, lease: &Path, record: &Path) -> ExitCode {
     ignore_terminal_signals();
+    pause("reaper-lease");
     let lock = match FileLock::try_acquire(lease, LockMode::Shared) {
         Ok(Some(lock)) => lock,
         Ok(None) => {
@@ -238,6 +273,7 @@ fn serve(session: &str, lease: &Path, record: &Path) -> ExitCode {
                 return;
             }
         }
+        pause("reaper-stop");
         let _ = stdin_sender.send(Input::StdinClosed);
     });
 

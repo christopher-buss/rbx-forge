@@ -23,7 +23,7 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
-mod converge;
+pub mod converge;
 
 #[cfg(unix)]
 mod unix;
