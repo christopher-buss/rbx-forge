@@ -22,6 +22,7 @@ import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import {
 	isProcessAlive,
 	killLoggedWorkersAsync,
+	pinNow,
 	readWorkerLog,
 	waitForDeathAsync,
 	waitForWorkersAsync,
@@ -70,9 +71,13 @@ async function startSessionAsync(): Promise<TestSession> {
 			sessionId,
 		},
 	);
+	// Pinned now: a kill by PID at the end could hit a process that reused it.
+	const pin = pinNow(reaper.pid);
 	onTestFinished(async () => {
-		if (isProcessAlive(reaper.pid)) {
-			process.kill(reaper.pid, "SIGKILL");
+		try {
+			pin?.kill();
+		} catch {
+			// It exited meanwhile.
 		}
 
 		await reaper.ended;

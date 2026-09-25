@@ -2,6 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import type { NativeAddon, PinnedProcess } from "../../src/native/addon.ts";
+import { startTimeToEpochMs } from "../../src/native/start-time.ts";
+import { nodeHost } from "../../src/seams/host.ts";
+import { loadRealNative } from "./real-native.ts";
+
 /** One `start` record a fake worker appends to `FIXTURE_LOG`. */
 export interface WorkerRecord {
 	args: Array<string>;
@@ -17,6 +22,13 @@ export interface WorkerRecord {
 }
 
 const POLL_MS = 50;
+/**
+ * How much later than its record a worker's OS start time may read: Linux
+ * start times count 10 ms ticks from a boot time forge reads from uptime.
+ */
+const START_SLACK_MS = process.platform === "linux" ? 1000 : 100;
+
+let native: NativeAddon | undefined;
 
 /**
  * Read every record in a fixture log. A missing file means no worker started.
@@ -105,16 +117,49 @@ export async function waitForDeathAsync(
 }
 
 /**
- * Force-kill every recorded worker. Safe on already-dead PIDs.
+ * Pin the process a record names, only while it is still that process. A
+ * worker writes its record after it started, so a process that started
+ * later reused the PID: a test file running in parallel may own it (Windows
+ * reuses PIDs within seconds), and killing it breaks that test.
+ *
+ * @param record - The worker's record.
+ * @param record.at - When it wrote the record.
+ * @param record.pid - Its PID.
+ * @returns The pin; `undefined` when the PID has exited, was reused, or
+ *   cannot be opened.
+ */
+export function pinRecorded({
+	at,
+	pid,
+}: Pick<WorkerRecord, "at" | "pid">): PinnedProcess | undefined {
+	let pin: null | PinnedProcess;
+	try {
+		pin = realNative().pinProcess(pid);
+	} catch {
+		// Another user's process: not a fixture process.
+		return undefined;
+	}
+
+	if (pin === null) {
+		return undefined;
+	}
+
+	const startedMs = startTimeToEpochMs(pin.startTime, process.platform, nodeHost.bootTimeMs());
+	return startedMs !== undefined && startedMs <= at + START_SLACK_MS ? pin : undefined;
+}
+
+/**
+ * Force-kill every recorded worker that still runs, through a pin: never a
+ * process that reused a recorded PID.
  *
  * @param records - Workers to kill.
  */
 export function killWorkers(records: ReadonlyArray<WorkerRecord>): void {
-	for (const { pid } of records) {
+	for (const record of records) {
 		try {
-			process.kill(pid, "SIGKILL");
+			pinRecorded(record)?.kill();
 		} catch {
-			// Already gone.
+			// It exited meanwhile.
 		}
 	}
 }
@@ -129,7 +174,7 @@ export function killWorkers(records: ReadonlyArray<WorkerRecord>): void {
 export async function killLoggedWorkersAsync(logFile: string, timeoutMs = 5000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	for (;;) {
-		const alive = readWorkerLog(logFile).filter(({ pid }) => isProcessAlive(pid));
+		const alive = readWorkerLog(logFile).filter((record) => pinRecorded(record) !== undefined);
 		if (alive.length === 0 || Date.now() > deadline) {
 			return;
 		}
@@ -137,4 +182,24 @@ export async function killLoggedWorkersAsync(logFile: string, timeoutMs = 5000):
 		killWorkers(alive);
 		await sleep(POLL_MS);
 	}
+}
+
+/**
+ * Pin a process the test knows runs now, to kill it later: a kill by PID
+ * could hit a process that reused the PID meanwhile.
+ *
+ * @param pid - The running process.
+ * @returns The pin, or `undefined` when it has exited.
+ */
+export function pinNow(pid: number): PinnedProcess | undefined {
+	try {
+		return realNative().pinProcess(pid) ?? undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function realNative(): NativeAddon {
+	native ??= loadRealNative();
+	return native;
 }

@@ -9,14 +9,13 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { EXIT_FAILURE } from "../../src/exit-codes.ts";
 import { parseResult } from "../helpers/output.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
-import { isProcessAlive, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
+import { isProcessAlive, pinNow, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 import { runBinAsync } from "./run-bin.ts";
 import type { Fixture, Session } from "./session-fixture.ts";
 import {
@@ -173,9 +172,13 @@ function reaperPids(fixture: Fixture): Array<number> {
  * @param pid - The process.
  */
 function killOnFinish(pid: number): void {
+	// Pinned now: a kill by PID at the end could hit a process that reused it.
+	const pin = pinNow(pid);
 	onTestFinished(() => {
-		if (isProcessAlive(pid)) {
-			process.kill(pid, "SIGKILL");
+		try {
+			pin?.kill();
+		} catch {
+			// It exited meanwhile.
 		}
 	});
 }

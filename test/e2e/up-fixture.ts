@@ -12,7 +12,7 @@ import { findSession } from "../../src/client/session.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import type { ResultLine } from "../helpers/output.ts";
 import { parseResult } from "../helpers/output.ts";
-import { isProcessAlive, waitForDeathAsync } from "../helpers/worker-log.ts";
+import { pinNow, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { BinRun } from "./run-bin.ts";
 import { BIN, runBinAsync } from "./run-bin.ts";
 import type { Fixture } from "./session-fixture.ts";
@@ -47,10 +47,12 @@ export async function stopDetachedAsync(fixture: Fixture): Promise<void> {
 	await new Promise((resolve) => {
 		down.once("close", resolve);
 	});
-	const alive = await waitForDeathAsync([session.identity.pid], 5000);
-	const survivors = alive.filter(isProcessAlive);
-	for (const survivor of survivors) {
-		process.kill(survivor, "SIGKILL");
+	await waitForDeathAsync([session.identity.pid], 5000);
+	// Through a pin with the recorded start time: never a process that
+	// reused the PID.
+	const pin = pinNow(session.identity.pid);
+	if (pin?.startTime === session.identity.processStartTime) {
+		pin.kill();
 	}
 }
 
