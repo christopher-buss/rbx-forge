@@ -19,7 +19,8 @@
  * - `FIXTURE_SCRUB=1`: the worker's grandchildren start without the markers.
  * - `FIXTURE_GRANDCHILD_MODES`: a comma list, one mode per grandchild in
  *   order: `scrub` (starts without the markers), `close-lease` (closes the
- *   session's inherited lease descriptor, POSIX), or empty for neither.
+ *   session's inherited lease descriptor before it writes its record,
+ *   POSIX), or empty for neither.
  * - `FIXTURE_BEAT_LOG` and `FIXTURE_BEAT_MS`: every long-running process
  *   appends `{ at, pid, session }` to this NDJSON file this often, so a test
  *   sees when a process last ran.
@@ -231,9 +232,6 @@ function storm(intervalMs: number): void {
 function runGrandchild(): void {
 	setInterval(doNothing, KEEP_ALIVE_MS);
 	beat();
-	if (env["FIXTURE_MODE"] === "close-lease") {
-		closeLease();
-	}
 
 	const links = Number(env["FIXTURE_CHAIN"] ?? "0");
 	if (links > 0) {
@@ -394,8 +392,13 @@ function runHook(): void {
 	exitOnce();
 }
 
-// Signals first, so a test that saw the record can rely on the handlers.
+// Signals and the lease first, so a test that saw the record can rely on
+// the handlers, and on a closed lease.
 ignoreSignals();
+if (ROLE === "grandchild" && env["FIXTURE_MODE"] === "close-lease") {
+	closeLease();
+}
+
 record();
 
 switch (ROLE) {

@@ -11,7 +11,6 @@
  */
 import assert from "node:assert/strict";
 import process from "node:process";
-import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 
 import { ForgeError } from "../../src/errors.ts";
@@ -42,6 +41,11 @@ const FORCED_START_MS = 45_000;
  * stop: its escalation (22 s) and the final barrier (5 s) at worst.
  */
 const EXIT_MS = 30_000;
+/**
+ * A test's bound: every step's bound (a refusal, a forced start, a stop),
+ * and the staging and the checks.
+ */
+const TEST_MS = EXIT_MS + FORCED_START_MS + EXIT_MS + 15_000;
 
 /**
  * Wait until the forced session is ready, stop it, and return what its
@@ -73,44 +77,46 @@ async function forcedCleanupAsync(run: Launched): Promise<CleanupReport> {
 }
 
 describe("forced cleanup", () => {
-	it("should refuse with the surviving PIDs, then kill the tree and the reaper last with --force (C4, C7, C8)", async () => {
-		expect.assertions(5);
+	it(
+		"should refuse with the surviving PIDs, then kill the tree and the reaper last with --force (C4, C7, C8)",
+		async () => {
+			expect.assertions(5);
 
-		const project = await makeProjectAsync();
-		// Two detached grandchildren; on POSIX the first closes its lease and
-		// is found by its marker alone (C8).
-		const old = await stageOldSessionAsync(project, [
-			{
-				FIXTURE_DETACH: "1",
-				FIXTURE_GRANDCHILD_MODES: "close-lease",
-				FIXTURE_GRANDCHILDREN: "2",
-			},
-		]);
-		const records = await waitForWorkersAsync(project.log, 3);
-		const workers = records.map(({ pid }) => pid);
-		// Let the grandchild close its lease.
-		await sleep(1000);
-		const refused = await settledWithinAsync(launch(project), "refuse", EXIT_MS);
-		assert(!refused.ok && refused.error instanceof ForgeError, "expected a refusal");
+			const project = await makeProjectAsync();
+			// Two detached grandchildren; on POSIX the first closes its lease
+			// before it writes its record, and is found by its marker alone (C8).
+			const old = await stageOldSessionAsync(project, [
+				{
+					FIXTURE_DETACH: "1",
+					FIXTURE_GRANDCHILD_MODES: "close-lease",
+					FIXTURE_GRANDCHILDREN: "2",
+				},
+			]);
+			const records = await waitForWorkersAsync(project.log, 3);
+			const workers = records.map(({ pid }) => pid);
+			const refused = await settledWithinAsync(launch(project), "refuse", EXIT_MS);
+			assert(!refused.ok && refused.error instanceof ForgeError, "expected a refusal");
 
-		const { details } = refused.error;
-		assert(details !== undefined);
+			const { details } = refused.error;
+			assert(details !== undefined);
 
-		expect(refused.error).toMatchObject({
-			code: "previous_generation_alive",
-			details: { sessionId: old.sessionId },
-		});
-		expect(details["pids"]).toIncludeAllMembers([old.reaper.pid, ...workers]);
+			expect(refused.error).toMatchObject({
+				code: "previous_generation_alive",
+				details: { sessionId: old.sessionId },
+			});
+			expect(details["pids"]).toIncludeAllMembers([old.reaper.pid, ...workers]);
 
-		const cleanup = await forcedCleanupAsync(launch(project, FORCE));
+			const cleanup = await forcedCleanupAsync(launch(project, FORCE));
 
-		expect(cleanup.killed.at(-1)).toBe(old.reaper.pid);
-		expect(cleanup.killed).toIncludeAllMembers(workers);
-		expect({
-			files: filesLeft(project),
-			survivors: await waitForDeathAsync([old.reaper.pid, ...workers]),
-		}).toStrictEqual({ files: [], survivors: [] });
-	}, 90_000);
+			expect(cleanup.killed.at(-1)).toBe(old.reaper.pid);
+			expect(cleanup.killed).toIncludeAllMembers(workers);
+			expect({
+				files: filesLeft(project),
+				survivors: await waitForDeathAsync([old.reaper.pid, ...workers]),
+			}).toStrictEqual({ files: [], survivors: [] });
+		},
+		TEST_MS,
+	);
 
 	// Windows: the reaper's jobs kill every descendant when it dies.
 	it.skipIf(process.platform === "win32")(
@@ -154,6 +160,6 @@ describe("forced cleanup", () => {
 				waitForDeathAsync(readWorkerLog(project.log).map(({ pid }) => pid)),
 			).resolves.toStrictEqual([]);
 		},
-		90_000,
+		TEST_MS,
 	);
 });
