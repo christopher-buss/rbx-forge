@@ -73,6 +73,7 @@
 		"@stryker-mutator/core": "catalog:mutation",
 		"@stryker-mutator/typescript-checker": "catalog:mutation",
 		"@stryker-mutator/vitest-runner": "catalog:mutation",
+		"@total-typescript/shoehorn": "catalog:test",
 		"@types/node": "catalog:types",
 		"@typescript/native": "catalog:tsc",
 		"@vitest/coverage-v8": "catalog:test",

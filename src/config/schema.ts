@@ -168,6 +168,14 @@ const REMOVED_KEYS: ReadonlyArray<readonly [path: string, instead: string]> = [
 	["typegenOutputPath", "Use `typegen.outputPath`."],
 ];
 
+/** One thing the schema rejected. */
+export interface ConfigProblem {
+	/** A full sentence, such as `rojoPort must be a number (was a string)`. */
+	message: string;
+	/** The dotted path of the value, such as `typegen.include.0`. */
+	path: string;
+}
+
 /**
  * Validate the content of a config file.
  *
@@ -179,8 +187,9 @@ const REMOVED_KEYS: ReadonlyArray<readonly [path: string, instead: string]> = [
  */
 export function validateConfigFile(value: unknown, file: string): ForgeConfig {
 	rejectRemovedKeys(value, file);
-	return check(configFileSchema, value, (summary) => {
-		return new ForgeError("config_invalid", `Invalid config in ${file}:\n${summary}`, {
+	return check(configFileSchema, value, (problems) => {
+		const lines = problems.map(({ message }) => message).join("\n");
+		return new ForgeError("config_invalid", `Invalid config in ${file}:\n${lines}`, {
 			hint: "Fix or remove the keys named above.",
 		});
 	});
@@ -195,7 +204,7 @@ export function validateConfigFile(value: unknown, file: string): ForgeConfig {
  */
 export function validateConfigLayer(
 	value: unknown,
-	describe: (summary: string) => ForgeError,
+	describe: (problems: ReadonlyArray<ConfigProblem>) => ForgeError,
 ): ConfigLayer {
 	return check(configLayerSchema, value, describe);
 }
@@ -203,11 +212,13 @@ export function validateConfigLayer(
 function check<T>(
 	schema: Type<T>,
 	value: unknown,
-	describe: (summary: string) => ForgeError,
+	describe: (problems: ReadonlyArray<ConfigProblem>) => ForgeError,
 ): Type<T>["infer"] {
 	const result = schema(value);
 	if (result instanceof type.errors) {
-		throw describe(result.summary);
+		throw describe(
+			result.map(({ message, path }) => ({ message, path: path.map(String).join(".") })),
+		);
 	}
 
 	return result;

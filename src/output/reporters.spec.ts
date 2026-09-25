@@ -55,6 +55,15 @@ describe(createJsonReporter, () => {
 		expect(captured.stderr()).toBe("");
 	});
 
+	it("should write a null command when no command was read", () => {
+		expect.assertions(1);
+
+		const captured = captureOutput();
+		createJsonReporter(captured.output).fail({ ...FAILURE, command: undefined });
+
+		expect(captured.jsonLines()).toStrictEqual([expect.objectContaining({ command: null })]);
+	});
+
 	it("should leave out a missing hint", () => {
 		expect.assertions(1);
 

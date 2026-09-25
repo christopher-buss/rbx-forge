@@ -1,5 +1,6 @@
-import { assert, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
+import { catchForgeError } from "../../test/helpers/errors.ts";
 import { ForgeError } from "../errors.ts";
 import type { ForgeConfig } from "./schema.ts";
 import { validateConfigFile, validateConfigLayer } from "./schema.ts";
@@ -33,16 +34,7 @@ const FULL_CONFIG: ForgeConfig = {
 	},
 };
 
-function errorOf(run: () => unknown): ForgeError {
-	try {
-		run();
-	} catch (err) {
-		assert(err instanceof ForgeError, "expected a ForgeError");
-		return err;
-	}
-
-	throw new Error("expected a ForgeError");
-}
+const errorOf = catchForgeError;
 
 describe(validateConfigFile, () => {
 	it("should accept every option", () => {
@@ -181,17 +173,22 @@ describe(validateConfigLayer, () => {
 		).toStrictEqual({ rojoPort: 4000 });
 	});
 
-	it("should throw the caller's error with the schema's summary", () => {
+	it("should throw the caller's error, made from each problem and its path", () => {
 		expect.assertions(2);
 
 		const error = errorOf(() => {
-			return validateConfigLayer(
-				{ rojoPort: "x" },
-				(summary) => new ForgeError("usage", summary),
-			);
+			return validateConfigLayer({ rojoPort: "x", typegen: { include: [1] } }, (problems) => {
+				return new ForgeError("usage", JSON.stringify(problems));
+			});
 		});
 
 		expect(error.code).toBe("usage");
-		expect(error.message).toBe("rojoPort must be a number (was a string)");
+		expect(JSON.parse(error.message)).toStrictEqual([
+			{ message: "rojoPort must be a number (was a string)", path: "rojoPort" },
+			{
+				message: "typegen.include[0] must be a string (was a number)",
+				path: "typegen.include.0",
+			},
+		]);
 	});
 });

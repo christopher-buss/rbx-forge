@@ -1,14 +1,19 @@
 /**
- * `forge` entry. The only module that touches the process: it reads argv,
- * wires the real streams, and writes the exit code. Every decision lives in
- * `cli/run-cli.ts`, where a test drives it.
+ * `forge` entry. The only module that touches the process: it reads argv, the
+ * environment, and the terminal, builds the real seams, and writes the exit
+ * code. Every decision lives in `cli/run-cli.ts`, where a test drives it.
  */
 import process from "node:process";
 
 import packageJson from "../package.json" with { type: "json" };
-import { runCli } from "./cli/run-cli.ts";
+import { COMMANDS } from "./cli/commands.ts";
+import { runCliAsync } from "./cli/run-cli.ts";
+import { createNodeSeams } from "./seams/node-seams.ts";
 
-process.exitCode = runCli(process.argv.slice(2), {
+process.exitCode = await runCliAsync(process.argv.slice(2), {
+	commands: COMMANDS,
+	cwd: process.cwd(),
+	env: process.env,
 	output: {
 		stderr: (text) => {
 			process.stderr.write(text);
@@ -16,6 +21,11 @@ process.exitCode = runCli(process.argv.slice(2), {
 		stdout: (text) => {
 			process.stdout.write(text);
 		},
+	},
+	seams: createNodeSeams({ input: process.stdin, output: process.stdout }),
+	terminal: {
+		stdinIsTty: process.stdin.isTTY,
+		stdoutIsTty: process.stdout.isTTY,
 	},
 	version: packageJson.version,
 });

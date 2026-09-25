@@ -10,13 +10,10 @@ import { ForgeError } from "../errors.ts";
  */
 export interface Prompter {
 	/**
-	 * Ask the user to pick one of `choices`. An empty answer picks `fallback`.
+	 * Ask the user to pick one of `choices`. Resolves one of `choices`; an
+	 * empty answer picks `fallback`.
 	 */
-	choose: <T extends string>(
-		question: string,
-		choices: ReadonlyArray<T>,
-		fallback: T,
-	) => Promise<T>;
+	choose: (question: string, choices: ReadonlyArray<string>, fallback: string) => Promise<string>;
 	/** Ask a yes/no question. An empty answer gives `fallback`. */
 	confirm: (question: string, fallback: boolean) => Promise<boolean>;
 }

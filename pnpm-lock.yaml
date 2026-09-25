@@ -72,6 +72,9 @@ catalogs:
       specifier: 2.7.0
       version: 2.7.0
   test:
+    '@total-typescript/shoehorn':
+      specifier: 0.1.2
+      version: 0.1.2
     '@vitest/coverage-v8':
       specifier: 5.0.1
       version: 5.0.1
@@ -149,6 +152,9 @@ importers:
       '@stryker-mutator/vitest-runner':
         specifier: catalog:mutation
         version: 10.0.0(patch_hash=4e4786ad92abcf9fc5e311e356fcf5be6ca34cb3a41bbeb7bd5c7559eae96cec)(@stryker-mutator/core@10.0.0)(vitest@5.0.1)
+      '@total-typescript/shoehorn':
+        specifier: catalog:test
+        version: 0.1.2
       '@types/node':
         specifier: catalog:types
         version: 26.6.2
@@ -2377,6 +2383,9 @@ packages:
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
     peerDependencies:
       eslint: ^9.0.0 || ^10.0.0
+
+  '@total-typescript/shoehorn@0.1.2':
+    resolution: {integrity: sha512-p7nNZbOZIofpDNyP0u1BctFbjxD44Qc+oO5jufgQdFdGIXJLc33QRloJpq7k5T59CTgLWfQSUxsuqLcmeurYRw==}
 
   '@tybys/wasm-util@0.10.4':
     resolution: {integrity: sha512-W3c4gRigFS0T/Ma4qIYF3GDAc5AQdHb1yL5znJT1Zv1YaD9Kitx656wBjvr19qbiosmZT8lWDM5BEMynUqX65A==}
@@ -6899,6 +6908,8 @@ snapshots:
       espree: 10.4.0
       estraverse: 5.3.0
       picomatch: 4.0.7
+
+  '@total-typescript/shoehorn@0.1.2': {}
 
   '@tybys/wasm-util@0.10.4':
     dependencies:

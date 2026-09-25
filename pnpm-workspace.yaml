@@ -66,6 +66,7 @@ catalogs:
     c12: 4.0.0-rc.2
     jiti: 2.7.0
   test:
+    "@total-typescript/shoehorn": 0.1.2
     "@vitest/coverage-v8": 5.0.1
     jest-extended: 7.0.0
     memfs: 4.79.0
