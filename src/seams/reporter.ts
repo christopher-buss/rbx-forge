@@ -32,6 +32,8 @@ export interface CommandFailure {
 	code: ForgeErrorCode;
 	/** The command that failed, or `undefined` when none was read. */
 	command: string | undefined;
+	/** Machine-readable facts, such as hook results; `--json` only. */
+	details: Readonly<Record<string, unknown>> | undefined;
 	exitCode: ExitCode;
 	hint: string | undefined;
 	message: string;

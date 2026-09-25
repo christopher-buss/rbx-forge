@@ -8,6 +8,7 @@ import { createJsonReporter, createReporter, createTtyReporter } from "./reporte
 const FAILURE: CommandFailure = {
 	code: "needs_confirmation",
 	command: "init",
+	details: undefined,
 	exitCode: EXIT_NEEDS_CONFIRMATION,
 	hint: "Pass --force.",
 	message: "A config file exists.",
@@ -53,6 +54,19 @@ describe(createJsonReporter, () => {
 			},
 		]);
 		expect(captured.stderr()).toBe("");
+	});
+
+	it("should write the details of a failure", () => {
+		expect.assertions(1);
+
+		const captured = captureOutput();
+		createJsonReporter(captured.output).fail({ ...FAILURE, details: { hooks: [] } });
+
+		expect(captured.jsonLines()).toStrictEqual([
+			expect.objectContaining({
+				error: expect.objectContaining({ details: { hooks: [] } }),
+			}),
+		]);
 	});
 
 	it("should write a null command when no command was read", () => {

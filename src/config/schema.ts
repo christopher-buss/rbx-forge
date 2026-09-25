@@ -80,6 +80,11 @@ export interface ForgeConfig {
 	gracefulTimeoutMs?: number;
 	/** Shell commands around forge commands, keyed by command. */
 	hooks?: Partial<Record<HookCommand, HookPhases>>;
+	/**
+	 * How long one hook may run. A hook that runs longer is killed with its
+	 * whole process tree, and fails.
+	 */
+	hookTimeoutMs?: number;
 	luau?: LuauOptions;
 	open?: OpenOptions;
 	projectType: ProjectType;
@@ -121,6 +126,7 @@ const fileSchema = type({
 		"syncback?": hookPhases,
 		"typegen?": hookPhases,
 	},
+	"hookTimeoutMs?": "number.integer >= 1",
 	"luau?": {
 		"+": "reject",
 		"watch?": { "+": "reject", "args?": STRINGS, "command?": PATH },

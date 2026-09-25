@@ -6,7 +6,12 @@ import type { OutputStreams } from "../../src/seams/reporter.ts";
 const resultLine = type({
 	"command": "string | null",
 	"data?": "Record<string, unknown>",
-	"error?": { "code": "string", "hint?": "string", "message": "string" },
+	"error?": {
+		"code": "string",
+		"details?": "Record<string, unknown>",
+		"hint?": "string",
+		"message": "string",
+	},
 	"exitCode?": "number",
 	"ok": "boolean",
 	"type": "'result'",

@@ -143,6 +143,11 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 /** Options that {@link ForgeError} takes beyond its code and message. */
 export interface ForgeErrorOptions {
 	cause?: unknown;
+	/**
+	 * Machine-readable facts about the failure, such as hook results. The
+	 * `--json` result carries them as `error.details`.
+	 */
+	details?: Readonly<Record<string, unknown>>;
 	/** One line that tells the user what to do next. */
 	hint?: string;
 }
@@ -153,12 +158,14 @@ export interface ForgeErrorOptions {
  */
 export class ForgeError extends Error {
 	public readonly code: ForgeErrorCode;
+	public readonly details: Readonly<Record<string, unknown>> | undefined;
 	public readonly hint: string | undefined;
 	public override readonly name = "ForgeError";
 
 	constructor(code: ForgeErrorCode, message: string, options: ForgeErrorOptions = {}) {
 		super(message, { cause: options.cause });
 		this.code = code;
+		this.details = options.details;
 		this.hint = options.hint;
 	}
 

@@ -53,6 +53,12 @@ const CASES: ReadonlyArray<PrecedenceCase> = [
 		values: { default: 34_872, file: 4000, flag: 5000 },
 	}),
 	precedenceCase({
+		read: (config) => config.hookTimeoutMs,
+		set: (value: number) => ({ hookTimeoutMs: value }),
+		type: "timeout",
+		values: { default: 300_000, file: 1000, flag: 2000 },
+	}),
+	precedenceCase({
 		read: (config) => config.open.buildFirst,
 		set: (value: boolean) => ({ open: { buildFirst: value } }),
 		type: "boolean",

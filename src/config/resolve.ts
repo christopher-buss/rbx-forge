@@ -8,6 +8,7 @@ export interface ConfigDefaults {
 	buildOutputPath: string;
 	gracefulTimeoutMs: number;
 	hooks: Partial<Record<HookCommand, HookPhases>>;
+	hookTimeoutMs: number;
 	luau: { watch: { args: Array<string>; command: string | undefined } };
 	open: {
 		buildFirst: boolean;
@@ -41,6 +42,7 @@ export const DEFAULT_CONFIG: Readonly<ConfigDefaults> = {
 	buildOutputPath: "game.rbxl",
 	gracefulTimeoutMs: 3000,
 	hooks: {},
+	hookTimeoutMs: 300_000,
 	luau: { watch: { args: [], command: undefined } },
 	open: { buildFirst: true, buildOutputPath: undefined, projectPath: undefined },
 	rbxts: { args: [], command: "rbxtsc" },

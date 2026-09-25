@@ -35,12 +35,21 @@ describe(ForgeError, () => {
 		expect(error.name).toBe("ForgeError");
 	});
 
-	it("should leave the hint undefined when none is given", () => {
-		expect.assertions(1);
+	it("should leave the hint and details undefined when none are given", () => {
+		expect.assertions(2);
 
 		const error = new ForgeError("usage", "x");
 
 		expect(error.hint).toBeUndefined();
+		expect(error.details).toBeUndefined();
+	});
+
+	it("should carry machine-readable details", () => {
+		expect.assertions(1);
+
+		const error = new ForgeError("hook_failed", "x", { details: { hooks: [] } });
+
+		expect(error.details).toStrictEqual({ hooks: [] });
 	});
 
 	// The exit code of each class the spec names, written out so that a moved

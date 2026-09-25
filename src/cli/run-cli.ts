@@ -189,6 +189,7 @@ function reportFailure(reporter: Reporter, command: string | undefined, err: unk
 	reporter.fail({
 		code: error.code,
 		command,
+		details: error.details,
 		exitCode: error.exitCode,
 		hint: error.hint,
 		message: error.message,

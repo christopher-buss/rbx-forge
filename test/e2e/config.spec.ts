@@ -33,6 +33,7 @@ describe("forge config", () => {
 						buildOutputPath: "game.rbxl",
 						gracefulTimeoutMs: 3000,
 						hooks: {},
+						hookTimeoutMs: 300_000,
 						luau: { watch: { args: [] } },
 						open: { buildFirst: true },
 						projectType: "rbxts",

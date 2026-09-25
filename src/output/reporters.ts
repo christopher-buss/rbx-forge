@@ -15,12 +15,12 @@ export function createJsonReporter(output: OutputStreams): Reporter {
 
 	return {
 		emit: line,
-		fail: ({ code, command, exitCode, hint, message }) => {
+		fail: ({ code, command, details, exitCode, hint, message }) => {
 			line({
 				type: "result",
 				// `null`, not a missing key, when no command was read.
 				command: command ?? null,
-				error: { code, hint, message },
+				error: { code, details, hint, message },
 				exitCode,
 				ok: false,
 			});
