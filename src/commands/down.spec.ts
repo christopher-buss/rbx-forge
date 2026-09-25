@@ -154,6 +154,7 @@ describe(runDownAsync, () => {
 		await expect(downAsync(context)).rejects.toMatchObject({
 			code: "not_running",
 			hint: 'Start one with "forge up".',
+			message: "No session runs for this project.",
 		});
 	});
 });

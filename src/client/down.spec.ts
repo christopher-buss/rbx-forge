@@ -197,16 +197,20 @@ function ignoreShutdown(): void {
 }
 
 /**
- * A worker of the session that holds its lease until forced cleanup kills
- * it.
+ * Workers of the session that hold its lease until forced cleanup kills
+ * them.
  *
  * @param world - The project.
- * @param entry - The worker's scan entry.
+ * @param entries - Each worker's scan entry.
  */
-function holdLease(world: World, entry: FakeSessionProcess): void {
-	const lease = world.native.addon.tryLockFile(FILES.lease, "shared");
-	assert(lease !== null);
-	world.native.sessions.set("s1", [{ ...entry, lease }]);
+function holdLease(world: World, ...entries: Array<FakeSessionProcess>): void {
+	for (const entry of entries) {
+		const lease = world.native.addon.tryLockFile(FILES.lease, "shared");
+		assert(lease !== null);
+		entry.lease = lease;
+	}
+
+	world.native.sessions.set("s1", entries);
 }
 
 /**
@@ -326,6 +330,7 @@ describe(stopSessionAsync, () => {
 			code: "supervisor_unresponsive",
 			details: { pid: SUPERVISOR, sessionId: "s1" },
 			hint: 'Run "forge down --force" to kill it.',
+			message: "The supervisor of session s1 (PID 500) did not stop.",
 		});
 		expect({
 			alive: world.native.processes.get(SUPERVISOR)!.alive,
@@ -418,7 +423,20 @@ describe(stopSessionAsync, () => {
 			sessionId: "s1",
 			stoppedBy: "gone",
 		});
-		expect(world.native.locks.size).toBe(0);
+		expect({ files: world.memory.files(), locks: world.native.locks.size }).toStrictEqual({
+			files: { ".forge/sessions": null },
+			locks: 0,
+		});
+	});
+
+	it("should take a missing session directory as a clear barrier, whatever a scan finds", async () => {
+		expect.assertions(1);
+
+		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
+		world.memory.fileSystem.rmSync(FILES.directory, { force: true, recursive: true });
+		world.native.sessions.set("s1", [{ pid: 77 }]);
+
+		await expect(downAsync(world)).resolves.toMatchObject({ removed: false });
 	});
 
 	it("should report session_replaced when another session answers, and stop nothing", async () => {
@@ -441,11 +459,13 @@ describe(stopSessionAsync, () => {
 		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
-		holdLease(world, { pid: 77 });
+		holdLease(world, { pid: 77 }, { pid: 78 });
 
 		await expect(downAsync(world)).rejects.toMatchObject({
 			code: "cleanup_in_progress",
-			details: { pids: [77], sessionId: "s1" },
+			details: { pids: [77, 78], sessionId: "s1" },
+			hint: 'Wait, then run "forge down" again; or run "forge down --force" to kill them.',
+			message: "Processes of session s1 are still alive (PIDs 77, 78).",
 		});
 		expect(world.memory.fileSystem.existsSync(FILES.identity)).toBeTrue();
 	});
@@ -487,11 +507,14 @@ describe(stopSessionAsync, () => {
 		expect.assertions(1);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
-		holdLease(world, { pid: 77, unverifiable: true });
+		holdLease(world, { pid: 77, unverifiable: true }, { pid: 78, unverifiable: true });
 
 		await expect(downAsync(world, { force: true })).rejects.toMatchObject({
 			code: "cleanup_unverifiable",
-			details: { pids: [77], sessionId: "s1" },
+			details: { pids: [77, 78], sessionId: "s1" },
+			hint: `Check them, and stop them by hand. The session files are in ${FILES.directory}.`,
+			message:
+				"Processes of session s1 could not be verified, so they were not killed (PIDs 77, 78).",
 		});
 	});
 
