@@ -36,6 +36,8 @@ export function createManualClock(start = 0): ManualClock {
 		clock: {
 			now: () => now,
 			sleep: async (ms, signal) => {
+				// As `timers/promises`: an aborted signal rejects at once.
+				signal?.throwIfAborted();
 				return new Promise((resolve, reject) => {
 					const timer = { at: now + ms, resolve };
 					timers.push(timer);

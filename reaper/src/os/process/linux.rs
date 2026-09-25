@@ -6,7 +6,7 @@
 //! if the pinned process is still unreaped after the read, the PID cannot
 //! have been reused during it.
 
-use super::{ProcessEntry, StartTime};
+use super::{FileId, ProcessEntry, StartTime};
 use std::fs;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -220,6 +220,28 @@ impl Pin {
         }
 
         Ok(Some(block))
+    }
+
+    /// Whether a descriptor in `/proc/<pid>/fd` names `file`. Each link is
+    /// followed to the open file, so a deleted or renamed path still counts.
+    pub fn holds_file(&self, file: FileId) -> io::Result<Option<bool>> {
+        use std::os::unix::fs::MetadataExt;
+        let entries = match fs::read_dir(format!("/proc/{}/fd", self.pid)) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let holds = entries.filter_map(Result::ok).any(|entry| {
+            // A descriptor closed during the listing has no target left.
+            fs::metadata(entry.path())
+                .is_ok_and(|metadata| metadata.dev() == file.device && metadata.ino() == file.inode)
+        });
+        // Still unreaped after the read: the PID named this process during it.
+        if !self.is_unreaped()? {
+            return Ok(None);
+        }
+
+        Ok(Some(holds))
     }
 
     pub fn kill(&self) -> io::Result<bool> {

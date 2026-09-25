@@ -66,6 +66,8 @@ pub struct RecordedWorker {
     pub pid: u32,
     /// OS start time of the leader, as in `spawned`.
     pub start_time: String,
+    /// Names its Windows job (`os::session::job_name`).
+    pub serial: u64,
 }
 
 /// Creates trees.
@@ -175,6 +177,7 @@ impl<P: Platform, W: Write> Reaper<P, W> {
                 id: worker.id.clone(),
                 pid: worker.tree.pid(),
                 start_time: worker.tree.start_time().to_string(),
+                serial: worker.serial,
             })
             .collect();
         self.platform.record(&workers);

@@ -119,6 +119,36 @@ export interface DetachedSpawn {
 	program: string;
 }
 
+/** One session's files: what the barrier and forced cleanup read. */
+export interface SessionTarget {
+	/** The lease file (`workers.lock`). */
+	leasePath: string;
+	/** The reaper record (`reaper.json`). */
+	recordPath: string;
+	sessionId: string;
+}
+
+/** A live process of a session. */
+export interface SessionProcess {
+	/** It is the session's reaper, as the reaper record names it. */
+	isReaper: boolean;
+	/** Its parent's PID (POSIX); 0 on Windows. */
+	parentPid: number;
+	pid: number;
+	/** Its start time (see `processStartTime`). */
+	startTime: string;
+}
+
+/** What a forced cleanup did. */
+export interface CleanupReport {
+	/** The PIDs it killed, in kill order: leaves first, the reaper last. */
+	killed: Array<number>;
+	/** Processes of the session still alive at the bound. */
+	survivors: Array<number>;
+	/** Processes whose ownership could not be read again: not killed. */
+	unverifiable: Array<number>;
+}
+
 /** The addon's exports. */
 export interface NativeAddon {
 	/**
@@ -128,6 +158,13 @@ export interface NativeAddon {
 	 * @throws When an instance of the name already exists (access denied).
 	 */
 	createPipeServer?: (path: string, rejectRemote: boolean) => NativePipeServer;
+	/**
+	 * Kill every process of a session within `boundMs`, off the main
+	 * thread: each target pinned and its ownership read again through the
+	 * pin, leaves first, the reaper last and only once nothing else is
+	 * left. Unverifiable targets are reported, never killed.
+	 */
+	forceCleanup: (target: SessionTarget, boundMs: number) => Promise<CleanupReport>;
 	/** Version of the native crate. */
 	nativeVersion: () => string;
 	/** Pin the live process with this PID, or `null` when there is none. */
@@ -139,6 +176,12 @@ export interface NativeAddon {
 	 * only on one machine. With the PID it names exactly one process.
 	 */
 	processStartTime: (pid: number) => null | string;
+	/**
+	 * Every live process of a session: marker or lease holders (POSIX),
+	 * members of its jobs (Windows), and its recorded reaper. Empty means
+	 * the session's workers are gone.
+	 */
+	scanSession: (target: SessionTarget) => Array<SessionProcess>;
 	/**
 	 * Windows only: start a process outside this process's job
 	 * (`CREATE_BREAKAWAY_FROM_JOB`), with no console and stdin from `NUL`.

@@ -32,6 +32,11 @@ export interface SessionRequest {
 	 * ready, and then deletes it.
 	 */
 	detached?: { report: string };
+	/**
+	 * `--force`: an earlier session whose processes outlive the barrier's
+	 * bound is cleaned up by force.
+	 */
+	force?: boolean;
 	/** `--no-open` sets it to `false`. */
 	open: boolean;
 }
@@ -94,6 +99,7 @@ const requestSchema = jsonLine.pipe(
 		"compiler": "boolean",
 		"config": "object",
 		"detached?": { report: "string" },
+		"force?": "boolean",
 		"open": "boolean",
 	}),
 );
@@ -139,6 +145,7 @@ export function parseSessionRequest(text: string | undefined): SessionRequest {
 		config,
 		...(parsed.detached === undefined ? {} : { detached: parsed.detached }),
 		open: parsed.open,
+		...(parsed.force === true ? { force: true } : {}),
 	};
 }
 

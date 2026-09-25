@@ -9,6 +9,8 @@ export interface WorkerRecord {
 	at: number;
 	event: "start";
 	markers: { session?: string; worker?: string };
+	/** A grandchild's `FIXTURE_GRANDCHILD_MODES` entry. */
+	mode?: string;
 	pid: number;
 	ppid: number;
 	role: string;

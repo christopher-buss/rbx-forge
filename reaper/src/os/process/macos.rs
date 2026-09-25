@@ -2,7 +2,7 @@
 //! first checks that the PID still has that start time. A PID reused between
 //! the check and the call (microseconds) is an accepted limit (spec #28).
 
-use super::{ProcessEntry, StartTime};
+use super::{FileId, ProcessEntry, StartTime};
 use std::ffi::OsStr;
 use std::io;
 use std::mem::{size_of, zeroed};
@@ -157,6 +157,87 @@ fn bsd_info(pid: u32) -> io::Result<Option<libc::proc_bsdinfo>> {
     Ok(Some(info))
 }
 
+/// `PROC_PIDFDVNODEINFO`: the vnode behind one descriptor.
+const PROC_PIDFDVNODEINFO: libc::c_int = 1;
+
+/// `struct proc_fileinfo` of `<sys/proc_info.h>`.
+#[repr(C)]
+struct ProcFileInfo {
+    open_flags: u32,
+    status: u32,
+    offset: libc::off_t,
+    kind: i32,
+    guard_flags: u32,
+}
+
+/// `struct vnode_fdinfo` of `<sys/proc_info.h>`.
+#[repr(C)]
+struct VnodeFdInfo {
+    file: ProcFileInfo,
+    vnode: libc::vnode_info,
+}
+
+/// `Ok(None)` for `ESRCH` (no such process), else the OS error.
+fn gone_or_error<T>() -> io::Result<Option<T>> {
+    let err = io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::ESRCH) {
+        Ok(None)
+    } else {
+        Err(err)
+    }
+}
+
+/// The descriptors of a process. `Ok(None)` when it is gone.
+fn descriptors(pid: libc::c_int) -> io::Result<Option<Vec<libc::proc_fdinfo>>> {
+    // SAFETY: a null buffer asks for the size only.
+    let size = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDLISTFDS, 0, ptr::null_mut(), 0) };
+    if size <= 0 {
+        return gone_or_error();
+    }
+
+    let entry = size_of::<libc::proc_fdinfo>();
+    let room = usize::try_from(size).map_err(io::Error::other)? / entry + LIST_SLACK;
+    let mut fds: Vec<libc::proc_fdinfo> = (0..room)
+        .map(|_| libc::proc_fdinfo {
+            proc_fd: 0,
+            proc_fdtype: 0,
+        })
+        .collect();
+    let bytes = libc::c_int::try_from(room * entry).map_err(io::Error::other)?;
+    // SAFETY: the buffer holds `bytes` bytes.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDLISTFDS,
+            0,
+            fds.as_mut_ptr().cast(),
+            bytes,
+        )
+    };
+    if written <= 0 {
+        return gone_or_error();
+    }
+
+    fds.truncate(usize::try_from(written).map_err(io::Error::other)? / entry);
+    Ok(Some(fds))
+}
+
+/// Whether one vnode descriptor of a process names `file`. A descriptor
+/// closed since the listing does not.
+fn names_file(pid: libc::c_int, fd: i32, file: FileId) -> bool {
+    // SAFETY: plain data; all-zero is a valid value.
+    let mut info: VnodeFdInfo = unsafe { zeroed() };
+    let Ok(size) = libc::c_int::try_from(size_of::<VnodeFdInfo>()) else {
+        return false;
+    };
+    // SAFETY: the buffer is a valid `vnode_fdinfo` of `size` bytes.
+    let written =
+        unsafe { libc::proc_pidfdinfo(pid, fd, PROC_PIDFDVNODEINFO, (&raw mut info).cast(), size) };
+    written == size
+        && u64::from(info.vnode.vi_stat.vst_dev) == file.device
+        && info.vnode.vi_stat.vst_ino == file.inode
+}
+
 /// A PID and the start time that proves it still names the pinned process.
 #[derive(Debug)]
 pub struct Pin {
@@ -192,6 +273,29 @@ impl Pin {
                 .ok_or_else(|| io::Error::other("unreadable KERN_PROCARGS2"))?
                 .to_vec(),
         ))
+    }
+
+    /// Whether a descriptor of the process names `file`, read between two
+    /// start-time checks.
+    pub fn holds_file(&self, file: FileId) -> io::Result<Option<bool>> {
+        if !self.is_alive()? {
+            return Ok(None);
+        }
+
+        let raw_pid = libc::c_int::try_from(self.pid).map_err(io::Error::other)?;
+        let Some(fds) = descriptors(raw_pid)? else {
+            return Ok(None);
+        };
+        let vnode = u32::try_from(libc::PROX_FDTYPE_VNODE).map_err(io::Error::other)?;
+        let holds = fds
+            .iter()
+            .any(|fd| fd.proc_fdtype == vnode && names_file(raw_pid, fd.proc_fd, file));
+        // Checked again: the PID may have been reused during the read.
+        if !self.is_alive()? {
+            return Ok(None);
+        }
+
+        Ok(Some(holds))
     }
 
     pub fn executable_path(&self) -> io::Result<Option<PathBuf>> {

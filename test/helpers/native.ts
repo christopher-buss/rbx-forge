@@ -1,4 +1,12 @@
-import type { FileLock, LockMode, NativeAddon, PinnedProcess } from "../../src/native/addon.ts";
+import type {
+	CleanupReport,
+	FileLock,
+	LockMode,
+	NativeAddon,
+	PinnedProcess,
+	SessionProcess,
+	SessionTarget,
+} from "../../src/native/addon.ts";
 
 /** One process in the fake process table. */
 export interface FakeProcess {
@@ -18,13 +26,36 @@ export interface FakeProcess {
 	waits?: Array<number>;
 }
 
+/** A process of a session in the fake session table. */
+export interface FakeSessionProcess extends Partial<SessionProcess> {
+	/** Released when forced cleanup kills it: the lease it holds. */
+	lease?: FileLock;
+	/** Forced cleanup cannot end it in time. */
+	survivesCleanup?: boolean;
+	/** Forced cleanup cannot read its ownership again. */
+	unverifiable?: boolean;
+}
+
+/** One `forceCleanup` call. */
+export interface FakeCleanup {
+	boundMs: number;
+	target: SessionTarget;
+}
+
 /** A fake addon over an in-memory process table and lock table. */
 export interface FakeNative {
 	addon: NativeAddon;
+	/** Every `forceCleanup` call, in order. */
+	cleanups: Array<FakeCleanup>;
 	/** The locks held now, by path: one mode per holder. */
 	locks: Map<string, Array<LockMode>>;
 	/** The process table, by PID. Tests read `alive` after a run. */
 	processes: Map<number, FakeProcess>;
+	/**
+	 * Each session's live processes, by session id: what `scanSession`
+	 * lists. Forced cleanup removes the ones it kills.
+	 */
+	sessions: Map<string, Array<FakeSessionProcess>>;
 }
 
 /**
@@ -38,9 +69,12 @@ export interface FakeNative {
 export function createFakeNative(processes: Record<number, FakeProcess> = {}): FakeNative {
 	const table = new Map(Object.entries(processes).map(([pid, entry]) => [Number(pid), entry]));
 	const locks = new Map<string, Array<LockMode>>();
+	const sessions = new Map<string, Array<FakeSessionProcess>>();
+	const cleanups: Array<FakeCleanup> = [];
 
 	return {
 		addon: {
+			...sessionMembers(sessions, cleanups),
 			nativeVersion: () => "0.0.0",
 			pinProcess: (pid) => {
 				const entry = table.get(pid);
@@ -56,8 +90,71 @@ export function createFakeNative(processes: Record<number, FakeProcess> = {}): F
 			},
 			tryLockFile: (path, mode) => lockIn(locks, path, mode),
 		},
+		cleanups,
 		locks,
 		processes: table,
+		sessions,
+	};
+}
+
+function toSessionProcess(entry: FakeSessionProcess, index: number): SessionProcess {
+	return {
+		isReaper: entry.isReaper ?? false,
+		parentPid: entry.parentPid ?? 0,
+		pid: entry.pid ?? 1000 + index,
+		startTime: entry.startTime ?? "1",
+	};
+}
+
+/**
+ * Forced cleanup over the session table: kill every process but the
+ * unverifiable and surviving ones, the reaper last.
+ *
+ * @param sessions - The session table.
+ * @param sessionId - The session to clean up.
+ * @returns The report.
+ */
+function cleanUp(
+	sessions: Map<string, Array<FakeSessionProcess>>,
+	sessionId: string,
+): CleanupReport {
+	const entries = sessions.get(sessionId) ?? [];
+	const report: CleanupReport = { killed: [], survivors: [], unverifiable: [] };
+	const left: Array<FakeSessionProcess> = [];
+	const ordered = [
+		...entries.filter(({ isReaper }) => isReaper !== true),
+		...entries.filter(({ isReaper }) => isReaper === true),
+	];
+	for (const [index, entry] of ordered.entries()) {
+		const { pid } = toSessionProcess(entry, index);
+		if (entry.unverifiable === true) {
+			report.unverifiable.push(pid);
+			left.push(entry);
+		} else if (entry.survivesCleanup === true) {
+			report.survivors.push(pid);
+			left.push(entry);
+		} else {
+			report.killed.push(pid);
+			entry.lease?.release();
+		}
+	}
+
+	sessions.set(sessionId, left);
+	return report;
+}
+
+function sessionMembers(
+	sessions: Map<string, Array<FakeSessionProcess>>,
+	cleanups: Array<FakeCleanup>,
+): Pick<NativeAddon, "forceCleanup" | "scanSession"> {
+	return {
+		forceCleanup: async (target, boundMs) => {
+			cleanups.push({ boundMs, target });
+			// A tick, as the real cleanup runs off the main thread.
+			await Promise.resolve();
+			return cleanUp(sessions, target.sessionId);
+		},
+		scanSession: (target) => (sessions.get(target.sessionId) ?? []).map(toSessionProcess),
 	};
 }
 

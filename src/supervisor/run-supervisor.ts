@@ -4,41 +4,37 @@ import type { CommandContext } from "../commands/context.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
-import { logFilePath } from "../output/log-file.ts";
 import { resolveInvocation } from "../process/run-tool.ts";
-import type { FinalReport, WorkerReport } from "../reaper/protocol.ts";
+import type { ReaperEnd } from "../reaper/reaper-client.ts";
 import { rojoInvocation, rojoServeArgs } from "../rojo/rojo.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { Pause } from "../session/pause.ts";
 import type { SessionPlan } from "../session/plan.ts";
 import { planSession } from "../session/plan.ts";
-import type { SessionEndReason, SessionOutcome } from "../session/run-session.ts";
+import type { SessionOutcome } from "../session/run-session.ts";
 import { runSessionAsync } from "../session/run-session.ts";
 import type { SessionSetup } from "../session/session-body.ts";
 import { createSessionBody } from "../session/session-body.ts";
 import type { StatusStore } from "../session/status.ts";
 import type { StopRequest, StopSource } from "../session/stop-source.ts";
+import type { ClearOptions, ForcedCleanup } from "./barrier.ts";
+import { clearOldSessionsAsync, finalBarrierAsync, OLD_SESSION_MARGIN_MS } from "./barrier.ts";
 import type { SessionRequest } from "./channel.ts";
+import { endedResult } from "./end-result.ts";
 import { endpointFor } from "./endpoint.ts";
-import {
-	acquireSingleton,
-	clearOldSessionsAsync,
-	OLD_SESSION_MARGIN_MS,
-	waitForLeaseAsync,
-} from "./locks.ts";
+import { acquireSingleton } from "./locks.ts";
 import { openSessionAsync } from "./session-control.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "./session-files.ts";
 import { forgeFiles, removeSession } from "./session-files.ts";
 
-/**
- * How long the final barrier waits for the lease once the reaper has
- * exited. On POSIX a worker that escaped its tree still holds it.
- */
-const FINAL_BARRIER_MS = 5000;
-
-/** The final barrier always runs to its bound. */
-const NEVER_ABORTS = AbortSignal.any([]);
+/** The warning for each escalation of the reaper's end. */
+const ESCALATIONS: Readonly<Record<NonNullable<ReaperEnd["escalation"]>, string>> = {
+	forced_cleanup:
+		"The reaper did not stop, even after its stdin closed; forge cleaned up the session by force.",
+	stdin_closed:
+		"The reaper did not stop within the grace time; forge closed its stdin, so it forced every tree.",
+};
 
 /** What a supervisor runs with besides the command context. */
 export interface SupervisorOptions {
@@ -67,9 +63,6 @@ interface OwnSession {
 	status: StatusStore;
 }
 
-/** An end that needs no detail beyond its name. */
-type QuietEnd = Exclude<SessionEndReason["type"], "failed" | "service_exited" | "signal">;
-
 /**
  * The supervisor of one `forge start` session (spec #28): the separate
  * process `start` spawns with the owner pipe. It runs the whole session and
@@ -79,17 +72,19 @@ type QuietEnd = Exclude<SessionEndReason["type"], "failed" | "service_exited" | 
  * 1. Load the config and resolve the services (Rojo, the compiler).
  * 2. Take the singleton lock (`session_running` when another session holds
  *    it) and keep it until it returns.
- * 3. Barrier: wait until every older session's lease is free, and delete
- *    those sessions' directories.
+ * 3. Barrier: wait until no process of any older session is left (its
+ *    lease is free and a scan finds none), and delete those sessions'
+ *    directories. With `request.force`, an older session that outlives the
+ *    bound is cleaned up by force first.
  * 4. Check the fixed Rojo port.
  * 5. Create the session directory: write-once identity record, token,
  *    `current`. Open the control endpoint (`status`, `shutdown`), and keep
  *    `state.json` up to date.
  * 6. Run the session (`runSessionAsync`): launch the reaper, admit it only
  *    while no stop request came, and run the body.
- * 7. Final barrier: the lease is free once the reaper and every worker are
- *    gone. Then delete the session's directory, answer the requests in
- *    progress, and close the endpoint.
+ * 7. Final barrier: no process of the session is left once the reaper and
+ *    every worker are gone. Then delete the session's directory, answer the
+ *    requests in progress, and close the endpoint.
  *
  * A stop request before step 5 ends the run with no session; after it, the
  * session's single shutdown path runs.
@@ -99,10 +94,11 @@ type QuietEnd = Exclude<SessionEndReason["type"], "failed" | "service_exited" | 
  * @param options - Stop requests, pause points, and version.
  * @returns The stop reason and every worker's report, once all are gone.
  * @rejects {ForgeError} `session_running`; `previous_generation_alive`;
- *   `port_in_use`; `rojo_missing` or `compiler_missing`; a step's failure
- *   (such as `compile_failed` or `hook_failed`); `service_failed` when a
- *   service exits; `cleanup_in_progress` when a worker outlived the wait; a
- *   config error; `endpoint_in_use`; or `reaper_unavailable`.
+ *   `cleanup_unverifiable` (only with `force`); `port_in_use`; `rojo_missing`
+ *   or `compiler_missing`; a step's failure (such as `compile_failed` or
+ *   `hook_failed`); `service_failed` when a service exits;
+ *   `cleanup_in_progress` when a worker outlived the wait; a config error;
+ *   `endpoint_in_use`; or `reaper_unavailable`.
  */
 export async function runSupervisorAsync(
 	context: CommandContext,
@@ -124,7 +120,12 @@ export async function runSupervisorAsync(
 	const forge = forgeFiles(cwd);
 	const singleton = acquireSingleton(seams, forge);
 	try {
-		return await runLockedAsync(context, options, { config, forge, services });
+		return await runLockedAsync(context, options, {
+			config,
+			force: request.force === true,
+			forge,
+			services,
+		});
 	} finally {
 		singleton.release();
 	}
@@ -150,154 +151,6 @@ function stopped(stop: StopSource): CommandResult | undefined {
 		data: { reason: reasonName(reason), reports: [] },
 		summary: `Stopped on ${reasonName(reason)} before the session started; nothing ran.`,
 	};
-}
-
-/** The summary of each end that needs no detail. */
-const STOP_SUMMARIES = {
-	owner_gone: "forge start is gone; every process of the session is gone.",
-	shutdown: "Stopped on request; every process of the session is gone.",
-	studio_closed: "Studio closed the place; every process of the session is gone.",
-} satisfies Record<QuietEnd, string>;
-
-function describeExit({ exitCode, signal }: WorkerReport): string {
-	if (exitCode !== null) {
-		return `exit code ${exitCode}`;
-	}
-
-	return signal === null ? "killed" : `signal ${signal}`;
-}
-
-/**
- * The error for a service that exited and so ended the session.
- *
- * @param reason - The service and its report.
- * @param cwd - The project root, for the log path.
- * @param reports - Every worker's report.
- * @returns A `service_failed` error.
- */
-function serviceFailed(
-	{ report, service }: Extract<SessionEndReason, { type: "service_exited" }>,
-	cwd: string,
-	reports: ReadonlyArray<FinalReport>,
-): ForgeError {
-	return new ForgeError(
-		"service_failed",
-		`${service} exited (${describeExit(report)}), so the session stopped.`,
-		{
-			details: { reason: `service_failed:${service}`, reports },
-			hint: `Its output is in ${logFilePath(cwd, service)}.`,
-		},
-	);
-}
-
-/**
- * The outcome for why the session ended, once every worker is gone.
- *
- * @param reason - Why it ended.
- * @param cwd - The project root, for the log paths.
- * @param data - The port and every worker's report.
- * @returns The result for a stop request or a closed Studio.
- * @throws The failed step's error, or `service_failed` when a service
- *   exited.
- */
-function endedResult(
-	reason: SessionEndReason,
-	cwd: string,
-	data: { port: number; reports: Array<FinalReport> },
-): CommandResult {
-	switch (reason.type) {
-		case "failed": {
-			throw reason.error;
-		}
-		case "service_exited": {
-			throw serviceFailed(reason, cwd, data.reports);
-		}
-		case "signal": {
-			return {
-				data: { ...data, reason: reason.signal },
-				summary: `Stopped on ${reason.signal}; every process of the session is gone.`,
-			};
-		}
-		case "owner_gone":
-		case "shutdown":
-		case "studio_closed": {
-			return {
-				data: { ...data, reason: reason.type },
-				summary: STOP_SUMMARIES[reason.type],
-			};
-		}
-	}
-}
-
-/**
- * Step 6 of {@link runSupervisorAsync}: run the session. When the reaper does
- * not start, nothing of the session ran, so its files go.
- *
- * @param seams - The reaper launcher and file system.
- * @param options - Stop requests and pause points.
- * @param session - The config, files, and services.
- * @returns How the session ended.
- * @rejects `reaper_unavailable`.
- */
-async function runSessionOnceAsync(
-	seams: CommandContext["seams"],
-	{ pause, stop }: SupervisorOptions,
-	{ config, files, forge, services, status }: OwnSession,
-): Promise<SessionOutcome> {
-	try {
-		return await runSessionAsync(
-			{ pause, reaper: seams.reaper },
-			{
-				graceMs: config.gracefulTimeoutMs,
-				leasePath: files.lease,
-				onStop: stop.onStop,
-				recordPath: files.record,
-				sessionId: files.sessionId,
-			},
-			createSessionBody({ ...services, directory: files.directory, status }),
-		);
-	} catch (err) {
-		removeSession(seams.fileSystem, forge, files.sessionId);
-		throw err;
-	}
-}
-
-function survivorsOf(reports: ReadonlyArray<FinalReport>): Array<string> {
-	return reports.filter(({ report }) => report.incomplete).map(({ id }) => id);
-}
-
-/**
- * Step 7 of {@link runSupervisorAsync}: the final barrier. The session's
- * files go once its lease is free and every tree was reported empty;
- * otherwise they stay, so the next session's barrier waits.
- *
- * @param seams - The clock, file system, and native addon.
- * @param session - The session's files.
- * @param reports - Every worker's report.
- * @rejects {ForgeError} `cleanup_in_progress` when a process of the session
- *   outlived the wait.
- */
-async function finalBarrierAsync(
-	seams: CommandContext["seams"],
-	{ files, forge }: Pick<OwnSession, "files" | "forge">,
-	reports: Array<FinalReport>,
-): Promise<void> {
-	const survivors = survivorsOf(reports);
-	const lease = await waitForLeaseAsync(seams, files.lease, FINAL_BARRIER_MS, NEVER_ABORTS);
-	lease?.release();
-	if (lease === undefined || survivors.length > 0) {
-		const names = survivors.length > 0 ? survivors.join(", ") : "the session";
-		throw new ForgeError(
-			"cleanup_in_progress",
-			`Processes of ${names} were still alive when forge stopped waiting.`,
-			{
-				details: { reports, sessionId: files.sessionId },
-				hint: "Check for them, and stop them by hand.",
-			},
-		);
-	}
-
-	removeSession(seams.fileSystem, forge, files.sessionId);
 }
 
 /**
@@ -343,6 +196,105 @@ async function requireFreePortAsync(network: Network, port: number): Promise<voi
 }
 
 /**
+ * Step 3 of {@link runSupervisorAsync}: the startup barrier, with a warning
+ * for each old session `--force` cleaned up.
+ *
+ * @param context - The seams and reporter.
+ * @param config - The resolved config, for the bound.
+ * @param forge - The project's `.forge` files.
+ * @param options - `--force`, and the stop signal.
+ * @returns Every forced cleanup.
+ * @rejects As `clearOldSessionsAsync`.
+ */
+async function clearOldAsync(
+	{ reporter, seams }: CommandContext,
+	config: ResolvedConfig,
+	forge: ForgeFiles,
+	options: Pick<ClearOptions, "force" | "signal">,
+): Promise<Array<ForcedCleanup>> {
+	const cleanups = await clearOldSessionsAsync(seams, forge, {
+		...options,
+		boundMs: config.gracefulTimeoutMs + OLD_SESSION_MARGIN_MS,
+	});
+	for (const { killed, sessionId } of cleanups) {
+		reporter.emit({
+			message: `--force killed ${killed.length} processes of the earlier session ${sessionId}.`,
+			type: "warning",
+		});
+	}
+
+	return cleanups;
+}
+
+/**
+ * Step 6 of {@link runSupervisorAsync}: run the session. When the reaper does
+ * not start, nothing of the session ran, so its files go.
+ *
+ * @param seams - The reaper launcher and file system.
+ * @param options - Stop requests and pause points.
+ * @param session - The config, files, and services.
+ * @returns How the session ended.
+ * @rejects `reaper_unavailable`.
+ */
+async function runSessionOnceAsync(
+	seams: CommandContext["seams"],
+	{ pause, stop }: SupervisorOptions,
+	{ config, files, forge, services, status }: OwnSession,
+): Promise<SessionOutcome> {
+	try {
+		return await runSessionAsync(
+			{ pause, reaper: seams.reaper },
+			{
+				graceMs: config.gracefulTimeoutMs,
+				leasePath: files.lease,
+				onStop: stop.onStop,
+				recordPath: files.record,
+				sessionId: files.sessionId,
+			},
+			createSessionBody({ ...services, directory: files.directory, status }),
+		);
+	} catch (err) {
+		removeSession(seams.fileSystem, forge, files.sessionId);
+		throw err;
+	}
+}
+
+/**
+ * Steps 6 and 7 of {@link runSupervisorAsync}, once the session's files and
+ * endpoint exist: run it, then the final barrier.
+ *
+ * @param context - The project root, reporter, and seams.
+ * @param options - Stop requests and pause points.
+ * @param session - The config, files, services, and status.
+ * @param cleanups - What `--force` cleaned up before it.
+ * @returns The session's result.
+ * @rejects As {@link runSupervisorAsync}.
+ */
+async function runOpenSessionAsync(
+	{ cwd, reporter, seams }: CommandContext,
+	options: SupervisorOptions,
+	session: OwnSession,
+	cleanups: Array<ForcedCleanup>,
+): Promise<CommandResult> {
+	const { config, files, forge, status } = session;
+	const { end, reason } = await runSessionOnceAsync(seams, options, session);
+	status.phase("stopping");
+	const { escalation } = end;
+	if (escalation !== undefined) {
+		reporter.emit({ message: ESCALATIONS[escalation], type: "warning" });
+	}
+
+	await finalBarrierAsync(seams, forge, files, end.reports);
+	status.phase("stopped");
+	return endedResult(reason, cwd, {
+		port: config.rojoPort,
+		reports: end.reports,
+		...(cleanups.length > 0 ? { cleanups } : {}),
+		...(escalation === undefined ? {} : { escalation }),
+	});
+}
+
+/**
  * Steps 3 to 7 of {@link runSupervisorAsync}, under the singleton lock.
  *
  * @param context - The project root, environment, and seams.
@@ -354,11 +306,18 @@ async function requireFreePortAsync(network: Network, port: number): Promise<voi
 async function runLockedAsync(
 	context: CommandContext,
 	options: SupervisorOptions,
-	{ config, forge, services }: Pick<OwnSession, "config" | "forge" | "services">,
+	{
+		config,
+		force,
+		forge,
+		services,
+	}: Pick<OwnSession, "config" | "forge" | "services"> & { force: boolean },
 ): Promise<CommandResult> {
-	const { cwd, seams } = context;
-	const bound = config.gracefulTimeoutMs + OLD_SESSION_MARGIN_MS;
-	await clearOldSessionsAsync(seams, forge, bound, options.stop.signal);
+	const { seams } = context;
+	const cleanups = await clearOldAsync(context, config, forge, {
+		force,
+		signal: options.stop.signal,
+	});
 	await requireFreePortAsync(seams.network, config.rojoPort);
 	const late = stopped(options.stop);
 	if (late !== undefined) {
@@ -375,11 +334,7 @@ async function runLockedAsync(
 	});
 	try {
 		const session = { config, files, forge, services, status };
-		const { end, reason } = await runSessionOnceAsync(seams, options, session);
-		status.phase("stopping");
-		await finalBarrierAsync(seams, session, end.reports);
-		status.phase("stopped");
-		return endedResult(reason, cwd, { port: config.rojoPort, reports: end.reports });
+		return await runOpenSessionAsync(context, options, session, cleanups);
 	} finally {
 		await control.closeAsync();
 	}

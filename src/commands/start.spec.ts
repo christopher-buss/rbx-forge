@@ -58,6 +58,25 @@ describe(runStartAsync, () => {
 		expect(bare.launches[0]!.request).toMatchObject({ compiler: false, open: false });
 	});
 
+	it("should ask for forced cleanup of an earlier session only with --force", () => {
+		expect.assertions(2);
+
+		const forced = startWith({ force: true });
+		const plain = startWith({ force: false });
+
+		expect(forced.launches[0]!.request).toStrictEqual({
+			compiler: true,
+			config: { rojoPort: 5000 },
+			force: true,
+			open: true,
+		});
+		expect(plain.launches[0]!.request).toStrictEqual({
+			compiler: true,
+			config: { rojoPort: 5000 },
+			open: true,
+		});
+	});
+
 	it("should report the supervisor's events and return its result", async () => {
 		expect.assertions(2);
 

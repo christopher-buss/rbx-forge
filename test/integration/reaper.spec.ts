@@ -29,6 +29,8 @@ import {
 
 const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 const native = loadRealNative();
+/** L9's repetitions (spec #28: ×200). */
+const L9_ROUNDS = 200;
 
 interface TestSession {
 	directory: string;
@@ -191,7 +193,7 @@ describe("reaper", () => {
 		expect.assertions(1);
 
 		const survivors: Array<number> = [];
-		for (let round = 0; round < 10; round++) {
+		for (let round = 0; round < L9_ROUNDS; round++) {
 			const { reaper, worker } = await startSessionAsync();
 			reaper.go();
 			const spawned = await reaper.spawnAsync(worker(`rojo-${round}`));
@@ -201,7 +203,7 @@ describe("reaper", () => {
 		}
 
 		expect(survivors).toStrictEqual([]);
-	}, 60_000);
+	}, 300_000);
 
 	it("should kill setsid and double-forked descendants (L3)", async () => {
 		expect.assertions(2);

@@ -20,6 +20,8 @@ use windows_sys::Win32::System::Threading::{
 
 /// Exit code a killed process reports.
 const KILLED_EXIT_CODE: u32 = 1;
+/// How long a failed kill waits for a process that is already exiting.
+const EXITING_WAIT: Duration = Duration::from_millis(500);
 /// Longest path `QueryFullProcessImageNameW` fills (the extended path limit).
 const MAX_PATH_UNITS: usize = 32_768;
 
@@ -150,9 +152,10 @@ impl Pin {
         // SAFETY: the handle is open and has `PROCESS_TERMINATE` access.
         if unsafe { TerminateProcess(self.0.0, KILLED_EXIT_CODE) } == 0 {
             let err = io::Error::last_os_error();
-            // Terminating a process that is already exiting fails; that is
-            // not an error for a caller that wants it gone.
-            return if self.0.has_exited()? {
+            // Terminating a process that is already exiting fails (access
+            // denied) until its exit completes; that is not an error for a
+            // caller that wants it gone.
+            return if self.0.wait(EXITING_WAIT)? {
                 Ok(false)
             } else {
                 Err(err)

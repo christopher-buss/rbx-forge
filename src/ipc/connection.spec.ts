@@ -5,6 +5,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import type { NativePipeConnection, NativePipeServer } from "../native/addon.ts";
 import {
+	Handoff,
 	nativeConnection,
 	nativeListener,
 	socketListener,
@@ -362,5 +363,22 @@ describe(socketListener, () => {
 		listener.close();
 
 		await expect(closed).resolves.toBeUndefined();
+	});
+});
+
+describe(Handoff, () => {
+	it("should hand an item to a waiting take without also queueing it", async () => {
+		expect.assertions(2);
+
+		const handoff = new Handoff<number>();
+		const taken = handoff.takeAsync();
+		handoff.push(1);
+		const dropped: Array<number> = [];
+		handoff.close((item) => {
+			dropped.push(item);
+		});
+
+		await expect(taken).resolves.toBe(1);
+		expect(dropped).toStrictEqual([]);
 	});
 });
