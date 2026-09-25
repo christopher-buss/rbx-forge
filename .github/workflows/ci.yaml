@@ -128,12 +128,14 @@ jobs:
       # glibc host links the glibc loader into the addon, and Ubuntu's
       # musl-gcc has no `libgcc_s`. A Node addon must link the C runtime
       # dynamically, so the addon build turns `crt-static` off; the reaper
-      # stays static. The container runs as root, so give the files back.
+      # stays static. The napi CLI picks the cross linker
+      # `aarch64-linux-musl-gcc` for aarch64 musl; Alpine's `cc` already links
+      # for musl. The container runs as root, so give the files back.
       - if: ${{ matrix.musl }}
         name: Build addon and reaper (Alpine)
         run: |
           mkdir -p ~/.cargo/registry
-          docker run --rm -v "$PWD:/w" -v "$HOME/.cargo/registry:/usr/local/cargo/registry" -w /w -e TARGET rust:1.98.1-alpine sh -euc '
+          docker run --rm -v "$PWD:/w" -v "$HOME/.cargo/registry:/usr/local/cargo/registry" -w /w -e TARGET -e CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER rust:1.98.1-alpine sh -euc '
               apk add --no-cache musl-dev nodejs npm
               RUSTFLAGS="-C target-feature=-crt-static" npm run build:native -- --target "$TARGET"
               cargo build --manifest-path reaper/Cargo.toml --release --bin forge-reaper --target "$TARGET"
@@ -141,6 +143,7 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" reaper/target ~/.cargo/registry
         shell: bash
         env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: cc
           TARGET: ${{ matrix.target }}
 
       # Load the addon in a Node of the target's platform and call it. musl
