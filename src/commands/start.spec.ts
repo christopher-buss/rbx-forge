@@ -137,6 +137,8 @@ interface JoinRun {
 	reporter: ReturnType<typeof createRecordingReporter>;
 	running: Promise<CommandResult>;
 	signals: ReturnType<typeof createFakeSignals>;
+	/** How many times it waited to look for the session again. */
+	sleeps: () => number;
 	supervisor: ReturnType<typeof vi.fn<SupervisorLauncher>>;
 }
 
@@ -180,7 +182,7 @@ async function joinWithAsync(
 		}),
 		{ config: {}, flags },
 	);
-	return { ipc, memory, reporter, running, signals, supervisor };
+	return { ipc, memory, reporter, running, signals, sleeps: () => now / 1000, supervisor };
 }
 
 /**
@@ -410,6 +412,7 @@ describe("runStartAsync next to a running session", () => {
 			hint: 'Check "forge status", or stop it with "forge down".',
 			message: "A session holds this project, but it does not answer.",
 		});
-		expect(JOIN_SILENCE_MS).toBe(30_000);
+		// It looks each second, up to and at the bound.
+		expect(run.sleeps()).toBe(JOIN_SILENCE_MS / 1000);
 	});
 });

@@ -3,6 +3,7 @@ import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createMemoryTransport, scriptedConnection } from "../../test/helpers/fake-ipc.ts";
 import { ForgeError } from "../errors.ts";
 import { callSessionAsync, ownSessionAsync } from "./client.ts";
+import type { IpcConnection } from "./connection.ts";
 import { IPC_WAIT_MS } from "./protocol.ts";
 import type { IpcOwner, IpcServerOptions } from "./server.ts";
 import { startIpcServer } from "./server.ts";
@@ -35,6 +36,15 @@ async function serveAsync(
 function makeOwner(join: IpcOwner["join"] = async () => ({ added: ["compiler"] })) {
 	const leave = vi.fn<IpcOwner["leave"]>().mockResolvedValue({ stopped: ["compiler"] });
 	return { join: vi.fn<IpcOwner["join"]>(join), leave };
+}
+
+const JOINED = '{"ok":true,"result":{},"type":"response"}';
+
+function scriptedTransport(connection: IpcConnection): IpcTransport {
+	return {
+		connectAsync: vi.fn<IpcTransport["connectAsync"]>().mockResolvedValue(connection),
+		listenAsync: vi.fn<IpcTransport["listenAsync"]>(),
+	};
 }
 
 function never(): AbortSignal {
@@ -211,5 +221,47 @@ describe(ownSessionAsync, () => {
 		});
 		expect(connection.written.at(-1)).toBe('{"type":"release"}\n');
 		expect(connection.readTimeouts.at(-1)).toBe(5000);
+	});
+
+	it.for([
+		["closes", { type: "closed" }],
+		["sends a line that is too long", { type: "too_long" }],
+	] as const)("should end the hold with no answer once the session %s", async ([, end]) => {
+		expect.assertions(2);
+
+		const connection = scriptedConnection([JOINED, end]);
+		const owned = await ownSessionAsync(scriptedTransport(connection), TARGET, {
+			signal: never(),
+		});
+
+		await expect(owned!.holdAsync(never(), 1000)).resolves.toBeUndefined();
+		expect(connection.isClosed()).toBeTrue();
+	});
+
+	it("should close the connection when the join fails, or is given up once answered", async () => {
+		expect.assertions(4);
+
+		const failing = scriptedConnection([
+			'{"error":{"code":"session_running","message":"m"},"ok":false,"type":"response"}',
+		]);
+		const silent = scriptedConnection([]);
+		const given = scriptedConnection([JOINED]);
+		const stop = new AbortController();
+		stop.abort();
+
+		await expect(
+			ownSessionAsync(scriptedTransport(failing), TARGET, { signal: never() }),
+		).rejects.toMatchObject({ code: "session_running" });
+		await expect(
+			ownSessionAsync(scriptedTransport(silent), TARGET, { signal: never() }),
+		).rejects.toMatchObject({ message: "The session at session gave no answer to own." });
+		await expect(
+			ownSessionAsync(scriptedTransport(given), TARGET, { signal: stop.signal }),
+		).resolves.toBeUndefined();
+		expect([failing.isClosed(), silent.isClosed(), given.isClosed()]).toStrictEqual([
+			true,
+			true,
+			true,
+		]);
 	});
 });

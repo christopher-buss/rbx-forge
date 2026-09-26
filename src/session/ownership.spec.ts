@@ -144,7 +144,8 @@ describe(createOwnerHandlers, () => {
 	it("should let go of nothing while no owner holds the session", async () => {
 		expect.assertions(2);
 
-		const { end, handlers } = makeHandlers();
+		const { end, handlers, status } = makeHandlers();
+		status.service("compiler", "off");
 
 		await expect(handlers.release({ type: "owner_gone" })).resolves.toStrictEqual({
 			ending: false,
@@ -180,5 +181,23 @@ describe(createOwnerHandlers, () => {
 		await expect(handlers.own({ parts: ["studio"] })).rejects.toThrow("add failed");
 		expect(status.snapshot().services.compiler.owner).toBeNull();
 		expect(ownership.isOwned).toBeFalse();
+	});
+
+	it("should give back a Studio it took, open, and forget what an earlier owner added", async () => {
+		expect.assertions(3);
+
+		const add = vi.fn<PartAdder>().mockResolvedValueOnce(["compiler"]).mockResolvedValue([]);
+		const { handlers, status, stopAsync } = makeHandlers(add);
+		status.studio("open", "/p/game.rbxl", null);
+		await handlers.own({ parts: ["compiler"] });
+		// `up` started the compiler again: it has no owner now.
+		status.owner("compiler", null);
+		await handlers.release({ type: "owner_gone" });
+		await handlers.own({ parts: [] });
+		const second = await handlers.release({ type: "owner_gone" });
+
+		expect(second).toMatchObject({ released: ["studio", "compiler"], stopped: [] });
+		expect(status.snapshot().services.studio).toMatchObject({ owner: null, status: "open" });
+		expect(stopAsync).not.toHaveBeenCalled();
 	});
 });

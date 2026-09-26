@@ -206,7 +206,7 @@ async function joinOnAsync(
 		connection.close();
 	}
 
-	options.signal.addEventListener("abort", close, { once: true });
+	options.signal.addEventListener("abort", close);
 	try {
 		await connection.writeAsync(requestLines(target, "own", options.params), IPC_WAIT_MS);
 		const joined = await readAnswerAsync(connection, target, "own", options.responseTimeoutMs);

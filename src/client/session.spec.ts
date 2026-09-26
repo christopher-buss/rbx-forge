@@ -238,6 +238,7 @@ describe(joinSessionAsync, () => {
 
 			await expect(outcome).rejects.toMatchObject({
 				code: "internal_error",
+				hint: "The session may run another forge version. Stop it, then start it again.",
 				message: `The session answered ${method} with something else.`,
 			});
 		},

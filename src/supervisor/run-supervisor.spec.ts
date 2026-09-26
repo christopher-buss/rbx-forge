@@ -2897,6 +2897,65 @@ describe("forge down control channel", () => {
 	});
 });
 
+describe("forge down and syncback", () => {
+	it("should sync back a save Studio made just before a down closed it, then end", async () => {
+		expect.assertions(2);
+
+		const run: StartRun = startCommand({
+			...SYNCBACK,
+			files: { ...TOOL_FILES, "game.rbxl": "v1" },
+			flags: { compiler: false, syncback: true },
+			// Rojo listens on the second look: the save watch looks 100 ms
+			// after the Studio watch.
+			isListening: vi
+				.fn<Network["isListeningAsync"]>()
+				.mockResolvedValueOnce(false)
+				.mockResolvedValue(true),
+			processes: {
+				[LAUNCHED_PID]: {
+					alive: true,
+					executablePath: "/opt/RobloxStudio",
+					onClose: () => {
+						run.memory.fileSystem.rmSync(LOCK);
+					},
+					startTime: "900",
+				},
+			},
+		});
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: LAUNCHED_PID, startTime: "900" },
+			type: "launched",
+		});
+		await flushAsync();
+		run.clock.advance(100);
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+		run.clock.advance(400);
+		await flushAsync();
+		run.clock.advance(100);
+		await flushAsync();
+		// Studio saves the place, and a down closes it before the save watch
+		// looks.
+		run.memory.setModifiedTime("game.rbxl", Date.UTC(2026, 0, 2));
+		const answer = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await vi.waitFor(async () => {
+			run.clock.advance(10);
+			await flushAsync();
+			assert(run.fake.calls.includes("stop rojo 3000"), "Rojo is asked to stop");
+		});
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		await expect(answer).resolves.toMatchObject({ ending: true });
+		expect(spawnedIds(run.fake)).toContain(
+			"syncback-1: syncback default.project.json --input game.rbxl --non-interactive",
+		);
+	});
+});
+
 describe("forge start owners", () => {
 	it("should give its owner every part it starts with, and end as before once it goes", async () => {
 		expect.assertions(3);
@@ -3065,7 +3124,7 @@ describe("forge start owners", () => {
 	});
 
 	it("should leave open the Studio a joined start opened, and stop the Rojo it started", async () => {
-		expect.assertions(4);
+		expect.assertions(5);
 
 		const run = startCommand({ ...WATCH, flags: UP });
 		await flushAsync();
@@ -3083,9 +3142,19 @@ describe("forge start owners", () => {
 		run.memory.fileSystem.rmSync(LOCK);
 		await passAsync(run, FILE_POLL_MS);
 		const closed = stateOf(run);
-		run.signals.fire("SIGINT");
-		await run.result;
+		// With no Studio left, a down that stops the compiler ends the session.
+		const down = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await vi.waitFor(async () => {
+			await passAsync(run, OUTPUT_POLL_MS);
+			assert(run.fake.calls.includes("stop compiler 3000"), "the compiler is asked to stop");
+		});
+		run.fake.exit("compiler", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
 
+		await expect(down).resolves.toMatchObject({ ending: true, stopped: ["compiler"] });
 		expect(owned.joined).toStrictEqual({
 			added: ["studio", "rojo"],
 			sessionId: "session-1",

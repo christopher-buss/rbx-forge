@@ -183,6 +183,7 @@ async function watchAsync(
 
 	const exited = exitedAsync(child, stderr, () => result);
 	// Once released, this `start` returns; the supervisor runs on.
+	// Stryker disable next-line CallExpression: only an unhandled rejection tells
 	exited.catch(ignore);
 	const { data, summary } = await Promise.race([released.promise, exited]);
 	return { data, summary };
