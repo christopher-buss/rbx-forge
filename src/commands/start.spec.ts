@@ -14,11 +14,12 @@ import {
 	createTestSeams,
 	PROJECT,
 } from "../../test/helpers/seams.ts";
+import { JOIN_SILENCE_MS } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { IpcHandler } from "../ipc/server.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { SupervisorLaunch, SupervisorLauncher } from "../supervisor/launcher.ts";
-import { JOIN_SILENCE_MS, runStartAsync, START_FLAGS } from "./start.ts";
+import { runStartAsync, START_FLAGS } from "./start.ts";
 
 /**
  * Run `start` with no session running, once it launched its supervisor.
@@ -69,7 +70,7 @@ describe(runStartAsync, () => {
 			{
 				cwd: PROJECT,
 				env: { PATH: "/bin" },
-				request: { compiler: true, config: { rojoPort: 5000 }, open: true, rojo: true },
+				request: { compiler: true, config: { rojoPort: 5000 }, open: true },
 			},
 		]);
 		expect(bare.launches[0]!.request).toMatchObject({ compiler: false, open: false });
@@ -86,13 +87,11 @@ describe(runStartAsync, () => {
 			config: { rojoPort: 5000 },
 			force: true,
 			open: true,
-			rojo: true,
 		});
 		expect(plain.launches[0]!.request).toStrictEqual({
 			compiler: true,
 			config: { rojoPort: 5000 },
 			open: true,
-			rojo: true,
 		});
 	});
 

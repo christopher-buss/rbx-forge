@@ -7,6 +7,7 @@ import { RECOVERY_FLAG, recoveryOptions } from "../client/studio.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { AutoRecoveryMode } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
+import type { IpcTransport } from "../ipc/transport.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { PartStops } from "../session/part-stops.ts";
 import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
@@ -80,6 +81,9 @@ interface SessionAnswer {
  *   stopped and kept (`null` with no session), and the same for each
  *   snapshot Studio (`snapshots`).
  * @rejects `studio_owned` when a `forge start` terminal owns the Studio;
+ *   `session_stopping` when the session stops while `stop` asks it, and
+ *   the failure of a session that does not answer the stop (such as
+ *   `supervisor_unresponsive`): a Studio then may be the session's;
  *   `identity_mismatch` when the lock file names no process or another
  *   computer, or a process that is not Studio, started after the lock file
  *   was written, is not the session's Studio, or cannot be checked;
@@ -208,15 +212,54 @@ function placeOf(cwd: string, value: FlagValues[string]): string | undefined {
 }
 
 /**
- * Ask the project's running session to stop its Studio.
+ * The Studio a session reports.
+ *
+ * @param ipc - Reaches the session.
+ * @param session - Its endpoint and token.
+ * @returns Its Studio; `undefined` when it is gone, silent, or replaced.
+ * @rejects {ForgeError} `internal_error` when it answers with something
+ *   else.
+ */
+async function sessionStudioAsync(
+	ipc: IpcTransport,
+	session: KnownSession,
+): Promise<SessionStudio | undefined> {
+	try {
+		const { services } = await fetchStatusAsync(ipc, session);
+		return services.studio;
+	} catch (err) {
+		if (err instanceof ForgeError && err.code === "internal_error") {
+			throw err;
+		}
+
+		return undefined;
+	}
+}
+
+function sessionStopping({ identity }: KnownSession): ForgeError {
+	return new ForgeError(
+		"session_stopping",
+		`Session ${identity.sessionId} is stopping, so forge cannot tell whether a Studio is its own.`,
+		{
+			details: { sessionId: identity.sessionId },
+			hint: 'Run "forge stop" again once the session is gone.',
+		},
+	);
+}
+
+/**
+ * Ask the project's running session to stop its Studio. A session that
+ * still starts answers once it started its parts.
  *
  * @param context - The file system and transport.
  * @param request - `--force`, `--place`, and the recovery mode.
  * @param graceMs - How long the session's services get to stop.
  * @returns What it did, and its Studio before; `undefined` when no session
- *   answers, or it still starts or stops.
+ *   answers its status.
  * @rejects {ForgeError} `internal_error` when it answers with something
- *   else.
+ *   else; `session_stopping` when it stops meanwhile; the stop's failure,
+ *   such as `supervisor_unresponsive`. A session that answered may have a
+ *   Studio open, so `stop` never closes one by its lock file then.
  */
 async function askSessionAsync(
 	context: CommandContext,
@@ -229,22 +272,23 @@ async function askSessionAsync(
 		return undefined;
 	}
 
+	const studio = await sessionStudioAsync(ipc, session);
+	if (studio === undefined) {
+		return undefined;
+	}
+
 	try {
-		const { services } = await fetchStatusAsync(ipc, session);
 		const stops = await stopPartsAsync(
 			ipc,
 			session,
 			{ ...request, keepStudio: false, scope: "stop" },
 			STOP_PARTS_WAIT_MS + graceMs,
 		);
-		return { session, stops, studio: services.studio };
+		return { session, stops, studio };
 	} catch (err) {
-		if (err instanceof ForgeError && err.code === "internal_error") {
-			throw err;
-		}
-
-		// Gone, silent, replaced, starting, or stopping: no session Studio.
-		return undefined;
+		throw err instanceof ForgeError && err.code === "not_running"
+			? sessionStopping(session)
+			: err;
 	}
 }
 

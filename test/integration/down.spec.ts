@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import nodeFs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, expect, it, onTestFinished } from "vitest";
 
 import type { DownOptions, DownReport } from "../../src/client/down.ts";
@@ -22,13 +23,13 @@ import { pidOf, realNativePath, spawnSleeper } from "../helpers/real-native.ts";
 import { isProcessAlive, waitForDeathAsync, waitForWorkersAsync } from "../helpers/worker-log.ts";
 import type { Project } from "./session-harness.ts";
 import {
+	COMPILER_ONLY,
 	currentIdentity,
 	filesLeft,
 	launch,
 	launchUnowned,
 	makeProjectAsync,
 	native,
-	ROJO_ONLY,
 	stageOldSessionAsync,
 	waitForAsync,
 	waitForReadyAsync,
@@ -177,7 +178,7 @@ function existenceAtDelete(file: string): {
 
 /**
  * A pause that starts a replacement session at `point`, once, and waits
- * until it is ready and its Rojo has started.
+ * until it is ready and its compiler has started.
  *
  * @param project - The fixture project, with its paths.
  * @param at - Where `down` lets it start.
@@ -268,7 +269,7 @@ describe("forge down", () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync({ gracefulTimeoutMs: 2000 });
-		const run = launchUnowned(project, ROJO_ONLY, {
+		const run = launchUnowned(project, COMPILER_ONLY, {
 			FIXTURE_GRANDCHILDREN: "2",
 			FIXTURE_IGNORE_SIGNALS: "1",
 		});
@@ -283,11 +284,11 @@ describe("forge down", () => {
 		// until its parent reaps it.
 		const alive = await waitForDeathAsync([pid, ...pidsOf(project, sessionId)], 2000);
 
-		// The session stopped Rojo, waiting through its grace, then ended.
+		// The session stopped the compiler through its grace, then ended.
 		expect(outcome).toStrictEqual({
 			ok: true,
 			report: {
-				parts: { kept: [], stopped: ["rojo"] },
+				parts: { kept: [], stopped: ["compiler"] },
 				removed: false,
 				sessionId,
 				status: "stopped",
@@ -303,7 +304,7 @@ describe("forge down", () => {
 		expect.assertions(2);
 
 		const project = await makeProjectAsync();
-		const run = launchUnowned(project, ROJO_ONLY);
+		const run = launchUnowned(project, COMPILER_ONLY);
 		await waitForReadyAsync(run);
 		const session = findSession(nodeFs, forgeFiles(project.project));
 		assert(session !== undefined, "no session is named");
@@ -316,9 +317,9 @@ describe("forge down", () => {
 		const status = await fetchStatusAsync(realTransport(), session);
 
 		expect(stops).toStrictEqual({ ending: false, kept: [], stopped: [] });
-		expect({ phase: status.phase, rojo: status.services.rojo.status }).toStrictEqual({
+		expect({ compiler: status.services.compiler.status, phase: status.phase }).toStrictEqual({
+			compiler: "ready",
 			phase: "ready",
-			rojo: "ready",
 		});
 	}, 60_000);
 
@@ -376,7 +377,7 @@ describe("forge down", () => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync();
-		const first = launch(project, ROJO_ONLY, { RBX_FORGE_TEST_PAUSE: "block" });
+		const first = launch(project, COMPILER_ONLY, { RBX_FORGE_TEST_PAUSE: "block" });
 		await waitForReadyAsync(first);
 		const a = currentIdentity(project);
 		await waitForWorkersAsync(project.log, 1);
@@ -407,11 +408,33 @@ describe("forge down", () => {
 		).resolves.toStrictEqual([]);
 	}, 90_000);
 
+	it("should wait for a start session's parts while it starts, and keep them", async () => {
+		expect.assertions(2);
+
+		const project = await makeProjectAsync();
+		launch(project, COMPILER_ONLY, { RBX_FORGE_TEST_PAUSE: "admitted" });
+		const pause = path.join(project.pauses, "admitted.paused");
+		const pid = await pausedPidAsync(pause);
+		const down = downAsync(project);
+		// The session answers its status, but has no parts to stop yet.
+		await sleep(1000);
+		rmSync(pause, { force: true });
+
+		await expect(down).resolves.toMatchObject({
+			ok: true,
+			report: {
+				parts: { kept: [{ owner: "start", part: "compiler" }], stopped: [] },
+				status: "running",
+			},
+		});
+		expect(isProcessAlive(pid)).toBeTrue();
+	}, 60_000);
+
 	it("should never report stopped for a stalled startup, and kill it before any worker with --force", async () => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync();
-		launch(project, ROJO_ONLY, { RBX_FORGE_TEST_PAUSE: "control,block" });
+		launch(project, COMPILER_ONLY, { RBX_FORGE_TEST_PAUSE: "control,block" });
 		const pause = path.join(project.pauses, "control.paused");
 		const pid = await pausedPidAsync(pause);
 		const { sessionId } = currentIdentity(project);

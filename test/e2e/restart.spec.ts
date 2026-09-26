@@ -110,6 +110,12 @@ describe("forge restart", () => {
 					},
 				},
 				stopped: ["studio", "rojo", "compiler"],
+				studio: {
+					forced: false,
+					pid: old.studio[0]!.pid,
+					place: fixture.place,
+					status: "closed",
+				},
 			},
 		]);
 		expect({

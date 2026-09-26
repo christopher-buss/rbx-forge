@@ -17,10 +17,8 @@ export interface SessionPlan {
 	compile: boolean;
 	/** The watch-mode compiler service it starts; none without one. */
 	compiler: CompilerWatch | undefined;
-	/** Open the place in Studio; the session ends when Studio closes it. */
+	/** Open the place in Studio, and serve Rojo: Rojo runs only with Studio. */
 	open: boolean;
-	/** Serve the project with Rojo. */
-	rojo: boolean;
 	/** Run syncback on every place save. */
 	syncback: boolean;
 }
@@ -29,10 +27,10 @@ export interface SessionPlan {
 export interface SessionFlags {
 	/** `--no-compiler` turns it off. */
 	compiler: boolean;
-	/** `start --no-open` turns it off; `up` never opens Studio. */
+	/**
+	 * Studio with its Rojo: `start --no-open` and `up` leave it off.
+	 */
 	open: boolean;
-	/** `start` serves Rojo; `up` does not. */
-	rojo: boolean;
 }
 
 /** The compiler's watch flag; roblox-ts reads it. */
@@ -85,10 +83,10 @@ export function compilerWatch(
 
 /**
  * Decide what a session runs: the compiler in watch mode unless
- * `--no-compiler`; Rojo and Studio as the flags ask; syncback on save with
- * `--syncback` or `syncback.runOnStart`. A session with a compiler and Rojo
- * or Studio compiles (roblox-ts) and builds once before its services start;
- * a compiler alone does its first compile in watch mode.
+ * `--no-compiler`; Studio with its Rojo as the flags ask; syncback on save
+ * with `--syncback` or `syncback.runOnStart`. A session with a compiler and
+ * Studio compiles (roblox-ts) and builds once before its services start; a
+ * compiler alone does its first compile in watch mode.
  *
  * @param config - The resolved config; the flags already set its values.
  * @param flags - The parts it starts with.
@@ -96,13 +94,12 @@ export function compilerWatch(
  */
 export function planSession(config: ResolvedConfig, flags: SessionFlags): SessionPlan {
 	const compiler = flags.compiler ? compilerWatch(config) : undefined;
-	const hasBuild = compiler !== undefined && (flags.open || flags.rojo);
+	const hasBuild = compiler !== undefined && flags.open;
 	return {
 		build: hasBuild,
 		compile: hasBuild && config.projectType === "rbxts",
 		compiler,
 		open: flags.open,
-		rojo: flags.rojo,
 		syncback: config.syncback.runOnStart,
 	};
 }

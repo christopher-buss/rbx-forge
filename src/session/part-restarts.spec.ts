@@ -34,13 +34,6 @@ describe(restartedParts, () => {
 			false,
 			["studio"],
 		],
-		[
-			"Rojo that served with no Studio, after the compiler",
-			servicesWith({ owner: "start", status: "ready" }),
-			["rojo", "compiler"],
-			true,
-			["compiler", "rojo"],
-		],
 		["a failed compiler with no owner", servicesWith(FAILED), [], false, ["compiler"]],
 		["no failed compiler that has an owner", servicesWith(OWNED_FAILED), [], false, []],
 		[
@@ -51,11 +44,11 @@ describe(restartedParts, () => {
 			["compiler"],
 		],
 		[
-			"Rojo alone, and no compiler that is off",
+			"no Rojo alone, and no compiler that is off",
 			servicesWith({ status: "off" }),
 			["rojo"],
 			true,
-			["rojo"],
+			[],
 		],
 	])("should restart %s", ([, services, stopped, force, expected]) => {
 		expect.assertions(1);
@@ -137,6 +130,27 @@ describe(createPartRestarter, () => {
 			added: [],
 			kept,
 			stopped: [],
+		});
+		expect(add).not.toHaveBeenCalled();
+	});
+
+	it("should start nothing, not even a failed compiler, when it cannot close Studio", async () => {
+		expect.assertions(2);
+
+		const studio = {
+			error: { code: "identity_mismatch", message: "Not Studio." },
+			place: "/p/game.rbxl",
+		};
+		const { add, restart } = makeRestarter(
+			{ ending: false, kept: [], stopped: [], studio },
+			{ services: servicesWith(FAILED) },
+		);
+
+		await expect(restart({ force: false })).resolves.toStrictEqual({
+			added: [],
+			kept: [],
+			stopped: [],
+			studio,
 		});
 		expect(add).not.toHaveBeenCalled();
 	});

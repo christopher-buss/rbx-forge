@@ -2,14 +2,14 @@ import path from "node:path";
 
 import type { FlagDefinition } from "../cli/flags.ts";
 import type { JoinedSession, KnownSession } from "../client/session.ts";
-import { joinSessionAsync, probeSessionAsync } from "../client/session.ts";
+import { JOIN_SILENCE_MS, joinSessionAsync, probeSessionAsync } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { OwnerJoin, OwnerRelease } from "../session/ownership.ts";
 import { releasedResult } from "../session/ownership.ts";
+import { listParts } from "../session/part-names.ts";
 import type { AddablePart, PartRequest } from "../session/part-requests.ts";
 import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
-import type { PartId } from "../session/status.ts";
 import { STUDIO_PATH_FLAG, withStudioPath } from "../studio/discover.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
@@ -28,7 +28,7 @@ export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
 		name: "open",
 		kind: "boolean",
-		text: "Open the place in Studio and serve Rojo (the default); --no-open leaves Studio alone.",
+		text: "Open the place in Studio and serve Rojo (the default); --no-open runs neither.",
 	},
 	STUDIO_PATH_FLAG,
 	{
@@ -45,17 +45,8 @@ export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
  */
 const JOIN_TIMEOUT_MS = 300_000;
 
-/** How long `start` waits for a session it cannot reach to answer. */
-export const JOIN_SILENCE_MS = 30_000;
-
 /** How often `start` looks for the session it joins. */
 const JOIN_POLL_MS = 100;
-
-const PART_NAMES: Readonly<Record<PartId, string>> = {
-	compiler: "the compiler",
-	rojo: "Rojo",
-	studio: "Studio",
-};
 
 /**
  * `forge start`: run the dev session in this terminal, as its owner:
@@ -65,7 +56,8 @@ const PART_NAMES: Readonly<Record<PartId, string>> = {
  * With no session, it runs one in a separate supervisor process
  * (`supervisor/run-supervisor.ts`), bound to this one by the owner pipe.
  * When a session runs (`forge up`), it joins it over the endpoint instead:
- * it takes every running part, and starts the missing ones.
+ * it takes every running part (with `--no-open`, only the compiler), and
+ * starts the missing ones.
  *
  * Either way, its end (Ctrl+C, a closed terminal, its death) stops the parts
  * it started and gives back the parts it took, which run on with no owner;
@@ -122,7 +114,6 @@ async function superviseAsync(
 			compiler: input.flags["compiler"] !== false,
 			config: input.config,
 			open: input.flags["open"] !== false,
-			rojo: true,
 			...(input.flags["force"] === true ? { force: true } : {}),
 		},
 	});
@@ -191,10 +182,6 @@ async function waitForSessionAsync(context: CommandContext): Promise<KnownSessio
 	}
 }
 
-function names(parts: ReadonlyArray<PartId>): string {
-	return parts.map((part) => PART_NAMES[part]).join(" and ");
-}
-
 /**
  * Say what a join took and started.
  *
@@ -204,11 +191,11 @@ function names(parts: ReadonlyArray<PartId>): string {
 function describeJoin({ added, taken }: OwnerJoin): string {
 	const done: Array<string> = [];
 	if (taken.length > 0) {
-		done.push(`took ${names(taken)}`);
+		done.push(`took ${listParts(taken)}`);
 	}
 
 	if (added.length > 0) {
-		done.push(`started ${names(added)}`);
+		done.push(`started ${listParts(added)}`);
 	}
 
 	return done.length === 0 ? "it has no part" : done.join("; ");

@@ -899,7 +899,62 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(7)!.alive).toBeFalse();
 	});
 
-	it("should close the lock file's Studio when the session is still starting", async () => {
+	it.for([
+		["session_stopping", new ForgeError("not_running", "The session is stopping.")],
+		["supervisor_unresponsive", new ForgeError("supervisor_unresponsive", "No answer.")],
+	] as const)(
+		"should fail with %s and close no Studio when the session answers no stop",
+		async ([code, failure]) => {
+			expect.assertions(2);
+
+			const project = makeProject({
+				files: { [LOCK]: studioLock(STUDIO_PID) },
+				processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+			});
+			for (const [file, content] of Object.entries(SESSION_FILES)) {
+				const full = path.join(PROJECT, file);
+				project.context.seams.fileSystem.mkdirSync(path.dirname(full), { recursive: true });
+				project.context.seams.fileSystem.writeFileSync(full, content);
+			}
+
+			const server = startIpcServer(
+				await project.context.seams.ipc.listenAsync("endpoint-s1"),
+				{
+					handlers: {
+						status: () => ({ ...makeStatus() }),
+						stopParts: () => {
+							throw failure;
+						},
+					},
+					token: "token",
+				},
+			);
+			onTestFinished(async () => {
+				await server.closeAsync();
+			});
+
+			await expect(stopAsync(project)).rejects.toMatchObject({ code });
+			expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
+		},
+	);
+
+	it("should tell a stopping session's stop to come again once it is gone", async () => {
+		expect.assertions(1);
+
+		const project = makeProject();
+		await serveAnswerAsync(project, () => {
+			throw new ForgeError("not_running", "The session is stopping.");
+		});
+
+		await expect(stopAsync(project)).rejects.toMatchObject({
+			code: "session_stopping",
+			details: { sessionId: "s1" },
+			hint: 'Run "forge stop" again once the session is gone.',
+			message: "Session s1 is stopping, so forge cannot tell whether a Studio is its own.",
+		});
+	});
+
+	it("should close the lock file's Studio when the named session does not answer", async () => {
 		expect.assertions(1);
 
 		const project = makeProject({
@@ -912,22 +967,30 @@ describe(runStopAsync, () => {
 			project.context.seams.fileSystem.writeFileSync(full, content);
 		}
 
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { parts: null, pid: STUDIO_PID, stopped: true },
+		});
+	});
+
+	it("should fail with internal_error when the session answers its status with something else", async () => {
+		expect.assertions(1);
+
+		const project = makeProject();
+		for (const [file, content] of Object.entries(SESSION_FILES)) {
+			const full = path.join(PROJECT, file);
+			project.context.seams.fileSystem.mkdirSync(path.dirname(full), { recursive: true });
+			project.context.seams.fileSystem.writeFileSync(full, content);
+		}
+
 		const server = startIpcServer(await project.context.seams.ipc.listenAsync("endpoint-s1"), {
-			handlers: {
-				status: () => ({ ...makeStatus() }),
-				stopParts: () => {
-					throw new ForgeError("not_running", "The session is starting.");
-				},
-			},
+			handlers: { status: () => ({ phase: "ready" }) },
 			token: "token",
 		});
 		onTestFinished(async () => {
 			await server.closeAsync();
 		});
 
-		await expect(stopAsync(project)).resolves.toMatchObject({
-			data: { parts: null, pid: STUDIO_PID, stopped: true },
-		});
+		await expect(stopAsync(project)).rejects.toMatchObject({ code: "internal_error" });
 	});
 
 	it("should fail with internal_error when the session answers with something else", async () => {

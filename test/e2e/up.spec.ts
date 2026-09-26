@@ -4,7 +4,7 @@
  * waits until its supervisor is gone.
  */
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -147,6 +147,28 @@ describe("forge up", () => {
 			ok: true,
 		});
 		expect(compilers(fixture.log)).toBe(2);
+	});
+
+	it("should name no part in added when the compiler fails before its first build", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
+		const watched = path.join(fixture.project, "src", "main.ts");
+		mkdirSync(path.dirname(watched), { recursive: true });
+		writeFileSync(watched, "export {};\n");
+		const up = await runForgeAsync(fixture, UP, {
+			FIXTURE_COMPILE_MS: "60000",
+			FIXTURE_COMPILER_WATCH: watched,
+			FIXTURE_EXIT_AFTER_CODE: "3",
+			FIXTURE_EXIT_AFTER_MS: "1000",
+		});
+
+		expect(up.status).toBe(EXIT_SUCCESS);
+		expect(up.result.data).toMatchObject({
+			added: [],
+			services: { compiler: { exitCode: 3, status: "failed" } },
+			started: true,
+		});
 	});
 
 	it("should start a session with no part in a project with no watch command", async () => {

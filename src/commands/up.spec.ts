@@ -11,6 +11,7 @@ import {
 	createTestSeams,
 	PROJECT,
 } from "../../test/helpers/seams.ts";
+import { JOIN_SILENCE_MS } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { SessionStatus } from "../session/status.ts";
@@ -18,7 +19,7 @@ import type { SessionRequest, SupervisorMessage } from "../supervisor/channel.ts
 import { encodeMessage } from "../supervisor/channel.ts";
 import type { DetachedLaunch, DetachedLauncher } from "../supervisor/detached-launcher.ts";
 import type { CommandInput } from "./context.ts";
-import { JOIN_SILENCE_MS, runUpAsync, UP_FLAGS, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
+import { runUpAsync, UP_FLAGS, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
 
 const INPUT: CommandInput = { config: {}, flags: {} };
 const LAUNCH_DIRECTORY = path.join(PROJECT, ".forge", "launch");
@@ -155,11 +156,27 @@ describe(runUpAsync, () => {
 				config: {},
 				detached: { report: path.join(LAUNCH_DIRECTORY, "l1.ndjson") },
 				open: false,
-				rojo: false,
 			},
 		});
 		expect(up.reporter.events).toStrictEqual([{ message: "compiling", type: "info" }]);
 		expect(launchFiles(up)).toStrictEqual([]);
+	});
+
+	it("should name no failed compiler among the parts its own session started", async () => {
+		expect.assertions(1);
+
+		const { run } = makeUp((_request, self) => {
+			self.ticks.push(async () => {
+				const status = compilerStatus("failed", { pid: 700 });
+				await serveFakeSessionAsync(self.memory, self.ipc, status);
+			});
+			return 700;
+		});
+
+		await expect(run()).resolves.toMatchObject({
+			data: { added: [], started: true },
+			summary: "Started session s1: the compiler is failed.",
+		});
 	});
 
 	it("should relay an event the supervisor wrote in two parts once", async () => {
@@ -214,7 +231,6 @@ describe(runUpAsync, () => {
 			config: { syncback: { runOnStart: true } },
 			detached: { report: path.join(LAUNCH_DIRECTORY, "l1.ndjson") },
 			open: false,
-			rojo: false,
 		});
 	});
 

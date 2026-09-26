@@ -46,7 +46,7 @@ export function resolveServices(
 		return { ...rojo, id: "rojo", step: "rojo serve" };
 	}
 
-	if (plan.rojo) {
+	if (plan.open) {
 		resolveRojo(config.rojoPort ?? DEFAULT_ROJO_PORT);
 	}
 

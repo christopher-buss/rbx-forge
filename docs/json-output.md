@@ -19,16 +19,16 @@ takes a safe default or fails with `needs_confirmation`.
 
 ## Exit codes
 
-| Exit | Meaning                                                 | Error codes                                                                   |
-| ---- | ------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| 0    | success                                                 |                                                                               |
-| 1    | failure (config, tool, hook, or declined prompt)        | every code not listed below, such as `compile_timeout` and `service_failed`   |
-| 2    | unreadable command line                                 | `usage`                                                                       |
-| 3    | no session is running                                   | `not_running`, `session_replaced`                                             |
-| 4    | needs confirmation, and the run cannot prompt           | `needs_confirmation`                                                          |
-| 5    | cannot verify a process identity; nothing was killed    | `identity_mismatch`, `cleanup_unverifiable`                                   |
-| 6    | cleanup in progress, or the supervisor does not respond | `cleanup_in_progress`, `previous_generation_alive`, `supervisor_unresponsive` |
-| 130  | interrupted                                             | `interrupted`                                                                 |
+| Exit | Meaning                                                 | Error codes                                                                                       |
+| ---- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 0    | success                                                 |                                                                                                   |
+| 1    | failure (config, tool, hook, or declined prompt)        | every code not listed below, such as `compile_timeout` and `service_failed`                       |
+| 2    | unreadable command line                                 | `usage`                                                                                           |
+| 3    | no session is running                                   | `not_running`, `session_replaced`                                                                 |
+| 4    | needs confirmation, and the run cannot prompt           | `needs_confirmation`                                                                              |
+| 5    | cannot verify a process identity; nothing was killed    | `identity_mismatch`, `cleanup_unverifiable`                                                       |
+| 6    | cleanup in progress, or the supervisor does not respond | `cleanup_in_progress`, `previous_generation_alive`, `session_stopping`, `supervisor_unresponsive` |
+| 130  | interrupted                                             | `interrupted`                                                                                     |
 
 Error codes are stable: a code is never renamed or reused. The full list is in
 [`src/errors.ts`](../src/errors.ts).
@@ -151,8 +151,11 @@ build with errors fails with `compile_failed` and the same fields in
 `down` and `stop` act only on parts with no owner. `data.parts` names what they
 did: `stopped` (the parts, Studio first) and `kept` (each part with its `owner`,
 left because a `forge start` terminal owns it). It is `null` when no session
-said: for `down`, the session did not answer or was still starting, and `down`
-stopped it whole; for `stop`, no session runs.
+said: for `down`, the session did not answer or was stopping, and `down` stopped
+it whole; for `stop`, no session runs. A session that is still starting answers
+once it started its parts. `down` never stops a session whole while a
+`forge start` terminal owns a part of it: when that session does not answer,
+`down` fails (such as with `supervisor_unresponsive`), unless `--force`.
 
 `down` never fails because of an owner. `data.status` is `stopped` once the
 session is gone (an `up` session with no part left ends), or `running` when
@@ -183,8 +186,11 @@ and `snapshots`: the same fields for each snapshot Studio it closed (none with
 `--place`). It closes the session's Studio with its Rojo; the compiler keeps
 running. A Studio that a `forge start` terminal owns fails with `studio_owned`
 (exit 1, `details.owner`, `details.sessionId`, and `details.pid` and
-`details.place` when known); `stop --force` closes it. `--place <path>` selects
-the Studio of one place, such as a snapshot that `forge open` opened.
+`details.place` when known); `stop --force` closes it. A session that stops
+while `stop` asks it fails with `session_stopping` (exit 6,
+`details.sessionId`): forge closes no Studio that may be the session's; run
+`stop` again once the session is gone. `--place <path>` selects the Studio of
+one place, such as a snapshot that `forge open` opened.
 
 ## The `restart` result
 
@@ -196,11 +202,15 @@ with:
 - `kept`: each running part with its `owner`, left because a `forge start`
   terminal owns it. With `--force` it is empty, and the restarted parts keep
   their owner.
+- `studio`: what closing the old Studio did, as `data.studio` of `down`:
+  `closed` (with `end`, `forced`, `pid`, `place`, `recovery`), `kept`, or
+  `none`. `data.services.studio` is the new Studio.
 
 It restarts only the parts that run with no owner (all with `--force`), and a
 `failed` compiler with no owner. Studio closes as for `stop`, and a new Studio
 opens once the compiler's first build is done; Rojo keeps its port. Failures:
 `not_running` (exit 3) with no session; `cleanup_in_progress` (exit 6,
 `details.parts`) when a stopped service's process tree is not proven gone, with
-nothing started again; Studio's close failure, such as `identity_mismatch`; an
-add failure, such as `compiler_missing` or `port_in_use`.
+nothing started again; Studio's close failure, such as `identity_mismatch`, with
+no part stopped or started; an add failure, such as `compiler_missing` or
+`port_in_use`.

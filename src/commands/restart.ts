@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import type { FlagDefinition } from "../cli/flags.ts";
+import { downStudio } from "../client/down-parts.ts";
 import type { KnownSession } from "../client/session.ts";
 import { fetchStatusAsync, findSession, restartPartsAsync } from "../client/session.ts";
 import { RECOVERY_FLAG } from "../client/studio.ts";
@@ -8,15 +9,15 @@ import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { listParts } from "../session/part-names.ts";
 import type { PartRestarts, RestartRequest } from "../session/part-restarts.ts";
-import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
+import { restartWaitMs } from "../session/part-restarts.ts";
 import type { SessionStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
 import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import { failureError } from "../supervisor/channel.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
-import { listParts } from "./down.ts";
 import { describeParts, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
 
 export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
@@ -32,7 +33,8 @@ export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
 /**
  * `forge restart`: restart every part of the project's session that the
  * caller may touch. The session closes its Studio without a save (as
- * `stop` does), stops Rojo and the compiler, and waits until the reaper
+ * `stop` does; a Studio it cannot close fails the restart before any
+ * part stops), stops Rojo and the compiler, and waits until the reaper
  * reports each tree gone; then it starts the compiler again, and, once the
  * compiler's first build is done, builds the place, opens it in a new
  * Studio, and serves Rojo on the same port. A failed compiler starts again
@@ -43,14 +45,14 @@ export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
  * @param context - The run: project root, seams, and reporter.
  * @param input - `--force`, `--studio-path`, and the config values flags
  *   set (`--recovery`).
- * @returns The session's status, and the parts it stopped, kept, and
- *   started again.
+ * @returns The session's status, the parts it stopped, kept, and started
+ *   again, and what closing the old Studio did (`studio`, as for `down`).
  * @rejects {ForgeError} `not_running` when no session runs or it stops
  *   meanwhile; `cleanup_in_progress` when an old tree is not proven gone
  *   (nothing started again); Studio's close failure, such as
- *   `identity_mismatch`; the add's failure, such as `compiler_missing` or
- *   `port_in_use`; `supervisor_unresponsive` when it is not ready in time;
- *   config errors from `loadProjectConfigAsync`.
+ *   `identity_mismatch` (nothing stopped or started); the add's failure, such
+ *   as `compiler_missing` or `port_in_use`; `supervisor_unresponsive` when it
+ *   is not ready in time; config errors from `loadProjectConfigAsync`.
  */
 export async function runRestartAsync(
 	context: CommandContext,
@@ -69,17 +71,21 @@ export async function runRestartAsync(
 		seams.ipc,
 		session,
 		restartRequest(context, input, config),
-		STOP_PARTS_WAIT_MS + config.gracefulTimeoutMs + UP_TIMEOUT_MS,
+		restartWaitMs(config.gracefulTimeoutMs),
 	);
 	const outcome = restarts.studio;
 	if (outcome !== undefined && "error" in outcome) {
-		throw failureError(outcome.error);
+		const { message } = outcome.error;
+		throw failureError({
+			...outcome.error,
+			message: `${message} forge closed no Studio and restarted no part.`,
+		});
 	}
 
 	const status = await waitReadyAsync(context, session);
 	const { added, kept, stopped } = restarts;
 	return {
-		data: { ...status, added, kept, stopped },
+		data: { ...status, added, kept, stopped, studio: downStudio(restarts, false) },
 		summary: restartSummary(status, restarts),
 	};
 }

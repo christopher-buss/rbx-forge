@@ -47,6 +47,7 @@ export type ForgeErrorCode =
 	| "service_failed"
 	| "session_replaced"
 	| "session_running"
+	| "session_stopping"
 	| "sourcemap_invalid"
 	| "studio_launch_failed"
 	| "studio_owned"
@@ -153,6 +154,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	session_running: {
 		exitCode: EXIT_FAILURE,
 		text: "A session already runs for this project.",
+	},
+	session_stopping: {
+		exitCode: EXIT_CLEANUP_PENDING,
+		text: "The session is stopping, so forge touched none of its parts; try again once it is gone.",
 	},
 	sourcemap_invalid: {
 		exitCode: EXIT_FAILURE,

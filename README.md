@@ -79,15 +79,18 @@ Session commands:
 
 `start` runs the compiler, Rojo, and Studio, and owns them: `down`, `stop`,
 `restart`, and the idle timeout leave them alone. When a session runs (such as
-an agent's `up`), `start` joins it instead: it takes every running part, without
-a restart, and starts the missing ones. On Ctrl+C (or a closed terminal) it
-stops the parts it started and gives back the parts it took, which run on with
-no owner; the session ends when no part is left. It never closes Studio, and the
-close of its Studio stops nothing. Its flags:
+an agent's `up`), `start` joins it instead: it takes every running part (with
+`--no-open`, only the compiler), without a restart, and starts the missing ones.
+On Ctrl+C (or a closed terminal) it stops the parts it started and gives back
+the parts it took, which run on with no owner; the session ends when no part is
+left. It never closes Studio, and the close of its Studio stops nothing. Its
+flags:
 
 - `--no-compiler`: no compile, no build, no watch-mode compiler: only Rojo and
   Studio. The open step still builds when `open.buildFirst` is on.
-- `--no-open`: do not open Studio. A `start` that joins adds only the compiler.
+- `--no-open`: no Studio and no Rojo (Rojo runs only with Studio): only the
+  compiler. A `start` that joins takes and adds only the compiler; a Studio and
+  Rojo that run stay with no owner.
 - `--syncback`: run syncback and its hooks each time the place file is saved
   (config `syncback.runOnStart`).
 - `--force`: when a crashed earlier session still has processes after the wait,
@@ -118,15 +121,16 @@ open), and `--recovery <mode>` (see
 [Auto-recovery](./docs/studio.md#auto-recovery)).
 
 `restart` restarts every part with no owner. It closes Studio without a save (as
-`stop` does), stops Rojo and the compiler, and waits until the reaper reports
-each old process tree gone; when one is not, it fails with `cleanup_in_progress`
-and starts nothing. Then it starts the compiler and, once its first build is
-done, builds the place, opens it in a new Studio, and serves Rojo on the same
-port. So a deleted output folder or a reinstalled `node_modules` recovers. A
-failed compiler starts again too. It names the parts that a `forge start`
-terminal owns in `data.kept` and leaves them alone; `--force` restarts them too,
-and they keep their owner. It returns when no part is starting. It takes
-`--recovery <mode>` and `--studio-path <path>`.
+`stop` does; a Studio it cannot close fails it before any part stops), stops
+Rojo and the compiler, and waits until the reaper reports each old process tree
+gone; when one is not, it fails with `cleanup_in_progress` and starts nothing.
+Then it starts the compiler and, once its first build is done, builds the place,
+opens it in a new Studio, and serves Rojo on the same port. So a deleted output
+folder or a reinstalled `node_modules` recovers. A failed compiler starts again
+too. It names the parts that a `forge start` terminal owns in `data.kept` and
+leaves them alone; `--force` restarts them too, and they keep their owner. It
+returns when no part is starting. It takes `--recovery <mode>` and
+`--studio-path <path>`.
 
 `status --wait` returns the status once the compiler's last build is fresh: no
 compile runs, and none started for a short quiet window. Run it after an edit.

@@ -10,8 +10,8 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { DEFAULT_CONFIG } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { listParts } from "../session/part-names.ts";
 import type { KeptPart } from "../session/part-stops.ts";
-import type { PartId } from "../session/status.ts";
 import type { StudioEnd } from "../studio/close-studio.ts";
 import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
@@ -54,29 +54,6 @@ const HOW: Readonly<Record<StoppedBy, string>> = {
 	killed: "Killed the supervisor of session",
 	shutdown: STOPPED,
 };
-
-/** How the summary names each part. */
-const PART_NAMES: Readonly<Record<PartId, string>> = {
-	compiler: "the compiler",
-	rojo: "Rojo",
-	studio: "Studio",
-};
-
-/**
- * Name parts in a list, such as `Studio, Rojo, and the compiler`.
- *
- * @param parts - The parts, in order.
- * @returns Their names, joined for a sentence.
- */
-export function listParts(parts: ReadonlyArray<PartId>): string {
-	const names = parts.map((part) => PART_NAMES[part]);
-	const last = names.pop();
-	if (names.length === 0) {
-		return String(last);
-	}
-
-	return `${names.join(", ")}${names.length > 1 ? "," : ""} and ${last}`;
-}
 
 /**
  * `forge down`: stop the parts of the project's session that have no owner

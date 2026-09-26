@@ -1,9 +1,9 @@
 /**
- * Real supervisors and reapers in a temporary Luau project with fake Rojo on
- * PATH, for the barrier and cleanup scenarios. Everything a test starts is
- * stopped when it finishes: supervisors get SIGTERM through their owner
- * pipe, paused reapers are resumed (so they stop their workers and exit),
- * and every fixture process still alive is killed.
+ * Real supervisors and reapers in a temporary Luau project with fake Rojo and
+ * a fake watch-mode compiler on PATH, for the barrier and cleanup scenarios.
+ * Everything a test starts is stopped when it finishes: supervisors get
+ * SIGTERM through their owner pipe, paused reapers are resumed (so they stop
+ * their workers and exit), and every fixture process still alive is killed.
  */
 import { randomUUID } from "node:crypto";
 import nodeFs, { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -26,9 +26,17 @@ import type { SessionRequest } from "../../src/supervisor/channel.ts";
 import { createSupervisorLauncher } from "../../src/supervisor/launcher.ts";
 import type { IdentityRecord } from "../../src/supervisor/session-files.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
+import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
 import { makeFixtureProject } from "../helpers/fixture-project.ts";
 import { realTransport } from "../helpers/native-testing.ts";
-import { loadRealNative, NATIVE_DIRECTORY, REAPER_PATH } from "../helpers/real-native.ts";
+import {
+	loadRealNative,
+	makeStudioExecutable,
+	NATIVE_DIRECTORY,
+	REAPER_PATH,
+	studioVariables,
+} from "../helpers/real-native.ts";
+import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { killLoggedWorkersAsync, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 
@@ -37,7 +45,12 @@ const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fak
 const PATH_NAME = /^path$/i;
 const POLL_MS = 50;
 const WAIT_MS = 30_000;
-export const ROJO_ONLY: SessionRequest = { compiler: false, config: {}, open: false, rojo: true };
+/** The compiler alone: the fake `rbxtsc -w` runs until stopped. */
+export const COMPILER_ONLY: SessionRequest = { compiler: true, config: {}, open: false };
+/** Studio and its Rojo, with no compiler: see {@link studioEnvironment}. */
+export const START_STUDIO: SessionRequest = { compiler: false, config: {}, open: true };
+/** Every part, as a plain `forge start`: see {@link studioEnvironment}. */
+export const START_ALL: SessionRequest = { compiler: true, config: {}, open: true };
 export const native = loadRealNative();
 
 export interface Project {
@@ -71,8 +84,9 @@ export interface OldSession {
 }
 
 /**
- * A Luau project with fake Rojo on PATH, on a free port, with no graceful
- * stop time: the barrier's bound is its 15 s margin alone.
+ * A Luau project with fake Rojo on PATH, on a free port, whose watch command
+ * is the fake compiler, with no graceful stop time: the barrier's bound is
+ * its 15 s margin alone.
  *
  * @param config - Config keys over those defaults.
  * @returns Its paths and environment.
@@ -81,6 +95,7 @@ export async function makeProjectAsync(config: Record<string, unknown> = {}): Pr
 	const { log, project } = makeFixtureProject({
 		config: {
 			gracefulTimeoutMs: 0,
+			luau: { watch: { args: ["-w"], command: "rbxtsc" } },
 			projectType: "luau",
 			rojoPort: await freePortAsync(),
 			...config,
@@ -112,7 +127,7 @@ export async function makeProjectAsync(config: Record<string, unknown> = {}): Pr
  */
 export function launch(
 	project: Project,
-	request: SessionRequest = ROJO_ONLY,
+	request: SessionRequest = COMPILER_ONLY,
 	variables: Record<string, string> = {},
 ): Launched {
 	const events: Array<ReporterEvent> = [];
@@ -152,7 +167,7 @@ export function launch(
  */
 export function launchUnowned(
 	project: Project,
-	request: SessionRequest = ROJO_ONLY,
+	request: SessionRequest = COMPILER_ONLY,
 	variables: Record<string, string> = {},
 ): Launched {
 	const launches = path.join(project.forge, "launch");
@@ -167,6 +182,33 @@ export function launchUnowned(
 		stop: () => {
 			void shutdownAsync(project);
 		},
+	};
+}
+
+/**
+ * The variables of a session that opens a stand-in Studio, with a scratch
+ * home, so no auto-recovery file of the user's Studio is ever touched. A
+ * `start` leaves Studio open when it goes: the test's end kills it before it
+ * removes the stand-in's directories.
+ *
+ * @param project - Where the session runs.
+ * @returns The variables.
+ */
+export function studioEnvironment(project: Project): Record<string, string> {
+	const home = makeTemporaryDirectory();
+	const executable = makeStudioExecutable();
+	onTestFinished(async () => {
+		await killLoggedWorkersAsync(project.log);
+	});
+	return {
+		FIXTURE_PLACE_CONTENT: studioPlaceContent(),
+		HOME: home,
+		LOCALAPPDATA: path.join(home, "AppData", "Local"),
+		// With an `--import`, Node loads the place as ESM, and the stand-in
+		// does not run.
+		NODE_OPTIONS: "",
+		USERPROFILE: home,
+		...studioVariables(executable),
 	};
 }
 

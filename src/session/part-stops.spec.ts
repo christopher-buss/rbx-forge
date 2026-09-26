@@ -602,6 +602,24 @@ describe(createPartStopper, () => {
 		}).toStrictEqual({ alive: true, attached: true, running: ["rojo"] });
 	});
 
+	it("should stop no service for restart when it cannot close Studio", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(servicesWith({ compiler: READY, rojo: READY, studio: OPEN }), [
+			"rojo",
+			"compiler",
+		]);
+		openStudio(world, { executablePath: "/usr/bin/node" });
+
+		await expect(stopAsync(world, { ...DOWN, scope: "restart" })).resolves.toMatchObject({
+			ending: false,
+			kept: [],
+			stopped: [],
+			studio: { error: { code: "identity_mismatch" }, place: PLACE },
+		});
+		expect([...world.running]).toStrictEqual(["rojo", "compiler"]);
+	});
+
 	it("should pass on a failure with no hint", async () => {
 		expect.assertions(1);
 

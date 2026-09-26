@@ -24,6 +24,12 @@ export interface KnownSession {
 }
 
 /** The hint for an answer this forge cannot read. */
+/**
+ * How long `up` and `start` wait for a session that holds the project to
+ * answer: `up` then starts one itself, `start` fails.
+ */
+export const JOIN_SILENCE_MS = 30_000;
+
 const OTHER_VERSION = "The session may run another forge version. Stop it, then start it again.";
 
 const identityLine = type("string.json.parse").pipe(
@@ -147,7 +153,8 @@ export interface JoinedSession {
 
 /**
  * Join a session as its owner (`forge start`): it takes every running part
- * and starts the parts the request asks for. The session holds them for
+ * (only the compiler when the request has no Studio) and starts the parts
+ * the request asks for. The session holds them for
  * this process until it lets go or ends.
  *
  * @param ipc - Reaches its endpoint.

@@ -39,7 +39,6 @@ export interface ControlSetup {
 		compiler: boolean;
 		open: boolean;
 		owner: null | PartOwner;
-		rojo: boolean;
 		syncback: boolean;
 	};
 	/** Rojo's port, when the session chose it before it started. */

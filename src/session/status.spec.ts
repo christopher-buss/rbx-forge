@@ -11,7 +11,6 @@ const START: StatusStart = {
 	owner: null,
 	pid: 42,
 	port: 34_872,
-	rojo: true,
 	sessionId: "s1",
 	startedAt: AT,
 	syncback: true,
@@ -30,7 +29,7 @@ function makeStore(start: StatusStart = START) {
 	return made;
 }
 
-const NO_PARTS: StatusStart = { ...START, compiler: false, open: false, rojo: false };
+const NO_PARTS: StatusStart = { ...START, compiler: false, open: false };
 
 describe(createStatusStore, () => {
 	it("should start with every planned service starting and the rest off", () => {
@@ -41,7 +40,6 @@ describe(createStatusStore, () => {
 			...START,
 			compiler: false,
 			open: false,
-			rojo: false,
 			syncback: false,
 		});
 

@@ -12,30 +12,40 @@ import { findSession } from "../../src/client/session.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
-import type { SessionRequest } from "../../src/supervisor/channel.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
 import { isProcessAlive } from "../helpers/worker-log.ts";
-import { launch, makeProjectAsync, waitForAsync, workersOf } from "./session-harness.ts";
+import {
+	launch,
+	makeProjectAsync,
+	START_ALL,
+	studioEnvironment,
+	waitForAsync,
+	workersOf,
+} from "./session-harness.ts";
 
-const WITH_COMPILER: SessionRequest = { compiler: true, config: {}, open: false, rojo: true };
 const POLL_MS = 50;
 const WAIT_MS = 20_000;
 
 /**
- * Start a session with Rojo and a watch-mode compiler, whose `role` exits
- * with code 7 after 1.5 s, and wait until that part has failed.
+ * Start a session with a stand-in Studio, its Rojo, and a watch-mode
+ * compiler, whose `role` exits with code 7 after 1.5 s, and wait until that
+ * part has failed.
  *
  * @param role - `rojo` or `rbxtsc`.
  * @returns The status once the part failed, the live workers by role, how
  *   the supervisor ends, and how to ask it.
  */
 async function crashAsync(role: string) {
-	const project = await makeProjectAsync({ projectType: "rbxts" });
+	const project = await makeProjectAsync({
+		projectType: "rbxts",
+		studio: { autoRecovery: "keep" },
+	});
 	const watched = path.join(project.project, "src", "main.ts");
 	mkdirSync(path.dirname(watched), { recursive: true });
 	writeFileSync(watched, "export {};\n");
-	const run = launch(project, WITH_COMPILER, {
+	const run = launch(project, START_ALL, {
+		...studioEnvironment(project),
 		FIXTURE_COMPILER_WATCH: watched,
 		FIXTURE_EXIT_AFTER_CODE: "7",
 		FIXTURE_EXIT_AFTER_MS: "1500",

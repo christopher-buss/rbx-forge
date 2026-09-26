@@ -21,12 +21,7 @@ import type { SyncbackCheck } from "./session-syncback.ts";
 import { checkSyncbackOnce, startSyncback, watchSavesForSyncback } from "./session-syncback.ts";
 import type { PartOwner, StatusRecorder, StatusStore } from "./status.ts";
 import type { StudioSetup, StudioState } from "./studio-part.ts";
-import {
-	buildPlaceAsync,
-	createStudioAdder,
-	followSessionStudio,
-	openStudioAsync,
-} from "./studio-part.ts";
+import { createStudioAdder, followSessionStudio, openStudioAsync } from "./studio-part.ts";
 import type { SaveWatch } from "./watch.ts";
 import { watchOptions, workerContext } from "./worker-context.ts";
 
@@ -74,7 +69,7 @@ const ALL_PARTS = ["studio", "rojo", "compiler"] as const;
  *
  * 1. With syncback on, check that Rojo has syncback, before anything runs.
  * 2. Compile (roblox-ts) and build once, when the plan asks: a session with
- *    a compiler and Rojo or Studio.
+ *    a compiler and Studio.
  * 3. Open the place in Studio (or attach a verified Studio that has it
  *    open), and follow it: the close of an owned Studio stops nothing, of
  *    one with no owner only its Rojo.
@@ -247,7 +242,7 @@ async function runServicesAsync(
 	state: BodyState,
 ): Promise<undefined | { port: number | undefined }> {
 	const { parts } = state;
-	const rojo = session.plan.rojo
+	const rojo = session.plan.open
 		? await startRojoAsync(session, parts, await resolveRojoAsync(session))
 		: undefined;
 	if (session.compiler !== undefined) {
@@ -307,15 +302,10 @@ async function runStepsAsync(
 		await compileAsync(steps, config);
 	}
 
-	if (plan.open) {
-		return openStudioAsync(session, steps, { build: plan.build, signal: scope.signal });
-	}
-
-	if (plan.build) {
-		await buildPlaceAsync(steps, config);
-	}
-
-	return undefined;
+	// A build runs only for the Studio it opens.
+	return plan.open
+		? openStudioAsync(session, steps, { build: plan.build, signal: scope.signal })
+		: undefined;
 }
 
 function announceReady({ config, context, plan }: SessionSetup, port: number | undefined): void {

@@ -1,5 +1,6 @@
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { listParts } from "./part-names.ts";
 import type { PartAdder, PartRequest } from "./part-requests.ts";
 import { isPartRunning } from "./part-stops.ts";
 import type { SessionScope } from "./run-session.ts";
@@ -56,8 +57,9 @@ export interface ReleasePlan {
 /** Joins an owner, and ends one. */
 export interface OwnerHandlers {
 	/**
-	 * A `start` joins: it takes every running part, then starts the parts it
-	 * asks for that are missing or failed.
+	 * A `start` joins: it takes every running part (only the compiler when
+	 * it asks for no Studio), then starts the parts it asks for that are
+	 * missing or failed.
 	 *
 	 * @rejects {ForgeError} `session_running` while another `start` holds
 	 *   the session; the add's failure, once what it took is given back.
@@ -86,12 +88,6 @@ export interface OwnerSetup {
 }
 
 const PART_IDS: ReadonlyArray<PartId> = ["studio", "rojo", "compiler"];
-
-const PART_NAMES: Readonly<Record<PartId, string>> = {
-	compiler: "the compiler",
-	rojo: "Rojo",
-	studio: "Studio",
-};
 
 /**
  * Decide what an owner's end does: the running parts it started stop
@@ -140,7 +136,7 @@ export function planRelease(
 export function releasedResult(release: OwnerRelease): CommandResult {
 	const done: Array<string> = [];
 	if (release.stopped.length > 0) {
-		done.push(`stopped ${partNames(release.stopped)}`);
+		done.push(`stopped ${listParts(release.stopped)}`);
 	}
 
 	if (release.studioLeft) {
@@ -149,7 +145,7 @@ export function releasedResult(release: OwnerRelease): CommandResult {
 
 	if (release.released.length > 0) {
 		const verb = release.released.length === 1 ? "runs" : "run";
-		done.push(`${partNames(release.released)} ${verb} on with no owner`);
+		done.push(`${listParts(release.released)} ${verb} on with no owner`);
 	}
 
 	const did = done.length === 0 ? "it owned no part" : done.join("; ");
@@ -184,13 +180,10 @@ export function createOwnerHandlers(
 	};
 }
 
-function partNames(parts: ReadonlyArray<PartId>): string {
-	return parts.map((part) => PART_NAMES[part]).join(" and ");
-}
-
 /**
- * A `start` joins as the owner: take every running part, then start the
- * parts it asks for, and own them too.
+ * A `start` joins as the owner: take every running part (only the
+ * compiler when it asks for no Studio), then start the parts it asks for,
+ * and own them too.
  *
  * @param setup - The status.
  * @param owner - The adder and the ownership.
@@ -216,7 +209,9 @@ async function joinOwnerAsync(
 	}
 
 	ownership.isOwned = true;
-	const taken = PART_IDS.filter((part) => isPartRunning(services, part));
+	// `start --no-open` owns only the compiler: Studio and its Rojo stay.
+	const reach = join.request.parts.includes("studio") ? PART_IDS : ["compiler" as const];
+	const taken = reach.filter((part) => isPartRunning(services, part));
 	for (const part of taken) {
 		status.owner(part, "start");
 	}

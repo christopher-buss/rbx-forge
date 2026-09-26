@@ -69,22 +69,6 @@ type FollowSetup = Pick<StudioSetup, "context" | "idle" | "status">;
 type FollowParts = Pick<AttachParts, "parts" | "state">;
 
 /**
- * Build the session's place with Rojo, as a step.
- *
- * @param steps - The steps context.
- * @param config - The project and the place.
- */
-export async function buildPlaceAsync(
-	steps: CommandContext,
-	config: ResolvedConfig,
-): Promise<void> {
-	await buildAsync(steps, config, {
-		project: config.rojoProjectPath,
-		target: { output: config.buildOutputPath, type: "output" },
-	});
-}
-
-/**
  * Open the place in Studio, or attach the verified Studio that has it open.
  * A place is never built under the Studio that has it open.
  *
@@ -214,6 +198,19 @@ export function createStudioAdder(
 }
 
 /**
+ * Build the session's place with Rojo, as a step.
+ *
+ * @param steps - The steps context.
+ * @param config - The project and the place.
+ */
+async function buildPlaceAsync(steps: CommandContext, config: ResolvedConfig): Promise<void> {
+	await buildAsync(steps, config, {
+		project: config.rojoProjectPath,
+		target: { output: config.buildOutputPath, type: "output" },
+	});
+}
+
+/**
  * Wait until Studio closes the place, and count each save of it as
  * activity meanwhile.
  *
@@ -333,8 +330,8 @@ async function waitForOpenAsync(
 
 /**
  * Whether an attach request has anything to do: Studio when it asks for it
- * and none is attached, Rojo when a Studio is attached (or it asks for
- * Rojo) and Rojo does not run.
+ * and none is attached, Rojo when a Studio is attached and Rojo does not
+ * run.
  *
  * @param request - The parts it asks for.
  * @param attach - The parts and the Studio state.
@@ -345,9 +342,8 @@ function planAttach(
 	{ parts, state }: Pick<AttachParts, "parts" | "state">,
 ): { hasWork: boolean; isStudioWanted: boolean } {
 	const isStudioWanted = request.parts.includes("studio") && !state.isAttached;
-	const isRojoWanted = state.isAttached || request.parts.includes("rojo");
 	return {
-		hasWork: isStudioWanted || (isRojoWanted && !parts.isRunning("rojo")),
+		hasWork: isStudioWanted || (state.isAttached && !parts.isRunning("rojo")),
 		isStudioWanted,
 	};
 }

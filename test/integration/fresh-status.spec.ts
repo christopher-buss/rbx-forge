@@ -13,13 +13,11 @@ import type { IpcTarget } from "../../src/ipc/client.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
-import type { SessionRequest } from "../../src/supervisor/channel.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
 import type { Project } from "./session-harness.ts";
-import { launch, makeProjectAsync, waitForAsync } from "./session-harness.ts";
+import { COMPILER_ONLY, launch, makeProjectAsync, waitForAsync } from "./session-harness.ts";
 
-const WITH_COMPILER: SessionRequest = { compiler: true, config: {}, open: false, rojo: true };
 const POLL_MS = 50;
 const WAIT_MS = 20_000;
 
@@ -46,7 +44,7 @@ async function startWatchedAsync(variables: Record<string, string>): Promise<Wat
 	const watched = path.join(project.project, "src", "main.ts");
 	mkdirSync(path.dirname(watched), { recursive: true });
 	writeFileSync(watched, "export {};\n");
-	launch(project, WITH_COMPILER, { FIXTURE_COMPILER_WATCH: watched, ...variables });
+	launch(project, COMPILER_ONLY, { FIXTURE_COMPILER_WATCH: watched, ...variables });
 	const session = await waitForAsync(() => findSession(nodeFs, forgeFiles(project.project)));
 	const target: IpcTarget = { endpoint: session.identity.endpoint, token: session.token };
 	const transport = realTransport();

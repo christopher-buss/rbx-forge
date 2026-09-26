@@ -23,17 +23,17 @@ import {
 } from "../helpers/worker-log.ts";
 import type { Launched, Settled } from "./session-harness.ts";
 import {
+	COMPILER_ONLY,
 	filesLeft,
 	launch,
 	makeProjectAsync,
 	native,
-	ROJO_ONLY,
 	settledWithinAsync,
 	stageOldSessionAsync,
 	waitForAsync,
 } from "./session-harness.ts";
 
-const FORCE = { ...ROJO_ONLY, force: true };
+const FORCE = { ...COMPILER_ONLY, force: true };
 /** The barrier's bound, the cleanup, and the session's start. */
 const FORCED_START_MS = 45_000;
 /**

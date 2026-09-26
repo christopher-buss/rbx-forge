@@ -15,7 +15,6 @@ const REQUEST: SessionRequest = {
 	config: {},
 	detached: { report: "/project/.forge/launch/l1.ndjson" },
 	open: false,
-	rojo: false,
 };
 const LOG = path.join(PROJECT, ".forge", "logs", "supervisor.log");
 

@@ -27,10 +27,12 @@ import type { Fixture } from "./session-fixture.ts";
 import {
 	holdPortAsync,
 	IS_WINDOWS,
+	isListeningAsync,
 	makeFixtureAsync,
 	PLACE,
-	ROJO_ONLY,
+	START_STUDIO,
 	startSession,
+	STUDIO_PROJECT,
 	waitForOutputAsync,
 	waitForRoleAsync,
 	WORKER_ROLES,
@@ -38,6 +40,26 @@ import {
 
 function workersOf(log: string): Array<WorkerRecord> {
 	return readWorkerLog(log).filter(({ role }) => WORKER_ROLES.has(role));
+}
+
+/**
+ * Wait until `rojo serve` and its two grandchildren have started.
+ *
+ * @param log - The fixture log.
+ * @returns Their records, in start order.
+ * @rejects When 30 seconds pass first.
+ */
+async function waitForRojoTreeAsync(log: string): Promise<Array<WorkerRecord>> {
+	const deadline = Date.now() + 30_000;
+	for (;;) {
+		const tree = readWorkerLog(log).filter(({ markers }) => markers.worker === "rojo");
+		if (tree.length >= 3) {
+			return tree;
+		}
+
+		assert(Date.now() < deadline, "Rojo's tree never started");
+		await sleep(50);
+	}
 }
 
 /**
@@ -150,28 +172,54 @@ describe("forge start", () => {
 		}).toStrictEqual({ isStudioAlive: true, survivors: [] });
 	});
 
-	it("should run Rojo and the compiler without Studio with --no-open, and keep Rojo when the compiler exits", async () => {
+	it("should run only the compiler with --no-open: no Rojo, no Studio, and no port taken", async () => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
-		const session = startSession(fixture, ["start", "--no-open", "--json"], {
+		const session = startSession(fixture, ["start", "--no-open", "--json"]);
+		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
+		const status = await waitForStatusAsync(fixture, () => true);
+		const isListening = await isListeningAsync(fixture.port);
+		session.child.kill("SIGKILL");
+		await session.closed;
+
+		expect({ isListening, services: status.services }).toMatchObject({
+			isListening: false,
+			services: {
+				compiler: { owner: "start", status: "ready" },
+				rojo: { owner: null, status: "off" },
+				studio: { owner: null, status: "off" },
+			},
+		});
+		expect(readWorkerLog(fixture.log).map(describeWorker)).toStrictEqual(["rbxtsc -w"]);
+		await expect(
+			waitForDeathAsync(readWorkerLog(fixture.log).map(({ pid }) => pid)),
+		).resolves.toStrictEqual([]);
+	});
+
+	it("should keep Rojo and Studio when the compiler exits", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
+		const session = startSession(fixture, ["start", "--json"], {
 			FIXTURE_EXIT_AFTER_MS: "3000",
 			FIXTURE_EXIT_ROLE: "rbxtsc",
 		});
 		await waitForOutputAsync(session, "compiler exited (exit code 0)");
 		const rojo = rojoServe(fixture.log);
+		const studio = await waitForRoleAsync(fixture.log, "studio");
 
 		expect({
 			isRojoAlive: isProcessAlive(rojo.pid),
 			isRunning: session.child.exitCode === null,
-		}).toStrictEqual({ isRojoAlive: true, isRunning: true });
-		expect(readWorkerLog(fixture.log).map(({ role }) => role)).not.toContain("studio");
+			isStudioAlive: isProcessAlive(studio.pid),
+		}).toStrictEqual({ isRojoAlive: true, isRunning: true, isStudioAlive: true });
 
 		session.child.kill("SIGKILL");
 		await session.closed;
 
 		await expect(
-			waitForDeathAsync(readWorkerLog(fixture.log).map(({ pid }) => pid)),
+			waitForDeathAsync(workersOf(fixture.log).map(({ pid }) => pid)),
 		).resolves.toStrictEqual([]);
 	});
 
@@ -182,7 +230,7 @@ describe("forge start", () => {
 			hooks: { build: { pre: ["hook"] } },
 			projectType: "rbxts",
 		});
-		const session = startSession(fixture, ["start", "--no-open", "--json"], {
+		const session = startSession(fixture, ["start", "--json"], {
 			FIXTURE_GRANDCHILDREN: "2",
 			FIXTURE_HANG: "1",
 		});
@@ -197,13 +245,13 @@ describe("forge start", () => {
 	});
 });
 
-describe("forge start --no-open --no-compiler", () => {
+describe("forge start --no-compiler", () => {
 	it("should serve on the fixed port and leave zero survivors when start is hard-killed", async () => {
 		expect.assertions(3);
 
-		const fixture = await makeFixtureAsync();
-		const session = startSession(fixture, ROJO_ONLY, { FIXTURE_GRANDCHILDREN: "2" });
-		const records = await waitForWorkersAsync(fixture.log, 3, 30_000);
+		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
+		const session = startSession(fixture, START_STUDIO, { FIXTURE_GRANDCHILDREN: "2" });
+		const records = await waitForRojoTreeAsync(fixture.log);
 		// A hard kill: no handler in forge runs. Only the reaper's stdin EOF
 		// is left to end the workers.
 		session.child.kill("SIGKILL");
@@ -224,11 +272,15 @@ describe("forge start --no-open --no-compiler", () => {
 	it("should report ready once Rojo runs", async () => {
 		expect.assertions(1);
 
-		const fixture = await makeFixtureAsync();
-		const session = startSession(fixture, ROJO_ONLY);
+		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
+		const session = startSession(fixture, START_STUDIO);
 		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
 
 		expect(parseLines(session.stdout())).toStrictEqual([
+			{ name: "rojo build", status: "started", type: "step" },
+			{ name: "rojo build", status: "succeeded", type: "step" },
+			{ name: "open Roblox Studio", status: "started", type: "step" },
+			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
 			{ name: "rojo serve", status: "started", type: "step" },
 			{ name: "rojo serve", status: "succeeded", type: "step" },
 			{
@@ -242,9 +294,9 @@ describe("forge start --no-open --no-compiler", () => {
 	it.skipIf(IS_WINDOWS)("should stop every worker on SIGTERM and exit 0", async () => {
 		expect.assertions(3);
 
-		const fixture = await makeFixtureAsync();
-		const session = startSession(fixture, ROJO_ONLY, { FIXTURE_GRANDCHILDREN: "2" });
-		const records = await waitForWorkersAsync(fixture.log, 3, 30_000);
+		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
+		const session = startSession(fixture, START_STUDIO, { FIXTURE_GRANDCHILDREN: "2" });
+		const records = await waitForRojoTreeAsync(fixture.log);
 		session.child.kill("SIGTERM");
 		const status = await session.closed;
 
@@ -259,13 +311,14 @@ describe("forge start --no-open --no-compiler", () => {
 	it("should fail only Rojo's part when it exits, killing what it left, and keep the session", async () => {
 		expect.assertions(3);
 
-		const fixture = await makeFixtureAsync();
-		const session = startSession(fixture, ROJO_ONLY, {
+		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
+		const session = startSession(fixture, START_STUDIO, {
+			FIXTURE_EXIT_AFTER_CODE: "3",
 			FIXTURE_EXIT_AFTER_MS: "1500",
-			FIXTURE_EXIT_CODE: "3",
+			FIXTURE_EXIT_ROLE: "rojo",
 			FIXTURE_GRANDCHILDREN: "2",
 		});
-		const records = await waitForWorkersAsync(fixture.log, 3, 30_000);
+		const records = await waitForRojoTreeAsync(fixture.log);
 		await waitForOutputAsync(session, "rojo exited (exit code 3)");
 		const survivors = await waitForDeathAsync(records.map(({ pid }) => pid));
 		const { exitCode } = session.child;
@@ -282,10 +335,10 @@ describe("forge start --no-open --no-compiler", () => {
 	it("should fail with port_in_use when the fixed port is busy, starting nothing", async () => {
 		expect.assertions(3);
 
-		const fixture = await makeFixtureAsync();
+		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
 		await holdPortAsync(fixture.port);
 		const { status, stdout } = await runBinAsync(
-			ROJO_ONLY,
+			START_STUDIO,
 			fixture.project,
 			fixture.environment(),
 		);

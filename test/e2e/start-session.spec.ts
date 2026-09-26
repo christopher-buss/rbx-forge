@@ -5,7 +5,7 @@
  *
  * The supervisor's test pause points (`RBX_FORGE_TEST_PAUSE`) hold it at a
  * startup point until the test kills `start`. Real Roblox Studio never opens:
- * every session here runs with `--no-open`.
+ * a session that opens a place opens it in the Studio stand-in.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -21,13 +21,15 @@ import type { Fixture, Session } from "./session-fixture.ts";
 import {
 	IS_WINDOWS,
 	makeFixtureAsync,
-	ROJO_ONLY,
 	startSession,
 	waitForOutputAsync,
 	waitForRoleAsync,
 } from "./session-fixture.ts";
+import { WATCH_COMMAND } from "./up-fixture.ts";
 
-/** Compile and build, then Rojo and the compiler; no Studio. */
+/** Compile and build, then Rojo, the compiler, and Studio. */
+const START = ["start", "--json"];
+/** The watch-mode compiler alone. */
 const NO_OPEN = ["start", "--no-open", "--json"];
 const READY = "Press Ctrl+C to stop.";
 const WAIT_MS = 30_000;
@@ -226,15 +228,15 @@ describe("forge start supervisor", () => {
 	it("should refuse a second start in the project with session_running, leaving the first alone", async () => {
 		expect.assertions(3);
 
-		const fixture = await makeFixtureAsync();
-		const first = startSession(fixture, ROJO_ONLY);
+		const fixture = await makeFixtureAsync(WATCH_COMMAND);
+		const first = startSession(fixture, NO_OPEN);
 		await waitForOutputAsync(first, READY);
-		const second = await runBinAsync(ROJO_ONLY, fixture.project, fixture.environment());
-		const rojo = readWorkerLog(fixture.log).filter(({ role }) => role === "rojo");
+		const second = await runBinAsync(NO_OPEN, fixture.project, fixture.environment());
+		const compiler = readWorkerLog(fixture.log).filter(({ role }) => role === "rbxtsc");
 
 		expect(second.status).toBe(EXIT_FAILURE);
 		expect(parseResult(second.stdout).error).toMatchObject({ code: "session_running" });
-		expect(rojo.map(({ pid }) => isProcessAlive(pid))).toStrictEqual([true]);
+		expect(compiler.map(({ pid }) => isProcessAlive(pid))).toStrictEqual([true]);
 	});
 
 	describe("killing start at a startup point", () => {
@@ -247,8 +249,8 @@ describe("forge start supervisor", () => {
 			async ([, kill, point]) => {
 				expect.assertions(3);
 
-				const fixture = await makeFixtureAsync({ projectType: "rbxts" });
-				const session = startSession(fixture, NO_OPEN, {
+				const fixture = await makeFixtureAsync({ projectType: "rbxts" }, { studio: true });
+				const session = startSession(fixture, START, {
 					FIXTURE_GRANDCHILDREN: "1",
 					RBX_FORGE_TEST_PAUSE_DIR: pauseDirectory(fixture),
 					...point.variables,
@@ -267,9 +269,10 @@ describe("forge start supervisor", () => {
 					startedAfterKill: startedAfter(records, killedAt),
 					survivors,
 				}).toStrictEqual({ startedAfterKill: [], survivors: [] });
+				// A session leaves its Studio open when it ends.
 				await expect(
 					waitForDeathAsync(
-						records.map(({ pid }) => pid),
+						records.filter(({ role }) => role !== "studio").map(({ pid }) => pid),
 						WAIT_MS,
 					),
 				).resolves.toStrictEqual([]);
