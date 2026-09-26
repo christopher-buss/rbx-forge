@@ -2225,6 +2225,22 @@ describe("forge up parts", () => {
 		});
 	});
 
+	it("should wait for the first build while the compile step runs, before the compiler", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			flags: { open: false },
+			oneShot: oneShotsWith({ "start-1": "hold" }),
+			projectType: "rbxts",
+		});
+		await flushAsync();
+		const fresh = await freshWithinAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result.catch(ignoreFailure);
+
+		expect(fresh).toMatchObject({ code: "compile_timeout" });
+	});
+
 	it("should add nothing while every part it asks for runs", async () => {
 		expect.assertions(2);
 

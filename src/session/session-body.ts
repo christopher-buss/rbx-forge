@@ -236,11 +236,6 @@ async function runServicesAsync(
 ): Promise<boolean | undefined> {
 	const parts = createServiceParts(session, scope);
 	const rojo = await startServicesAsync(session, parts);
-	// A stop request while the services started: the session is ending.
-	if (hasEnded(scope)) {
-		return undefined;
-	}
-
 	session.parts.attach(createPartAdder(session, parts));
 	session.status.started();
 	const isServing =

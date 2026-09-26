@@ -283,9 +283,9 @@ async function addOnceAsync(
 		return false;
 	}
 
-	const waitMs = state.deadline - context.seams.clock.now();
 	try {
-		state.added = await addPartsAsync(context.seams.ipc, session, state.wanted, waitMs);
+		// The session answers once its own parts started: a whole startup.
+		state.added = await addPartsAsync(context.seams.ipc, session, state.wanted, UP_TIMEOUT_MS);
 	} catch (err) {
 		// The session ended meanwhile: wait for the next one, as for silence.
 		if (!(err instanceof ForgeError) || err.code !== "not_running") {

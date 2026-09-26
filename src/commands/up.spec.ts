@@ -283,6 +283,18 @@ describe(runUpAsync, () => {
 		expect(rojo.summary).toBe("Found session s1 and added no part: Rojo serves on port 34872.");
 	});
 
+	it("should name every part a running session started", async () => {
+		expect.assertions(1);
+
+		const { run, up } = makeUp();
+		const session = await serveFakeSessionAsync(up.memory, up.ipc, compilerStatus("ready"));
+		session.addParts = () => ({ added: ["compiler", "rojo"] });
+
+		await expect(run()).resolves.toMatchObject({
+			summary: "Found session s1 and started the compiler and Rojo: the compiler is ready.",
+		});
+	});
+
 	it("should fail with the session's failure to add a part", async () => {
 		expect.assertions(1);
 
