@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { makeStatus } from "../../test/helpers/fake-session.ts";
@@ -14,6 +14,7 @@ import {
 } from "../../test/helpers/seams.ts";
 import { DEFAULT_CONFIG } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
+import type { IpcHandler } from "../ipc/server.ts";
 import { startIpcServer } from "../ipc/server.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
@@ -21,7 +22,11 @@ import type { Host } from "../seams/host.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { Environment } from "../seams/seams.ts";
 import { parseStopRequest } from "../session/part-stop-schema.ts";
-import { createPartStopper, STUDIO_OPEN_WAIT_MS } from "../session/part-stops.ts";
+import {
+	createPartStopper,
+	STOP_PARTS_WAIT_MS,
+	STUDIO_OPEN_WAIT_MS,
+} from "../session/part-stops.ts";
 import type { SessionScope } from "../session/run-session.ts";
 import type { PartOwner, SessionStatus, StatusStore } from "../session/status.ts";
 import {
@@ -288,6 +293,30 @@ function failOn({ context }: StopProject, member: "readFileSync" | "statSync", c
 			throw Object.assign(new Error(`${code}: ${member}`), { code });
 		},
 	};
+}
+
+/**
+ * Run session `s1` of the project with an endpoint whose `stopParts`
+ * answers as `answer` says.
+ *
+ * @param project - The stop test project.
+ * @param answer - Answers `stopParts`.
+ */
+async function serveAnswerAsync(project: StopProject, answer: IpcHandler): Promise<void> {
+	const { fileSystem, ipc } = project.context.seams;
+	for (const [file, content] of Object.entries(SESSION_FILES)) {
+		const full = path.join(PROJECT, file);
+		fileSystem.mkdirSync(path.dirname(full), { recursive: true });
+		fileSystem.writeFileSync(full, content);
+	}
+
+	const server = startIpcServer(await ipc.listenAsync("endpoint-s1"), {
+		handlers: { status: () => ({ ...makeStatus() }), stopParts: answer },
+		token: "token",
+	});
+	onTestFinished(async () => {
+		await server.closeAsync();
+	});
 }
 
 async function stopAsync({ context }: StopProject): Promise<CommandResult> {
@@ -706,12 +735,14 @@ describe(runStopAsync, () => {
 	});
 
 	it("should name no PID for an owned Studio forge did not start", async () => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const project = makeProject();
 		await serveSessionAsync(project, () => ({ status: "open" }), "start");
 
-		await expect(stopAsync(project)).rejects.toMatchObject({
+		const error = await catchStopErrorAsync(project);
+
+		expect({ code: error.code, details: error.details, message: error.message }).toStrictEqual({
 			code: "studio_owned",
 			details: { owner: "start", sessionId: "s1" },
 			message: "Roblox Studio of session s1 has an owner: the forge start terminal.",
@@ -819,8 +850,56 @@ describe(runStopAsync, () => {
 
 		await expect(stopAsync(project)).rejects.toMatchObject({
 			code: "internal_error",
+			hint: "The session may run another forge version. Stop it, then start it again.",
 			message: "The session answered stopParts with something else.",
 		});
+	});
+
+	it("should close the lock file's Studio when the session kept only other parts", async () => {
+		expect.assertions(1);
+
+		const project = makeProject();
+		await serveAnswerAsync(project, () => {
+			return {
+				ending: false,
+				kept: [{ owner: "start", part: "compiler" }],
+				stopped: [],
+			};
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: {
+				parts: { kept: [{ owner: "start", part: "compiler" }], stopped: [] },
+				stopped: false,
+			},
+		});
+	});
+
+	it("should give the session its Studio time and the services' grace to answer", async () => {
+		expect.assertions(1);
+
+		const project = makeProject({ config: { gracefulTimeoutMs: 1234 } });
+		const waits: Array<number> = [];
+		const { ipc } = project.context.seams;
+		const { connectAsync } = ipc;
+		ipc.connectAsync = async (endpoint, timeoutMs) => {
+			const connection = await connectAsync(endpoint, timeoutMs);
+			assert(connection !== undefined);
+			const { readLineAsync } = connection;
+			connection.readLineAsync = async (waitMs) => {
+				waits.push(waitMs);
+				return readLineAsync(waitMs);
+			};
+
+			return connection;
+		};
+
+		await serveAnswerAsync(project, () => {
+			return { ending: false, kept: [], stopped: [] };
+		});
+		await stopAsync(project);
+
+		expect(waits[1]).toBe(STOP_PARTS_WAIT_MS + 1234);
 	});
 
 	it("should end a Studio that stays open after the close request, without a save", async () => {

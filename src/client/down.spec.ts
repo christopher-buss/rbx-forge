@@ -481,7 +481,7 @@ describe(stopSessionAsync, () => {
 	it.for<[string, IpcHandler | undefined, IpcHandler | undefined]>([
 		["does not answer its status", undefined, () => ({ ...CLOSED_STOPS })],
 		["answers its status with something else", () => ({ phase: "ready" }), undefined],
-		["is another session", statusOf("s2"), undefined],
+		["is another session", statusOf("s2"), () => ({ ...CLOSED_STOPS })],
 		["still starts", READY_STATUS, starting],
 		["answers stopParts with something else", READY_STATUS, () => ({ ending: "yes" })],
 	])(

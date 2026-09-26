@@ -127,6 +127,12 @@ describe(planStops, () => {
 			{ kept: [], stop: ["studio", "compiler"] },
 		],
 		[
+			"Studio for restart, which takes no keepStudio",
+			servicesWith({ studio: OPEN }),
+			{ ...DOWN, keepStudio: true, scope: "restart" },
+			{ kept: [], stop: ["studio"] },
+		],
+		[
 			"Studio to keepStudio",
 			servicesWith({ compiler: READY, rojo: READY, studio: OPEN }),
 			{ ...DOWN, keepStudio: true },
@@ -412,6 +418,31 @@ describe(createPartStopper, () => {
 			alive: true,
 			ended: [],
 		});
+	});
+
+	it("should keep a session whose only part is an owned Studio", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(servicesWith({ studio: { ...OPEN, ...OWNED } }));
+
+		await expect(stopAsync(world, DOWN)).resolves.toStrictEqual({
+			ending: false,
+			kept: [{ owner: "start", part: "studio" }],
+			stopped: [],
+		});
+		expect(world.stopper.state.isAttached).toBeTrue();
+	});
+
+	it("should keep the Studio of another place attached, also with keepStudio", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(servicesWith({ studio: OPEN }));
+		const other = path.join(PROJECT, "other.rbxl");
+
+		await expect(
+			stopAsync(world, { ...STOP, keepStudio: true, place: other }),
+		).resolves.toStrictEqual({ ending: false, kept: [], stopped: [] });
+		expect(world.stopper.state.isAttached).toBeTrue();
 	});
 
 	it("should close an owned Studio with force", async () => {
