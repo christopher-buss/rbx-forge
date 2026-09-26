@@ -12,8 +12,9 @@ import type { Invocation } from "../process/command-line.ts";
 import type { SpawnedWorker } from "../reaper/reaper-client.ts";
 import type { Clock } from "../seams/clock.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
-import type { StudioProcess } from "../studio/launcher.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
+import type { OpenedStudio } from "./attach.ts";
+import { attachStudio } from "./attach.ts";
 import type { BuildWatch } from "./build-watch.ts";
 import type { OutputFollower } from "./output-follower.ts";
 import { followOutput } from "./output-follower.ts";
@@ -64,12 +65,6 @@ interface ServiceHooks {
 	onStopped?: (() => void) | undefined;
 }
 
-/** The place the session opened, and the Studio it started. */
-interface OpenedStudio {
-	place: string;
-	process: null | StudioProcess;
-}
-
 /** How often the session reads a service's output. */
 export const OUTPUT_POLL_MS = 250;
 /** How often the session looks at the place and Studio's lock file. */
@@ -99,8 +94,9 @@ export const STUDIO_CLOSED_SYNCBACK_MS = 30_000;
  *
  * 1. With syncback on, check that Rojo has syncback, before anything runs.
  * 2. Compile (roblox-ts) and build once, when the session has a compiler.
- * 3. Open the place in Studio, and end the session when Studio closes it,
- *    once a save just before the close has synced back.
+ * 3. Open the place in Studio (or attach a verified Studio that has it
+ *    open), and end the session when Studio closes it, once a save just
+ *    before the close has synced back.
  * 4. Start Rojo and the watch-mode compiler. Each is a service: its exit
  *    ends the session.
  * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
@@ -127,6 +123,7 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 		// The save watch starts once Rojo serves; until then no save is seen.
 		const saves: Pick<SaveWatch, "check"> = { check: noSaveWatch };
 		if (opened !== undefined) {
+			session.status.studio("opening", opened.place, opened.studio);
 			async function flushSyncbackAsync(): Promise<void> {
 				saves.check();
 				await syncback.settled();
@@ -335,8 +332,8 @@ function workerContext(
  * @param session - The config, plan, and context.
  * @param scope - Its reaper and end signal.
  * @param requireSyncback - The session's check of Rojo's syncback support.
- * @returns The place opened in Studio and the Studio forge started, or
- *   `undefined` when none was.
+ * @returns The place opened in Studio and the Studio forge started or
+ *   attached, or `undefined` when none was.
  * @rejects A step's failure. A step that the session's end
  *   stopped fails too; the session has its reason by then.
  */
@@ -345,7 +342,7 @@ async function runStepsAsync(
 	scope: SessionScope,
 	requireSyncback: SyncbackCheck,
 ): Promise<OpenedStudio | undefined> {
-	const { config, plan } = session;
+	const { config, context, plan } = session;
 	const steps = workerContext(session, scope, "start");
 	if (plan.syncback) {
 		await requireSyncback(steps);
@@ -357,7 +354,9 @@ async function runStepsAsync(
 		await compileAsync(steps, config);
 	}
 
-	if (plan.build) {
+	const attached = plan.open ? attachStudio(context, config) : undefined;
+	// Never build a place under the Studio that has it open.
+	if (plan.build && attached?.place !== path.resolve(context.cwd, config.buildOutputPath)) {
 		await buildAsync(steps, config, {
 			project: config.rojoProjectPath,
 			target: { output: config.buildOutputPath, type: "output" },
@@ -374,9 +373,7 @@ async function runStepsAsync(
 		plan.build &&
 		config.open.buildOutputPath === undefined &&
 		config.open.projectPath === undefined;
-	const { place, studio } = await openPlaceAsync(steps, config, { isBuilt });
-	session.status.studio("opening", place, studio);
-	return { place, process: studio };
+	return attached ?? (await openPlaceAsync(steps, config, { isBuilt }));
 }
 
 function watchOptions(session: SessionSetup, scope: SessionScope): WatchOptions {
@@ -405,12 +402,13 @@ async function settleSyncbackAsync(
  *
  * @param session - The clock, file system, and reporter.
  * @param scope - Where the end goes.
- * @param studio - The place the session opened, its Studio, and the
+ * @param opened - The place the session opened, its Studio, and the
  *   syncback flush.
- * @param studio.flushSyncbackAsync - Looks at the place and waits for the
+ * @param opened.flushSyncbackAsync - Looks at the place and waits for the
  *   runs.
- * @param studio.place - The absolute path of the place file.
- * @param studio.process - The Studio forge started directly, if it did.
+ * @param opened.place - The absolute path of the place file.
+ * @param opened.studio - The Studio forge started directly or attached, if
+ *   any.
  */
 async function watchStudioAsync(
 	session: SessionSetup,
@@ -418,13 +416,13 @@ async function watchStudioAsync(
 	{
 		flushSyncbackAsync,
 		place,
-		process,
+		studio,
 	}: OpenedStudio & { flushSyncbackAsync: () => Promise<void> },
 ): Promise<void> {
 	const { reporter } = session.context;
-	const lockPath = studioLockPath(place);
-	const isClosed = await waitForStudioCloseAsync(watchOptions(session, scope), lockPath, () => {
-		session.status.studio("open", place, process);
+	const lock = { path: studioLockPath(place), pid: studio?.pid };
+	const isClosed = await waitForStudioCloseAsync(watchOptions(session, scope), lock, () => {
+		session.status.studio("open", place, studio);
 		reporter.emit({
 			message: `Roblox Studio has ${place} open. The session ends when Studio closes it.`,
 			type: "info",
@@ -435,7 +433,7 @@ async function watchStudioAsync(
 		return;
 	}
 
-	session.status.studio("closed", place, process);
+	session.status.studio("closed", place, studio);
 	await settleSyncbackAsync(session.context.seams.clock, flushSyncbackAsync);
 	scope.end({ type: "studio_closed" });
 }
