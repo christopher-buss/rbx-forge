@@ -2,15 +2,12 @@
  * `restartParts` against a real supervisor and reaper: each old process
  * tree, grandchildren included, is gone before its part starts again.
  */
-import nodeFs from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { findSession } from "../../src/client/session.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import type { SessionRequest } from "../../src/supervisor/channel.ts";
-import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
@@ -24,6 +21,7 @@ import {
 	waitForAsync,
 	waitForReadyAsync,
 } from "./session-harness.ts";
+import { waitForSessionAsync } from "./session-reach.ts";
 
 const WAIT_MS = 20_000;
 
@@ -86,7 +84,7 @@ async function restartAsync(
 	variables: Record<string, string> = {},
 ): Promise<Restarted> {
 	const run = launch(project, request, { ...variables, FIXTURE_GRANDCHILDREN: "1" });
-	const session = await waitForAsync(() => findSession(nodeFs, forgeFiles(project.project)));
+	const session = await waitForSessionAsync(project);
 	const target = { endpoint: session.identity.endpoint, token: session.token };
 	await waitForReadyAsync(run);
 	const { records: old } = await treesSinceAsync(project, [], leaders);

@@ -2,17 +2,15 @@
  * The idle timeout against a real supervisor on the real clock. The config
  * takes a fraction of a minute, so each test waits a few seconds.
  */
-import nodeFs, { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, expect, it } from "vitest";
 
-import { findSession } from "../../src/client/session.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { ReporterEvent } from "../../src/seams/reporter.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
-import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
 import type { Launched, Project } from "./session-harness.ts";
@@ -27,6 +25,7 @@ import {
 	waitForAsync,
 	workersOf,
 } from "./session-harness.ts";
+import { waitForSessionAsync } from "./session-reach.ts";
 
 /** 1.2 s with no activity. */
 const SHORT_TIMEOUT = 0.02;
@@ -71,7 +70,7 @@ async function waitForStatusAsync(
 	project: Project,
 	isDone: (status: SessionStatus) => boolean,
 ): Promise<SessionStatus> {
-	const session = await waitForAsync(() => findSession(nodeFs, forgeFiles(project.project)));
+	const session = await waitForSessionAsync(project);
 	const target = { endpoint: session.identity.endpoint, token: session.token };
 	const transport = realTransport();
 	for (;;) {
@@ -138,7 +137,7 @@ describe("idle timeout", () => {
 		expect.assertions(2);
 
 		const { project, run } = await startUpAsync(TIMEOUT);
-		const session = await waitForAsync(() => findSession(nodeFs, forgeFiles(project.project)));
+		const session = await waitForSessionAsync(project);
 		const target = { endpoint: session.identity.endpoint, token: session.token };
 		const transport = realTransport();
 		await keepActiveAsync(run, async () => {
@@ -199,7 +198,7 @@ describe("idle timeout", () => {
 		void run.settled.finally(() => {
 			isSettled = true;
 		});
-		const session = await waitForAsync(() => findSession(nodeFs, forgeFiles(project.project)));
+		const session = await waitForSessionAsync(project);
 		const target = { endpoint: session.identity.endpoint, token: session.token };
 		await callSessionAsync(realTransport(), target, "addParts", {
 			params: { parts: ["compiler"] },

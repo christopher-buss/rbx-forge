@@ -3,16 +3,14 @@
  * exit code and the end of its output, and the session and the other
  * service keep running.
  */
-import nodeFs, { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, expect, it } from "vitest";
 
-import { findSession } from "../../src/client/session.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
-import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
 import { isProcessAlive } from "../helpers/worker-log.ts";
 import {
@@ -23,6 +21,7 @@ import {
 	waitForAsync,
 	workersOf,
 } from "./session-harness.ts";
+import { waitForSessionAsync } from "./session-reach.ts";
 
 const POLL_MS = 50;
 const WAIT_MS = 20_000;
@@ -51,7 +50,7 @@ async function crashAsync(role: string) {
 		FIXTURE_EXIT_AFTER_MS: "1500",
 		FIXTURE_EXIT_ROLE: role,
 	});
-	const session = await waitForAsync(() => findSession(nodeFs, forgeFiles(project.project)));
+	const session = await waitForSessionAsync(project);
 	const target = { endpoint: session.identity.endpoint, token: session.token };
 	const transport = realTransport();
 	const part = role === "rojo" ? "rojo" : "compiler";

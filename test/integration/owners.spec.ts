@@ -4,14 +4,11 @@
  * the endpoint, and the owner's end stops what it started and gives back
  * what it took.
  */
-import nodeFs from "node:fs";
 import { assert, describe, expect, it } from "vitest";
 
-import { findSession } from "../../src/client/session.ts";
 import { callSessionAsync, ownSessionAsync } from "../../src/ipc/client.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
-import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
 import { isProcessAlive, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Project } from "./session-harness.ts";
@@ -26,6 +23,7 @@ import {
 	waitForReadyAsync,
 	workersOf,
 } from "./session-harness.ts";
+import { waitForSessionAsync } from "./session-reach.ts";
 
 const WAIT_MS = 20_000;
 
@@ -36,7 +34,7 @@ const WAIT_MS = 20_000;
  * @returns Its endpoint and token, its id, and a status reader.
  */
 async function reachAsync(project: Project) {
-	const session = await waitForAsync(() => findSession(nodeFs, forgeFiles(project.project)));
+	const session = await waitForSessionAsync(project);
 	const target = { endpoint: session.identity.endpoint, token: session.token };
 	const transport = realTransport();
 	return {

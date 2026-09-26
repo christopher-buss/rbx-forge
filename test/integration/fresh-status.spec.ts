@@ -3,20 +3,19 @@
  * supervisor, whose fake roblox-ts compiler watches one file
  * (`FIXTURE_COMPILER_WATCH`).
  */
-import nodeFs, { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 
-import { findSession } from "../../src/client/session.ts";
 import type { IpcTarget } from "../../src/ipc/client.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
-import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
 import type { Project } from "./session-harness.ts";
-import { COMPILER_ONLY, launch, makeProjectAsync, waitForAsync } from "./session-harness.ts";
+import { COMPILER_ONLY, launch, makeProjectAsync } from "./session-harness.ts";
+import { waitForSessionAsync } from "./session-reach.ts";
 
 const POLL_MS = 50;
 const WAIT_MS = 20_000;
@@ -45,7 +44,7 @@ async function startWatchedAsync(variables: Record<string, string>): Promise<Wat
 	mkdirSync(path.dirname(watched), { recursive: true });
 	writeFileSync(watched, "export {};\n");
 	launch(project, COMPILER_ONLY, { FIXTURE_COMPILER_WATCH: watched, ...variables });
-	const session = await waitForAsync(() => findSession(nodeFs, forgeFiles(project.project)));
+	const session = await waitForSessionAsync(project);
 	const target: IpcTarget = { endpoint: session.identity.endpoint, token: session.token };
 	const transport = realTransport();
 	return {
