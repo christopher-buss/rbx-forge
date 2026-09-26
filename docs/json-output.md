@@ -41,7 +41,8 @@ Error codes are stable: a code is never renamed or reused. The full list is in
    runs. `data.added` names the parts this `up` started (`[]` when none).
    Returns when no part is `starting`: the first compile is done, or the part
    failed (see [Parts](#parts)). A project with no compiler gets a session with
-   no part.
+   no part. `forge restart --json` restarts every part with no owner, the
+   compiler first (see [The `restart` result](#the-restart-result)).
 2. Edit code.
 3. `forge status --json --wait`: `data.services.compiler.lastBuild` has `errors`
    and `diagnostics` (`file`, `line`, `column`, `code`, `message`, `severity`),
@@ -83,13 +84,14 @@ has:
   `outputTail`, the last lines of its output. `forge logs <part>` has all of it.
 
 A service's exit stops only its part: the session and its other parts keep
-running. A second `forge up` starts a `failed` compiler again, as a new part,
-and the `failed` Rojo of an attached Studio on the same port. When a Studio that
-`up --studio` attached closes the place, only its Rojo stops (`off`); when a
-Studio that a `start` owns closes it, nothing stops. The phase is `ready` once
-the session started its parts and none is `starting`, also with a part `off` or
-`failed`. `data.services.studio` also has `owner`. `data.services.rojo.port` is
-there once the session chose Rojo's port; it keeps it from then on.
+running. A second `forge up` (or `forge restart`) starts a `failed` compiler
+again, as a new part, and the `failed` Rojo of an attached Studio on the same
+port. When a Studio that `up --studio` attached closes the place, only its Rojo
+stops (`off`); when a Studio that a `start` owns closes it, nothing stops. The
+phase is `ready` once the session started its parts and none is `starting`, also
+with a part `off` or `failed`. `data.services.studio` also has `owner`.
+`data.services.rojo.port` is there once the session chose Rojo's port; it keeps
+it from then on.
 
 ## `start` and its parts
 
@@ -183,3 +185,22 @@ running. A Studio that a `forge start` terminal owns fails with `studio_owned`
 (exit 1, `details.owner`, `details.sessionId`, and `details.pid` and
 `details.place` when known); `stop --force` closes it. `--place <path>` selects
 the Studio of one place, such as a snapshot that `forge open` opened.
+
+## The `restart` result
+
+`forge restart --json` returns the session's status once no part is starting,
+with:
+
+- `stopped`: the parts it stopped, Studio first.
+- `added`: the parts it started again, the compiler first, then Studio and Rojo.
+- `kept`: each running part with its `owner`, left because a `forge start`
+  terminal owns it. With `--force` it is empty, and the restarted parts keep
+  their owner.
+
+It restarts only the parts that run with no owner (all with `--force`), and a
+`failed` compiler with no owner. Studio closes as for `stop`, and a new Studio
+opens once the compiler's first build is done; Rojo keeps its port. Failures:
+`not_running` (exit 3) with no session; `cleanup_in_progress` (exit 6,
+`details.parts`) when a stopped service's process tree is not proven gone, with
+nothing started again; Studio's close failure, such as `identity_mismatch`; an
+add failure, such as `compiler_missing` or `port_in_use`.

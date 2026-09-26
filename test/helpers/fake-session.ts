@@ -25,6 +25,8 @@ export interface FakeSession {
 	join: IpcHandler;
 	/** Answers an owner's release; lets go of no part by default. */
 	leave: IpcOwner["leave"];
+	/** Answers `restartParts`; restarts no part by default. */
+	restartParts: IpcHandler;
 	/** What `status` answers; change it to move the session on. */
 	status: SessionStatus;
 	/** Stop answering, as a dead supervisor does. Its files stay. */
@@ -96,6 +98,9 @@ export async function serveFakeSessionAsync(
 			return { added: [], sessionId: status.sessionId, taken: [] };
 		},
 		leave: vi.fn<IpcOwner["leave"]>().mockResolvedValue({ ...LET_GO }),
+		restartParts: () => {
+			return { added: [], kept: [], stopped: [] };
+		},
 		status,
 		stop: async () => {
 			await server.closeAsync();
@@ -126,6 +131,7 @@ function serverOptions(session: FakeSession): IpcServerOptions {
 		handlers: {
 			addParts: async (parameters) => session.addParts(parameters),
 			freshStatus: async (parameters) => session.freshStatus(parameters),
+			restartParts: async (parameters) => session.restartParts(parameters),
 			status: () => answerOf(session),
 			sync: async (parameters) => session.sync(parameters),
 		},

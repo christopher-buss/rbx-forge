@@ -42,6 +42,11 @@ export interface RunningPart {
  * `failed` and leaves the session and the other parts running.
  */
 export interface ServiceParts {
+	/**
+	 * Whether the last tree of a part's service left processes that the
+	 * reaper could not prove gone.
+	 */
+	hasSurvivors: (id: ServiceId) => boolean;
 	/** Whether a part's service runs: started, and its tree not gone yet. */
 	isRunning: (id: ServiceId) => boolean;
 	/**
@@ -94,6 +99,12 @@ interface PartRun {
 	worker: SpawnedWorker;
 }
 
+/** The running parts, and the services whose last tree left processes. */
+interface PartRuns {
+	running: Map<ServiceId, PartRun>;
+	survivors: Set<ServiceId>;
+}
+
 /**
  * Run the session's services, each as a part that stops alone.
  *
@@ -102,12 +113,14 @@ interface PartRun {
  * @returns Starts and stops each service's part.
  */
 export function createServiceParts(setup: PartsSetup, scope: SessionScope): ServiceParts {
-	const running = new Map<ServiceId, PartRun>();
+	const parts: PartRuns = { running: new Map(), survivors: new Set() };
+	const { running, survivors } = parts;
 	function stop(id: ServiceId, failure?: string): void {
 		stopRun(scope, running.get(id), failure);
 	}
 
 	return {
+		hasSurvivors: (id) => survivors.has(id),
 		isRunning: (id) => running.has(id),
 		startAsync: async (service, hooks) => {
 			const started = await spawnAsync(setup, scope, service, hooks);
@@ -115,11 +128,9 @@ export function createServiceParts(setup: PartsSetup, scope: SessionScope): Serv
 				return;
 			}
 
-			const { follower, run } = started;
+			const { run } = started;
 			running.set(service.id, run);
-			const stopped = followPartAsync(setup, scope.signal, { follower, run }).finally(() => {
-				running.delete(service.id);
-			});
+			const stopped = followRunAsync(setup, scope.signal, parts, started);
 			run.stopped = stopped;
 			scope.track(stopped);
 			return { stopped };
@@ -131,6 +142,113 @@ export function createServiceParts(setup: PartsSetup, scope: SessionScope): Serv
 			await stopped;
 		},
 	};
+}
+
+/**
+ * Note when a service's tree is gone.
+ *
+ * @param worker - The service.
+ * @param state - Gets `isRunning: false` once the tree is gone.
+ */
+async function markExitAsync(worker: SpawnedWorker, state: { isRunning: boolean }): Promise<void> {
+	await worker.exited;
+	state.isRunning = false;
+}
+
+/**
+ * Read a service's output until its tree is gone.
+ *
+ * @param clock - Runs the poll timer.
+ * @param worker - The service.
+ * @param follower - Reads its output file.
+ * @returns Its report.
+ */
+async function followUntilExitAsync(
+	clock: Clock,
+	worker: SpawnedWorker,
+	follower: OutputFollower,
+): Promise<WorkerReport> {
+	const state = { isRunning: true };
+	const exited = markExitAsync(worker, state);
+	while (state.isRunning) {
+		await settlesWithinAsync(clock, exited, OUTPUT_POLL_MS);
+		follower.read();
+	}
+
+	follower.finish();
+	return worker.exited;
+}
+
+function describeExit({ exitCode, signal }: WorkerReport): string {
+	if (exitCode !== null) {
+		return `exit code ${exitCode}`;
+	}
+
+	return signal === null ? "killed" : `signal ${signal}`;
+}
+
+/**
+ * Read a service's output until its tree is gone, then mark its part: `off`
+ * after a stop on request or the session's end, else `failed`.
+ *
+ * @param setup - The clock, status, and reporter.
+ * @param ended - Aborts once the session ends, which stops every part on
+ *   request.
+ * @param part - The part and its output reader.
+ * @param part.follower - Reads its output file.
+ * @param part.run - Its worker, service, hooks, and output tail.
+ * @returns How its tree ended.
+ */
+async function followPartAsync(
+	setup: PartsSetup,
+	ended: AbortSignal,
+	{ follower, run }: { follower: OutputFollower; run: PartRun },
+): Promise<WorkerReport> {
+	const report = await followUntilExitAsync(setup.context.seams.clock, run.worker, follower);
+	const { id } = run.service;
+	const { stopping } = run;
+	const isRequested = stopping === undefined ? ended.aborted : stopping.failure === undefined;
+	if (isRequested) {
+		setup.status.service(id, "off");
+	} else {
+		setup.status.serviceFailed(id, { exitCode: report.exitCode, outputTail: run.tail });
+		const why = stopping?.failure ?? `${id} exited (${describeExit(report)})`;
+		setup.context.reporter.emit({
+			message: `${why}; the session goes on without it. Its output is in ${logFilePath(setup.context.cwd, id)}.`,
+			type: "warning",
+		});
+	}
+
+	run.hooks.onStopped?.();
+	return report;
+}
+
+/**
+ * Follow a part until its tree is gone, note whether the tree left
+ * processes behind, and forget the run.
+ *
+ * @param setup - The clock, status, and reporter.
+ * @param ended - Aborts once the session ends.
+ * @param parts - The running parts, and the survivors.
+ * @param part - The part and its output reader.
+ */
+async function followRunAsync(
+	setup: PartsSetup,
+	ended: AbortSignal,
+	{ running, survivors }: PartRuns,
+	part: { follower: OutputFollower; run: PartRun },
+): Promise<void> {
+	const { id } = part.run.service;
+	try {
+		const report = await followPartAsync(setup, ended, part);
+		if (report.incomplete) {
+			survivors.add(id);
+		} else {
+			survivors.delete(id);
+		}
+	} finally {
+		running.delete(id);
+	}
 }
 
 /**
@@ -198,81 +316,4 @@ async function spawnAsync(
 		hooks.onLine?.(line);
 	});
 	return { follower, run };
-}
-
-/**
- * Note when a service's tree is gone.
- *
- * @param worker - The service.
- * @param state - Gets `isRunning: false` once the tree is gone.
- */
-async function markExitAsync(worker: SpawnedWorker, state: { isRunning: boolean }): Promise<void> {
-	await worker.exited;
-	state.isRunning = false;
-}
-
-/**
- * Read a service's output until its tree is gone.
- *
- * @param clock - Runs the poll timer.
- * @param worker - The service.
- * @param follower - Reads its output file.
- * @returns Its report.
- */
-async function followUntilExitAsync(
-	clock: Clock,
-	worker: SpawnedWorker,
-	follower: OutputFollower,
-): Promise<WorkerReport> {
-	const state = { isRunning: true };
-	const exited = markExitAsync(worker, state);
-	while (state.isRunning) {
-		await settlesWithinAsync(clock, exited, OUTPUT_POLL_MS);
-		follower.read();
-	}
-
-	follower.finish();
-	return worker.exited;
-}
-
-function describeExit({ exitCode, signal }: WorkerReport): string {
-	if (exitCode !== null) {
-		return `exit code ${exitCode}`;
-	}
-
-	return signal === null ? "killed" : `signal ${signal}`;
-}
-
-/**
- * Read a service's output until its tree is gone, then mark its part: `off`
- * after a stop on request or the session's end, else `failed`.
- *
- * @param setup - The clock, status, and reporter.
- * @param ended - Aborts once the session ends, which stops every part on
- *   request.
- * @param part - The part and its output reader.
- * @param part.follower - Reads its output file.
- * @param part.run - Its worker, service, hooks, and output tail.
- */
-async function followPartAsync(
-	setup: PartsSetup,
-	ended: AbortSignal,
-	{ follower, run }: { follower: OutputFollower; run: PartRun },
-): Promise<void> {
-	const report = await followUntilExitAsync(setup.context.seams.clock, run.worker, follower);
-	const { id } = run.service;
-	const { stopping } = run;
-	const isRequested = stopping === undefined ? ended.aborted : stopping.failure === undefined;
-	if (isRequested) {
-		setup.status.service(id, "off");
-	} else {
-		setup.status.serviceFailed(id, { exitCode: report.exitCode, outputTail: run.tail });
-		const why = stopping?.failure ?? `${id} exited (${describeExit(report)})`;
-		setup.context.reporter.emit({
-			message: `${why}; the session goes on without it. Its output is in ${logFilePath(setup.context.cwd, id)}.`,
-			type: "warning",
-		});
-	}
-
-	run.hooks.onStopped?.();
 }

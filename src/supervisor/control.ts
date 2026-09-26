@@ -4,7 +4,7 @@ import type { BuildWatch } from "../session/build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { PartRequests } from "../session/part-requests.ts";
 import { parsePartRequest } from "../session/part-requests.ts";
-import { parseStopRequest } from "../session/part-stop-schema.ts";
+import { parseRestartRequest, parseStopRequest } from "../session/part-stop-schema.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { StatusStore } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
@@ -12,7 +12,10 @@ import type { StopSource } from "../session/stop-source.ts";
 /** What the control channel of one session reaches. */
 export interface ControlTarget {
 	builds: Pick<BuildWatch, "tick" | "waitAsync">;
-	parts: Pick<PartRequests, "addAsync" | "ownAsync" | "releaseAsync" | "stopAsync">;
+	parts: Pick<
+		PartRequests,
+		"addAsync" | "ownAsync" | "releaseAsync" | "restartAsync" | "stopAsync"
+	>;
 	sessionId: string;
 	status: Pick<StatusStore, "snapshot">;
 	stop: Pick<StopSource, "request">;
@@ -28,6 +31,13 @@ export interface ControlTarget {
  *   Rojo. Waits until the session has started its own parts, and answers
  *   once the new ones run (Rojo listens, Studio has the place open), with
  *   `added`: the parts it started.
+ * - `restartParts`: stop the parts `stopParts` stops in the `restart`
+ *   scope (with the `force` and `recovery` params), then start them again
+ *   as `addParts` does (Studio with the `studioPath` param, if any), each
+ *   with the owner it had. Answers once they run, with `stopped`, `kept`,
+ *   `studio`, and `added`; with `cleanup_in_progress`, having started
+ *   nothing, when a stopped service's tree is not proven gone. A
+ *   `sessionId` param works as for `shutdown`.
  * - `status`: the state contract (`session/status.ts`).
  * - `freshStatus`: the state contract once the compiler's last build is
  *   fresh (`session/build-watch.ts`), waiting up to the `timeoutMs` param
@@ -65,6 +75,7 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 			);
 			return snapshot(target);
 		},
+		restartParts: async (parameters) => restartPartsAsync(target, parameters),
 		shutdown: (parameters) => {
 			requireSession(target, parameters);
 			const isForced = parameters["force"] === true;
@@ -128,6 +139,14 @@ async function addPartsAsync(
 ): Promise<Record<string, unknown>> {
 	const added = await target.parts.addAsync(parsePartRequest(parameters));
 	return { added };
+}
+
+async function restartPartsAsync(
+	target: ControlTarget,
+	parameters: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+	requireSession(target, parameters);
+	return { ...(await target.parts.restartAsync(parseRestartRequest(parameters))) };
 }
 
 function snapshot({ builds, status }: ControlTarget): Record<string, unknown> {

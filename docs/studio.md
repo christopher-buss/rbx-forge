@@ -1,7 +1,8 @@
 # Studio
 
-How `open`, `start`, and `up --studio` open Roblox Studio, how `stop` and `down`
-close it, and what forge does with Studio's auto-recovery files.
+How `open`, `start`, `up --studio`, and `restart` open Roblox Studio, how
+`stop`, `down`, and `restart` close it, and what forge does with Studio's
+auto-recovery files.
 
 ## Opening Studio
 
@@ -44,9 +45,9 @@ the session and stays open.
 
 ## Closing Studio
 
-`down` and `stop` close Studio the same way. forge sends a close request, as
-Studio gets when you close its window (`WM_CLOSE` to its main windows; `SIGTERM`
-on macOS and Linux), then looks at Studio every 50 ms:
+`down`, `stop`, and `restart` close Studio the same way. forge sends a close
+request, as Studio gets when you close its window (`WM_CLOSE` to its main
+windows; `SIGTERM` on macOS and Linux), then looks at Studio every 50 ms:
 
 - When the place's lock file goes, Studio has closed the place: forge ends the
   process at once, instead of waiting for Studio's slow exit.
@@ -94,9 +95,9 @@ launch does not offer to recover a place forge builds anyway:
 - `keep`: leave them.
 
 Set the mode with [`studio.autoRecovery`](./config.md#studioautorecovery) in the
-config, or `--recovery <mode>` on `stop` and `down`; the idle timeout uses the
-config's mode. forge acts only when it ended a Studio, and only on
-`<place>_AutoRecovery_<n>.rbxl` files (any case) for the place, written since
+config, or `--recovery <mode>` on `stop`, `down`, and `restart`; the idle
+timeout uses the config's mode. forge acts only when it ended a Studio, and only
+on `<place>_AutoRecovery_<n>.rbxl` files (any case) for the place, written since
 that Studio started (2 seconds of slack). It searches:
 
 - Windows: `%LOCALAPPDATA%\Roblox\RobloxStudio\AutoSaves` and

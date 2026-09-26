@@ -7,7 +7,8 @@ import type { IpcTransport } from "../ipc/transport.ts";
 import type { FileSystem } from "../seams/file-system.ts";
 import type { OwnerJoin, OwnerRelease } from "../session/ownership.ts";
 import type { PartRequest } from "../session/part-requests.ts";
-import { parseStopResult } from "../session/part-stop-schema.ts";
+import type { PartRestarts, RestartRequest } from "../session/part-restarts.ts";
+import { parseRestartResult, parseStopResult } from "../session/part-stop-schema.ts";
 import type { PartStops, StopPartsRequest } from "../session/part-stops.ts";
 import type { PartId, SessionStatus } from "../session/status.ts";
 import { parseStatus } from "../session/status.ts";
@@ -274,6 +275,43 @@ export async function stopPartsAsync(
 				hint: OTHER_VERSION,
 			},
 		);
+	}
+
+	return parsed;
+}
+
+/**
+ * Ask a session to stop the parts a restart may touch and start them
+ * again.
+ *
+ * @param ipc - Reaches its endpoint.
+ * @param session - Its identity record and token.
+ * @param request - `force`, the recovery mode, and the Studio executable.
+ * @param waitMs - How long the answer may take: the session answers once
+ *   the old parts are gone and the new ones run.
+ * @returns What it stopped, kept, and started.
+ * @rejects {ForgeError} As {@link stopPartsAsync}; the add's failure;
+ *   `cleanup_in_progress` when an old tree is not proven gone.
+ */
+export async function restartPartsAsync(
+	ipc: IpcTransport,
+	session: KnownSession,
+	request: RestartRequest,
+	waitMs: number,
+): Promise<PartRestarts> {
+	const result = await callSessionAsync(
+		ipc,
+		{ endpoint: session.identity.endpoint, token: session.token },
+		"restartParts",
+		// JSON leaves an unset `recovery` and `studioPath` out.
+		{
+			params: { ...request, sessionId: session.identity.sessionId },
+			responseTimeoutMs: waitMs,
+		},
+	);
+	const parsed = parseRestartResult(result);
+	if (parsed === undefined) {
+		throw otherAnswer("restartParts");
 	}
 
 	return parsed;

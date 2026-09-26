@@ -9,6 +9,7 @@ import { stopWhenIdleAsync } from "./idle.ts";
 import type { Ownership } from "./ownership.ts";
 import { createOwnerHandlers } from "./ownership.ts";
 import type { PartAdder, PartRequests } from "./part-requests.ts";
+import { createPartRestarter } from "./part-restarts.ts";
 import { createPartStopper } from "./part-stops.ts";
 import type { SessionPlan } from "./plan.ts";
 import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./rojo-part.ts";
@@ -82,7 +83,8 @@ const ALL_PARTS = ["studio", "rojo", "compiler"] as const;
  *    `failed`. From then on, `forge up` can add the parts that are missing
  *    or failed, and attach Studio with its Rojo (`studio-part.ts`); `down`
  *    and `stop` can stop the parts with no owner (`part-stops.ts`), and
- *    so does the idle timeout (`idle.ts`); a `start` can join as the
+ *    so does the idle timeout (`idle.ts`); `restart` stops them and starts
+ *    them again (`part-restarts.ts`); a `start` can join as the
  *    owner, and its end stops what it started and gives back what it took
  *    (`ownership.ts`).
  * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
@@ -258,9 +260,11 @@ async function runServicesAsync(
 		added: new Set(session.owner === null ? [] : ALL_PARTS),
 		isOwned: session.owner !== null,
 	};
+	const stop = createPartStopper(session, scope, { ...state, ownership, state: state.studio });
 	session.parts.attach({
 		add: withNoOwner(session, add),
-		stop: createPartStopper(session, scope, { ...state, ownership, state: state.studio }),
+		restart: createPartRestarter(session, { add, parts, stop }),
+		stop,
 		...createOwnerHandlers(session, scope, { add, ownership, parts, studio: state.studio }),
 	});
 	session.status.started();

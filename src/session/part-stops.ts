@@ -392,6 +392,9 @@ async function stopStudioAsync(
 	const outcome = await closeSessionStudioAsync(setup, services.studio, request.recovery);
 	const isGone = outcome !== undefined && "stop" in outcome;
 	if (isGone) {
+		// Its follow ends here: its late close would stop the next Studio's Rojo.
+		stopper.state.letGo?.();
+		stopper.state.letGo = undefined;
 		// The answer and the state contract agree, before the close watch sees
 		// it.
 		setup.status.studio("closed", outcome.place, studioProcess(services.studio));

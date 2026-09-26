@@ -2,6 +2,7 @@ import { type } from "arktype";
 
 import { ForgeError } from "../errors.ts";
 import type { OwnerHandlers } from "./ownership.ts";
+import type { PartRestarter } from "./part-restarts.ts";
 import type { PartStopper } from "./part-stops.ts";
 import type { PartId } from "./status.ts";
 
@@ -24,15 +25,17 @@ export type PartAdder = (request: PartRequest) => Promise<Array<PartId>>;
 /** What the session body adds, stops, and hands over parts with. */
 export interface PartHandlers extends OwnerHandlers {
 	add: PartAdder;
+	restart: PartRestarter;
 	stop: PartStopper;
 }
 
 /**
- * `forge up`, `down`, `stop`, and `start` on a running session: the control
- * channel (or the owner pipe) asks, the session body adds, stops, or hands
- * over parts. The channel opens before the body has started its parts, so
- * an add or a join waits until the body hands its handlers over; a stop or
- * an owner's end before that fails at once, and the whole session stops.
+ * `forge up`, `down`, `stop`, `restart`, and `start` on a running session:
+ * the control channel (or the owner pipe) asks, the session body adds,
+ * stops, restarts, or hands over parts. The channel opens before the body
+ * has started its parts, so an add, a restart, or a join waits until the
+ * body hands its handlers over; a stop or an owner's end before that fails
+ * at once, and the whole session stops.
  * Requests run one at a time.
  */
 export interface PartRequests {
@@ -65,6 +68,14 @@ export interface PartRequests {
 	 *   is stopping.
 	 */
 	releaseAsync: OwnerHandlers["release"];
+	/**
+	 * Stop the parts a restart may touch, and start them again.
+	 *
+	 * @returns What it stopped, kept, and started.
+	 * @rejects {ForgeError} `not_running` once the session is stopping; the
+	 *   restart's failure, such as `cleanup_in_progress`.
+	 */
+	restartAsync: PartRestarter;
 	/**
 	 * Stop the parts a request may stop.
 	 *
@@ -108,7 +119,7 @@ export function parsePartRequest(parameters: Record<string, unknown>): PartReque
 
 /**
  * Make the link between a session's control channel and its body for
- * `forge up`, `down`, `stop`, and `start`.
+ * `forge up`, `down`, `stop`, `restart`, and `start`.
  *
  * @returns A link with no handlers yet.
  */
@@ -127,6 +138,9 @@ export function createPartRequests(): PartRequests {
 		},
 		ownAsync: async (request) => whenAttachedAsync(link, async ({ own }) => own(request)),
 		releaseAsync: async (reason) => nowAsync(link, async ({ release }) => release(reason)),
+		restartAsync: async (request) => {
+			return whenAttachedAsync(link, async ({ restart }) => restart(request));
+		},
 		stopAsync: async (request) => nowAsync(link, async ({ stop }) => stop(request)),
 	};
 }

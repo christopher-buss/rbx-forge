@@ -63,6 +63,22 @@ const PART_NAMES: Readonly<Record<PartId, string>> = {
 };
 
 /**
+ * Name parts in a list, such as `Studio, Rojo, and the compiler`.
+ *
+ * @param parts - The parts, in order.
+ * @returns Their names, joined for a sentence.
+ */
+export function listParts(parts: ReadonlyArray<PartId>): string {
+	const names = parts.map((part) => PART_NAMES[part]);
+	const last = names.pop();
+	if (names.length === 0) {
+		return String(last);
+	}
+
+	return `${names.join(", ")}${names.length > 1 ? "," : ""} and ${last}`;
+}
+
+/**
  * `forge down`: stop the parts of the project's session that have no owner
  * and, once none is left, prove the session gone. The session closes its
  * Studio first, unless `--keep-studio`; a Studio forge cannot close is
@@ -105,22 +121,6 @@ export async function runDownAsync(
 		timeoutMs,
 	});
 	return { data: { ...report }, summary: downSummary(report) };
-}
-
-/**
- * Name parts in a list, such as `Studio, Rojo, and the compiler`.
- *
- * @param parts - The parts, in order.
- * @returns Their names, joined for a sentence.
- */
-function listParts(parts: ReadonlyArray<PartId>): string {
-	const names = parts.map((part) => PART_NAMES[part]);
-	const last = names.pop();
-	if (names.length === 0) {
-		return String(last);
-	}
-
-	return `${names.join(", ")}${names.length > 1 ? "," : ""} and ${last}`;
 }
 
 /**

@@ -45,6 +45,11 @@ function makeTarget() {
 		stopped: [],
 		studioLeft: true,
 	});
+	const restartAsync = vi.fn<PartRequests["restartAsync"]>().mockResolvedValue({
+		added: ["compiler"],
+		kept: [{ owner: "start", part: "studio" }],
+		stopped: ["compiler"],
+	});
 	const builds = {
 		tick: vi.fn<BuildWatch["tick"]>(),
 		waitAsync: vi.fn<BuildWatch["waitAsync"]>().mockResolvedValue(),
@@ -54,7 +59,7 @@ function makeTarget() {
 		builds,
 		handlers: controlHandlers({
 			builds,
-			parts: { addAsync, ownAsync, releaseAsync, stopAsync },
+			parts: { addAsync, ownAsync, releaseAsync, restartAsync, stopAsync },
 			sessionId: "s1",
 			status,
 			stop: { request },
@@ -62,11 +67,12 @@ function makeTarget() {
 		}),
 		ownAsync,
 		owner: controlOwner({
-			parts: { addAsync, ownAsync, releaseAsync, stopAsync },
+			parts: { addAsync, ownAsync, releaseAsync, restartAsync, stopAsync },
 			sessionId: "s1",
 		}),
 		releaseAsync,
 		request,
+		restartAsync,
 		runAsync,
 		status,
 		stopAsync,
@@ -254,6 +260,61 @@ describe(controlHandlers, () => {
 		await expect(stopped).rejects.toThrow("stopParts takes a scope: ");
 		expect(stopAsync).not.toHaveBeenCalled();
 	});
+
+	it("should answer restartParts with what the session stopped, kept, and started", async () => {
+		expect.assertions(3);
+
+		const { handlers, restartAsync } = makeTarget();
+
+		await expect(
+			handlers.restartParts!({
+				force: true,
+				recovery: "delete",
+				sessionId: "s1",
+				studioPath: "/opt/Studio",
+			}),
+		).resolves.toStrictEqual({
+			added: ["compiler"],
+			kept: [{ owner: "start", part: "studio" }],
+			stopped: ["compiler"],
+		});
+
+		await handlers.restartParts!({});
+
+		expect(restartAsync).toHaveBeenNthCalledWith(1, {
+			force: true,
+			recovery: "delete",
+			studioPath: "/opt/Studio",
+		});
+		expect(restartAsync).toHaveBeenNthCalledWith(2, { force: false });
+	});
+
+	it("should refuse restartParts for another session's id", async () => {
+		expect.assertions(2);
+
+		const { handlers, restartAsync } = makeTarget();
+
+		await expect(handlers.restartParts!({ sessionId: "old" })).rejects.toMatchObject({
+			code: "session_replaced",
+		});
+		expect(restartAsync).not.toHaveBeenCalled();
+	});
+
+	it.for([[{ force: "yes" }], [{ recovery: "trash" }], [{ studioPath: 1 }]] as const)(
+		"should refuse restartParts params %j with usage",
+		async ([parameters]) => {
+			expect.assertions(3);
+
+			const { handlers, restartAsync } = makeTarget();
+			const restarted = handlers.restartParts!(parameters);
+
+			await expect(restarted).rejects.toMatchObject({ code: "usage" });
+			await expect(restarted).rejects.toThrow(
+				"restartParts takes force, recovery, and studioPath: ",
+			);
+			expect(restartAsync).not.toHaveBeenCalled();
+		},
+	);
 
 	it("should answer sync with the session's syncback run", async () => {
 		expect.assertions(2);
