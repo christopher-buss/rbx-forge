@@ -11,7 +11,6 @@ type QuietEnd = Exclude<SessionEndReason["type"], "failed" | "signal">;
 const STOP_SUMMARIES = {
 	owner_gone: "forge start is gone; every process of the session is gone.",
 	shutdown: "Stopped on request; every process of the session is gone.",
-	studio_closed: "Studio closed the place; every process of the session is gone.",
 } satisfies Record<QuietEnd, string>;
 
 /**
@@ -19,7 +18,7 @@ const STOP_SUMMARIES = {
  *
  * @param reason - Why it ended.
  * @param data - The port and every worker's report.
- * @returns The result for a stop request or a closed Studio.
+ * @returns The result for a stop request.
  * @throws The failed step's error.
  */
 export function endedResult(
@@ -43,8 +42,7 @@ export function endedResult(
 			};
 		}
 		case "owner_gone":
-		case "shutdown":
-		case "studio_closed": {
+		case "shutdown": {
 			return {
 				data: { ...data, reason: reason.type },
 				summary: STOP_SUMMARIES[reason.type],

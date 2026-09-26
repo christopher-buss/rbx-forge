@@ -112,6 +112,21 @@ export interface StopperParts {
 }
 
 /**
+ * Whether a part runs, by the session's status: a service `starting` or
+ * `ready`, a Studio `opening` or `open`.
+ *
+ * @param services - The parts' status.
+ * @param part - Which of them.
+ * @returns Whether it runs.
+ */
+export function isPartRunning(services: SessionStatus["services"], part: PartId): boolean {
+	const { status } = services[part];
+	return part === "studio"
+		? status === "open" || status === "opening"
+		: status === "ready" || status === "starting";
+}
+
+/**
  * Decide which running parts a request stops: those with no owner, and with
  * `force` the owned ones too. The rest it keeps, with their owner. Rojo
  * stops with its Studio in the `stop` scope, so it stays when Studio does.
@@ -127,7 +142,7 @@ export function planStops(
 	const plan: StopPlan = { kept: [], stop: [] };
 	for (const part of partsInScope(services.studio, request)) {
 		const { owner } = services[part];
-		if (!isRunning(services, part)) {
+		if (!isPartRunning(services, part)) {
 			continue;
 		}
 
@@ -215,21 +230,6 @@ export function createPartStopper(
 			...(studio?.outcome === undefined ? {} : { studio: studio.outcome }),
 		};
 	};
-}
-
-/**
- * Whether a part runs, by the session's status: a service `starting` or
- * `ready`, a Studio `opening` or `open`.
- *
- * @param services - The parts' status.
- * @param part - Which of them.
- * @returns Whether it runs.
- */
-function isRunning(services: SessionStatus["services"], part: PartId): boolean {
-	const { status } = services[part];
-	return part === "studio"
-		? status === "open" || status === "opening"
-		: status === "ready" || status === "starting";
 }
 
 /**

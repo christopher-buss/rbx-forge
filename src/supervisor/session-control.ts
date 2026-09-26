@@ -7,10 +7,10 @@ import type { BuildWatch } from "../session/build-watch.ts";
 import { createBuildWatch } from "../session/build-watch.ts";
 import type { PartRequests } from "../session/part-requests.ts";
 import type { SessionSync } from "../session/session-sync.ts";
-import type { SessionStatus, StatusStore } from "../session/status.ts";
+import type { PartOwner, SessionStatus, StatusStore } from "../session/status.ts";
 import { createStatusStore, isReady } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
-import { controlHandlers } from "./control.ts";
+import { controlHandlers, controlOwner } from "./control.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "./session-files.ts";
 import { createSession, removeSession } from "./session-files.ts";
 
@@ -21,17 +21,23 @@ export interface ControlSetup {
 	/** Called once, when the session is first ready. */
 	onReady: (() => void) | undefined;
 	/**
-	 * Adds and stops parts through the session body, for `up`, `down`, and
-	 * `stop`.
+	 * Adds, stops, and hands over parts through the session body, for `up`,
+	 * `down`, `stop`, and a `start` that joins.
 	 */
-	parts: Pick<PartRequests, "addAsync" | "stopAsync">;
+	parts: Pick<PartRequests, "addAsync" | "ownAsync" | "releaseAsync" | "stopAsync">;
 	/**
 	 * The test pause point `control`: the files and `current` exist, the
 	 * endpoint does not.
 	 */
 	pause: () => Promise<void>;
-	/** What the session starts with, for its first status. */
-	plan: { compiler: boolean; open: boolean; rojo: boolean; syncback: boolean };
+	/** What the session starts with, and who owns it, for its first status. */
+	plan: {
+		compiler: boolean;
+		open: boolean;
+		owner: null | PartOwner;
+		rojo: boolean;
+		syncback: boolean;
+	};
 	/** Rojo's port, when the session chose it before it started. */
 	port: number | undefined;
 	/** The session reads its compiler's builds (roblox-ts). */
@@ -64,9 +70,9 @@ export type ControlSeams = Pick<
 /**
  * Step 5 of `runSupervisorAsync`: create the session directory with its
  * identity record and token, keep `state.json` up to date, and open the
- * control endpoint (`status`, `freshStatus`, `addParts`, `stopParts`, `sync`,
- * `shutdown`). Call only while holding the singleton lock. When the endpoint
- * cannot open, nothing of the session ran, so its files go.
+ * control endpoint (`status`, `freshStatus`, `addParts`, `stopParts`, `own`,
+ * `sync`, `shutdown`). Call only while holding the singleton lock. When the
+ * endpoint cannot open, nothing of the session ran, so its files go.
  *
  * @param seams - The clock, file system, host, transport, addon, and ids.
  * @param setup - The identity, plan, port, stop requests, and `onReady`.
@@ -94,6 +100,7 @@ export async function openSessionAsync(
 			stop: setup.stop,
 			sync: setup.sync,
 		}),
+		owner: controlOwner({ parts: setup.parts, sessionId: setup.identity.sessionId }),
 		token,
 	});
 	return {

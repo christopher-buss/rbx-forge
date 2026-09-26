@@ -52,6 +52,9 @@ type SupervisorProcess = ChildProcessByStdio<Writable, Readable, Readable>;
 /** The result line, once the supervisor wrote it. */
 type ResultMessage = Extract<SupervisorMessage, { type: "result" }>;
 
+/** The released line: the session goes on without this `start`. */
+type ReleasedMessage = Extract<SupervisorMessage, { type: "released" }>;
+
 /**
  * Make the launcher: it runs `entry` (the built `supervisor.mjs`) with the
  * current Node executable. The supervisor's stdin is the owner pipe: this
@@ -121,8 +124,40 @@ function crashed(code: null | number, signal: NodeJS.Signals | null, stderr: str
 }
 
 /**
+ * Settle once the supervisor has exited: with its result, or as a crash.
+ *
+ * @param child - The supervisor process.
+ * @param stderr - The end of its stderr.
+ * @param result - The result line it wrote, if any.
+ * @returns The session's result.
+ */
+async function exitedAsync(
+	child: SupervisorProcess,
+	stderr: () => string,
+	result: () => ResultMessage | undefined,
+): Promise<CommandResult> {
+	return new Promise((resolve, reject) => {
+		child.once("error", (err) => {
+			reject(
+				new ForgeError("internal_error", `The supervisor did not start: ${err.message}`),
+			);
+		});
+		child.once("close", (code, signal) => {
+			const written = result();
+			if (written === undefined) {
+				reject(crashed(code, signal, stderr()));
+			} else if (written.ok) {
+				resolve({ data: written.data, summary: written.summary });
+			} else {
+				reject(failureError(written.error));
+			}
+		});
+	});
+}
+
+/**
  * Relay the supervisor's events, then settle with its result once it has
- * exited.
+ * exited, or at once when it let this `start` go.
  *
  * @param child - The supervisor process.
  * @param onEvent - Gets each event.
@@ -134,29 +169,21 @@ async function watchAsync(
 ): Promise<CommandResult> {
 	const stderr = keepTail(child.stderr);
 	let result: ResultMessage | undefined;
+	const released = Promise.withResolvers<ReleasedMessage>();
 	createInterface({ input: child.stdout }).on("line", (line) => {
 		const message = parseMessage(line);
 		if (message?.type === "event") {
 			onEvent(message.event);
+		} else if (message?.type === "released") {
+			released.resolve(message);
 		} else if (message !== undefined) {
 			result = message;
 		}
 	});
 
-	return new Promise((resolve, reject) => {
-		child.once("error", (err) => {
-			reject(
-				new ForgeError("internal_error", `The supervisor did not start: ${err.message}`),
-			);
-		});
-		child.once("close", (code, signal) => {
-			if (result === undefined) {
-				reject(crashed(code, signal, stderr()));
-			} else if (result.ok) {
-				resolve({ data: result.data, summary: result.summary });
-			} else {
-				reject(failureError(result.error));
-			}
-		});
-	});
+	const exited = exitedAsync(child, stderr, () => result);
+	// Once released, this `start` returns; the supervisor runs on.
+	exited.catch(ignore);
+	const { data, summary } = await Promise.race([released.promise, exited]);
+	return { data, summary };
 }

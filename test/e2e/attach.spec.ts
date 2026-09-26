@@ -12,7 +12,6 @@ import { openStudioStandInAsync, pidOf } from "../helpers/real-native.ts";
 import { readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
 import {
-	closedOnRequest,
 	makeFixtureAsync,
 	startReadyAsync,
 	startSession,
@@ -23,26 +22,24 @@ import { runForgeAsync } from "./up-fixture.ts";
 /** Rojo and Studio; the open step would build the place first. */
 const BUILD_FIRST = { open: { buildFirst: true } };
 const START = ["start", "--no-compiler", "--json"];
-const OPEN_TEXT = "The session ends when Studio closes it.";
+const OPEN_TEXT = "Roblox Studio has ";
 
 function rolesOf(fixture: Fixture): Array<string> {
 	return readWorkerLog(fixture.log).map(({ args, role }) => [role, ...args].join(" "));
 }
 
 describe("attach an open Studio", () => {
-	it("should attach the Studio that has the place open on start, and close it on down", async () => {
+	it("should attach the Studio that has the place open on start, and close it on stop --force", async () => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(BUILD_FIRST, { studio: true });
 		const studio = pidOf(await openStudioStandInAsync(fixture.place));
 		const { session } = await startReadyAsync(fixture, START);
-		const down = await runForgeAsync(fixture, ["down", "--json"]);
+		const stop = await runForgeAsync(fixture, ["stop", "--force", "--json"]);
 
 		await expect(session.closed).resolves.toBe(0);
-		expect(down.result).toMatchObject({
-			data: {
-				studio: closedOnRequest({ pid: studio, place: fixture.place, status: "closed" }),
-			},
+		expect(stop.result).toMatchObject({
+			data: { pid: studio, place: fixture.place, stopped: true },
 			ok: true,
 		});
 		// No build under the open Studio, and no second Studio.

@@ -133,6 +133,8 @@ export interface StatusRecorder {
 	 * still runs.
 	 */
 	compiled: (build: LastBuild, isBuilding: boolean) => void;
+	/** A part got an owner (`start` took or added it), or lost it. */
+	owner: (part: PartId, owner: null | PartOwner) => void;
 	/** The session chose Rojo's port. */
 	rojoPort: (port: number) => void;
 	/**
@@ -156,6 +158,11 @@ export interface StatusRecorder {
 		place: string,
 		process: null | StudioProcess,
 	) => void;
+	/**
+	 * The session let go of its Studio, which stays open: `off`, with no
+	 * owner.
+	 */
+	studioLeft: () => void;
 	/** A syncback run ended. */
 	syncbackFinished: (run: SyncbackRun) => void;
 	/** A syncback run started. */
@@ -176,6 +183,8 @@ export interface StatusStart {
 	compiler: boolean;
 	/** The session opens Studio. */
 	open: boolean;
+	/** The owner of every part the session starts with. */
+	owner: null | PartOwner;
 	pid: number;
 	/** Rojo's port, when the session chose it before it started. */
 	port: number | undefined;
@@ -245,18 +254,26 @@ export function createStatusStore(
 }
 
 function initialStatus(start: StatusStart): SessionStatus {
+	function ownerOf(isPlanned: boolean): null | PartOwner {
+		return isPlanned ? start.owner : null;
+	}
+
 	return {
 		phase: "starting",
 		pid: start.pid,
 		running: true,
 		services: {
-			compiler: { building: false, owner: null, status: start.compiler ? "starting" : "off" },
+			compiler: {
+				building: false,
+				owner: ownerOf(start.compiler),
+				status: start.compiler ? "starting" : "off",
+			},
 			rojo: {
-				owner: null,
+				owner: ownerOf(start.rojo),
 				...(start.port === undefined ? {} : { port: start.port }),
 				status: start.rojo ? "starting" : "off",
 			},
-			studio: { owner: null, status: start.open ? "opening" : "off" },
+			studio: { owner: ownerOf(start.open), status: start.open ? "opening" : "off" },
 			syncback: { status: start.syncback ? "idle" : "off" },
 		},
 		sessionId: start.sessionId,
@@ -289,8 +306,12 @@ function setPart(
 function createPartRecorder(
 	status: SessionStatus,
 	changed: () => void,
-): Pick<StatusRecorder, "rojoPort" | "service" | "serviceFailed"> {
+): Pick<StatusRecorder, "owner" | "rojoPort" | "service" | "serviceFailed"> {
 	return {
+		owner: (part, owner) => {
+			status.services[part].owner = owner;
+			changed();
+		},
 		rojoPort: (port) => {
 			status.services.rojo.port = port;
 			changed();
@@ -301,6 +322,30 @@ function createPartRecorder(
 		},
 		serviceFailed: (id, failure) => {
 			setPart(status.services[id], { ...failure, status: "failed" });
+			changed();
+		},
+	};
+}
+
+/**
+ * The Studio half of a recorder.
+ *
+ * @param status - The status it changes.
+ * @param changed - Called after each change.
+ * @returns What records the session's Studio.
+ */
+function createStudioRecorder(
+	status: SessionStatus,
+	changed: () => void,
+): Pick<StatusRecorder, "studio" | "studioLeft"> {
+	return {
+		studio: (studioStatus, place, process) => {
+			const { owner } = status.services.studio;
+			status.services.studio = { ...process, owner, place, status: studioStatus };
+			changed();
+		},
+		studioLeft: () => {
+			status.services.studio = { owner: null, status: "off" };
 			changed();
 		},
 	};
@@ -333,11 +378,7 @@ function createRecorder(
 			changed();
 		},
 		...createPartRecorder(status, changed),
-		studio: (studioStatus, place, process) => {
-			const { owner } = status.services.studio;
-			status.services.studio = { ...process, owner, place, status: studioStatus };
-			changed();
-		},
+		...createStudioRecorder(status, changed),
 		syncbackFinished: (run) => {
 			status.services.syncback = { lastRun: { at: isoTime(now()), ...run }, status: resting };
 			changed();

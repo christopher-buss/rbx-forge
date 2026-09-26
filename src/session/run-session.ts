@@ -5,12 +5,13 @@ import type { OnStop, StopRequest } from "./stop-source.ts";
 
 /** Why a session ended. */
 export type SessionEndReason =
-	/** A stop request: the owner pipe closed, or a stop signal. */
+	/**
+	 * A stop request: the owner pipe closed, or a stop signal; an owner's
+	 * end that left no part; or `down` and `stop` that left none.
+	 */
 	| StopRequest
 	/** A step before the services failed, or a service could not start. */
-	| { error: unknown; type: "failed" }
-	/** Studio closed the place the session opened. */
-	| { type: "studio_closed" };
+	| { error: unknown; type: "failed" };
 
 /** How a session ended, once every worker is gone. */
 export interface SessionOutcome {

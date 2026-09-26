@@ -29,9 +29,10 @@ the place's lock file.
 after Ctrl+C on `start`: when the place's lock file names a Studio that `stop`
 would verify (see [Closing Studio](#closing-studio)), the session records that
 Studio, builds nothing into the place, and opens no second Studio. Studio has
-closed the place when the lock file goes or names another process. The session
-of `start` then ends; for a Studio that `up --studio` attached, only its Rojo
-stops.
+closed the place when the lock file goes or names another process. For a Studio
+that a `start` owns, nothing then stops; for a Studio with no owner, only its
+Rojo stops. The end of `start` never closes Studio: a Studio it opened leaves
+the session and stays open.
 
 ## Closing Studio
 

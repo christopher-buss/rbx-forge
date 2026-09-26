@@ -1,6 +1,7 @@
 import { type } from "arktype";
 
 import { ForgeError } from "../errors.ts";
+import type { OwnerHandlers } from "./ownership.ts";
 import type { PartStopper } from "./part-stops.ts";
 import type { PartId } from "./status.ts";
 
@@ -20,18 +21,19 @@ export interface PartRequest {
 /** Adds the parts that are missing or failed, and returns those it started. */
 export type PartAdder = (request: PartRequest) => Promise<Array<PartId>>;
 
-/** What the session body adds and stops parts with. */
-export interface PartHandlers {
+/** What the session body adds, stops, and hands over parts with. */
+export interface PartHandlers extends OwnerHandlers {
 	add: PartAdder;
 	stop: PartStopper;
 }
 
 /**
- * `forge up`, `down`, and `stop` on a running session: the control channel
- * asks, the session body adds or stops. The channel opens before the body
- * has started its parts, so an add waits until the body hands its handlers
- * over; a stop before that fails at once, and the client stops the whole
- * session. Requests run one at a time.
+ * `forge up`, `down`, `stop`, and `start` on a running session: the control
+ * channel (or the owner pipe) asks, the session body adds, stops, or hands
+ * over parts. The channel opens before the body has started its parts, so
+ * an add or a join waits until the body hands its handlers over; a stop or
+ * an owner's end before that fails at once, and the whole session stops.
+ * Requests run one at a time.
  */
 export interface PartRequests {
 	/**
@@ -50,6 +52,20 @@ export interface PartRequests {
 	 */
 	close: () => void;
 	/**
+	 * A `start` joins as the owner.
+	 *
+	 * @rejects {ForgeError} `not_running` once the session is stopping; as
+	 *   {@link OwnerHandlers.own}.
+	 */
+	ownAsync: OwnerHandlers["own"];
+	/**
+	 * The owner is gone.
+	 *
+	 * @rejects {ForgeError} `not_running` while the session starts, or once it
+	 *   is stopping.
+	 */
+	releaseAsync: OwnerHandlers["release"];
+	/**
 	 * Stop the parts a request may stop.
 	 *
 	 * @returns What it stopped and kept.
@@ -57,6 +73,16 @@ export interface PartRequests {
 	 *   is stopping.
 	 */
 	stopAsync: PartStopper;
+}
+
+/** The link between the control channel and the body. */
+interface Link {
+	/** Resolves with the handlers, or with none once closed. */
+	attached: Promise<PartHandlers | undefined>;
+	/** Runs one request at a time. */
+	enqueueAsync: <T>(run: () => Promise<T>) => Promise<T>;
+	handlers?: PartHandlers;
+	isClosed: boolean;
 }
 
 const partRequest = type({
@@ -82,23 +108,15 @@ export function parsePartRequest(parameters: Record<string, unknown>): PartReque
 
 /**
  * Make the link between a session's control channel and its body for
- * `forge up`, `down`, and `stop`.
+ * `forge up`, `down`, `stop`, and `start`.
  *
  * @returns A link with no handlers yet.
  */
 export function createPartRequests(): PartRequests {
 	const attached = Promise.withResolvers<PartHandlers | undefined>();
-	const link: { handlers?: PartHandlers; isClosed: boolean } = { isClosed: false };
-	const enqueueAsync = createQueue();
+	const link: Link = { attached: attached.promise, enqueueAsync: createQueue(), isClosed: false };
 	return {
-		addAsync: async (parts) => {
-			// Once attached, requests queue in the order they came.
-			const handlers =
-				link.handlers === undefined || link.isClosed
-					? await waitForHandlersAsync(attached.promise, link)
-					: link.handlers;
-			return enqueueAsync(async () => handlers.add(parts));
-		},
+		addAsync: async (parts) => whenAttachedAsync(link, async ({ add }) => add(parts)),
 		attach: (handlers) => {
 			link.handlers = handlers;
 			attached.resolve(handlers);
@@ -107,14 +125,9 @@ export function createPartRequests(): PartRequests {
 			link.isClosed = true;
 			attached.resolve(undefined);
 		},
-		stopAsync: async (request) => {
-			const { handlers, isClosed } = link;
-			if (handlers === undefined || isClosed) {
-				throw isClosed ? stopping() : starting();
-			}
-
-			return enqueueAsync(async () => handlers.stop(request));
-		},
+		ownAsync: async (request) => whenAttachedAsync(link, async ({ own }) => own(request)),
+		releaseAsync: async (reason) => nowAsync(link, async ({ release }) => release(reason)),
+		stopAsync: async (request) => nowAsync(link, async ({ stop }) => stop(request)),
 	};
 }
 
@@ -164,8 +177,47 @@ async function waitForHandlersAsync(
 	return handlers;
 }
 
+/**
+ * Queue a request once the body handed its handlers over.
+ *
+ * @template T - What the request resolves with.
+ * @param link - The handlers, once attached, and the queue.
+ * @param run - The request.
+ * @returns What it resolves with.
+ * @rejects {ForgeError} `not_running` once the session is stopping; the
+ *   request's own failure.
+ */
+async function whenAttachedAsync<T>(
+	link: Link,
+	run: (handlers: PartHandlers) => Promise<T>,
+): Promise<T> {
+	// Once attached, requests queue in the order they came.
+	const ready = link.isClosed ? undefined : link.handlers;
+	const handlers = ready ?? (await waitForHandlersAsync(link.attached, link));
+	return link.enqueueAsync(async () => run(handlers));
+}
+
 function starting(): ForgeError {
 	return new ForgeError("not_running", "The session is starting; it stops no part yet.", {
 		hint: "Stop the whole session.",
 	});
+}
+
+/**
+ * Queue a request that needs the handlers now.
+ *
+ * @template T - What the request resolves with.
+ * @param link - The handlers, once attached, and the queue.
+ * @param run - The request.
+ * @returns What it resolves with.
+ * @rejects {ForgeError} `not_running` while the session starts, or once it
+ *   is stopping; the request's own failure.
+ */
+async function nowAsync<T>(link: Link, run: (handlers: PartHandlers) => Promise<T>): Promise<T> {
+	const { handlers, isClosed } = link;
+	if (handlers === undefined || isClosed) {
+		throw isClosed ? stopping() : starting();
+	}
+
+	return link.enqueueAsync(async () => run(handlers));
 }

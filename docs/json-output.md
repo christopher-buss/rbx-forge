@@ -72,18 +72,37 @@ has:
 
 - `status`: `starting`, `ready`, `off` (not run, or stopped on request), or
   `failed` (its service exited by itself).
-- `owner`: `start` (the `forge start` terminal that owns it) or `null`.
+- `owner`: `start` (the `forge start` terminal that owns it) or `null`. A
+  `start` owns the parts it started and those it took when it joined; its end
+  stops the first and gives back the second (`owner` becomes `null`).
 - With `failed` only: `exitCode` (`null` when a signal ended it) and
   `outputTail`, the last lines of its output. `forge logs <part>` has all of it.
 
 A service's exit stops only its part: the session and its other parts keep
 running. A second `forge up` starts a `failed` compiler again, as a new part,
 and the `failed` Rojo of an attached Studio on the same port. When a Studio that
-`up --studio` attached closes the place, only its Rojo stops (`off`). The phase
-is `ready` once the session started its parts and none is `starting`, also with
-a part `off` or `failed`. `data.services.studio` also has `owner`.
-`data.services.rojo.port` is there once the session chose Rojo's port; it keeps
-it from then on.
+`up --studio` attached closes the place, only its Rojo stops (`off`); when a
+Studio that a `start` owns closes it, nothing stops. The phase is `ready` once
+the session started its parts and none is `starting`, also with a part `off` or
+`failed`. `data.services.studio` also has `owner`. `data.services.rojo.port` is
+there once the session chose Rojo's port; it keeps it from then on.
+
+## `start` and its parts
+
+A `forge start` that started its session ends with the session's result:
+`data.reason` (`SIGINT`, `owner_gone`, `shutdown`, …) and every worker's report.
+When its end leaves the session running (a part with no owner runs on), or when
+it joined a running session, its result names what letting go did:
+
+- `stopped`: the services it started, now stopped.
+- `studioLeft`: `true` when the session let go of the Studio it opened; that
+  Studio stays open.
+- `released`: the parts it took, which run on with no owner.
+- `ending`: `true` when no part was left, so the session ends.
+- `sessionId`.
+
+A `start` that joined reports `Joined session <id>: …` first. When the session
+ends while it holds it, it returns `data.ending: true` with no other field.
 
 ## Fresh builds: `status --wait`
 

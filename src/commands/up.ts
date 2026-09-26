@@ -262,7 +262,7 @@ function readReport(context: CommandContext, launched: Launched): ResultMessage 
 		const message = parseMessage(line);
 		if (message?.type === "event") {
 			context.reporter.emit(message.event);
-		} else if (message !== undefined) {
+		} else if (message?.type === "result") {
 			result = message;
 		}
 	}

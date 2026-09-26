@@ -1,10 +1,11 @@
 import { type } from "arktype";
 
 import { ForgeError } from "../errors.ts";
-import { callSessionAsync } from "../ipc/client.ts";
+import { callSessionAsync, ownSessionAsync } from "../ipc/client.ts";
 import { IPC_WAIT_MS } from "../ipc/protocol.ts";
 import type { IpcTransport } from "../ipc/transport.ts";
 import type { FileSystem } from "../seams/file-system.ts";
+import type { OwnerJoin, OwnerRelease } from "../session/ownership.ts";
 import type { PartRequest } from "../session/part-requests.ts";
 import { parseStopResult } from "../session/part-stop-schema.ts";
 import type { PartStops, StopPartsRequest } from "../session/part-stops.ts";
@@ -114,7 +115,88 @@ export async function fetchStatusAsync(
 	return status;
 }
 
-const addedResult = type({ added: "('compiler' | 'rojo' | 'studio')[]" });
+const PART_LIST = "('compiler' | 'rojo' | 'studio')[]";
+
+const addedResult = type({ added: PART_LIST });
+
+const joinedResult = type({ added: PART_LIST, sessionId: "string", taken: PART_LIST });
+
+const releasedResult = type({
+	ending: "boolean",
+	released: PART_LIST,
+	sessionId: "string",
+	stopped: "('compiler' | 'rojo')[]",
+	studioLeft: "boolean",
+});
+
+/** A session this `start` joined as its owner. */
+export interface JoinedSession {
+	/**
+	 * Hold the session until `release` aborts, then let go.
+	 *
+	 * @returns What letting go did; `undefined` when the session ended
+	 *   first.
+	 * @rejects {ForgeError} `supervisor_unresponsive` with no answer in time;
+	 *   `internal_error` for an answer that is no release.
+	 */
+	holdAsync: (release: AbortSignal, waitMs: number) => Promise<OwnerRelease | undefined>;
+	/** What the join took and started, and the session's id. */
+	joined: OwnerJoin & { sessionId: string };
+}
+
+/**
+ * Join a session as its owner (`forge start`): it takes every running part
+ * and starts the parts the request asks for. The session holds them for
+ * this process until it lets go or ends.
+ *
+ * @param ipc - Reaches its endpoint.
+ * @param session - Its identity record and token.
+ * @param request - The parts to start, and the Studio executable.
+ * @param options - How long the join may take, and the signal that gives
+ *   up on it.
+ * @param options.signal - Aborts to give up: the session lets go.
+ * @param options.waitMs - How long the join may take.
+ * @returns The joined session; `undefined` when `signal` aborted first.
+ * @rejects {ForgeError} As {@link fetchStatusAsync}; `session_running`
+ *   while another `start` owns it; the add's own failure.
+ */
+export async function joinSessionAsync(
+	ipc: IpcTransport,
+	session: KnownSession,
+	request: PartRequest,
+	{ signal, waitMs }: { signal: AbortSignal; waitMs: number },
+): Promise<JoinedSession | undefined> {
+	const owned = await ownSessionAsync(
+		ipc,
+		{ endpoint: session.identity.endpoint, token: session.token },
+		{ params: { ...request }, responseTimeoutMs: waitMs, signal },
+	);
+	if (owned === undefined) {
+		return undefined;
+	}
+
+	const joined = joinedResult(owned.joined);
+	if (joined instanceof type.errors) {
+		throw otherAnswer("own");
+	}
+
+	return {
+		holdAsync: async (release, releaseWaitMs) => {
+			const answer = await owned.holdAsync(release, releaseWaitMs);
+			if (answer === undefined) {
+				return;
+			}
+
+			const released = releasedResult(answer);
+			if (released instanceof type.errors) {
+				throw otherAnswer("release");
+			}
+
+			return released;
+		},
+		joined,
+	};
+}
 
 /**
  * Ask a session to start the parts that are missing or failed.
@@ -224,6 +306,12 @@ export async function probeSessionAsync(
 
 		throw err;
 	}
+}
+
+function otherAnswer(method: string): ForgeError {
+	return new ForgeError("internal_error", `The session answered ${method} with something else.`, {
+		hint: OTHER_VERSION,
+	});
 }
 
 function readText(fileSystem: Pick<FileSystem, "readFileSync">, file: string): string | undefined {

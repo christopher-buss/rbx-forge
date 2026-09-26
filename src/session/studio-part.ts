@@ -16,7 +16,7 @@ import type { RojoService, RojoSetup } from "./rojo-part.ts";
 import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./rojo-part.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
-import type { PartId, StatusRecorder } from "./status.ts";
+import type { PartId, StatusRecorder, StatusStore } from "./status.ts";
 import { waitForStudioCloseAsync } from "./watch.ts";
 import { watchOptions } from "./worker-context.ts";
 
@@ -29,6 +29,8 @@ export const STUDIO_OPEN_BOUND_MS = 180_000;
 /** Whether the session has a Studio: one that opens or has the place open. */
 export interface StudioState {
 	isAttached: boolean;
+	/** Stops following the attached Studio, which stays open. */
+	letGo?: (() => void) | undefined;
 }
 
 /** What opens and follows the session's Studio. */
@@ -36,7 +38,7 @@ export interface StudioSetup extends RojoSetup {
 	/** Waits for the compiler's fresh build before the place is built. */
 	builds: Pick<BuildWatch, "waitAsync">;
 	config: ResolvedConfig;
-	status: Pick<StatusRecorder, "rojoPort" | "service" | "studio">;
+	status: Pick<StatusRecorder, "rojoPort" | "service" | "studio"> & Pick<StatusStore, "snapshot">;
 }
 
 /** How the session opens Studio. */
@@ -56,6 +58,9 @@ interface AttachParts {
 	/** The session's steps context: builds and hooks run as its workers. */
 	steps: CommandContext;
 }
+
+/** The session's Studio parts, as a follow changes them. */
+type FollowParts = Pick<AttachParts, "parts" | "state">;
 
 /**
  * Build the session's place with Rojo, as a step.
@@ -106,34 +111,49 @@ export async function openStudioAsync(
 }
 
 /**
- * Follow the session's Studio until it closes the place: `open` once its
- * lock file names it. The caller marks it `closed`.
+ * Attach a Studio to the session as its part (`opening`), and follow it
+ * until it closes the place: `open` once its lock file names it. The close
+ * of a Studio with no owner stops its Rojo; the close of an owned one stops
+ * nothing, as its owner decides.
  *
  * @param setup - The context and status.
- * @param scope - Its end signal.
+ * @param scope - Its end signal; tracks the follow.
+ * @param follow - The parts and the Studio state.
  * @param opened - The place and its Studio.
- * @param events - What happens once it is open, and what its close does.
- * @param events.onOpen - Called once it has the place open.
- * @param events.whenClosed - Says what its close does, such as that the
- *   session ends.
- * @returns `true` once Studio closed the place; `false` when the session
- *   ended first.
+ * @returns `open`: resolves once Studio has the place open, or the follow
+ *   ended.
  */
-export async function followStudioAsync(
-	{ context, status }: Pick<StudioSetup, "context" | "status">,
-	scope: Pick<SessionScope, "signal">,
-	{ place, studio }: OpenedStudio,
-	events: { onOpen?: () => void; whenClosed: string },
-): Promise<boolean> {
-	const lock = { path: studioLockPath(place), pid: studio?.pid };
-	return waitForStudioCloseAsync(watchOptions(context, scope), lock, () => {
-		status.studio("open", place, studio);
-		context.reporter.emit({
-			message: `Roblox Studio has ${place} open. ${events.whenClosed}`,
-			type: "info",
-		});
-		events.onOpen?.();
-	});
+export function followSessionStudio(
+	setup: Pick<StudioSetup, "context" | "status">,
+	scope: Pick<SessionScope, "signal" | "track">,
+	follow: FollowParts,
+	opened: OpenedStudio,
+): { open: Promise<void> } {
+	const letGo = new AbortController();
+	follow.state.isAttached = true;
+	follow.state.letGo = () => {
+		letGo.abort();
+	};
+
+	setup.status.studio("opening", opened.place, opened.studio);
+	const open = Promise.withResolvers<void>();
+	const signal = AbortSignal.any([scope.signal, letGo.signal]);
+	scope.track(followAsync(setup, { signal }, follow, { ...opened, onOpen: open.resolve }));
+	return { open: open.promise };
+}
+
+/**
+ * Let go of the session's Studio, which stays open: its follow ends, and
+ * it is no part any more.
+ *
+ * @param state - Whether a Studio is attached, and its follow.
+ * @param status - Records it `off`.
+ */
+export function leaveStudio(state: StudioState, status: Pick<StatusRecorder, "studioLeft">): void {
+	state.letGo?.();
+	state.letGo = undefined;
+	state.isAttached = false;
+	status.studioLeft();
 }
 
 /**
@@ -188,22 +208,25 @@ export function createStudioAdder(
 }
 
 /**
- * Follow an attached Studio: once it closes the place, only its Rojo stops.
+ * Follow an attached Studio until it closes the place, or the follow ends.
  *
  * @param setup - The context and status.
- * @param scope - Its end signal.
- * @param attach - The parts and the Studio state.
+ * @param scope - Ends the follow: the session's end, or a let go.
+ * @param follow - The parts and the Studio state.
  * @param opened - The place, its Studio, and what gets its open.
  */
-async function followAttachedAsync(
-	setup: StudioSetup,
-	scope: SessionScope,
-	{ parts, state }: Pick<AttachParts, "parts" | "state">,
+async function followAsync(
+	{ context, status }: Pick<StudioSetup, "context" | "status">,
+	scope: Pick<SessionScope, "signal">,
+	{ parts, state }: FollowParts,
 	opened: OpenedStudio & { onOpen: () => void },
 ): Promise<void> {
-	const isClosed = await followStudioAsync(setup, scope, opened, {
-		onOpen: opened.onOpen,
-		whenClosed: "Its Rojo stops when Studio closes it.",
+	const { place, studio } = opened;
+	const lock = { path: studioLockPath(place), pid: studio?.pid };
+	const isClosed = await waitForStudioCloseAsync(watchOptions(context, scope), lock, () => {
+		status.studio("open", place, studio);
+		context.reporter.emit({ message: `Roblox Studio has ${place} open.`, type: "info" });
+		opened.onOpen();
 	});
 	opened.onOpen();
 	if (!isClosed) {
@@ -211,8 +234,11 @@ async function followAttachedAsync(
 	}
 
 	state.isAttached = false;
-	setup.status.studio("closed", opened.place, opened.studio);
-	parts.stop("rojo");
+	state.letGo = undefined;
+	status.studio("closed", place, studio);
+	if (status.snapshot().services.studio.owner === null) {
+		parts.stop("rojo");
+	}
 }
 
 /**
@@ -236,11 +262,8 @@ async function attachAsync(
 		return undefined;
 	}
 
-	attach.state.isAttached = true;
-	setup.status.studio("opening", opened.place, opened.studio);
-	const open = Promise.withResolvers<void>();
-	scope.track(followAttachedAsync(setup, scope, attach, { ...opened, onOpen: open.resolve }));
-	return { open: open.promise, place: opened.place };
+	const { open } = followSessionStudio(setup, scope, attach, opened);
+	return { open, place: opened.place };
 }
 
 /**

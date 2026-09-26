@@ -1,26 +1,45 @@
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createMemoryTransport, scriptedConnection } from "../../test/helpers/fake-ipc.ts";
 import { ForgeError } from "../errors.ts";
-import { callSessionAsync } from "./client.ts";
+import { callSessionAsync, ownSessionAsync } from "./client.ts";
 import { IPC_WAIT_MS } from "./protocol.ts";
-import type { IpcServerOptions } from "./server.ts";
+import type { IpcOwner, IpcServerOptions } from "./server.ts";
 import { startIpcServer } from "./server.ts";
 import type { IpcTransport } from "./transport.ts";
 
 const ENDPOINT = "session";
 const TARGET = { endpoint: ENDPOINT, token: "token" };
 
-async function serveAsync(handlers: IpcServerOptions["handlers"]): Promise<IpcTransport> {
+async function startAsync(handlers: IpcServerOptions["handlers"], owner?: IpcOwner) {
 	const transport = createMemoryTransport();
 	const server = startIpcServer(await transport.listenAsync(ENDPOINT), {
 		handlers,
+		owner,
 		token: TARGET.token,
 	});
 	onTestFinished(async () => {
 		await server.closeAsync();
 	});
+	return { server, transport };
+}
+
+async function serveAsync(
+	handlers: IpcServerOptions["handlers"],
+	owner?: IpcOwner,
+): Promise<IpcTransport> {
+	const { transport } = await startAsync(handlers, owner);
 	return transport;
+}
+
+function makeOwner(join: IpcOwner["join"] = async () => ({ added: ["compiler"] })) {
+	const leave = vi.fn<IpcOwner["leave"]>().mockResolvedValue({ stopped: ["compiler"] });
+	return { join: vi.fn<IpcOwner["join"]>(join), leave };
+}
+
+function never(): AbortSignal {
+	const controller = new AbortController();
+	return controller.signal;
 }
 
 describe(callSessionAsync, () => {
@@ -93,5 +112,104 @@ describe(callSessionAsync, () => {
 		expect(connection.readTimeouts).toStrictEqual([60_000]);
 		expect(connection.isClosed()).toBeTrue();
 		expect(transport.connectAsync).toHaveBeenCalledWith(ENDPOINT, IPC_WAIT_MS);
+	});
+});
+
+describe(ownSessionAsync, () => {
+	it("should join, hold the session, and let go with a release once asked", async () => {
+		expect.assertions(4);
+
+		const owner = makeOwner();
+		const transport = await serveAsync({}, owner);
+		const owned = await ownSessionAsync(transport, TARGET, {
+			params: { parts: [] },
+			signal: never(),
+		});
+		const release = new AbortController();
+		const held = owned!.holdAsync(release.signal, 1000);
+		await new Promise((resolve) => {
+			setTimeout(resolve, 300);
+		});
+		const wasHeld = owner.leave.mock.calls.length;
+		release.abort();
+
+		expect(owned!.joined).toStrictEqual({ added: ["compiler"] });
+		expect(owner.join).toHaveBeenCalledExactlyOnceWith({ parts: [] });
+		await expect(held).resolves.toStrictEqual({ stopped: ["compiler"] });
+		expect([wasHeld, owner.leave.mock.calls]).toStrictEqual([0, [["release"]]]);
+	});
+
+	it("should end the hold with no answer once the session closes the connection", async () => {
+		expect.assertions(2);
+
+		const owner = makeOwner();
+		const { server, transport } = await startAsync({}, owner);
+		const owned = await ownSessionAsync(transport, TARGET, { signal: never() });
+		const held = owned!.holdAsync(never(), 1000);
+		await server.closeAsync();
+
+		await expect(held).resolves.toBeUndefined();
+		expect(owner.leave).not.toHaveBeenCalled();
+	});
+
+	it("should give up on a join once its signal aborts, and the session lets go", async () => {
+		expect.assertions(2);
+
+		const joined = Promise.withResolvers<Record<string, unknown>>();
+		const owner = makeOwner(async () => joined.promise);
+		const transport = await serveAsync({}, owner);
+		const stop = new AbortController();
+		const owning = ownSessionAsync(transport, TARGET, { signal: stop.signal });
+		await vi.waitFor(() => {
+			assert(owner.join.mock.calls.length === 1, "the join is asked");
+		});
+		stop.abort();
+
+		await expect(owning).resolves.toBeUndefined();
+
+		joined.resolve({ added: [] });
+		await vi.waitFor(() => {
+			assert(owner.leave.mock.calls.length > 0, "the session lets go");
+		}, IPC_WAIT_MS * 2);
+
+		expect(owner.leave.mock.calls).toStrictEqual([["gone"]]);
+	});
+
+	it("should throw the join's failure, and report no session when nothing listens", async () => {
+		expect.assertions(2);
+
+		const transport = await serveAsync(
+			{},
+			makeOwner(async () => {
+				throw new ForgeError("session_running", "owned");
+			}),
+		);
+
+		await expect(ownSessionAsync(transport, TARGET, { signal: never() })).rejects.toMatchObject(
+			{ code: "session_running" },
+		);
+		await expect(
+			ownSessionAsync(createMemoryTransport(), TARGET, { signal: never() }),
+		).rejects.toMatchObject({ code: "not_running" });
+	});
+
+	it("should report a release that gets no answer in time", async () => {
+		expect.assertions(3);
+
+		const connection = scriptedConnection(['{"ok":true,"result":{},"type":"response"}']);
+		const transport: IpcTransport = {
+			connectAsync: vi.fn<IpcTransport["connectAsync"]>().mockResolvedValue(connection),
+			listenAsync: vi.fn<IpcTransport["listenAsync"]>(),
+		};
+		const owned = await ownSessionAsync(transport, TARGET, { signal: never() });
+		const release = new AbortController();
+		release.abort();
+
+		await expect(owned!.holdAsync(release.signal, 5000)).rejects.toMatchObject({
+			code: "supervisor_unresponsive",
+			message: "The session at session gave no answer to release.",
+		});
+		expect(connection.written.at(-1)).toBe('{"type":"release"}\n');
+		expect(connection.readTimeouts.at(-1)).toBe(5000);
 	});
 });
