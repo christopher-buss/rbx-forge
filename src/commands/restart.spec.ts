@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { FakeSession } from "../../test/helpers/fake-session.ts";
@@ -13,6 +13,7 @@ import {
 import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
 import type { SessionStatus } from "../session/status.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 import { RESTART_FLAGS, runRestartAsync } from "./restart.ts";
@@ -48,7 +49,7 @@ function everyPart(overrides: Partial<SessionStatus> = {}): SessionStatus {
 	};
 }
 
-function makeRestart(): RestartRun {
+function makeRestart(config: Record<string, unknown> = {}): RestartRun {
 	const memory = createMemoryFileSystem();
 	const transport = createMemoryTransport();
 	const onSleep: Array<(now: number) => void> = [];
@@ -64,7 +65,7 @@ function makeRestart(): RestartRun {
 	};
 	const configLoader = vi.fn<ConfigLoader>().mockResolvedValue({
 		path: path.join(PROJECT, "rbx-forge.config.ts"),
-		value: { projectType: "rbxts" },
+		value: { projectType: "rbxts", ...config },
 	});
 	const context = createCommandContext({
 		seams: createTestSeams({
@@ -204,6 +205,30 @@ describe(runRestartAsync, () => {
 			});
 		},
 	);
+
+	it("should give the session its Studio time, the services' grace, and a startup to answer", async () => {
+		expect.assertions(1);
+
+		const run = makeRestart({ gracefulTimeoutMs: 1234 });
+		const waits: Array<number> = [];
+		const { connectAsync } = run.transport;
+		run.transport.connectAsync = async (endpoint, timeoutMs) => {
+			const connection = await connectAsync(endpoint, timeoutMs);
+			assert(connection !== undefined);
+			const { readLineAsync } = connection;
+			connection.readLineAsync = async (waitMs) => {
+				waits.push(waitMs);
+				return readLineAsync(waitMs);
+			};
+
+			return connection;
+		};
+
+		await serveAsync(run, EVERY_PART);
+		await restartAsync(run);
+
+		expect(waits).toContain(STOP_PARTS_WAIT_MS + 1234 + UP_TIMEOUT_MS);
+	});
 
 	it("should fail as Studio's close failed", async () => {
 		expect.assertions(1);

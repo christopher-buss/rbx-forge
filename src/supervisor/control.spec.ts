@@ -286,7 +286,7 @@ describe(controlHandlers, () => {
 			recovery: "delete",
 			studioPath: "/opt/Studio",
 		});
-		expect(restartAsync).toHaveBeenNthCalledWith(2, { force: false });
+		expect(restartAsync.mock.calls[1]).toStrictEqual([{ force: false }]);
 	});
 
 	it("should refuse restartParts for another session's id", async () => {
