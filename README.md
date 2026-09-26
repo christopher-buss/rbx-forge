@@ -110,11 +110,16 @@ One-shot commands:
 | `forge init`     | Create `rbx-forge.config.ts`. `--type <rbxts\|luau>`, `--force` to replace.                              |
 | `forge config`   | Print the resolved config.                                                                               |
 | `forge build`    | Build the Rojo project. `-o, --output <path>`, or `--plugin <name>` for Studio's plugins folder.         |
-| `forge compile`  | Compile roblox-ts once and report errors (rbxts only).                                                   |
+| `forge compile`  | Compile roblox-ts once and report errors (rbxts only). While a session runs: see below.                  |
 | `forge open`     | Open the place in Studio. `--place <path>`, `--build` / `--no-build`, `--studio-path <path>`.            |
 | `forge stop`     | Close the Studio of the session or of this project's place, after it verifies it. `--recovery <mode>`.   |
 | `forge syncback` | Sync the place back into the project once. `--input <path>`, `--project <path>`.                         |
 | `forge typegen`  | Write service types from the Rojo sourcemap. `-o`, `--include`, `--exclude`, `--max-depth` (rbxts only). |
+
+While a session runs, `forge compile` starts no second compiler: it waits for
+the session's fresh build (as `status --wait`), with its `compile` hooks around
+the wait, and reports that build in the same result. A session with its compiler
+off or stopped fails with `compiler_off`; run `forge up` to start it.
 
 `forge --help` and `forge <command> --help` show every flag.
 

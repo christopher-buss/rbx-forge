@@ -54,7 +54,8 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		name: "compile",
 		flags: [],
 		run: runCompileCommandAsync,
-		summary: "Compile the roblox-ts project once and report its errors (rbxts only).",
+		summary:
+			"Compile the roblox-ts project once and report its errors (rbxts only). While a session runs, report its fresh build instead.",
 	},
 	{
 		name: "open",

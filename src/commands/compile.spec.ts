@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
+import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
+import { makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
 import {
 	createCommandContext,
 	createMemoryFileSystem,
@@ -9,10 +12,13 @@ import {
 	PROJECT,
 } from "../../test/helpers/seams.ts";
 import type { MemoryFileSystem } from "../../test/helpers/seams.ts";
-import type { ForgeError } from "../errors.ts";
+import type { Diagnostic } from "../compiler/diagnostics.ts";
+import { ForgeError } from "../errors.ts";
 import type { ProcessRunner, ProcessSpec } from "../process/process-runner.ts";
 import { OUTPUT_TAIL_LINES } from "../process/process-runner.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
+import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
+import type { LastBuild, ServiceStatus, SessionStatus } from "../session/status.ts";
 import { runCompileCommandAsync } from "./compile.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
@@ -42,6 +48,7 @@ interface CompileSetup {
 
 interface CompileRun {
 	context: CommandContext;
+	ipc: MemoryTransport;
 	memory: MemoryFileSystem;
 	/** What ran, in order: `rbxtsc` or a hook's command line. */
 	order: () => Array<string>;
@@ -71,6 +78,7 @@ function makeCompile({
 	runs = {},
 }: CompileSetup = {}): CompileRun {
 	const memory = createMemoryFileSystem(files);
+	const ipc = createMemoryTransport();
 	const specs: Array<ProcessSpec> = [];
 	const processRunner = vi.fn<ProcessRunner>(async (spec) => {
 		specs.push(spec);
@@ -95,8 +103,14 @@ function makeCompile({
 	return {
 		context: createCommandContext({
 			env: { PATH: TOOLS },
-			seams: createTestSeams({ configLoader, fileSystem: memory.fileSystem, processRunner }),
+			seams: createTestSeams({
+				configLoader,
+				fileSystem: memory.fileSystem,
+				ipc,
+				processRunner,
+			}),
 		}),
+		ipc,
 		memory,
 		order: () => specs.map(labelOf),
 		specs,
@@ -399,5 +413,217 @@ describe(runCompileCommandAsync, () => {
 			code: "compile_failed",
 		});
 		expect(order()).toStrictEqual(["rbxtsc"]);
+	});
+});
+
+const SESSION_LOG = path.join(PROJECT, ".forge", "logs", "compiler.log");
+const TYPE_ERROR: Diagnostic = {
+	code: "TS2322",
+	column: 7,
+	file: "src/a.ts",
+	line: 3,
+	message: "Type 'string' is not assignable to type 'number'.\n  More.",
+	severity: "error",
+};
+const WARNING: Diagnostic = {
+	code: "roblox-ts",
+	column: null,
+	file: null,
+	line: null,
+	message: "Unused import.",
+	severity: "warning",
+};
+
+function sessionBuild(diagnostics: Array<Diagnostic>): LastBuild {
+	return {
+		at: "2026-01-01T00:00:02.500Z",
+		diagnostics,
+		errors: diagnostics.filter(({ severity }) => severity === "error").length,
+		startedAt: "2026-01-01T00:00:01.000Z",
+	};
+}
+
+function compilerStatus(status: ServiceStatus, lastBuild?: LastBuild): SessionStatus {
+	const base = makeStatus();
+	const compiler = lastBuild === undefined ? {} : { lastBuild };
+	return makeStatus({
+		services: { ...base.services, compiler: { building: false, status, ...compiler } },
+	});
+}
+
+describe("runCompileCommandAsync with a running session", () => {
+	it("should report the session's fresh build and run no compiler", async () => {
+		expect.assertions(3);
+
+		const run = makeCompile();
+		const fake = await serveFakeSessionAsync(run.memory, run.ipc, compilerStatus("starting"));
+		const waits: Array<unknown> = [];
+		fake.freshStatus = (parameters) => {
+			waits.push(parameters["timeoutMs"]);
+			return { ...compilerStatus("ready", sessionBuild([WARNING])) };
+		};
+
+		await expect(runCompileCommandAsync(run.context, INPUT)).resolves.toStrictEqual({
+			data: {
+				diagnostics: [WARNING],
+				durationMs: 1500,
+				errors: 0,
+				hooks: [],
+				log: SESSION_LOG,
+				sessionId: "s1",
+			},
+			summary: `Session s1 built: 0 errors, 1 warning. Full output: ${SESSION_LOG}`,
+		});
+		expect(waits).toStrictEqual([FRESH_BUILD_TIMEOUT_MS]);
+		expect(run.specs).toStrictEqual([]);
+	});
+
+	it("should fail with the build's diagnostics when it has errors", async () => {
+		expect.assertions(2);
+
+		const run = makeCompile();
+		const fake = await serveFakeSessionAsync(run.memory, run.ipc, compilerStatus("ready"));
+		fake.freshStatus = () => {
+			return { ...compilerStatus("ready", sessionBuild([TYPE_ERROR, WARNING])) };
+		};
+
+		await expect(runCompileCommandAsync(run.context, INPUT)).rejects.toMatchObject({
+			code: "compile_failed",
+			details: {
+				diagnostics: [TYPE_ERROR, WARNING],
+				errors: 1,
+				log: SESSION_LOG,
+				sessionId: "s1",
+			},
+			hint: "Fix the errors, then run forge compile again.",
+			message: [
+				"The build of session s1 has 1 error:",
+				"  src/a.ts:3:7 - error TS2322: Type 'string' is not assignable to type 'number'.",
+				`Full output: ${SESSION_LOG}`,
+			].join("\n"),
+		});
+		expect(run.specs).toStrictEqual([]);
+	});
+
+	it("should list at most 20 errors in the message", async () => {
+		expect.assertions(1);
+
+		const errors = Array.from({ length: 25 }, (_, index) => {
+			return { ...TYPE_ERROR, line: index + 1 };
+		});
+		const run = makeCompile();
+		const fake = await serveFakeSessionAsync(run.memory, run.ipc, compilerStatus("ready"));
+		fake.freshStatus = () => {
+			return { ...compilerStatus("ready", sessionBuild([WARNING, ...errors])) };
+		};
+
+		const tail: Array<string> = [
+			"  src/a.ts:20:7 - error TS2322: Type 'string' is not assignable to type 'number'.",
+			"  ...and 5 more",
+			`Full output: ${SESSION_LOG}`,
+		];
+
+		await expect(runCompileCommandAsync(run.context, INPUT)).rejects.toThrow(tail.join("\n"));
+	});
+
+	it("should name a diagnostic with no location by its code alone", async () => {
+		expect.assertions(1);
+
+		const run = makeCompile();
+		const fake = await serveFakeSessionAsync(run.memory, run.ipc, compilerStatus("ready"));
+		fake.freshStatus = () => {
+			return {
+				...compilerStatus("ready", sessionBuild([{ ...WARNING, severity: "error" }])),
+			};
+		};
+
+		await expect(runCompileCommandAsync(run.context, INPUT)).rejects.toMatchObject({
+			message: [
+				"The build of session s1 has 1 error:",
+				"  error roblox-ts: Unused import.",
+				`Full output: ${SESSION_LOG}`,
+			].join("\n"),
+		});
+	});
+
+	it.for<ServiceStatus>(["off", "stopped"])(
+		"should fail with compiler_off when the session's compiler is %s",
+		async (status) => {
+			expect.assertions(2);
+
+			const run = makeCompile();
+			const fake = await serveFakeSessionAsync(run.memory, run.ipc, compilerStatus(status));
+			fake.freshStatus = () => {
+				throw new Error("no wait");
+			};
+
+			await expect(runCompileCommandAsync(run.context, INPUT)).rejects.toMatchObject({
+				code: "compiler_off",
+				details: { sessionId: "s1", status },
+				hint: 'Run "forge up" to start the compiler, then forge compile again.',
+				message: `Session s1 runs, but its compiler is ${status}: no build to report.`,
+			});
+			expect(run.specs).toStrictEqual([]);
+		},
+	);
+
+	it("should run compile hooks around the wait", async () => {
+		expect.assertions(2);
+
+		const run = makeCompile({
+			file: { hooks: { compile: { post: ["lint"], pre: ["codegen"] } } },
+		});
+		const fake = await serveFakeSessionAsync(run.memory, run.ipc, compilerStatus("ready"));
+		fake.freshStatus = () => {
+			run.specs.push({ args: ["-c", "wait"], cwd: PROJECT, env: {}, file: "/bin/sh" });
+			return { ...compilerStatus("ready", sessionBuild([])) };
+		};
+
+		const { data } = await runCompileCommandAsync(run.context, INPUT);
+
+		expect(run.order()).toStrictEqual(["codegen", "wait", "lint"]);
+		expect(data["hooks"]).toStrictEqual([
+			expect.objectContaining({ id: "compile:pre:0", outcome: "succeeded" }),
+			expect.objectContaining({ id: "compile:post:0", outcome: "succeeded" }),
+		]);
+	});
+
+	it("should pass on a failure of the wait", async () => {
+		expect.assertions(2);
+
+		const run = makeCompile();
+		const fake = await serveFakeSessionAsync(run.memory, run.ipc, compilerStatus("ready"));
+		fake.freshStatus = () => {
+			throw new ForgeError("compile_timeout", "No fresh build.");
+		};
+
+		await expect(runCompileCommandAsync(run.context, INPUT)).rejects.toMatchObject({
+			code: "compile_timeout",
+		});
+		expect(run.specs).toStrictEqual([]);
+	});
+
+	it("should fail, and compile nothing, when the session answers with no status", async () => {
+		expect.assertions(2);
+
+		const run = makeCompile();
+		const fake = await serveFakeSessionAsync(run.memory, run.ipc);
+		fake.answer = { running: "maybe" };
+
+		await expect(runCompileCommandAsync(run.context, INPUT)).rejects.toMatchObject({
+			code: "internal_error",
+		});
+		expect(run.specs).toStrictEqual([]);
+	});
+
+	it("should compile once when the named session no longer answers", async () => {
+		expect.assertions(1);
+
+		const run = makeCompile();
+		const fake = await serveFakeSessionAsync(run.memory, run.ipc, compilerStatus("ready"));
+		await fake.stop();
+		await runCompileCommandAsync(run.context, INPUT);
+
+		expect(run.order()).toStrictEqual(["rbxtsc"]);
 	});
 });

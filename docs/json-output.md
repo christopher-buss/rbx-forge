@@ -82,6 +82,13 @@ shorter than the quiet window (0.75 s) always fails when a roblox-ts compiler
 runs; `service_failed` (exit 1) when the compiler stops during the wait;
 `not_running` (exit 3) when no session runs or it stops.
 
+`forge compile --json` in a running session gives the same fresh build as a
+compile result: `data.diagnostics`, `data.errors`, `data.durationMs`,
+`data.hooks`, `data.log` (the session's compiler log), and `data.sessionId`. A
+build with errors fails with `compile_failed` and the same fields in
+`error.details`. A session whose compiler does not run fails with `compiler_off`
+(exit 1, `details.status`).
+
 ## The `down` and `stop` result
 
 `data.stoppedBy` is `shutdown`, `forced_shutdown`, `killed`, `gone`, or
