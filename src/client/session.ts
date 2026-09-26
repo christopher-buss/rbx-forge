@@ -24,6 +24,12 @@ export interface KnownSession {
 }
 
 /** The hint for an answer this forge cannot read. */
+/**
+ * How long `up` and `start` wait for a session that holds the project to
+ * answer: `up` then starts one itself, `start` fails.
+ */
+export const JOIN_SILENCE_MS = 30_000;
+
 const OTHER_VERSION = "The session may run another forge version. Stop it, then start it again.";
 
 const identityLine = type("string.json.parse").pipe(

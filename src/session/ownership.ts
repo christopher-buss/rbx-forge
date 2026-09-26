@@ -1,5 +1,6 @@
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { listParts } from "./part-names.ts";
 import type { PartAdder, PartRequest } from "./part-requests.ts";
 import { isPartRunning } from "./part-stops.ts";
 import type { SessionScope } from "./run-session.ts";
@@ -88,12 +89,6 @@ export interface OwnerSetup {
 
 const PART_IDS: ReadonlyArray<PartId> = ["studio", "rojo", "compiler"];
 
-const PART_NAMES: Readonly<Record<PartId, string>> = {
-	compiler: "the compiler",
-	rojo: "Rojo",
-	studio: "Studio",
-};
-
 /**
  * Decide what an owner's end does: the running parts it started stop
  * (Studio is let go, never closed), the running parts it took run on with
@@ -141,7 +136,7 @@ export function planRelease(
 export function releasedResult(release: OwnerRelease): CommandResult {
 	const done: Array<string> = [];
 	if (release.stopped.length > 0) {
-		done.push(`stopped ${partNames(release.stopped)}`);
+		done.push(`stopped ${listParts(release.stopped)}`);
 	}
 
 	if (release.studioLeft) {
@@ -150,7 +145,7 @@ export function releasedResult(release: OwnerRelease): CommandResult {
 
 	if (release.released.length > 0) {
 		const verb = release.released.length === 1 ? "runs" : "run";
-		done.push(`${partNames(release.released)} ${verb} on with no owner`);
+		done.push(`${listParts(release.released)} ${verb} on with no owner`);
 	}
 
 	const did = done.length === 0 ? "it owned no part" : done.join("; ");
@@ -183,10 +178,6 @@ export function createOwnerHandlers(
 		own: async (request) => joinOwnerAsync(setup, owner, { release: releaseAsync, request }),
 		release: releaseAsync,
 	};
-}
-
-function partNames(parts: ReadonlyArray<PartId>): string {
-	return parts.map((part) => PART_NAMES[part]).join(" and ");
 }
 
 /**

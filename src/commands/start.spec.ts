@@ -14,11 +14,12 @@ import {
 	createTestSeams,
 	PROJECT,
 } from "../../test/helpers/seams.ts";
+import { JOIN_SILENCE_MS } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { IpcHandler } from "../ipc/server.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { SupervisorLaunch, SupervisorLauncher } from "../supervisor/launcher.ts";
-import { JOIN_SILENCE_MS, runStartAsync, START_FLAGS } from "./start.ts";
+import { runStartAsync, START_FLAGS } from "./start.ts";
 
 /**
  * Run `start` with no session running, once it launched its supervisor.

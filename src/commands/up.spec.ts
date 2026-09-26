@@ -11,6 +11,7 @@ import {
 	createTestSeams,
 	PROJECT,
 } from "../../test/helpers/seams.ts";
+import { JOIN_SILENCE_MS } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { SessionStatus } from "../session/status.ts";
@@ -18,7 +19,7 @@ import type { SessionRequest, SupervisorMessage } from "../supervisor/channel.ts
 import { encodeMessage } from "../supervisor/channel.ts";
 import type { DetachedLaunch, DetachedLauncher } from "../supervisor/detached-launcher.ts";
 import type { CommandInput } from "./context.ts";
-import { JOIN_SILENCE_MS, runUpAsync, UP_FLAGS, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
+import { runUpAsync, UP_FLAGS, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
 
 const INPUT: CommandInput = { config: {}, flags: {} };
 const LAUNCH_DIRECTORY = path.join(PROJECT, ".forge", "launch");

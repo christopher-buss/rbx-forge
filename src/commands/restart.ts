@@ -9,6 +9,7 @@ import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { listParts } from "../session/part-names.ts";
 import type { PartRestarts, RestartRequest } from "../session/part-restarts.ts";
 import { restartWaitMs } from "../session/part-restarts.ts";
 import type { SessionStatus } from "../session/status.ts";
@@ -17,7 +18,6 @@ import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import { failureError } from "../supervisor/channel.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
-import { listParts } from "./down.ts";
 import { describeParts, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
 
 export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [

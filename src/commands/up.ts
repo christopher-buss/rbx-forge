@@ -3,10 +3,11 @@ import path from "node:path";
 
 import type { FlagDefinition } from "../cli/flags.ts";
 import type { KnownSession } from "../client/session.ts";
-import { addPartsAsync, probeSessionAsync } from "../client/session.ts";
+import { addPartsAsync, JOIN_SILENCE_MS, probeSessionAsync } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { PinnedProcess } from "../native/addon.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { listParts } from "../session/part-names.ts";
 import type { AddablePart, PartRequest } from "../session/part-requests.ts";
 import { isPartRunning } from "../session/part-stops.ts";
 import type { PartId, SessionStatus } from "../session/status.ts";
@@ -39,11 +40,6 @@ export const UP_FLAGS: ReadonlyArray<FlagDefinition> = [
  * How long `up` waits for a session to be ready: the first compile included.
  */
 export const UP_TIMEOUT_MS = 300_000;
-/**
- * How long `up` waits for a session it did not start to answer before it
- * starts one itself (a bounded wait for the endpoint).
- */
-export const JOIN_SILENCE_MS = 30_000;
 /** How often `up` looks at the session. */
 export const UP_POLL_MS = 100;
 
@@ -58,12 +54,6 @@ interface Ready {
 
 /** The parts `up` names, in the order a session starts them. */
 const PART_IDS: ReadonlyArray<PartId> = ["compiler", "studio", "rojo"];
-
-const PART_NAMES: Readonly<Record<PartId, string>> = {
-	compiler: "the compiler",
-	rojo: "Rojo",
-	studio: "Studio",
-};
 
 /** A supervisor this `up` started, and its report file. */
 interface Launched {
@@ -201,8 +191,7 @@ function wantedParts(context: CommandContext, flags: CommandInput["flags"]): Par
 }
 
 function describeAdded(added: ReadonlyArray<PartId>): string {
-	const names = added.map((id) => PART_NAMES[id]);
-	return names.length === 0 ? "added no part" : `started ${names.join(" and ")}`;
+	return added.length === 0 ? "added no part" : `started ${listParts(added)}`;
 }
 
 /**
