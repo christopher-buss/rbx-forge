@@ -133,13 +133,8 @@ export async function addPartsAsync(
 		ipc,
 		{ endpoint: session.identity.endpoint, token: session.token },
 		"addParts",
-		{
-			params: {
-				parts: request.parts,
-				...(request.studioPath === undefined ? {} : { studioPath: request.studioPath }),
-			},
-			responseTimeoutMs: waitMs,
-		},
+		// JSON leaves an unset `studioPath` out.
+		{ params: { ...request }, responseTimeoutMs: waitMs },
 	);
 	const parsed = addedResult(result);
 	if (parsed instanceof type.errors) {

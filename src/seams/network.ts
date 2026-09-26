@@ -25,7 +25,9 @@ export const nodeNetwork: Network = {
 	freePortAsync: async () => {
 		return new Promise((resolve, reject) => {
 			const server = createServer();
+			// Stryker disable next-line StringLiteral,CallExpression: never fails
 			server.once("error", reject);
+			// Stryker disable next-line StringLiteral: equivalent
 			server.listen({ host: "127.0.0.1", port: 0 }, () => {
 				// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a TCP server's address is an object
 				const { port } = server.address() as AddressInfo;

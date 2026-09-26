@@ -2609,10 +2609,91 @@ describe("forge up --studio", () => {
 
 		await expect(answer).resolves.toMatchObject({
 			code: "studio_launch_failed",
+			hint: 'The session keeps waiting for it; check "forge status".',
 			message: `Roblox Studio did not open ${PLACE} within 180 s.`,
 		});
 		expect(state).toMatchObject({
 			services: { rojo: { status: "ready" }, studio: { status: "opening" } },
+		});
+	});
+
+	it("should open no second Studio for a session that opened its own", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ flags: { compiler: false } });
+		await flushAsync();
+		const answer = await askAddAsync(run, STUDIO);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: [] });
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+	});
+
+	it("should attach Studio while a failed compiler stays failed", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: UP, projectType: "rbxts" });
+		await flushAsync();
+		run.fake.exit("compiler", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const answer = await attachAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: ["studio", "rojo"] });
+	});
+
+	it("should start an up session with no Rojo installed, and fail with rojo_missing on attach", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			files: { "tools/rbxtsc": "" },
+			flags: UP,
+			projectType: "rbxts",
+		});
+		await flushAsync();
+		const answer = await askAddAsync(run, STUDIO);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toMatchObject({ code: "rojo_missing" });
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+	});
+
+	it("should answer at once when the session stops while Studio opens", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		const answer = askAddAsync(run, STUDIO);
+		await passAsync(run, FILE_POLL_MS);
+		run.signals.fire("SIGINT");
+		let isAnswered = false;
+		void answer.finally(() => {
+			isAnswered = true;
+		});
+		await passAsync(run, FILE_POLL_MS);
+		await run.result;
+
+		expect(isAnswered).toBeTrue();
+	});
+
+	it("should leave the attached Studio open when the session stops", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		await attachAsync(run);
+		run.native.addon.tryLockFile(path.join(SESSION, "workers.lock"), "shared");
+		run.signals.fire("SIGINT");
+		const caught = run.result.catch((err: unknown) => err);
+		await passAsync(run, 5250);
+		await caught;
+
+		expect(stateOf(run)).toMatchObject({
+			phase: "stopping",
+			services: { studio: { status: "open" } },
 		});
 	});
 
