@@ -119,7 +119,9 @@ no roblox-ts compiler in the session, it returns at once.
 One session runs per project (per worktree and build output). A second `start`
 fails with `session_running`; a second `up` joins the running session and adds
 its missing parts. A new session waits until every process of a crashed old one
-is gone.
+is gone. After 30 minutes with no activity (a command that talks to the session,
+a compile start, or a Studio save), a session stops its parts with no owner, as
+`down` does; set it with `session.idleTimeout`.
 
 One-shot commands:
 
@@ -186,7 +188,9 @@ stable, and each maps to one exit code. The loop:
    its Rojo; the compiler runs on.
 5. `forge sync --json` pulls Studio edits into the project.
 6. `forge down --json` stops the parts with no owner, and the session once none
-   is left. It never fails because a `forge start` terminal owns a part.
+   is left. It never fails because a `forge start` terminal owns a part. A
+   forgotten session stops the same way after `session.idleTimeout` minutes (30
+   by default) with no activity.
 
 See [docs/json-output.md](./docs/json-output.md) for the result fields and exit
 codes.

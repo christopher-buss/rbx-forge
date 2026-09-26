@@ -12,6 +12,7 @@ export type {
 	OpenOptions,
 	ProjectType,
 	RbxtsOptions,
+	SessionOptions,
 	StudioOptions,
 	SyncbackOptions,
 	TypegenOptions,

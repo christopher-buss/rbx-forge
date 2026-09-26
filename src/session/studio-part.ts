@@ -11,13 +11,14 @@ import type { OpenedStudio } from "./attach.ts";
 import { attachStudio } from "./attach.ts";
 import type { BuildWatch } from "./build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
+import type { IdleTracker } from "./idle.ts";
 import type { PartAdder, PartRequest } from "./part-requests.ts";
 import type { RojoService, RojoSetup } from "./rojo-part.ts";
 import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./rojo-part.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
 import type { PartId, StatusRecorder } from "./status.ts";
-import { waitForStudioCloseAsync } from "./watch.ts";
+import { waitForStudioCloseAsync, watchSaves } from "./watch.ts";
 import { watchOptions } from "./worker-context.ts";
 
 /**
@@ -36,6 +37,8 @@ export interface StudioSetup extends RojoSetup {
 	/** Waits for the compiler's fresh build before the place is built. */
 	builds: Pick<BuildWatch, "waitAsync">;
 	config: ResolvedConfig;
+	/** Gets each save of the session's Studio as activity. */
+	idle: Pick<IdleTracker, "activity">;
 	status: Pick<StatusRecorder, "rojoPort" | "service" | "studio">;
 }
 
@@ -107,9 +110,10 @@ export async function openStudioAsync(
 
 /**
  * Follow the session's Studio until it closes the place: `open` once its
- * lock file names it. The caller marks it `closed`.
+ * lock file names it, and each save of the place is activity. The caller
+ * marks it `closed`.
  *
- * @param setup - The context and status.
+ * @param setup - The context, idle tracker, and status.
  * @param scope - Its end signal.
  * @param opened - The place and its Studio.
  * @param events - What happens once it is open, and what its close does.
@@ -120,20 +124,34 @@ export async function openStudioAsync(
  *   ended first.
  */
 export async function followStudioAsync(
-	{ context, status }: Pick<StudioSetup, "context" | "status">,
+	{ context, idle, status }: Pick<StudioSetup, "context" | "idle" | "status">,
 	scope: Pick<SessionScope, "signal">,
 	{ place, studio }: OpenedStudio,
 	events: { onOpen?: () => void; whenClosed: string },
 ): Promise<boolean> {
+	const options = watchOptions(context, scope);
+	const followed = new AbortController();
+	const saves = watchSaves(
+		{ ...options, signal: AbortSignal.any([options.signal, followed.signal]) },
+		place,
+		() => {
+			idle.activity(context.seams.clock.now());
+		},
+	);
 	const lock = { path: studioLockPath(place), pid: studio?.pid };
-	return waitForStudioCloseAsync(watchOptions(context, scope), lock, () => {
-		status.studio("open", place, studio);
-		context.reporter.emit({
-			message: `Roblox Studio has ${place} open. ${events.whenClosed}`,
-			type: "info",
+	try {
+		return await waitForStudioCloseAsync(options, lock, () => {
+			status.studio("open", place, studio);
+			context.reporter.emit({
+				message: `Roblox Studio has ${place} open. ${events.whenClosed}`,
+				type: "info",
+			});
+			events.onOpen?.();
 		});
-		events.onOpen?.();
-	});
+	} finally {
+		followed.abort();
+		await saves.done;
+	}
 }
 
 /**
