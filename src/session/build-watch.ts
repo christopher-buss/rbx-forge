@@ -25,6 +25,11 @@ export interface BuildWatch {
 	 * @returns The build a summary line ended, else `undefined`.
 	 */
 	read: (line: string) => LastBuild | undefined;
+	/**
+	 * A new compiler that reports compiles starts: waits wait for its builds,
+	 * and a failure before it is forgotten. Does nothing once closed.
+	 */
+	restart: () => void;
 	/** Let time pass with no output, such as before a status is read. */
 	tick: () => void;
 	/**
@@ -59,10 +64,12 @@ interface Watch {
 	change: PromiseWithResolvers<void> | undefined;
 	clock: Clock;
 	failure: ForgeError | undefined;
+	isClosed: boolean;
 	/** Turns each output line into its build event (rbxtsc or sloptor). */
 	parse: (line: string) => CompileEvent | undefined;
 	recorder: BuildWatchOptions["recorder"];
 	tracker: FreshnessTracker;
+	tracks: boolean;
 }
 
 /**
@@ -73,32 +80,54 @@ interface Watch {
  * @param options - The clock, the status, and whether a compiler is read.
  * @returns A watch with no build.
  */
-export function createBuildWatch({ clock, recorder, tracks }: BuildWatchOptions): BuildWatch {
-	const watch: Watch = {
-		change: undefined,
-		clock,
-		failure: undefined,
-		parse: createCompilerOutputParser().read,
-		recorder,
-		tracker: createFreshnessTracker(),
-	};
+export function createBuildWatch(options: BuildWatchOptions): BuildWatch {
+	const { clock } = options;
+	const watch = initialWatch(options);
 	return {
 		close: () => {
 			fail(watch, stopping());
+			watch.isClosed = true;
 		},
 		fail: (error) => {
 			fail(watch, error);
 		},
 		read: (line) => read(watch, line),
+		restart: () => {
+			restart(watch);
+		},
 		tick: () => {
 			tick(watch, clock.now());
 		},
 		waitAsync: async (timeoutMs) => {
-			if (tracks && timeoutMs > 0) {
+			if (watch.tracks && timeoutMs > 0) {
 				await waitFreshAsync(watch, timeoutMs);
 			}
 		},
 	};
+}
+
+function initialWatch({ clock, recorder, tracks }: BuildWatchOptions): Watch {
+	return {
+		change: undefined,
+		clock,
+		failure: undefined,
+		isClosed: false,
+		parse: createCompilerOutputParser().read,
+		recorder,
+		tracker: createFreshnessTracker(),
+		tracks,
+	};
+}
+
+function restart(watch: Watch): void {
+	if (watch.isClosed) {
+		return;
+	}
+
+	watch.failure = undefined;
+	watch.parse = createCompilerOutputParser().read;
+	watch.tracker = createFreshnessTracker();
+	watch.tracks = true;
 }
 
 function changed(watch: Watch): void {
@@ -174,7 +203,7 @@ function timedOut(tracker: FreshnessTracker, timeoutMs: number): ForgeError {
  * @rejects {ForgeError} As {@link BuildWatch.waitAsync}.
  */
 async function waitFreshAsync(watch: Watch, timeoutMs: number): Promise<void> {
-	const { clock, tracker } = watch;
+	const { clock } = watch;
 	const since = clock.now();
 	const deadline = since + timeoutMs;
 	for (;;) {
@@ -182,6 +211,8 @@ async function waitFreshAsync(watch: Watch, timeoutMs: number): Promise<void> {
 			throw watch.failure;
 		}
 
+		// A compiler that started again reads into a new tracker.
+		const { tracker } = watch;
 		const now = clock.now();
 		tick(watch, now);
 		const freshAt = tracker.freshAt(since);

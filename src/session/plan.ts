@@ -15,17 +15,21 @@ export interface SessionPlan {
 	build: boolean;
 	/** Compile once before the build (roblox-ts only). */
 	compile: boolean;
-	/** The watch-mode compiler service; none for Rojo only. */
+	/** The watch-mode compiler service it starts; none without one. */
 	compiler: CompilerWatch | undefined;
-	/** Open the place in Studio; the session ends when Studio closes it. */
+	/** Open the place in Studio, and serve Rojo: Rojo runs only with Studio. */
 	open: boolean;
 	/** Run syncback on every place save. */
 	syncback: boolean;
 }
 
-/** The session flags: `--no-compiler` and `--no-open` turn these off. */
+/** The parts a session starts with. */
 export interface SessionFlags {
+	/** `--no-compiler` turns it off. */
 	compiler: boolean;
+	/**
+	 * Studio with its Rojo: `start --no-open` and `up` leave it off.
+	 */
 	open: boolean;
 }
 
@@ -38,34 +42,13 @@ export const COMPILER_MISSING_HINT =
 const LUAU_MISSING_HINT = "Install it, or fix luau.watch.command in the config.";
 
 /**
- * Decide what a session runs: Rojo always; the
- * compiler in watch mode unless `--no-compiler`; Studio unless `--no-open`;
- * syncback on save with `--syncback` or `syncback.runOnStart`. A session with
- * a compiler compiles (roblox-ts) and builds once before its services start.
- *
- * @param config - The resolved config; the flags already set its values.
- * @param flags - Whether `--compiler` and `--open` are on.
- * @returns What the session runs, in order.
- */
-export function planSession(config: ResolvedConfig, flags: SessionFlags): SessionPlan {
-	const compiler = flags.compiler ? compilerWatch(config) : undefined;
-	return {
-		build: compiler !== undefined,
-		compile: compiler !== undefined && config.projectType === "rbxts",
-		compiler,
-		open: flags.open,
-		syncback: config.syncback.runOnStart,
-	};
-}
-
-/**
  * The watch-mode compiler of a project: `rbxtsc -w` for roblox-ts, the
  * configured watch command for Luau (none when no command is set).
  *
  * @param config - The project type and compiler options.
  * @returns The compiler service, or `undefined` when there is none.
  */
-function compilerWatch(
+export function compilerWatch(
 	config: Pick<ResolvedConfig, "luau" | "projectType" | "rbxts">,
 ): CompilerWatch | undefined {
 	if (config.projectType === "rbxts") {
@@ -95,5 +78,28 @@ function compilerWatch(
 			missingHint: LUAU_MISSING_HINT,
 		},
 		parsesDiagnostics: false,
+	};
+}
+
+/**
+ * Decide what a session runs: the compiler in watch mode unless
+ * `--no-compiler`; Studio with its Rojo as the flags ask; syncback on save
+ * with `--syncback` or `syncback.runOnStart`. A session with a compiler and
+ * Studio compiles (roblox-ts) and builds once before its services start; a
+ * compiler alone does its first compile in watch mode.
+ *
+ * @param config - The resolved config; the flags already set its values.
+ * @param flags - The parts it starts with.
+ * @returns What the session runs, in order.
+ */
+export function planSession(config: ResolvedConfig, flags: SessionFlags): SessionPlan {
+	const compiler = flags.compiler ? compilerWatch(config) : undefined;
+	const hasBuild = compiler !== undefined && flags.open;
+	return {
+		build: hasBuild,
+		compile: hasBuild && config.projectType === "rbxts",
+		compiler,
+		open: flags.open,
+		syncback: config.syncback.runOnStart,
 	};
 }

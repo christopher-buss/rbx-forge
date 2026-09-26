@@ -26,14 +26,18 @@ the caller: `start` owns, `up` does not.
 - **`up` adds.** `up` starts the compiler, and `up --studio` also attaches
   Studio and Rojo. A second `up` starts only the parts that are missing or
   failed, and never removes one. Parts that `up` starts have no owner.
-- **`start` takes control.** `start` joins a running session, takes ownership of
-  every running part, and adds Studio and Rojo (`--no-open`: only the compiler).
-  On Ctrl+C it stops the parts it added and gives back the parts it took; those
-  keep running with no owner.
+- **`start` takes control.** `start` joins a running session over its endpoint,
+  takes ownership of every running part, and adds Studio and Rojo (`--no-open`:
+  it takes and adds only the compiler). It holds that connection as the owner
+  pipe of a session it starts. One `start` owns a session at a time; another
+  fails with `session_running`. On Ctrl+C it stops the parts it added and gives
+  back the parts it took; those keep running with no owner. A session with no
+  part left ends.
 - **Studio outlives Ctrl+C.** The end of the owner pipe never closes Studio. A
-  Studio that `start` opened stays open with no session. `start`, `up --studio`,
-  and `restart` attach a Studio that already has the place open (after the
-  identity check of `stop`) and never open a second one.
+  Studio that `start` opened stays open and leaves the session. The close of a
+  Studio that `start` owns stops nothing. `start`, `up --studio`, and `restart`
+  attach a Studio that already has the place open (after the identity check of
+  `stop`) and never open a second one.
 - **A part fails alone.** A service's exit stops only its part, which is then
   `failed`. Nothing restarts it by itself. `up`, `start`, or `restart` starts it
   again: the compiler first, then Rojo, which needs the compiler's output. When

@@ -1,14 +1,14 @@
 /**
- * `forge down` as a real process against a detached session with fake Rojo
- * and the real reaper. Only NDJSON output, exit codes, files, and the process
- * table are checked.
+ * `forge down` as a real process against a session with fake Rojo, compiler,
+ * and Studio, and the real reaper. Only NDJSON output, exit codes, files, and
+ * the process table are checked.
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_CLEANUP_PENDING, EXIT_NOT_RUNNING, EXIT_SUCCESS } from "../../src/exit-codes.ts";
+import { parseStatus } from "../../src/session/status.ts";
 import { openStudioStandInAsync, pidOf, waitForFileAsync } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import {
@@ -18,19 +18,21 @@ import {
 	waitForWorkersAsync,
 } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { closedOnRequest, IS_MACOS, IS_WINDOWS, makeFixtureAsync } from "./session-fixture.ts";
-import { runForgeAsync, UP_ROJO_ONLY } from "./up-fixture.ts";
+import {
+	closedOnRequest,
+	IS_MACOS,
+	IS_WINDOWS,
+	makeFixtureAsync,
+	START_STUDIO,
+	startReadyAsync,
+} from "./session-fixture.ts";
+import { runForgeAsync, UP, WATCH_COMMAND } from "./up-fixture.ts";
 
 const DOWN = ["down", "--json"];
-/** Rojo and Studio: the open step builds the place first. */
-const UP_STUDIO = ["up", "--no-compiler", "--json"];
+/** A session with no compiler: the open step builds the place first. */
+const UP_STUDIO = ["up", "--no-compiler", "--studio", "--json"];
 /** How long a dead process may stay a zombie before its parent reaps it. */
 const REAP_MS = 2000;
-/**
- * How a Studio that closes on the request goes: it exits right after it
- * removes its lock file, and forge may see the gap and end it at once.
- */
-const CLOSED_END: unknown = expect.toBeOneOf(["exited", "lock_released"]);
 /**
  * How forge ends a Studio behind a dialog: POSIX sees no dialog, so the time
  * limit.
@@ -62,34 +64,8 @@ function filesLeft(project: string): Array<string> {
 }
 
 /**
- * Wait until the session reports that Studio has its place open.
- *
- * @param fixture - The project.
- * @param sessionId - The session's id, from the `up` result.
- * @returns The PID the session recorded for the Studio it started.
- * @rejects When 30 seconds pass first.
- */
-async function waitForStudioOpenAsync(fixture: Fixture, sessionId: unknown): Promise<unknown> {
-	const state = path.join(fixture.project, ".forge", "sessions", String(sessionId), "state.json");
-	const deadline = Date.now() + 30_000;
-	while (!existsSync(state) || !readFileSync(state, "utf8").includes('"status":"open"')) {
-		if (Date.now() > deadline) {
-			throw new Error(`expected Studio open in ${state}`);
-		}
-
-		await sleep(50);
-	}
-
-	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the session's state contract
-	const status = JSON.parse(readFileSync(state, "utf8")) as {
-		services: { studio: { pid?: number } };
-	};
-	return status.services.studio.pid;
-}
-
-/**
- * Start a detached session whose stand-in Studio has the place open, and a
- * second stand-in Studio with another place open.
+ * Start a session with `up --studio`, whose stand-in Studio has the place
+ * open, and a second stand-in Studio with another place open.
  *
  * @param variables - Fixture variables for the session and its Studio.
  * @returns The fixture, the session id, the session's Studio PID, and the
@@ -105,11 +81,16 @@ async function upWithStudioAsync(variables: Record<string, string> = {}): Promis
 }> {
 	const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
 	const other = await openStudioStandInAsync(path.join(fixture.project, "other.rbxl"));
-	const up = await runForgeAsync(fixture, UP_STUDIO, variables);
-	const { sessionId } = up.result.data!;
-	const recorded = await waitForStudioOpenAsync(fixture, sessionId);
+	const { result } = await runForgeAsync(fixture, UP_STUDIO, variables);
+	const status = parseStatus(result.data);
 	const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
-	return { fixture, other: pidOf(other), recorded, sessionId, studio: studio!.pid };
+	return {
+		fixture,
+		other: pidOf(other),
+		recorded: status?.services.studio.pid,
+		sessionId: status?.sessionId,
+		studio: studio!.pid,
+	};
 }
 
 describe("forge down", () => {
@@ -125,7 +106,8 @@ describe("forge down", () => {
 			data: {
 				sessionId,
 				status: "stopped",
-				stoppedBy: "studio_closed",
+				// The session goes on without the Studio `up --studio` attached.
+				stoppedBy: "shutdown",
 				studio: closedOnRequest({ pid: studio, place: fixture.place, status: "closed" }),
 			},
 			ok: true,
@@ -174,18 +156,27 @@ describe("forge down", () => {
 		await expect(waitForDeathAsync([studio], REAP_MS)).resolves.toStrictEqual([]);
 	});
 
-	it("should wait for a Studio that is still opening its place, then close it", async () => {
+	it("should keep the parts of a start session, its opening Studio too, and end nothing", async () => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
-		await runForgeAsync(fixture, UP_STUDIO, { FIXTURE_STUDIO_LOCK_DELAY_MS: "3000" });
+		const { session } = await startReadyAsync(fixture, START_STUDIO, {
+			FIXTURE_STUDIO_LOCK_DELAY_MS: "3000",
+		});
 		const down = await runForgeAsync(fixture, DOWN);
-		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
 
 		expect(down.result.data).toMatchObject({
-			studio: { end: CLOSED_END, pid: studio!.pid, status: "closed" },
+			parts: {
+				kept: [
+					{ owner: "start", part: "studio" },
+					{ owner: "start", part: "rojo" },
+				],
+				stopped: [],
+			},
+			status: "running",
+			studio: { status: "kept" },
 		});
-		expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
+		expect(session.child.exitCode).toBeNull();
 	});
 
 	it.skipIf(!IS_WINDOWS && !IS_MACOS)(
@@ -239,8 +230,8 @@ describe("forge down", () => {
 	it("should stop a detached session and report stopped only once every process is gone", async () => {
 		expect.assertions(4);
 
-		const fixture = await makeFixtureAsync();
-		const up = await runForgeAsync(fixture, UP_ROJO_ONLY, { FIXTURE_GRANDCHILDREN: "2" });
+		const fixture = await makeFixtureAsync(WATCH_COMMAND);
+		const up = await runForgeAsync(fixture, UP, { FIXTURE_GRANDCHILDREN: "2" });
 		const { pid, sessionId } = up.result.data!;
 		const records = await waitForWorkersAsync(fixture.log, 3, 30_000);
 		const workers = records.map((record) => record.pid);
@@ -253,7 +244,12 @@ describe("forge down", () => {
 
 		expect([down.status, again.status]).toStrictEqual([EXIT_SUCCESS, EXIT_NOT_RUNNING]);
 		expect(down.result).toMatchObject({
-			data: { sessionId, status: "stopped", stoppedBy: "shutdown" },
+			data: {
+				parts: { kept: [], stopped: ["compiler"] },
+				sessionId,
+				status: "stopped",
+				stoppedBy: "shutdown",
+			},
 			ok: true,
 		});
 		expect(again.result.error!.code).toBe("not_running");
@@ -263,12 +259,31 @@ describe("forge down", () => {
 		});
 	});
 
+	it("should succeed and say so when the session has no part to stop", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync();
+		const up = await runForgeAsync(fixture, ["up", "--no-compiler", "--json"]);
+		const down = await runForgeAsync(fixture, DOWN);
+
+		expect(down.result).toMatchObject({
+			data: {
+				parts: { kept: [], stopped: [] },
+				sessionId: up.result.data!["sessionId"],
+				status: "stopped",
+				stoppedBy: "shutdown",
+			},
+			ok: true,
+		});
+		expect(filesLeft(fixture.project)).toStrictEqual([]);
+	});
+
 	it("should report a hung supervisor as unresponsive, then kill it with --force", async () => {
 		expect.assertions(4);
 
-		const fixture = await makeFixtureAsync();
+		const fixture = await makeFixtureAsync(WATCH_COMMAND);
 		const pauses = makeTemporaryDirectory();
-		const up = await runForgeAsync(fixture, UP_ROJO_ONLY, {
+		const up = await runForgeAsync(fixture, UP, {
 			RBX_FORGE_TEST_PAUSE: "block",
 			RBX_FORGE_TEST_PAUSE_DIR: pauses,
 		});

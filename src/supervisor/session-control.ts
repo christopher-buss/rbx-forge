@@ -5,11 +5,14 @@ import { startIpcServer } from "../ipc/server.ts";
 import type { Seams } from "../seams/seams.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
 import { createBuildWatch } from "../session/build-watch.ts";
+import type { IdleTracker } from "../session/idle.ts";
+import { createIdleTracker } from "../session/idle.ts";
 import type { SessionSync } from "../session/session-sync.ts";
-import type { SessionStatus, StatusStore } from "../session/status.ts";
+import type { PartOwner, SessionStatus, StatusStore } from "../session/status.ts";
 import { createStatusStore, isReady } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
-import { controlHandlers } from "./control.ts";
+import type { ControlTarget } from "./control.ts";
+import { controlHandlers, controlOwner } from "./control.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "./session-files.ts";
 import { createSession, removeSession } from "./session-files.ts";
 
@@ -17,17 +20,29 @@ import { createSession, removeSession } from "./session-files.ts";
 export interface ControlSetup {
 	forge: ForgeFiles;
 	identity: IdentityRecord;
+	/** `session.idleTimeout`, in minutes; 0 turns it off. */
+	idleTimeout: number;
 	/** Called once, when the session is first ready. */
 	onReady: (() => void) | undefined;
+	/**
+	 * Adds, stops, and hands over parts through the session body, for `up`,
+	 * `down`, `stop`, and a `start` that joins.
+	 */
+	parts: ControlTarget["parts"];
 	/**
 	 * The test pause point `control`: the files and `current` exist, the
 	 * endpoint does not.
 	 */
 	pause: () => Promise<void>;
-	/** What the session runs, for its first status. */
-	plan: { compiler: boolean; open: boolean; syncback: boolean };
-	/** The fixed Rojo port. */
-	port: number;
+	/** What the session starts with, and who owns it, for its first status. */
+	plan: {
+		compiler: boolean;
+		open: boolean;
+		owner: null | PartOwner;
+		syncback: boolean;
+	};
+	/** Rojo's port, when the session chose it before it started. */
+	port: number | undefined;
 	/** The session reads its compiler's builds (roblox-ts). */
 	readsBuilds: boolean;
 	/** The supervisor's stop requests: `shutdown` feeds them. */
@@ -46,6 +61,11 @@ export interface SessionControl {
 	 */
 	closeAsync: () => Promise<void>;
 	files: SessionFiles;
+	/**
+	 * When the session is idle. Each client request and each compile start
+	 * is activity; the session body adds Studio saves.
+	 */
+	idle: IdleTracker;
 	status: StatusStore;
 }
 
@@ -56,11 +76,12 @@ export type ControlSeams = Pick<
 >;
 
 /**
- * Step 5 of `runSupervisorAsync`: create the session
- * directory with its identity record and token, keep `state.json` up to
- * date, and open the control endpoint (`status`, `freshStatus`, `sync`,
- * `shutdown`). Call only while holding the singleton lock. When the endpoint
- * cannot open, nothing of the session ran, so its files go.
+ * Step 5 of `runSupervisorAsync`: create the session directory with its
+ * identity record and token, keep `state.json` up to date, and open the
+ * control endpoint (`status`, `freshStatus`, `addParts`, `stopParts`, `own`,
+ * `restartParts`, `sync`, `shutdown`). Call only while holding the
+ * singleton lock. When the endpoint cannot open, nothing of the session
+ * ran, so its files go.
  *
  * @param seams - The clock, file system, host, transport, addon, and ids.
  * @param setup - The identity, plan, port, stop requests, and `onReady`.
@@ -76,27 +97,28 @@ export async function openSessionAsync(
 		value: token,
 		write: tokenWriter(seams),
 	});
-	const { builds, status } = createSessionState(seams, setup, files.state);
+	const idle = createIdleTracker(setup.idleTimeout, seams.clock.now());
+	function activity(): void {
+		idle.activity(seams.clock.now());
+	}
+
+	const { builds, status } = createSessionState(seams, setup, files.state, activity);
 	await setup.pause();
 	const listener = await listenOrRemoveAsync(seams, setup, files.sessionId);
 	const server = startIpcServer(listener, {
 		handlers: controlHandlers({
 			builds,
+			parts: setup.parts,
 			sessionId: setup.identity.sessionId,
 			status,
 			stop: setup.stop,
 			sync: setup.sync,
 		}),
+		onRequest: activity,
+		owner: controlOwner({ parts: setup.parts, sessionId: setup.identity.sessionId }),
 		token,
 	});
-	return {
-		builds,
-		closeAsync: async () => {
-			await server.closeAsync();
-		},
-		files,
-		status,
-	};
+	return { builds, closeAsync: server.closeAsync, files, idle, status };
 }
 
 /**
@@ -187,17 +209,28 @@ function createSessionStatus(
  * @param seams - The clock and file system.
  * @param setup - The identity, plan, port, stop requests, and `onReady`.
  * @param stateFile - `state.json`.
+ * @param activity - Records activity now: a compile start is activity.
  * @returns The status store and the build watch.
  */
 function createSessionState(
 	seams: Pick<ControlSeams, "clock" | "fileSystem">,
 	setup: ControlSetup,
 	stateFile: string,
-): { builds: BuildWatch; status: StatusStore } {
+	activity: () => void,
+): Pick<SessionControl, "builds" | "status"> {
 	const store = createSessionStatus(seams, setup, stateFile);
 	const builds = createBuildWatch({
 		clock: seams.clock,
-		recorder: store,
+		recorder: {
+			building: (isBuilding) => {
+				if (isBuilding) {
+					activity();
+				}
+
+				store.building(isBuilding);
+			},
+			compiled: store.compiled,
+		},
 		tracks: setup.readsBuilds,
 	});
 	const status: StatusStore = {

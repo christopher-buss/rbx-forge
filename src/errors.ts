@@ -22,6 +22,7 @@ export type ForgeErrorCode =
 	| "compile_failed"
 	| "compile_timeout"
 	| "compiler_missing"
+	| "compiler_off"
 	| "config_exists"
 	| "config_invalid"
 	| "config_load_failed"
@@ -46,8 +47,10 @@ export type ForgeErrorCode =
 	| "service_failed"
 	| "session_replaced"
 	| "session_running"
+	| "session_stopping"
 	| "sourcemap_invalid"
 	| "studio_launch_failed"
+	| "studio_owned"
 	| "supervisor_unresponsive"
 	| "syncback_unsupported"
 	| "usage";
@@ -82,6 +85,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		text: "No fresh build came within the wait bound of `status --wait`.",
 	},
 	compiler_missing: { exitCode: EXIT_FAILURE, text: "The compiler is not installed." },
+	compiler_off: {
+		exitCode: EXIT_FAILURE,
+		text: "A session runs, but its compiler does not, so `forge compile` has no build to report.",
+	},
 	config_exists: {
 		exitCode: EXIT_FAILURE,
 		text: "`init` found a config file it will not replace.",
@@ -148,6 +155,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		exitCode: EXIT_FAILURE,
 		text: "A session already runs for this project.",
 	},
+	session_stopping: {
+		exitCode: EXIT_CLEANUP_PENDING,
+		text: "The session is stopping, so forge touched none of its parts; try again once it is gone.",
+	},
 	sourcemap_invalid: {
 		exitCode: EXIT_FAILURE,
 		text: "Rojo's sourcemap is missing, or is not the sourcemap of a place.",
@@ -155,6 +166,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	studio_launch_failed: {
 		exitCode: EXIT_FAILURE,
 		text: "The platform launcher could not open the place in Roblox Studio.",
+	},
+	studio_owned: {
+		exitCode: EXIT_FAILURE,
+		text: "A forge start terminal owns the Studio; only --force closes it.",
 	},
 	supervisor_unresponsive: {
 		exitCode: EXIT_CLEANUP_PENDING,

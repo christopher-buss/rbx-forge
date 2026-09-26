@@ -1,6 +1,6 @@
-import { onTestFinished } from "vitest";
+import { onTestFinished, vi } from "vitest";
 
-import type { IpcHandler, IpcServer } from "../../src/ipc/server.ts";
+import type { IpcHandler, IpcOwner, IpcServer, IpcServerOptions } from "../../src/ipc/server.ts";
 import { startIpcServer } from "../../src/ipc/server.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import type { IdentityRecord } from "../../src/supervisor/session-files.ts";
@@ -14,11 +14,19 @@ import { PROJECT } from "./seams.ts";
  * memory.
  */
 export interface FakeSession {
+	/** Answers `addParts`; no part added by default. */
+	addParts: IpcHandler;
 	/** What `status` answers instead of the status, such as a bad answer. */
 	answer?: Record<string, unknown>;
 	/** Answers `freshStatus`; the status at once by default. */
 	freshStatus: IpcHandler;
 	identity: IdentityRecord;
+	/** Answers `own`; takes and starts no part by default. */
+	join: IpcHandler;
+	/** Answers an owner's release; lets go of no part by default. */
+	leave: IpcOwner["leave"];
+	/** Answers `restartParts`; restarts no part by default. */
+	restartParts: IpcHandler;
 	/** What `status` answers; change it to move the session on. */
 	status: SessionStatus;
 	/** Stop answering, as a dead supervisor does. Its files stay. */
@@ -26,6 +34,15 @@ export interface FakeSession {
 	/** Answers `sync`; a synced place with no hooks by default. */
 	sync: IpcHandler;
 }
+
+/** What a fake session's release answers by default: it held no part. */
+export const LET_GO: Readonly<Record<string, unknown>> = {
+	ending: false,
+	released: [],
+	sessionId: "s1",
+	stopped: [],
+	studioLeft: false,
+};
 
 /** What a fake session's `sync` answers by default. */
 export const SYNCED: Readonly<Record<string, unknown>> = {
@@ -47,9 +64,9 @@ export function makeStatus(overrides: Partial<SessionStatus> = {}): SessionStatu
 		pid: 500,
 		running: true,
 		services: {
-			compiler: { building: false, status: "off" },
-			rojo: { port: 34_872, status: "ready" },
-			studio: { status: "off" },
+			compiler: { building: false, owner: null, status: "off" },
+			rojo: { owner: null, port: 34_872, status: "ready" },
+			studio: { owner: null, status: "off" },
 			syncback: { status: "off" },
 		},
 		sessionId: "s1",
@@ -74,30 +91,56 @@ export async function serveFakeSessionAsync(
 ): Promise<FakeSession> {
 	const identity = writeSessionFiles(memory, status);
 	const session: FakeSession = {
-		freshStatus: () => answerStatus(),
+		addParts: () => ({ added: [] }),
+		freshStatus: () => answerOf(session),
 		identity,
+		join: () => {
+			return { added: [], sessionId: status.sessionId, taken: [] };
+		},
+		leave: vi.fn<IpcOwner["leave"]>().mockResolvedValue({ ...LET_GO }),
+		restartParts: () => {
+			return { added: [], kept: [], stopped: [] };
+		},
 		status,
 		stop: async () => {
 			await server.closeAsync();
 		},
 		sync: () => ({ ...SYNCED }),
 	};
-	function answerStatus(): Record<string, unknown> {
-		return session.answer ?? { ...session.status };
-	}
-
-	const server: IpcServer = startIpcServer(await transport.listenAsync(identity.endpoint), {
-		handlers: {
-			freshStatus: async (parameters) => session.freshStatus(parameters),
-			status: answerStatus,
-			sync: async (parameters) => session.sync(parameters),
-		},
-		token: "token",
-	});
+	const listener = await transport.listenAsync(identity.endpoint);
+	const server: IpcServer = startIpcServer(listener, serverOptions(session));
 	onTestFinished(async () => {
 		await server.closeAsync();
 	});
 	return session;
+}
+
+function answerOf(session: FakeSession): Record<string, unknown> {
+	return session.answer ?? { ...session.status };
+}
+
+/**
+ * What a fake session serves: each method through the session's handler of
+ * the moment, so a test can change it.
+ *
+ * @param session - The fake session.
+ * @returns The server's handlers, owner, and token.
+ */
+function serverOptions(session: FakeSession): IpcServerOptions {
+	return {
+		handlers: {
+			addParts: async (parameters) => session.addParts(parameters),
+			freshStatus: async (parameters) => session.freshStatus(parameters),
+			restartParts: async (parameters) => session.restartParts(parameters),
+			status: () => answerOf(session),
+			sync: async (parameters) => session.sync(parameters),
+		},
+		owner: {
+			join: async (parameters) => session.join(parameters),
+			leave: async (how) => session.leave(how),
+		},
+		token: "token",
+	};
 }
 
 /**

@@ -160,6 +160,7 @@ function unreachable(seam: string): () => never {
 
 function unreachableNetwork(): Network {
 	return {
+		freePortAsync: vi.fn<Network["freePortAsync"]>(unreachable("network")),
 		isListeningAsync: vi.fn<Network["isListeningAsync"]>(unreachable("network")),
 		isPortFreeAsync: vi.fn<Network["isPortFreeAsync"]>(unreachable("network")),
 	};

@@ -17,8 +17,16 @@ import type { BinRun } from "./run-bin.ts";
 import { BIN, runBinAsync } from "./run-bin.ts";
 import type { Fixture } from "./session-fixture.ts";
 
-/** Rojo alone: the quickest session. */
-export const UP_ROJO_ONLY: ReadonlyArray<string> = ["up", "--no-open", "--no-compiler", "--json"];
+/** `forge up`: the watch-mode compiler alone. */
+export const UP: ReadonlyArray<string> = ["up", "--json"];
+
+/**
+ * Config for a Luau project whose watch command is the fake compiler: a
+ * worker that runs until stopped and is ready once it runs.
+ */
+export const WATCH_COMMAND: Readonly<Record<string, unknown>> = {
+	luau: { watch: { args: ["-w"], command: "rbxtsc" } },
+};
 
 /** One finished `forge` run with its parsed result. */
 export interface UpRun extends BinRun {

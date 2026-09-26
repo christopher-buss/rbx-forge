@@ -9,12 +9,12 @@ import { assert, describe, expect, it } from "vitest";
 
 import { isProcessAlive, waitForDeathAsync, waitForWorkersAsync } from "../helpers/worker-log.ts";
 import {
+	COMPILER_ONLY,
 	currentIdentity,
 	filesLeft,
 	launch,
 	makeProjectAsync,
 	native,
-	ROJO_ONLY,
 	waitForAsync,
 	waitForReadyAsync,
 	workersOf,
@@ -67,7 +67,7 @@ describe("sessions", () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();
-		const run = launch(project, ROJO_ONLY, { FIXTURE_GRANDCHILDREN: "2" });
+		const run = launch(project, COMPILER_ONLY, { FIXTURE_GRANDCHILDREN: "2" });
 		await waitForReadyAsync(run);
 		const { pid, sessionId } = currentIdentity(project);
 		run.stop("SIGINT");
@@ -89,7 +89,7 @@ describe("sessions", () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();
-		const run = launch(project, ROJO_ONLY, {
+		const run = launch(project, COMPILER_ONLY, {
 			FIXTURE_GRANDCHILDREN: "2",
 			RBX_FORGE_TEST_PAUSE: "reaper-stop",
 		});
@@ -122,7 +122,7 @@ describe("sessions", () => {
 		expect.assertions(2);
 
 		const project = await makeProjectAsync();
-		const run = launch(project, ROJO_ONLY, { RBX_FORGE_TEST_PAUSE: "reaper-exit" });
+		const run = launch(project, COMPILER_ONLY, { RBX_FORGE_TEST_PAUSE: "reaper-exit" });
 		await waitForReadyAsync(run);
 		const { sessionId } = currentIdentity(project);
 		const directory = path.join(project.forge, "sessions", sessionId);
@@ -164,12 +164,12 @@ describe("sessions", () => {
 			FIXTURE_GRANDCHILDREN: "2",
 			FIXTURE_IGNORE_SIGNALS: "1",
 		};
-		const first = launch(project, ROJO_ONLY, variables);
+		const first = launch(project, COMPILER_ONLY, variables);
 		await waitForReadyAsync(first);
 		const old = currentIdentity(project);
 		await waitForWorkersAsync(project.log, 3);
 		process.kill(old.pid, "SIGKILL");
-		const second = launch(project, ROJO_ONLY, variables);
+		const second = launch(project, COMPILER_ONLY, variables);
 		await waitForReadyAsync(second);
 		const next = currentIdentity(project);
 		second.stop("SIGINT");
@@ -192,7 +192,7 @@ describe("sessions", () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();
-		launch(project, ROJO_ONLY, { RBX_FORGE_TEST_PAUSE: "reaper-lease" });
+		launch(project, COMPILER_ONLY, { RBX_FORGE_TEST_PAUSE: "reaper-lease" });
 		const pause = path.join(project.pauses, "reaper-lease.paused");
 		const reaper = await pausedPidAsync(pause);
 		const old = currentIdentity(project);

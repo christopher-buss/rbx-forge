@@ -78,8 +78,8 @@ describe("forge init", () => {
 
 		expect(status).toBe(EXIT_SUCCESS);
 		expect(parseResult(stdout).data!["config"]).toMatchObject({
+			buildOutputPath: "game.rbxl",
 			projectType: "luau",
-			rojoPort: 34_872,
 		});
 	});
 });

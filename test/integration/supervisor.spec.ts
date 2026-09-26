@@ -1,7 +1,8 @@
 /**
  * The supervisor as a real process (run from source with the current Node),
- * with the real reaper and addon and fake Rojo on PATH: the session files it
- * keeps while it runs, and its end on a stop request and on owner-pipe EOF.
+ * with the real reaper and addon and a fake compiler on PATH: the session
+ * files it keeps while it runs, and its end on a stop request and on
+ * owner-pipe EOF.
  */
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -27,7 +28,7 @@ import { isProcessAlive, readWorkerLog, waitForDeathAsync } from "../helpers/wor
 
 const SUPERVISOR = path.join(import.meta.dirname, "..", "..", "src", "supervisor.ts");
 const PATH_NAME = /^path$/i;
-const ROJO_ONLY: SessionRequest = { compiler: false, config: {}, open: false };
+const COMPILER_ONLY: SessionRequest = { compiler: true, config: {}, open: false };
 const WAIT_MS = 20_000;
 const native = loadRealNative();
 
@@ -60,13 +61,17 @@ async function freePortAsync(): Promise<number> {
 }
 
 /**
- * A Luau project with fake Rojo on PATH, on a free port.
+ * A Luau project whose watch command is the fake compiler, on a free port.
  *
  * @returns The project and the supervisor's environment.
  */
 async function makeSessionProjectAsync(): Promise<Project> {
 	const { log, project } = makeFixtureProject({
-		config: { projectType: "luau", rojoPort: await freePortAsync() },
+		config: {
+			luau: { watch: { args: ["-w"], command: "rbxtsc" } },
+			projectType: "luau",
+			rojoPort: await freePortAsync(),
+		},
 	});
 	const environment: NodeJS.ProcessEnv = { ...process.env, CI: undefined };
 	for (const key of Object.keys(environment)) {
@@ -151,7 +156,7 @@ describe("supervisor", () => {
 			onEvent: (event) => {
 				events.push(event);
 			},
-			request: ROJO_ONLY,
+			request: COMPILER_ONLY,
 		});
 		onTestFinished(() => {
 			run.stop("SIGTERM");
@@ -179,9 +184,9 @@ describe("supervisor", () => {
 			record: {
 				sessionId: path.basename(directory),
 				startTime: native.processStartTime(record.pid),
-				// The leader: on Windows the shim's cmd.exe, not fake Rojo.
+				// The leader: on Windows the shim's cmd.exe, not fake rbxtsc.
 				workers: [
-					{ id: "rojo", startTime: native.processStartTime(record.workers[0]!.pid) },
+					{ id: "compiler", startTime: native.processStartTime(record.workers[0]!.pid) },
 				],
 			},
 			sessionId: path.basename(directory),
@@ -203,7 +208,7 @@ describe("supervisor", () => {
 		expect.assertions(2);
 
 		const project = await makeSessionProjectAsync();
-		const child = spawn(process.execPath, [SUPERVISOR, encodeSessionRequest(ROJO_ONLY)], {
+		const child = spawn(process.execPath, [SUPERVISOR, encodeSessionRequest(COMPILER_ONLY)], {
 			cwd: project.project,
 			env: project.env,
 			stdio: ["pipe", "pipe", "inherit"],

@@ -43,7 +43,7 @@ describe(planSession, () => {
 		expect(compiler).toMatchObject({ call: { args: ["--verbose", "-w"], command: "tsc" } });
 	});
 
-	it("should run only Rojo with --no-open --no-compiler", () => {
+	it("should run no part with --no-open --no-compiler", () => {
 		expect.assertions(1);
 
 		expect(plan("rbxts", { compiler: false, open: false })).toStrictEqual({
@@ -55,13 +55,15 @@ describe(planSession, () => {
 		});
 	});
 
-	it("should run the compiler without Studio with --no-open", () => {
+	it("should run only the compiler, with no compile or build step, with --no-open and for up", () => {
 		expect.assertions(1);
 
-		expect(plan("rbxts", { compiler: true, open: false })).toMatchObject({
-			build: true,
-			compile: true,
+		expect(plan("rbxts", { compiler: true, open: false })).toStrictEqual({
+			build: false,
+			compile: false,
+			compiler: RBXTSC,
 			open: false,
+			syncback: false,
 		});
 	});
 

@@ -2,20 +2,21 @@ import path from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
-import type { FakeNative, FakeProcess } from "../../test/helpers/native.ts";
+import { makeStatus } from "../../test/helpers/fake-session.ts";
+import type { FakeNative } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import {
 	createCommandContext,
 	createMemoryFileSystem,
 	createTestSeams,
 	PROJECT,
-	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
 import type { FlagValues } from "../cli/flags.ts";
 import { DOWN_TIMEOUT_MS } from "../client/down.ts";
 import { startIpcServer } from "../ipc/server.ts";
 import type { Clock } from "../seams/clock.ts";
-import type { SessionStatus } from "../session/status.ts";
+import type { PartStops } from "../session/part-stops.ts";
+import type { StudioEnd, StudioStop } from "../studio/close-studio.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 import { runDownAsync } from "./down.ts";
@@ -24,7 +25,6 @@ const FORGE = forgeFiles(PROJECT);
 const FILES = sessionFiles(FORGE, "s1");
 const PLACE = path.join(PROJECT, "game.rbxl");
 const STUDIO_PID = 4242;
-const STUDIO_OPEN: SessionStatus["services"]["studio"] = { place: PLACE, status: "open" };
 const SESSION_FILES = {
 	".forge/current": "s1\n",
 	".forge/sessions/s1/supervisor.id": `${JSON.stringify({
@@ -87,61 +87,62 @@ function makeContext({
 }
 
 /**
- * Give session `s1` a Studio with its place open, and serve its endpoint:
- * `status` names the place, and `shutdown` ends the supervisor.
+ * Serve session `s1`'s endpoint: `status` answers, `stopParts` answers
+ * `stops` and records each request, and `shutdown` ends the supervisor.
  *
  * @param project - The context and addon of {@link makeContext}.
  * @param project.context - The run.
  * @param project.native - Its addon.
- * @param studio - How the Studio process behaves.
- * @param entry - What the session reports about Studio.
+ * @param stops - What the session stopped.
+ * @returns Every `stopParts` request's params.
  */
-async function serveStudioAsync(
+async function serveStopsAsync(
 	{ context, native }: { context: CommandContext; native: FakeNative },
-	studio: Partial<FakeProcess>,
-	entry: SessionStatus["services"]["studio"] = STUDIO_OPEN,
-): Promise<void> {
-	const { fileSystem, ipc } = context.seams;
-	fileSystem.writeFileSync(
-		`${PLACE}.lock`,
-		`${STUDIO_PID}\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
-	);
-	native.processes.set(STUDIO_PID, {
-		alive: true,
-		executablePath: String.raw`C:\Roblox\RobloxStudioBeta.exe`,
-		onClose: () => {
-			fileSystem.rmSync(`${PLACE}.lock`, { force: true });
-		},
-		...studio,
-	});
-	const status: SessionStatus = {
-		phase: "ready",
-		pid: 500,
-		running: true,
-		services: {
-			compiler: { building: false, status: "off" },
-			rojo: { port: 34_872, status: "ready" },
-			studio: entry,
-			syncback: { status: "off" },
-		},
-		sessionId: "s1",
-		startedAt: "2026-01-01T00:00:00.000Z",
-	};
-	const server = startIpcServer(await ipc.listenAsync("endpoint-s1"), {
+	stops: PartStops,
+): Promise<Array<Record<string, unknown>>> {
+	const requests: Array<Record<string, unknown>> = [];
+	const server = startIpcServer(await context.seams.ipc.listenAsync("endpoint-s1"), {
 		handlers: {
 			shutdown: () => {
 				native.processes.get(500)!.alive = false;
 				native.locks.delete(FORGE.lock);
 				return { accepted: true };
 			},
-			status: () => ({ ...status }),
+			status: () => ({ ...makeStatus() }),
+			stopParts: (parameters) => {
+				requests.push(parameters);
+				return { ...stops };
+			},
 		},
 		token: "token",
 	});
 	onTestFinished(async () => {
 		await server.closeAsync();
 	});
+	return requests;
 }
+
+/**
+ * What a session answers once it closed its Studio.
+ *
+ * @param stop - How Studio went.
+ * @returns The answer: Studio and Rojo stopped, the session ends.
+ */
+function closedStudio(stop: StudioStop): PartStops {
+	return { ending: true, kept: [], stopped: ["studio", "rojo"], studio: { place: PLACE, stop } };
+}
+
+/**
+ * A Studio forge ended, and how.
+ *
+ * @param end - How it ended.
+ * @returns What closing it did.
+ */
+function ended(end: StudioEnd): StudioStop {
+	return { end, forced: end !== "exited", pid: STUDIO_PID, recovery: null, status: "stopped" };
+}
+
+const NOTHING: PartStops = { ending: true, kept: [], stopped: [] };
 
 async function downAsync(
 	context: CommandContext,
@@ -159,6 +160,7 @@ describe(runDownAsync, () => {
 
 		await expect(downAsync(context)).resolves.toStrictEqual({
 			data: {
+				parts: null,
 				removed: true,
 				sessionId: "s1",
 				status: "stopped",
@@ -170,35 +172,30 @@ describe(runDownAsync, () => {
 	});
 
 	it.for([
-		["closes", {}, " Closed Roblox Studio (PID 4242)."],
-		["closes and ends", { onCloseRequest: "linger" }, " Closed Roblox Studio (PID 4242)."],
+		["closes", ended("exited"), " Closed Roblox Studio (PID 4242)."],
+		["closes and ends", ended("lock_released"), " Closed Roblox Studio (PID 4242)."],
 		[
 			"ends",
-			{ onCloseRequest: "refuse" },
+			ended("timeout"),
 			" Roblox Studio (PID 4242): it did not close within 15 s, so forge ended it without saving.",
 		],
 		[
 			"ends behind a dialog",
-			{ onCloseRequest: "dialog" },
+			ended("dialog"),
 			" Roblox Studio (PID 4242): a dialog blocked it, so forge ended it without saving.",
 		],
 		[
 			"ends with no window",
-			{ onCloseRequest: "no_window" },
+			ended("no_window"),
 			" Roblox Studio (PID 4242): it had no window to close, so forge ended it without saving.",
-		],
-		[
-			"cannot verify",
-			{ executablePath: "/usr/bin/node" },
-			` Roblox Studio may still have ${PLACE} open: ${PLACE}.lock names PID 4242, but that process is /usr/bin/node, not Roblox Studio. Nothing was killed.`,
 		],
 	] as const)(
 		"should say in the summary when it %s the session's Studio",
-		async ([, studio, sentence]) => {
+		async ([, stop, sentence]) => {
 			expect.assertions(1);
 
 			const project = makeContext({ isSupervisorAlive: true });
-			await serveStudioAsync(project, studio);
+			await serveStopsAsync(project, closedStudio(stop));
 
 			await expect(downAsync(project.context)).resolves.toMatchObject({
 				summary: `Stopped session s1; every process of it is gone.${sentence}`,
@@ -206,19 +203,32 @@ describe(runDownAsync, () => {
 		},
 	);
 
-	it("should handle the auto-recovery files as --recovery says", async () => {
+	it("should say in the summary when the session cannot verify its Studio", async () => {
 		expect.assertions(1);
 
 		const project = makeContext({ isSupervisorAlive: true });
-		await serveStudioAsync(project, { onCloseRequest: "dialog" });
-
-		await expect(
-			downAsync(project.context, {}, { studio: { autoRecovery: "delete" } }),
-		).resolves.toMatchObject({
-			data: {
-				studio: { recovery: { deleted: [], mode: "delete", moved: [], warnings: [] } },
-			},
+		await serveStopsAsync(project, {
+			ending: true,
+			kept: [],
+			stopped: ["rojo"],
+			studio: { error: { code: "identity_mismatch", message: "Not Studio." }, place: PLACE },
 		});
+
+		await expect(downAsync(project.context)).resolves.toMatchObject({
+			summary: `Stopped session s1; every process of it is gone. Roblox Studio may still have ${PLACE} open: Not Studio.`,
+		});
+	});
+
+	it("should ask the session to handle the auto-recovery files as --recovery says", async () => {
+		expect.assertions(1);
+
+		const project = makeContext({ isSupervisorAlive: true });
+		const requests = await serveStopsAsync(project, NOTHING);
+		await downAsync(project.context, {}, { studio: { autoRecovery: "delete" } });
+
+		expect(requests).toStrictEqual([
+			{ force: false, keepStudio: false, recovery: "delete", scope: "down", sessionId: "s1" },
+		]);
 	});
 
 	it("should take the auto-recovery mode from the config file", async () => {
@@ -232,22 +242,21 @@ describe(runDownAsync, () => {
 			};
 		};
 
-		await serveStudioAsync(project, { onCloseRequest: "dialog" });
+		const requests = await serveStopsAsync(project, NOTHING);
+		await downAsync(project.context);
 
-		await expect(downAsync(project.context)).resolves.toMatchObject({
-			data: { studio: { recovery: { mode: "keep" } } },
-		});
+		expect(requests).toMatchObject([{ recovery: "keep" }]);
 	});
 
-	it("should say nothing of Studio when the session has none open", async () => {
+	it("should say when the session had no part to stop", async () => {
 		expect.assertions(1);
 
 		const project = makeContext({ isSupervisorAlive: true });
-		await serveStudioAsync(project, {}, { status: "off" });
+		await serveStopsAsync(project, NOTHING);
 
 		await expect(downAsync(project.context)).resolves.toMatchObject({
-			data: { studio: { status: "none" } },
-			summary: "Stopped session s1; every process of it is gone.",
+			data: { parts: { kept: [], stopped: [] }, studio: { status: "none" } },
+			summary: "Stopped session s1; every process of it is gone. It had no part to stop.",
 		});
 	});
 
@@ -255,14 +264,57 @@ describe(runDownAsync, () => {
 		expect.assertions(2);
 
 		const project = makeContext({ isSupervisorAlive: true });
-		await serveStudioAsync(project, {});
+		const requests = await serveStopsAsync(project, {
+			ending: true,
+			kept: [],
+			stopped: ["rojo"],
+		});
 
 		await expect(downAsync(project.context, { "keep-studio": true })).resolves.toMatchObject({
 			data: { studio: { status: "kept" } },
 			summary: "Stopped session s1; every process of it is gone. Roblox Studio stays open.",
 		});
-		expect(project.native.processes.get(STUDIO_PID)!.alive).toBeTrue();
+		expect(requests).toMatchObject([{ keepStudio: true }]);
 	});
+
+	it.for([
+		[
+			["studio", "rojo", "compiler"],
+			[],
+			"Stopped Studio, Rojo, and the compiler of session s1. It goes on.",
+		],
+		[
+			["rojo"],
+			[
+				{ owner: "start", part: "studio" },
+				{ owner: "start", part: "compiler" },
+			],
+			"Stopped Rojo of session s1. It goes on: Studio and the compiler have an owner, the forge start terminal. Roblox Studio stays open.",
+		],
+		[
+			[],
+			[{ owner: "start", part: "compiler" }],
+			"Stopped no part of session s1. It goes on: the compiler has an owner, the forge start terminal.",
+		],
+	] as const)(
+		"should succeed and name the parts it kept: %j",
+		async ([stopped, kept, summary]) => {
+			expect.assertions(2);
+
+			const project = makeContext({ isSupervisorAlive: true });
+			await serveStopsAsync(project, {
+				ending: false,
+				kept: [...kept],
+				stopped: [...stopped],
+			});
+
+			await expect(downAsync(project.context)).resolves.toMatchObject({
+				data: { parts: { kept, stopped }, sessionId: "s1", status: "running" },
+				summary,
+			});
+			expect(project.native.processes.get(500)!.alive).toBeTrue();
+		},
+	);
 
 	it("should name a supervisor --force killed", async () => {
 		expect.assertions(1);

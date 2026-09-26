@@ -1,12 +1,12 @@
 /**
- * Real supervisors and reapers in a temporary Luau project with fake Rojo on
- * PATH, for the barrier and cleanup scenarios. Everything a test starts is
- * stopped when it finishes: supervisors get SIGTERM through their owner
- * pipe, paused reapers are resumed (so they stop their workers and exit),
- * and every fixture process still alive is killed.
+ * Real supervisors and reapers in a temporary Luau project with fake Rojo and
+ * a fake watch-mode compiler on PATH, for the barrier and cleanup scenarios.
+ * Everything a test starts is stopped when it finishes: supervisors get
+ * SIGTERM through their owner pipe, paused reapers are resumed (so they stop
+ * their workers and exit), and every fixture process still alive is killed.
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import nodeFs, { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { createServer } from "node:net";
 import path from "node:path";
@@ -14,6 +14,8 @@ import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { onTestFinished } from "vitest";
 
+import { findSession } from "../../src/client/session.ts";
+import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { Reaper } from "../../src/reaper/reaper-client.ts";
 import { launchReaperAsync } from "../../src/reaper/reaper-client.ts";
 import { nodeChildProcessRunner } from "../../src/seams/child-process.ts";
@@ -23,17 +25,32 @@ import type { CommandResult, ReporterEvent } from "../../src/seams/reporter.ts";
 import type { SessionRequest } from "../../src/supervisor/channel.ts";
 import { createSupervisorLauncher } from "../../src/supervisor/launcher.ts";
 import type { IdentityRecord } from "../../src/supervisor/session-files.ts";
+import { forgeFiles } from "../../src/supervisor/session-files.ts";
+import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
 import { makeFixtureProject } from "../helpers/fixture-project.ts";
-import { loadRealNative, NATIVE_DIRECTORY, REAPER_PATH } from "../helpers/real-native.ts";
+import { realTransport } from "../helpers/native-testing.ts";
+import {
+	loadRealNative,
+	makeStudioExecutable,
+	NATIVE_DIRECTORY,
+	REAPER_PATH,
+	studioVariables,
+} from "../helpers/real-native.ts";
+import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
-import { killLoggedWorkersAsync, readWorkerLog } from "../helpers/worker-log.ts";
+import { killLoggedWorkersAsync, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 
 const SUPERVISOR = path.join(import.meta.dirname, "..", "..", "src", "supervisor.ts");
 const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 const PATH_NAME = /^path$/i;
 const POLL_MS = 50;
 const WAIT_MS = 30_000;
-export const ROJO_ONLY: SessionRequest = { compiler: false, config: {}, open: false };
+/** The compiler alone: the fake `rbxtsc -w` runs until stopped. */
+export const COMPILER_ONLY: SessionRequest = { compiler: true, config: {}, open: false };
+/** Studio and its Rojo, with no compiler: see {@link studioEnvironment}. */
+export const START_STUDIO: SessionRequest = { compiler: false, config: {}, open: true };
+/** Every part, as a plain `forge start`: see {@link studioEnvironment}. */
+export const START_ALL: SessionRequest = { compiler: true, config: {}, open: true };
 export const native = loadRealNative();
 
 export interface Project {
@@ -67,8 +84,9 @@ export interface OldSession {
 }
 
 /**
- * A Luau project with fake Rojo on PATH, on a free port, with no graceful
- * stop time: the barrier's bound is its 15 s margin alone.
+ * A Luau project with fake Rojo on PATH, on a free port, whose watch command
+ * is the fake compiler, with no graceful stop time: the barrier's bound is
+ * its 15 s margin alone.
  *
  * @param config - Config keys over those defaults.
  * @returns Its paths and environment.
@@ -77,6 +95,7 @@ export async function makeProjectAsync(config: Record<string, unknown> = {}): Pr
 	const { log, project } = makeFixtureProject({
 		config: {
 			gracefulTimeoutMs: 0,
+			luau: { watch: { args: ["-w"], command: "rbxtsc" } },
 			projectType: "luau",
 			rojoPort: await freePortAsync(),
 			...config,
@@ -97,7 +116,9 @@ export async function makeProjectAsync(config: Record<string, unknown> = {}): Pr
 }
 
 /**
- * Launch a supervisor, as `forge start` does. The test's end stops it.
+ * Launch a supervisor, as `forge start` does: it owns the parts the session
+ * starts with. The test's end stops it, and ends a session its stop let
+ * run on.
  *
  * @param project - Where it runs.
  * @param request - What `start` asks for.
@@ -106,7 +127,7 @@ export async function makeProjectAsync(config: Record<string, unknown> = {}): Pr
  */
 export function launch(
 	project: Project,
-	request: SessionRequest = ROJO_ONLY,
+	request: SessionRequest = COMPILER_ONLY,
 	variables: Record<string, string> = {},
 ): Launched {
 	const events: Array<ReporterEvent> = [];
@@ -126,9 +147,69 @@ export function launch(
 		.catch((err: unknown): Settled => ({ error: err, ok: false }));
 	onTestFinished(async () => {
 		run.stop("SIGTERM");
-		await settled;
+		const outcome = await settled;
+		if (outcome.ok && outcome.result.data["ending"] === false) {
+			await shutdownAsync(project);
+		}
 	});
 	return { events, settled, stop: run.stop };
+}
+
+/**
+ * Launch a supervisor with no owner, as `forge up` does, but with its
+ * output on a pipe once the session is ready. Its parts have no owner.
+ * `stop` asks it to shut down; the test's end does too.
+ *
+ * @param project - Where it runs.
+ * @param request - What the session starts with.
+ * @param variables - Fixture and pause variables.
+ * @returns The running supervisor.
+ */
+export function launchUnowned(
+	project: Project,
+	request: SessionRequest = COMPILER_ONLY,
+	variables: Record<string, string> = {},
+): Launched {
+	const launches = path.join(project.forge, "launch");
+	mkdirSync(launches, { recursive: true });
+	const report = path.join(launches, `${randomUUID()}.ndjson`);
+	const run = launch(project, { ...request, detached: { report } }, variables);
+	onTestFinished(async () => {
+		await shutdownAsync(project);
+	});
+	return {
+		...run,
+		stop: () => {
+			void shutdownAsync(project);
+		},
+	};
+}
+
+/**
+ * The variables of a session that opens a stand-in Studio, with a scratch
+ * home, so no auto-recovery file of the user's Studio is ever touched. A
+ * `start` leaves Studio open when it goes: the test's end kills it before it
+ * removes the stand-in's directories.
+ *
+ * @param project - Where the session runs.
+ * @returns The variables.
+ */
+export function studioEnvironment(project: Project): Record<string, string> {
+	const home = makeTemporaryDirectory();
+	const executable = makeStudioExecutable();
+	onTestFinished(async () => {
+		await killLoggedWorkersAsync(project.log);
+	});
+	return {
+		FIXTURE_PLACE_CONTENT: studioPlaceContent(),
+		HOME: home,
+		LOCALAPPDATA: path.join(home, "AppData", "Local"),
+		// With an `--import`, Node loads the place as ESM, and the stand-in
+		// does not run.
+		NODE_OPTIONS: "",
+		USERPROFILE: home,
+		...studioVariables(executable),
+	};
 }
 
 /**
@@ -328,6 +409,27 @@ function resumeAll(pauses: string): void {
 	for (const name of readdirSync(pauses)) {
 		rmSync(path.join(pauses, name), { force: true });
 	}
+}
+
+/**
+ * Ask the project's session to shut down at once, and wait until its
+ * supervisor is gone.
+ *
+ * @param project - Where it runs.
+ */
+async function shutdownAsync(project: Project): Promise<void> {
+	const session = findSession(nodeFs, forgeFiles(project.project));
+	if (session === undefined) {
+		return;
+	}
+
+	const target = { endpoint: session.identity.endpoint, token: session.token };
+	await callSessionAsync(realTransport(), target, "shutdown", {
+		params: { force: true },
+	}).catch(() => {
+		// It is gone already, or never opened its endpoint.
+	});
+	await waitForDeathAsync([session.identity.pid], WAIT_MS);
 }
 
 async function launchOldReaperAsync(directory: string, sessionId: string): Promise<Reaper> {

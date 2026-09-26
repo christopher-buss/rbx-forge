@@ -6,6 +6,11 @@ import { type } from "arktype";
  * session's token, then one {@link IpcRequest}; the supervisor answers with
  * one {@link IpcResponse} and closes. A wrong token or protocol closes the
  * connection without an answer. There is no streaming.
+ *
+ * `own` alone keeps its connection: once answered, the client holds it
+ * as the session's owner. It lets go with an {@link IpcRelease} line, which
+ * the supervisor answers before it closes; the connection's end without one
+ * lets go too, with no answer.
  */
 
 /** The protocol version both ends speak. */
@@ -14,11 +19,25 @@ export const IPC_PROTOCOL = 1;
 /** How long each read and write of the channel waits. */
 export const IPC_WAIT_MS = 2000;
 
+/**
+ * How long each end of an owner connection waits for a line before it
+ * looks again at its own side: a stop, or the session's end.
+ */
+export const OWNER_POLL_MS = 250;
+
 /** The longest line either end reads. */
 export const MAX_LINE_BYTES = 1_048_576;
 
 /** What a client can ask a session. */
-export type IpcMethod = "freshStatus" | "shutdown" | "status" | "sync";
+export type IpcMethod =
+	| "addParts"
+	| "freshStatus"
+	| "own"
+	| "restartParts"
+	| "shutdown"
+	| "status"
+	| "stopParts"
+	| "sync";
 
 /** The first line: who is asking. */
 export interface IpcHello {
@@ -32,6 +51,11 @@ export interface IpcRequest {
 	method: IpcMethod;
 	params: Record<string, unknown>;
 	type: "request";
+}
+
+/** The owner lets go of the session it holds (`own`). */
+export interface IpcRelease {
+	type: "release";
 }
 
 /** A failed request, as the supervisor reports it. */
@@ -54,11 +78,14 @@ const helloLine = jsonLine.pipe(type({ protocol: "number", token: "string", type
 
 const requestLine = jsonLine.pipe(
 	type({
-		"method": "'freshStatus' | 'shutdown' | 'status' | 'sync'",
+		"method":
+			"'addParts' | 'freshStatus' | 'own' | 'restartParts' | 'shutdown' | 'status' | 'stopParts' | 'sync'",
 		"params?": RECORD,
 		"type": "'request'",
 	}),
 );
+
+const releaseLine = jsonLine.pipe(type({ type: "'release'" }));
 
 const responseLine = jsonLine.pipe(
 	type.or(
@@ -82,7 +109,7 @@ const responseLine = jsonLine.pipe(
  * @param message - A hello, request, or response.
  * @returns JSON text and a newline.
  */
-export function encodeLine(message: IpcHello | IpcRequest | IpcResponse): string {
+export function encodeLine(message: IpcHello | IpcRelease | IpcRequest | IpcResponse): string {
 	return `${JSON.stringify(message)}\n`;
 }
 
@@ -95,6 +122,16 @@ export function encodeLine(message: IpcHello | IpcRequest | IpcResponse): string
 export function parseHello(line: string): IpcHello | undefined {
 	const parsed = helloLine(line);
 	return parsed instanceof type.errors ? undefined : parsed;
+}
+
+/**
+ * Whether a line is an owner's release.
+ *
+ * @param line - The line, without its newline.
+ * @returns `true` for an {@link IpcRelease}.
+ */
+export function isRelease(line: string): boolean {
+	return !(releaseLine(line) instanceof type.errors);
 }
 
 /**

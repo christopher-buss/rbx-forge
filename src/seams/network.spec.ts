@@ -21,6 +21,17 @@ async function listenAsync(): Promise<number> {
 	return (server.address() as AddressInfo).port;
 }
 
+describe(nodeNetwork.freePortAsync, () => {
+	it("should give a port that is free, and leave it free", async () => {
+		expect.assertions(2);
+
+		const port = await nodeNetwork.freePortAsync();
+
+		expect(port).toBeGreaterThan(0);
+		await expect(nodeNetwork.isPortFreeAsync(port)).resolves.toBeTrue();
+	});
+});
+
 describe(nodeNetwork.isPortFreeAsync, () => {
 	it("should report a port another server listens on as busy", async () => {
 		expect.assertions(1);

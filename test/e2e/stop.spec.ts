@@ -3,10 +3,10 @@ import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_IDENTITY_UNVERIFIED, EXIT_SUCCESS } from "../../src/exit-codes.ts";
-import { parseResult } from "../helpers/output.ts";
+import { parseOpened, parseResult } from "../helpers/output.ts";
 import {
 	NATIVE_DIRECTORY,
 	openStudioStandInAsync,
@@ -14,12 +14,19 @@ import {
 	spawnFakeStudio,
 	spawnSleeper,
 	waitForExitAsync,
+	waitForFileAsync,
 } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
-import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
+import { isProcessAlive, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 import { makeProject, runBinAsync } from "./run-bin.ts";
-import { closedOnRequest, makeFixtureAsync } from "./session-fixture.ts";
-import { runForgeAsync } from "./up-fixture.ts";
+import type { Fixture } from "./session-fixture.ts";
+import {
+	closedOnRequest,
+	makeFixtureAsync,
+	START_STUDIO,
+	startReadyAsync,
+} from "./session-fixture.ts";
+import { runForgeAsync, UP, WATCH_COMMAND } from "./up-fixture.ts";
 
 /**
  * This process's variables, without `CI`, with the native addon directory set.
@@ -85,6 +92,20 @@ async function makeStudioProjectAsync(variables: Record<string, string> = {}): P
 	return { other, place, project, studio };
 }
 
+/**
+ * Run `forge open`, and wait until its Studio has the snapshot open.
+ *
+ * @param fixture - The project, with a Studio stand-in.
+ * @returns The snapshot and its Studio's PID.
+ */
+async function openSnapshotAsync(fixture: Fixture): Promise<{ pid: number; place: string }> {
+	const { result } = await runForgeAsync(fixture, ["open", "--json"]);
+	const { place, studio } = parseOpened(result.data);
+	assert(studio !== null, "forge started Studio directly");
+	await waitForFileAsync(`${place}.lock`);
+	return { pid: studio.pid, place };
+}
+
 describe("forge stop", () => {
 	it("should close a verified Studio with a close request, and no other Studio", async () => {
 		expect.assertions(4);
@@ -95,7 +116,13 @@ describe("forge stop", () => {
 
 		expect(status).toBe(EXIT_SUCCESS);
 		expect(parseResult(stdout).data).toStrictEqual(
-			closedOnRequest({ pid: pidOf(studio), place, stopped: true }),
+			closedOnRequest({
+				parts: null,
+				pid: pidOf(studio),
+				place,
+				snapshots: [],
+				stopped: true,
+			}),
 		);
 		expect(existsSync(`${place}.lock`)).toBeFalse();
 		expect({
@@ -118,9 +145,11 @@ describe("forge stop", () => {
 		expect(parseResult(stdout).data).toStrictEqual({
 			end: BLOCKED_END,
 			forced: true,
+			parts: null,
 			pid: pidOf(studio),
 			place,
 			recovery: { deleted: [], mode: "move", moved: [], warnings: [] },
+			snapshots: [],
 			stopped: true,
 		});
 		expect(existsSync(`${place}.lock`)).toBeFalse();
@@ -147,14 +176,14 @@ describe("forge stop", () => {
 		expect(isProcessAlive(pidOf(studio))).toBeFalse();
 	});
 
-	it("should wait for the Studio a session is opening, then close it through the session", async () => {
+	it("should wait for the Studio a start is opening, then close it through the session with --force", async () => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
-		await runForgeAsync(fixture, ["up", "--no-compiler", "--json"], {
+		await startReadyAsync(fixture, START_STUDIO, {
 			FIXTURE_STUDIO_LOCK_DELAY_MS: "2000",
 		});
-		const stop = await runForgeAsync(fixture, ["stop", "--json"]);
+		const stop = await runForgeAsync(fixture, ["stop", "--force", "--json"]);
 		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
 
 		expect(stop.result.data).toMatchObject({
@@ -164,6 +193,126 @@ describe("forge stop", () => {
 			stopped: true,
 		});
 		expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
+	});
+
+	it("should close the attached Studio and stop its Rojo, and keep the compiler and the session", async () => {
+		expect.assertions(3);
+
+		const fixture = await makeFixtureAsync(
+			{ ...WATCH_COMMAND, open: { buildFirst: true } },
+			{ studio: true },
+		);
+		await runForgeAsync(fixture, [...UP, "--studio"]);
+		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
+		const stop = await runForgeAsync(fixture, ["stop", "--json"]);
+		const status = await runForgeAsync(fixture, ["status", "--json"]);
+
+		expect(stop.result).toMatchObject({
+			data: {
+				end: CLOSED_END,
+				parts: { kept: [], stopped: ["studio", "rojo"] },
+				pid: studio!.pid,
+				place: fixture.place,
+				stopped: true,
+			},
+			ok: true,
+		});
+		expect(status.result.data).toMatchObject({
+			phase: "ready",
+			running: true,
+			services: {
+				compiler: { status: "ready" },
+				rojo: { status: "off" },
+				studio: { status: "closed" },
+			},
+		});
+		await expect(waitForDeathAsync([studio!.pid], 2000)).resolves.toStrictEqual([]);
+	});
+
+	it("should close a Studio with --force, as one with no owner", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
+		await runForgeAsync(fixture, ["up", "--no-compiler", "--studio", "--json"]);
+		const stop = await runForgeAsync(fixture, ["stop", "--force", "--json"]);
+		const down = await runForgeAsync(fixture, ["down", "--json"]);
+
+		expect(stop.result).toMatchObject({
+			data: { parts: { kept: [], stopped: ["studio", "rojo"] }, stopped: true },
+			ok: true,
+		});
+		// With no part left, the up session ended by itself.
+		expect(down.result.error!.code).toBe("not_running");
+	});
+
+	it("should close the Studio of the place --place names, and no other", async () => {
+		expect.assertions(3);
+
+		const { other, place, project, studio } = await makeStudioProjectAsync();
+		const otherPlace = path.join(project, "other.rbxl");
+		const { status, stdout } = await runBinAsync(
+			["stop", "--place", "other.rbxl", "--json"],
+			project,
+			NATIVE,
+		);
+		await waitForExitAsync(other);
+
+		expect(status).toBe(EXIT_SUCCESS);
+		expect(parseResult(stdout).data).toMatchObject({
+			parts: null,
+			pid: pidOf(other),
+			place: otherPlace,
+			stopped: true,
+		});
+		expect({
+			isOpen: existsSync(`${place}.lock`),
+			isStudioAlive: isProcessAlive(pidOf(studio)),
+		}).toStrictEqual({ isOpen: true, isStudioAlive: true });
+	});
+
+	it("should close every snapshot Studio that forge open opened", async () => {
+		expect.assertions(3);
+
+		const fixture = await makeFixtureAsync({}, { studio: true });
+		const first = await openSnapshotAsync(fixture);
+		const second = await openSnapshotAsync(fixture);
+		const { result, status } = await runForgeAsync(fixture, ["stop", "--json"]);
+		await waitForDeathAsync([first.pid, second.pid], 10_000);
+
+		expect(status).toBe(EXIT_SUCCESS);
+		expect(result.data).toMatchObject({
+			place: fixture.place,
+			snapshots: [
+				closedOnRequest({ pid: first.pid, place: first.place, stopped: true }),
+				closedOnRequest({ pid: second.pid, place: second.place, stopped: true }),
+			],
+			stopped: false,
+		});
+		expect([first, second].map(({ pid }) => isProcessAlive(pid))).toStrictEqual([false, false]);
+	});
+
+	it("should close only the snapshot Studio --place names", async () => {
+		expect.assertions(3);
+
+		const fixture = await makeFixtureAsync({}, { studio: true });
+		const first = await openSnapshotAsync(fixture);
+		const second = await openSnapshotAsync(fixture);
+		const { result, status } = await runForgeAsync(fixture, [
+			"stop",
+			"--place",
+			first.place,
+			"--json",
+		]);
+		await waitForDeathAsync([first.pid], 10_000);
+
+		expect(status).toBe(EXIT_SUCCESS);
+		expect(result.data).toMatchObject({
+			pid: first.pid,
+			place: first.place,
+			snapshots: [],
+			stopped: true,
+		});
+		expect(isProcessAlive(second.pid)).toBeTrue();
 	});
 
 	it("should kill nothing when a stale lock names a PID that another program reused", async () => {
@@ -220,8 +369,10 @@ describe("forge stop", () => {
 
 		expect(status).toBe(EXIT_SUCCESS);
 		expect(parseResult(stdout).data).toStrictEqual({
+			parts: null,
 			pid: pidOf(sleeper),
 			place,
+			snapshots: [],
 			stopped: false,
 		});
 	});

@@ -27,12 +27,15 @@
  * - `FIXTURE_IGNORE_SIGNALS=1`: this process and its grandchildren ignore
  *   SIGINT, SIGTERM, SIGHUP, and SIGBREAK.
  * - `FIXTURE_EXIT_CODE`: exit code of a one-shot run (default 0).
+ * - `FIXTURE_FAIL_ROLE`: only a one-shot run of this role takes
+ *   `FIXTURE_EXIT_CODE`; every other exits with code 0.
  * - `FIXTURE_HANG=1`: a hook stays alive instead of exiting.
  * - `FIXTURE_HOOK_MS`: a hook runs this long, then exits with code 0.
  * - `FIXTURE_HANG_ROLE`: a one-shot run of this role (such as `rbxtsc` for a
  *   compile, `rojo` for a build) stays alive instead of exiting.
- * - `FIXTURE_EXIT_AFTER_MS`: a long-running role exits on its own after this
- *   long, with `FIXTURE_EXIT_CODE`. Its grandchildren stay alive.
+ * - `FIXTURE_EXIT_AFTER_MS`: a long-running role prints a line to stderr and
+ *   exits on its own after this long, with `FIXTURE_EXIT_AFTER_CODE` (else
+ *   `FIXTURE_EXIT_CODE`). Its grandchildren stay alive.
  * - `FIXTURE_EXIT_ROLE`: only this role exits after `FIXTURE_EXIT_AFTER_MS`.
  * - `FIXTURE_ROJO_NO_SYNCBACK=1`: rojo has no `syncback` command.
  * - `rojo serve --port <port>` listens on that port of `127.0.0.1`, as Rojo
@@ -270,7 +273,8 @@ function stayAlive(): void {
 	const exitRole = env["FIXTURE_EXIT_ROLE"];
 	if (exitAfter !== undefined && (exitRole === undefined || exitRole === ROLE)) {
 		setTimeout(() => {
-			process.exit(Number(env["FIXTURE_EXIT_CODE"] ?? "0"));
+			process.stderr.write(`${ROLE} exits on its own\n`);
+			process.exit(Number(env["FIXTURE_EXIT_AFTER_CODE"] ?? env["FIXTURE_EXIT_CODE"] ?? "0"));
 		}, Number(exitAfter));
 	}
 }
@@ -281,7 +285,9 @@ function exitOnce(): void {
 		return;
 	}
 
-	process.exitCode = Number(env["FIXTURE_EXIT_CODE"] ?? "0");
+	const failRole = env["FIXTURE_FAIL_ROLE"];
+	process.exitCode =
+		failRole === undefined || failRole === ROLE ? Number(env["FIXTURE_EXIT_CODE"] ?? "0") : 0;
 }
 
 function runSyncback(): void {

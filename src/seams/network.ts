@@ -1,7 +1,14 @@
+import type { AddressInfo } from "node:net";
 import { connect, createServer } from "node:net";
 
 /** Local network checks. Unit tests pass a fake. */
 export interface Network {
+	/**
+	 * A port of `127.0.0.1` the OS gave out as free a moment ago.
+	 *
+	 * @rejects When no server can listen at all.
+	 */
+	freePortAsync: () => Promise<number>;
 	/**
 	 * Whether a server listens on `port` of `127.0.0.1`, where Rojo serves
 	 * by default: a connection to it succeeds.
@@ -15,6 +22,21 @@ export interface Network {
 }
 
 export const nodeNetwork: Network = {
+	freePortAsync: async () => {
+		return new Promise((resolve, reject) => {
+			const server = createServer();
+			// Stryker disable next-line StringLiteral,CallExpression: never fails
+			server.once("error", reject);
+			// Stryker disable next-line StringLiteral: equivalent
+			server.listen({ host: "127.0.0.1", port: 0 }, () => {
+				// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a TCP server's address is an object
+				const { port } = server.address() as AddressInfo;
+				server.close(() => {
+					resolve(port);
+				});
+			});
+		});
+	},
 	isListeningAsync: async (port) => {
 		return new Promise((resolve) => {
 			const socket = connect({ host: "127.0.0.1", port });

@@ -6,6 +6,7 @@ import { DOWN_FLAGS, runDownAsync } from "../commands/down.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
 import { LOG_NAMES, LOGS_FLAGS, runLogsAsync } from "../commands/logs.ts";
 import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
+import { RESTART_FLAGS, runRestartAsync } from "../commands/restart.ts";
 import { runStartAsync, START_FLAGS } from "../commands/start.ts";
 import { runStatusAsync, STATUS_FLAGS } from "../commands/status.ts";
 import { runStopAsync, STOP_FLAGS } from "../commands/stop.ts";
@@ -54,7 +55,8 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		name: "compile",
 		flags: [],
 		run: runCompileCommandAsync,
-		summary: "Compile the roblox-ts project once and report its errors (rbxts only).",
+		summary:
+			"Compile the roblox-ts project once and report its errors (rbxts only). While a session runs, report its fresh build instead.",
 	},
 	{
 		name: "open",
@@ -67,14 +69,14 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		flags: START_FLAGS,
 		run: runStartAsync,
 		summary:
-			"Run the dev session in this terminal: compile, build, open Studio, serve Rojo, and watch. Every process it starts stops with it.",
+			"Run the dev session in this terminal, or join the running one, as the owner of its parts: compile, build, open Studio, serve Rojo, and watch. On Ctrl+C, what it started stops, the rest runs on, and Studio stays open.",
 	},
 	{
 		name: "up",
 		flags: UP_FLAGS,
 		run: runUpAsync,
 		summary:
-			"Start the dev session in the background, as start does, and return once Rojo and the compiler are ready. Reports the running session if there is one.",
+			"Start the dev session in the background with the watch-mode compiler alone, and return once its first compile is done. On a running session, start only the parts that are missing or failed.",
 	},
 	{
 		name: "status",
@@ -113,6 +115,13 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		run: runStopAsync,
 		summary:
 			"Close Roblox Studio for this project's place, after verifying the process is Studio.",
+	},
+	{
+		name: "restart",
+		flags: RESTART_FLAGS,
+		run: runRestartAsync,
+		summary:
+			"Restart the running session's parts with no owner: the compiler, then a fresh Studio (closed without a save, built again) with Rojo on the same port, once the old processes are gone and the compiler has built.",
 	},
 	{
 		name: "syncback",

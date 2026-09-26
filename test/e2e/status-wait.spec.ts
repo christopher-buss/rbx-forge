@@ -40,7 +40,7 @@ describe("forge status --wait", () => {
 			const watched = path.join(fixture.project, "src", "main.ts");
 			mkdirSync(path.dirname(watched), { recursive: true });
 			writeFileSync(watched, "export {};\n");
-			const up = await runForgeAsync(fixture, ["up", "--no-open", "--json"], {
+			const up = await runForgeAsync(fixture, ["up", "--json"], {
 				FIXTURE_COMPILE_ENDS: ends,
 				FIXTURE_COMPILE_MS: compileMs,
 				FIXTURE_COMPILE_STARTS: starts,
@@ -51,7 +51,13 @@ describe("forge status --wait", () => {
 			const fresh = await runForgeAsync(fixture, ["status", "--json", "--wait"]);
 			const compiler = statusOf(fresh);
 
-			expect([up.status, fresh.status]).toStrictEqual([EXIT_SUCCESS, EXIT_SUCCESS]);
+			// The compiler alone: no compile step, no build, no Rojo.
+			expect({
+				exits: [up.status, fresh.status],
+				processes: readWorkerLog(fixture.log).map(
+					({ args, role }) => `${role} ${args.join(" ")}`,
+				),
+			}).toStrictEqual({ exits: [EXIT_SUCCESS, EXIT_SUCCESS], processes: ["rbxtsc -w"] });
 			expect(statusOf(up)!.lastBuild!.errors).toBe(0);
 			expect(compiler).toMatchObject({ building: false, lastBuild: { errors: 1 } });
 			expect(Date.parse(compiler!.lastBuild!.startedAt)).toBeGreaterThanOrEqual(editedAt);
@@ -69,7 +75,7 @@ describe("forge status --wait", () => {
 		const watched = path.join(fixture.project, "src", "main.ts");
 		mkdirSync(path.dirname(watched), { recursive: true });
 		writeFileSync(watched, "export {};\n");
-		const up = await runForgeAsync(fixture, ["up", "--no-open", "--json"], {
+		const up = await runForgeAsync(fixture, ["up", "--json"], {
 			FIXTURE_COMPILE_MS: "500",
 			FIXTURE_COMPILER_NDJSON: "1",
 			FIXTURE_COMPILER_WATCH: watched,
@@ -111,7 +117,7 @@ describe("forge status --wait", () => {
 		const watched = path.join(fixture.project, "src", "main.ts");
 		mkdirSync(path.dirname(watched), { recursive: true });
 		writeFileSync(watched, "export {};\n");
-		await runForgeAsync(fixture, ["up", "--no-open", "--json"], {
+		await runForgeAsync(fixture, ["up", "--json"], {
 			FIXTURE_COMPILE_MS: "8000",
 			FIXTURE_COMPILER_WATCH: watched,
 		});
@@ -125,20 +131,15 @@ describe("forge status --wait", () => {
 		expect(statusOf(now)).toMatchObject({ building: true, lastBuild: { errors: 0 } });
 	});
 
-	it("should return at once with no roblox-ts compiler", async () => {
-		expect.assertions(2);
+	it("should return at once with the compiler off in a project with no watch command", async () => {
+		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync();
-		await runForgeAsync(fixture, ["up", "--no-open", "--no-compiler", "--json"]);
-		const fresh = await runForgeAsync(fixture, [
-			"status",
-			"--json",
-			"--wait",
-			"--timeout",
-			"0",
-		]);
+		const up = await runForgeAsync(fixture, ["up", "--json"]);
+		const fresh = await runForgeAsync(fixture, ["status", "--json", "--wait"]);
 
-		expect(fresh.status).toBe(EXIT_SUCCESS);
-		expect(statusOf(fresh)).toStrictEqual({ building: false, status: "off" });
+		expect([up.status, fresh.status]).toStrictEqual([EXIT_SUCCESS, EXIT_SUCCESS]);
+		expect(statusOf(fresh)).toStrictEqual({ building: false, owner: null, status: "off" });
+		expect(readWorkerLog(fixture.log)).toStrictEqual([]);
 	});
 });

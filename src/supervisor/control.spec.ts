@@ -3,11 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import { ForgeError } from "../errors.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
+import type { PartRequests } from "../session/part-requests.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { SessionStatus } from "../session/status.ts";
 import { createStatusStore } from "../session/status.ts";
 import type { StopRequest } from "../session/stop-source.ts";
-import { controlHandlers } from "./control.ts";
+import { controlHandlers, controlOwner } from "./control.ts";
 
 function makeTarget() {
 	const request = vi.fn<(stop: StopRequest) => void>();
@@ -15,6 +16,7 @@ function makeTarget() {
 		{
 			compiler: false,
 			open: false,
+			owner: null,
 			pid: 7,
 			port: 1,
 			sessionId: "s1",
@@ -25,22 +27,54 @@ function makeTarget() {
 		vi.fn<(next: SessionStatus) => void>(),
 	);
 	const runAsync = vi.fn<SessionSync["runAsync"]>().mockResolvedValue({ input: "game.rbxl" });
+	const addAsync = vi.fn<PartRequests["addAsync"]>().mockResolvedValue(["compiler"]);
+	const stopAsync = vi.fn<PartRequests["stopAsync"]>().mockResolvedValue({
+		ending: false,
+		kept: [{ owner: "start", part: "studio" }],
+		stopped: ["compiler"],
+	});
+	const ownAsync = vi.fn<PartRequests["ownAsync"]>().mockResolvedValue({
+		added: ["studio"],
+		taken: ["compiler"],
+	});
+	const releaseAsync = vi.fn<PartRequests["releaseAsync"]>().mockResolvedValue({
+		ending: false,
+		released: ["compiler"],
+		sessionId: "s1",
+		stopped: [],
+		studioLeft: true,
+	});
+	const restartAsync = vi.fn<PartRequests["restartAsync"]>().mockResolvedValue({
+		added: ["compiler"],
+		kept: [{ owner: "start", part: "studio" }],
+		stopped: ["compiler"],
+	});
 	const builds = {
 		tick: vi.fn<BuildWatch["tick"]>(),
 		waitAsync: vi.fn<BuildWatch["waitAsync"]>().mockResolvedValue(),
 	};
 	return {
+		addAsync,
 		builds,
 		handlers: controlHandlers({
 			builds,
+			parts: { addAsync, ownAsync, releaseAsync, restartAsync, stopAsync },
 			sessionId: "s1",
 			status,
 			stop: { request },
 			sync: { runAsync },
 		}),
+		ownAsync,
+		owner: controlOwner({
+			parts: { addAsync, ownAsync, releaseAsync, restartAsync, stopAsync },
+			sessionId: "s1",
+		}),
+		releaseAsync,
 		request,
+		restartAsync,
 		runAsync,
 		status,
+		stopAsync,
 	};
 }
 
@@ -140,6 +174,147 @@ describe(controlHandlers, () => {
 		expect(request).not.toHaveBeenCalled();
 	});
 
+	it("should answer addParts with the parts the session started", async () => {
+		expect.assertions(2);
+
+		const { addAsync, handlers } = makeTarget();
+
+		await expect(
+			handlers.addParts!({ parts: ["compiler", "studio"], studioPath: "/opt/Studio" }),
+		).resolves.toStrictEqual({ added: ["compiler"] });
+		expect(addAsync).toHaveBeenCalledExactlyOnceWith({
+			parts: ["compiler", "studio"],
+			studioPath: "/opt/Studio",
+		});
+	});
+
+	it.for([
+		[{}],
+		[{ parts: "compiler" }],
+		[{ parts: ["rojo"] }],
+		[{ parts: [], studioPath: 1 }],
+	] as const)("should refuse addParts params %j with usage", async ([parameters]) => {
+		expect.assertions(3);
+
+		const { addAsync, handlers } = makeTarget();
+		const added = handlers.addParts!(parameters);
+
+		await expect(added).rejects.toMatchObject({ code: "usage" });
+		await expect(added).rejects.toThrow("addParts takes a list of parts: ");
+		expect(addAsync).not.toHaveBeenCalled();
+	});
+
+	it("should answer stopParts with what the session stopped and kept", async () => {
+		expect.assertions(2);
+
+		const { handlers, stopAsync } = makeTarget();
+
+		await expect(
+			handlers.stopParts!({
+				force: true,
+				place: "/p/game.rbxl",
+				recovery: "delete",
+				scope: "stop",
+				sessionId: "s1",
+			}),
+		).resolves.toStrictEqual({
+			ending: false,
+			kept: [{ owner: "start", part: "studio" }],
+			stopped: ["compiler"],
+		});
+		expect(stopAsync).toHaveBeenCalledExactlyOnceWith({
+			force: true,
+			keepStudio: false,
+			place: "/p/game.rbxl",
+			recovery: "delete",
+			scope: "stop",
+		});
+	});
+
+	it("should refuse stopParts for another session's id", async () => {
+		expect.assertions(2);
+
+		const { handlers, stopAsync } = makeTarget();
+
+		await expect(
+			handlers.stopParts!({ scope: "down", sessionId: "old" }),
+		).rejects.toMatchObject({
+			code: "session_replaced",
+		});
+		expect(stopAsync).not.toHaveBeenCalled();
+	});
+
+	it.for([
+		[{}],
+		[{ scope: "idle" }],
+		[{ force: "yes", scope: "down" }],
+		[{ place: 1, scope: "stop" }],
+	] as const)("should refuse stopParts params %j with usage", async ([parameters]) => {
+		expect.assertions(3);
+
+		const { handlers, stopAsync } = makeTarget();
+		const stopped = handlers.stopParts!(parameters);
+
+		await expect(stopped).rejects.toMatchObject({ code: "usage" });
+		await expect(stopped).rejects.toThrow("stopParts takes a scope: ");
+		expect(stopAsync).not.toHaveBeenCalled();
+	});
+
+	it("should answer restartParts with what the session stopped, kept, and started", async () => {
+		expect.assertions(3);
+
+		const { handlers, restartAsync } = makeTarget();
+
+		await expect(
+			handlers.restartParts!({
+				force: true,
+				recovery: "delete",
+				sessionId: "s1",
+				studioPath: "/opt/Studio",
+			}),
+		).resolves.toStrictEqual({
+			added: ["compiler"],
+			kept: [{ owner: "start", part: "studio" }],
+			stopped: ["compiler"],
+		});
+
+		await handlers.restartParts!({});
+
+		expect(restartAsync).toHaveBeenNthCalledWith(1, {
+			force: true,
+			recovery: "delete",
+			studioPath: "/opt/Studio",
+		});
+		expect(restartAsync.mock.calls[1]).toStrictEqual([{ force: false }]);
+	});
+
+	it("should refuse restartParts for another session's id", async () => {
+		expect.assertions(2);
+
+		const { handlers, restartAsync } = makeTarget();
+
+		await expect(handlers.restartParts!({ sessionId: "old" })).rejects.toMatchObject({
+			code: "session_replaced",
+		});
+		expect(restartAsync).not.toHaveBeenCalled();
+	});
+
+	it.for([[{ force: "yes" }], [{ recovery: "trash" }], [{ studioPath: 1 }]] as const)(
+		"should refuse restartParts params %j with usage",
+		async ([parameters]) => {
+			expect.assertions(3);
+
+			const { handlers, restartAsync } = makeTarget();
+			const restarted = handlers.restartParts!(parameters);
+
+			await expect(restarted).rejects.toMatchObject({ code: "usage" });
+			await expect(restarted).rejects.toThrow(
+				"restartParts takes force, recovery, and studioPath: ",
+			);
+			expect(restartAsync).not.toHaveBeenCalled();
+		},
+	);
+
 	it("should answer sync with the session's syncback run", async () => {
 		expect.assertions(2);
 
@@ -148,4 +323,47 @@ describe(controlHandlers, () => {
 		await expect(handlers.sync!({})).resolves.toStrictEqual({ input: "game.rbxl" });
 		expect(runAsync).toHaveBeenCalledOnce();
 	});
+});
+
+describe(controlOwner, () => {
+	it("should join with the parts asked for, and answer with the session's id", async () => {
+		expect.assertions(2);
+
+		const { ownAsync, owner } = makeTarget();
+
+		await expect(
+			owner.join({ parts: ["studio"], studioPath: "/opt/Studio" }),
+		).resolves.toStrictEqual({ added: ["studio"], sessionId: "s1", taken: ["compiler"] });
+		expect(ownAsync).toHaveBeenCalledExactlyOnceWith({
+			parts: ["studio"],
+			studioPath: "/opt/Studio",
+		});
+	});
+
+	it("should refuse a join with no list of parts", async () => {
+		expect.assertions(2);
+
+		const { ownAsync, owner } = makeTarget();
+
+		await expect(owner.join({ parts: "studio" })).rejects.toMatchObject({ code: "usage" });
+		expect(ownAsync).not.toHaveBeenCalled();
+	});
+
+	it.for(["gone", "release"] as const)(
+		"should let go of the parts as its owner is gone, on %s",
+		async (how) => {
+			expect.assertions(2);
+
+			const { owner, releaseAsync } = makeTarget();
+
+			await expect(owner.leave(how)).resolves.toStrictEqual({
+				ending: false,
+				released: ["compiler"],
+				sessionId: "s1",
+				stopped: [],
+				studioLeft: true,
+			});
+			expect(releaseAsync).toHaveBeenCalledExactlyOnceWith({ type: "owner_gone" });
+		},
+	);
 });

@@ -7,14 +7,16 @@
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import nodeFs, { mkdirSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { expect, onTestFinished } from "vitest";
+import { assert, expect, onTestFinished } from "vitest";
 
+import { findSession } from "../../src/client/session.ts";
+import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
 import { createFixtureBinDirectory } from "../helpers/fixture-bin.ts";
 import { makeStudioExecutable, NATIVE_DIRECTORY, studioVariables } from "../helpers/real-native.ts";
@@ -26,7 +28,10 @@ export const IS_WINDOWS = process.platform === "win32";
 export const IS_MACOS = process.platform === "darwin";
 
 const PATH_NAME = /^path$/i;
-export const ROJO_ONLY = ["start", "--no-open", "--no-compiler", "--json"];
+/** Studio and Rojo with no compiler: the open step builds the place first. */
+export const START_STUDIO = ["start", "--no-compiler", "--json"];
+/** Config whose open step builds the place, so Studio has one to open. */
+export const STUDIO_PROJECT: Readonly<Record<string, unknown>> = { open: { buildFirst: true } };
 /** Roles that run as reaper workers; Studio and its launcher do not. */
 export const WORKER_ROLES: ReadonlySet<string> = new Set(["hook", "rbxtsc", "rojo", "sloptor"]);
 
@@ -95,6 +100,25 @@ export async function holdPortAsync(port: number): Promise<void> {
 	});
 	onTestFinished(() => {
 		server.close();
+	});
+}
+
+/**
+ * Whether something listens on `port` of `127.0.0.1`.
+ *
+ * @param port - The port to try.
+ * @returns True once a connection opens.
+ */
+export async function isListeningAsync(port: number): Promise<boolean> {
+	return new Promise((resolve) => {
+		const socket = connect({ host: "127.0.0.1", port });
+		socket.once("error", () => {
+			resolve(false);
+		});
+		socket.once("connect", () => {
+			socket.destroy();
+			resolve(true);
+		});
 	});
 }
 
@@ -195,6 +219,27 @@ export async function waitForOutputAsync(session: Session, text: string): Promis
 
 		await sleep(50);
 	}
+}
+
+/**
+ * Start `forge start` and wait until its session is ready.
+ *
+ * @param fixture - The project and its environment.
+ * @param argv - Arguments after `forge`.
+ * @param variables - Fixture variables for the workers and Studio.
+ * @returns The running process, and its session's id.
+ * @rejects When the session is not ready within 30 seconds.
+ */
+export async function startReadyAsync(
+	fixture: Fixture,
+	argv: Array<string>,
+	variables: Record<string, string> = {},
+): Promise<{ session: Session; sessionId: string }> {
+	const session = startSession(fixture, argv, variables);
+	await waitForOutputAsync(session, "Press Ctrl+C to stop.");
+	const known = findSession(nodeFs, forgeFiles(fixture.project));
+	assert(known !== undefined, "expected the session's files");
+	return { session, sessionId: known.identity.sessionId };
 }
 
 /**

@@ -46,7 +46,11 @@ describe(parseSessionRequest, () => {
 	it("should read back what start encodes", () => {
 		expect.assertions(1);
 
-		const request = { compiler: false, config: { syncback: { runOnStart: true } }, open: true };
+		const request = {
+			compiler: false,
+			config: { syncback: { runOnStart: true } },
+			open: true,
+		};
 
 		expect(parseSessionRequest(encodeSessionRequest(request))).toStrictEqual(request);
 	});

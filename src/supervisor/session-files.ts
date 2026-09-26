@@ -15,6 +15,7 @@ import type { FileSystem } from "../seams/file-system.ts";
  * .forge/sessions/<id>/reaper.json     reaper record: written by the reaper only
  * .forge/sessions/<id>/output/         raw worker output while the session runs
  * .forge/logs/<service>.log            rotated service logs (`output/log-file.ts`)
+ * .forge/snapshots/<time>_<place>      places `forge open` built (`studio/snapshots.ts`)
  * ```
  *
  * Only the holder of the singleton lock creates or deletes a session
@@ -30,6 +31,8 @@ export interface ForgeFiles {
 	lock: string;
 	/** `.forge/sessions`. */
 	sessions: string;
+	/** `.forge/snapshots`: the places `forge open` built. */
+	snapshots: string;
 }
 
 /** The files of one session, in `.forge/sessions/<id>`. */
@@ -89,6 +92,7 @@ export function forgeFiles(projectRoot: string): ForgeFiles {
 		directory,
 		lock: path.join(directory, "supervisor.lock"),
 		sessions: path.join(directory, "sessions"),
+		snapshots: path.join(directory, "snapshots"),
 	};
 }
 

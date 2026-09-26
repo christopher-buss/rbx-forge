@@ -24,8 +24,9 @@ export interface ConfigDefaults {
 	};
 	rbxts: { args: Array<string>; command: string };
 	rojoAlias: string;
-	rojoPort: number;
+	rojoPort: number | undefined;
 	rojoProjectPath: string;
+	session: { idleTimeout: number };
 	studio: { autoRecovery: AutoRecoveryMode };
 	syncback: {
 		inputPath: string | undefined;
@@ -55,8 +56,9 @@ export const DEFAULT_CONFIG: Readonly<ConfigDefaults> = {
 	open: { buildFirst: true, buildOutputPath: undefined, projectPath: undefined },
 	rbxts: { args: [], command: "rbxtsc" },
 	rojoAlias: "rojo",
-	rojoPort: 34_872,
+	rojoPort: undefined,
 	rojoProjectPath: "default.project.json",
+	session: { idleTimeout: 30 },
 	studio: { autoRecovery: "move" },
 	syncback: { inputPath: undefined, projectPath: undefined, runOnStart: false },
 	typegen: {

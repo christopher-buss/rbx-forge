@@ -1,11 +1,16 @@
 import { type } from "arktype";
 
 import { ForgeError } from "../errors.ts";
-import { callSessionAsync } from "../ipc/client.ts";
+import { callSessionAsync, ownSessionAsync } from "../ipc/client.ts";
 import { IPC_WAIT_MS } from "../ipc/protocol.ts";
 import type { IpcTransport } from "../ipc/transport.ts";
 import type { FileSystem } from "../seams/file-system.ts";
-import type { SessionStatus } from "../session/status.ts";
+import type { OwnerJoin, OwnerRelease } from "../session/ownership.ts";
+import type { PartRequest } from "../session/part-requests.ts";
+import type { PartRestarts, RestartRequest } from "../session/part-restarts.ts";
+import { parseRestartResult, parseStopResult } from "../session/part-stop-schema.ts";
+import type { PartStops, StopPartsRequest } from "../session/part-stops.ts";
+import type { PartId, SessionStatus } from "../session/status.ts";
 import { parseStatus } from "../session/status.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "../supervisor/session-files.ts";
 import { sessionFiles } from "../supervisor/session-files.ts";
@@ -17,6 +22,15 @@ export interface KnownSession {
 	/** The token its control channel wants. */
 	token: string;
 }
+
+/** The hint for an answer this forge cannot read. */
+/**
+ * How long `up` and `start` wait for a session that holds the project to
+ * answer: `up` then starts one itself, `start` fails.
+ */
+export const JOIN_SILENCE_MS = 30_000;
+
+const OTHER_VERSION = "The session may run another forge version. Stop it, then start it again.";
 
 const identityLine = type("string.json.parse").pipe(
 	type({
@@ -101,11 +115,213 @@ export async function fetchStatusAsync(
 	const status = parseStatus(result);
 	if (status === undefined) {
 		throw new ForgeError("internal_error", "The session answered status with something else.", {
-			hint: "The session may run another forge version. Stop it, then start it again.",
+			hint: OTHER_VERSION,
 		});
 	}
 
 	return status;
+}
+
+const PART_LIST = "('compiler' | 'rojo' | 'studio')[]";
+
+const addedResult = type({ added: PART_LIST });
+
+const joinedResult = type({ added: PART_LIST, sessionId: "string", taken: PART_LIST });
+
+const releasedResult = type({
+	ending: "boolean",
+	released: PART_LIST,
+	sessionId: "string",
+	stopped: "('compiler' | 'rojo')[]",
+	studioLeft: "boolean",
+});
+
+/** A session this `start` joined as its owner. */
+export interface JoinedSession {
+	/**
+	 * Hold the session until `release` aborts, then let go.
+	 *
+	 * @returns What letting go did; `undefined` when the session ended
+	 *   first.
+	 * @rejects {ForgeError} `supervisor_unresponsive` with no answer in time;
+	 *   `internal_error` for an answer that is no release.
+	 */
+	holdAsync: (release: AbortSignal, waitMs: number) => Promise<OwnerRelease | undefined>;
+	/** What the join took and started, and the session's id. */
+	joined: OwnerJoin & { sessionId: string };
+}
+
+/**
+ * Join a session as its owner (`forge start`): it takes every running part
+ * (only the compiler when the request has no Studio) and starts the parts
+ * the request asks for. The session holds them for
+ * this process until it lets go or ends.
+ *
+ * @param ipc - Reaches its endpoint.
+ * @param session - Its identity record and token.
+ * @param request - The parts to start, and the Studio executable.
+ * @param options - How long the join may take, and the signal that gives
+ *   up on it.
+ * @param options.signal - Aborts to give up: the session lets go.
+ * @param options.waitMs - How long the join may take.
+ * @returns The joined session; `undefined` when `signal` aborted first.
+ * @rejects {ForgeError} As {@link fetchStatusAsync}; `session_running`
+ *   while another `start` owns it; the add's own failure.
+ */
+export async function joinSessionAsync(
+	ipc: IpcTransport,
+	session: KnownSession,
+	request: PartRequest,
+	{ signal, waitMs }: { signal: AbortSignal; waitMs: number },
+): Promise<JoinedSession | undefined> {
+	const owned = await ownSessionAsync(
+		ipc,
+		{ endpoint: session.identity.endpoint, token: session.token },
+		{ params: { ...request }, responseTimeoutMs: waitMs, signal },
+	);
+	if (owned === undefined) {
+		return undefined;
+	}
+
+	const joined = joinedResult(owned.joined);
+	if (joined instanceof type.errors) {
+		throw otherAnswer("own");
+	}
+
+	return {
+		holdAsync: async (release, releaseWaitMs) => {
+			const answer = await owned.holdAsync(release, releaseWaitMs);
+			if (answer === undefined) {
+				return;
+			}
+
+			const released = releasedResult(answer);
+			if (released instanceof type.errors) {
+				throw otherAnswer("release");
+			}
+
+			return released;
+		},
+		joined,
+	};
+}
+
+/**
+ * Ask a session to start the parts that are missing or failed.
+ *
+ * @param ipc - Reaches its endpoint.
+ * @param session - Its identity record and token.
+ * @param request - The parts to add, and the Studio executable to start.
+ * @param waitMs - How long the answer may take: the session answers once it
+ *   has started its own parts and then the new ones.
+ * @returns The parts it started.
+ * @rejects {ForgeError} As {@link fetchStatusAsync}; the add's own failure,
+ *   such as `compiler_missing` or `port_in_use`.
+ */
+export async function addPartsAsync(
+	ipc: IpcTransport,
+	session: KnownSession,
+	request: PartRequest,
+	waitMs: number,
+): Promise<Array<PartId>> {
+	const result = await callSessionAsync(
+		ipc,
+		{ endpoint: session.identity.endpoint, token: session.token },
+		"addParts",
+		// JSON leaves an unset `studioPath` out.
+		{ params: { ...request }, responseTimeoutMs: waitMs },
+	);
+	const parsed = addedResult(result);
+	if (parsed instanceof type.errors) {
+		throw new ForgeError(
+			"internal_error",
+			"The session answered addParts with something else.",
+			{
+				hint: OTHER_VERSION,
+			},
+		);
+	}
+
+	return parsed.added;
+}
+
+/**
+ * Ask a session to stop the parts a request may stop.
+ *
+ * @param ipc - Reaches its endpoint.
+ * @param session - Its identity record and token.
+ * @param request - The scope, `force`, place, and recovery mode.
+ * @param waitMs - How long the answer may take: the session answers once
+ *   the parts are gone.
+ * @returns What it stopped and kept.
+ * @rejects {ForgeError} As {@link fetchStatusAsync}; `session_replaced` when
+ *   another session answers; `not_running` while it starts or stops.
+ */
+export async function stopPartsAsync(
+	ipc: IpcTransport,
+	session: KnownSession,
+	request: StopPartsRequest,
+	waitMs: number,
+): Promise<PartStops> {
+	const result = await callSessionAsync(
+		ipc,
+		{ endpoint: session.identity.endpoint, token: session.token },
+		"stopParts",
+		// JSON leaves an unset `place` and `recovery` out.
+		{
+			params: { ...request, sessionId: session.identity.sessionId },
+			responseTimeoutMs: waitMs,
+		},
+	);
+	const parsed = parseStopResult(result);
+	if (parsed === undefined) {
+		throw new ForgeError(
+			"internal_error",
+			"The session answered stopParts with something else.",
+			{
+				hint: OTHER_VERSION,
+			},
+		);
+	}
+
+	return parsed;
+}
+
+/**
+ * Ask a session to stop the parts a restart may touch and start them
+ * again.
+ *
+ * @param ipc - Reaches its endpoint.
+ * @param session - Its identity record and token.
+ * @param request - `force`, the recovery mode, and the Studio executable.
+ * @param waitMs - How long the answer may take: the session answers once
+ *   the old parts are gone and the new ones run.
+ * @returns What it stopped, kept, and started.
+ * @rejects {ForgeError} As {@link stopPartsAsync}; the add's failure;
+ *   `cleanup_in_progress` when an old tree is not proven gone.
+ */
+export async function restartPartsAsync(
+	ipc: IpcTransport,
+	session: KnownSession,
+	request: RestartRequest,
+	waitMs: number,
+): Promise<PartRestarts> {
+	const result = await callSessionAsync(
+		ipc,
+		{ endpoint: session.identity.endpoint, token: session.token },
+		"restartParts",
+		// JSON leaves an unset `recovery` and `studioPath` out.
+		{
+			params: { ...request, sessionId: session.identity.sessionId },
+			responseTimeoutMs: waitMs,
+		},
+	);
+	const parsed = parseRestartResult(result);
+	if (parsed === undefined) {
+		throw otherAnswer("restartParts");
+	}
+
+	return parsed;
 }
 
 /**
@@ -135,6 +351,12 @@ export async function probeSessionAsync(
 
 		throw err;
 	}
+}
+
+function otherAnswer(method: string): ForgeError {
+	return new ForgeError("internal_error", `The session answered ${method} with something else.`, {
+		hint: OTHER_VERSION,
+	});
 }
 
 function readText(fileSystem: Pick<FileSystem, "readFileSync">, file: string): string | undefined {

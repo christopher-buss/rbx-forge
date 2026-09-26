@@ -1,0 +1,373 @@
+import path from "node:path";
+
+import { buildAsync } from "../commands/build.ts";
+import type { CommandContext } from "../commands/context.ts";
+import { openPlaceAsync } from "../commands/open.ts";
+import type { ResolvedConfig } from "../config/resolve.ts";
+import { ForgeError } from "../errors.ts";
+import { settlesWithinAsync } from "../seams/clock.ts";
+import { studioLockPath } from "../studio/lock-file.ts";
+import type { OpenedStudio } from "./attach.ts";
+import { attachStudio } from "./attach.ts";
+import type { BuildWatch } from "./build-watch.ts";
+import { FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
+import type { IdleTracker } from "./idle.ts";
+import type { PartAdder, PartRequest } from "./part-requests.ts";
+import type { RojoService, RojoSetup } from "./rojo-part.ts";
+import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./rojo-part.ts";
+import type { SessionScope } from "./run-session.ts";
+import type { ServiceParts } from "./service-parts.ts";
+import type { PartId, StatusRecorder, StatusStore } from "./status.ts";
+import { waitForStudioCloseAsync, watchSaves } from "./watch.ts";
+import { watchOptions } from "./worker-context.ts";
+
+/**
+ * How long an attach waits for Studio to open the place. Studio goes on
+ * opening it after that, but `forge up` gets its answer.
+ */
+export const STUDIO_OPEN_BOUND_MS = 180_000;
+
+/** Whether the session has a Studio: one that opens or has the place open. */
+export interface StudioState {
+	isAttached: boolean;
+	/** Stops following the attached Studio, which stays open. */
+	letGo?: (() => void) | undefined;
+}
+
+/** What opens and follows the session's Studio. */
+export interface StudioSetup extends RojoSetup {
+	/** Waits for the compiler's fresh build before the place is built. */
+	builds: Pick<BuildWatch, "waitAsync">;
+	config: ResolvedConfig;
+	/** Gets each save of the session's Studio as activity. */
+	idle: Pick<IdleTracker, "activity">;
+	status: Pick<StatusRecorder, "rojoPort" | "service" | "studio"> & Pick<StatusStore, "snapshot">;
+}
+
+/** How the session opens Studio. */
+interface OpenOptions {
+	/** Build the session's place first, unless Studio has it open. */
+	build: boolean;
+	/** The session's end: once it came, no Studio opens. */
+	signal: AbortSignal;
+	/** The Studio executable to start, absolute. */
+	studioPath?: string | undefined;
+}
+
+/** What an attach adds its parts with. */
+interface AttachParts {
+	parts: ServiceParts;
+	state: StudioState;
+	/** The session's steps context: builds and hooks run as its workers. */
+	steps: CommandContext;
+}
+
+/** What follows the session's Studio: its context, idle tracker, and status. */
+type FollowSetup = Pick<StudioSetup, "context" | "idle" | "status">;
+
+/** The session's Studio parts, as a follow changes them. */
+type FollowParts = Pick<AttachParts, "parts" | "state">;
+
+/**
+ * Open the place in Studio, or attach the verified Studio that has it open.
+ * A place is never built under the Studio that has it open.
+ *
+ * @param setup - The config and context.
+ * @param steps - The steps context.
+ * @param options - Whether to build, the end signal, and the Studio path.
+ * @returns The place and its Studio, or `undefined` once the session is
+ *   ending.
+ * @rejects A step's failure, as `openPlaceAsync`.
+ */
+export async function openStudioAsync(
+	{ config, context }: Pick<StudioSetup, "config" | "context">,
+	steps: CommandContext,
+	{ build, signal, studioPath }: OpenOptions,
+): Promise<OpenedStudio | undefined> {
+	const attached = attachStudio(context, config);
+	if (build && attached?.place !== path.resolve(context.cwd, config.buildOutputPath)) {
+		await buildPlaceAsync(steps, config);
+	}
+
+	// Studio starts outside the reaper, so this step checks by itself.
+	if (signal.aborted) {
+		return undefined;
+	}
+
+	// The build above wrote the place `open` would build.
+	const isBuilt =
+		build && config.open.buildOutputPath === undefined && config.open.projectPath === undefined;
+	return attached ?? (await openPlaceAsync(steps, config, { isBuilt, studioPath }));
+}
+
+/**
+ * Attach a Studio to the session as its part (`opening`), and follow it
+ * until it closes the place: `open` once its lock file names it, and each
+ * save of the place is activity. The close of a Studio with no owner stops
+ * its Rojo; the close of an owned one stops nothing, as its owner decides.
+ *
+ * @param setup - The context, idle tracker, and status.
+ * @param scope - Its end signal; tracks the follow.
+ * @param follow - The parts and the Studio state.
+ * @param opened - The place and its Studio.
+ * @returns `open`: resolves once Studio has the place open, or the follow
+ *   ended.
+ */
+export function followSessionStudio(
+	setup: FollowSetup,
+	scope: Pick<SessionScope, "signal" | "track">,
+	follow: FollowParts,
+	opened: OpenedStudio,
+): { open: Promise<void> } {
+	const letGo = new AbortController();
+	follow.state.isAttached = true;
+	follow.state.letGo = () => {
+		letGo.abort();
+	};
+
+	setup.status.studio("opening", opened.place, opened.studio);
+	const open = Promise.withResolvers<void>();
+	const signal = AbortSignal.any([scope.signal, letGo.signal]);
+	scope.track(followAsync(setup, { signal }, follow, { ...opened, onOpen: open.resolve }));
+	return { open: open.promise };
+}
+
+/**
+ * Let go of the session's Studio, which stays open: its follow ends, and
+ * it is no part any more.
+ *
+ * @param state - Whether a Studio is attached, and its follow.
+ * @param status - Records it `off`.
+ */
+export function leaveStudio(state: StudioState, status: Pick<StatusRecorder, "studioLeft">): void {
+	state.letGo?.();
+	state.letGo = undefined;
+	state.isAttached = false;
+	status.studioLeft();
+}
+
+/**
+ * Attach Studio and its Rojo to a running session, as `forge up --studio`
+ * asks, and repair the Rojo of an attached Studio:
+ *
+ * 1. Choose Rojo's port (the session keeps it) and resolve Rojo, so a busy
+ *    port or a missing Rojo fails before Studio opens.
+ * 2. Wait for the compiler's fresh build, when it runs: the place build and
+ *    Rojo read its output.
+ * 3. Attach the Studio that has the place open, or build the place and open
+ *    it. When Studio closes it, only its Rojo stops.
+ * 4. Start Rojo, when it does not run, and wait until it listens.
+ * 5. Wait until Studio has the place open.
+ *
+ * @param setup - The config, context, builds, Rojo, and status.
+ * @param scope - Its end signal; tracks the Studio follow.
+ * @param attach - The parts, the Studio state, and the steps context.
+ * @returns The adder of the Studio half of a request.
+ */
+export function createStudioAdder(
+	setup: StudioSetup,
+	scope: SessionScope,
+	attach: AttachParts,
+): PartAdder {
+	return async (request) => {
+		const { hasWork, isStudioWanted } = planAttach(request, attach);
+		if (!hasWork) {
+			return [];
+		}
+
+		const rojo = await resolveRojoAsync(setup);
+		const hasCompiler = attach.parts.isRunning("compiler");
+		if (hasCompiler) {
+			await setup.builds.waitAsync(FRESH_BUILD_TIMEOUT_MS);
+		}
+
+		const opening = isStudioWanted
+			? await attachAsync(setup, scope, attach, {
+					build: hasCompiler,
+					studioPath: request.studioPath,
+				})
+			: undefined;
+		const isRojoStarted = await serveRojoAsync(setup, scope, attach.parts, rojo);
+		if (opening !== undefined && !hasEnded(scope)) {
+			await waitForOpenAsync(setup, opening);
+		}
+
+		const added: Array<PartId> = opening === undefined ? [] : ["studio"];
+		return isRojoStarted ? [...added, "rojo"] : added;
+	};
+}
+
+/**
+ * Build the session's place with Rojo, as a step.
+ *
+ * @param steps - The steps context.
+ * @param config - The project and the place.
+ */
+async function buildPlaceAsync(steps: CommandContext, config: ResolvedConfig): Promise<void> {
+	await buildAsync(steps, config, {
+		project: config.rojoProjectPath,
+		target: { output: config.buildOutputPath, type: "output" },
+	});
+}
+
+/**
+ * Wait until Studio closes the place, and count each save of it as
+ * activity meanwhile.
+ *
+ * @param setup - The context, idle tracker, and status.
+ * @param scope - Ends the watch.
+ * @param opened - The place, its Studio, and what gets its open.
+ * @returns `true` once Studio closed the place; `false` when the watch
+ *   ended first.
+ */
+async function watchStudioAsync(
+	{ context, idle, status }: FollowSetup,
+	scope: Pick<SessionScope, "signal">,
+	opened: OpenedStudio & { onOpen: () => void },
+): Promise<boolean> {
+	const { place, studio } = opened;
+	const options = watchOptions(context, scope);
+	const followed = new AbortController();
+	const saves = watchSaves(
+		{ ...options, signal: AbortSignal.any([options.signal, followed.signal]) },
+		place,
+		() => {
+			idle.activity(context.seams.clock.now());
+		},
+	);
+	const lock = { path: studioLockPath(place), pid: studio?.pid };
+	try {
+		return await waitForStudioCloseAsync(options, lock, () => {
+			status.studio("open", place, studio);
+			context.reporter.emit({ message: `Roblox Studio has ${place} open.`, type: "info" });
+			opened.onOpen();
+		});
+	} finally {
+		followed.abort();
+		await saves.done;
+	}
+}
+
+/**
+ * Follow an attached Studio until it closes the place, or the follow ends.
+ *
+ * @param setup - The context and status.
+ * @param scope - Ends the follow: the session's end, or a let go.
+ * @param follow - The parts and the Studio state.
+ * @param opened - The place, its Studio, and what gets its open.
+ */
+async function followAsync(
+	setup: FollowSetup,
+	scope: Pick<SessionScope, "signal">,
+	{ parts, state }: FollowParts,
+	opened: OpenedStudio & { onOpen: () => void },
+): Promise<void> {
+	const { status } = setup;
+	const { place, studio } = opened;
+	const isClosed = await watchStudioAsync(setup, scope, opened);
+	opened.onOpen();
+	if (!isClosed) {
+		return;
+	}
+
+	state.isAttached = false;
+	state.letGo = undefined;
+	status.studio("closed", place, studio);
+	if (status.snapshot().services.studio.owner === null) {
+		parts.stop("rojo");
+	}
+}
+
+/**
+ * Open or attach Studio for an attach request, and follow it.
+ *
+ * @param setup - The config, context, and status.
+ * @param scope - Its end signal; tracks the follow.
+ * @param attach - The parts, the Studio state, and the steps context.
+ * @param options - Whether to build, and the Studio path.
+ * @returns The place and whether Studio has it open yet, or `undefined`
+ *   once the session is ending.
+ */
+async function attachAsync(
+	setup: StudioSetup,
+	scope: SessionScope,
+	attach: AttachParts,
+	options: Pick<OpenOptions, "build" | "studioPath">,
+): Promise<undefined | { open: Promise<void>; place: string }> {
+	const opened = await openStudioAsync(setup, attach.steps, { ...options, signal: scope.signal });
+	if (opened === undefined) {
+		return undefined;
+	}
+
+	const { open } = followSessionStudio(setup, scope, attach, opened);
+	return { open, place: opened.place };
+}
+
+/**
+ * Wait until Studio has the place open, for at most
+ * {@link STUDIO_OPEN_BOUND_MS}. The session's end ends the wait.
+ *
+ * @param setup - The clock.
+ * @param opening - The place, and whether Studio has it open.
+ * @param opening.open - Resolves once it has, or the follow ended.
+ * @param opening.place - The place file Studio opens.
+ * @rejects {ForgeError} `studio_launch_failed` once the bound passed.
+ */
+async function waitForOpenAsync(
+	setup: Pick<StudioSetup, "context">,
+	{ open, place }: { open: Promise<void>; place: string },
+): Promise<void> {
+	if (await settlesWithinAsync(setup.context.seams.clock, open, STUDIO_OPEN_BOUND_MS)) {
+		return;
+	}
+
+	throw new ForgeError(
+		"studio_launch_failed",
+		`Roblox Studio did not open ${place} within ${STUDIO_OPEN_BOUND_MS / 1000} s.`,
+		{ hint: 'The session keeps waiting for it; check "forge status".' },
+	);
+}
+
+/**
+ * Whether an attach request has anything to do: Studio when it asks for it
+ * and none is attached, Rojo when a Studio is attached and Rojo does not
+ * run.
+ *
+ * @param request - The parts it asks for.
+ * @param attach - The parts and the Studio state.
+ * @returns Whether it adds Studio, and whether it adds anything.
+ */
+function planAttach(
+	request: PartRequest,
+	{ parts, state }: Pick<AttachParts, "parts" | "state">,
+): { hasWork: boolean; isStudioWanted: boolean } {
+	const isStudioWanted = request.parts.includes("studio") && !state.isAttached;
+	return {
+		hasWork: isStudioWanted || (state.isAttached && !parts.isRunning("rojo")),
+		isStudioWanted,
+	};
+}
+
+/**
+ * Start Rojo when it does not run, and wait until it listens.
+ *
+ * @param setup - The context and status.
+ * @param scope - Its end signal.
+ * @param parts - Starts and stops Rojo.
+ * @param rojo - Rojo on the session's port.
+ * @returns Whether it started Rojo.
+ */
+async function serveRojoAsync(
+	setup: StudioSetup,
+	scope: SessionScope,
+	parts: ServiceParts,
+	rojo: RojoService,
+): Promise<boolean> {
+	const running = parts.isRunning("rojo") ? undefined : await startRojoAsync(setup, parts, rojo);
+	if (running === undefined) {
+		return false;
+	}
+
+	await waitForRojoAsync(setup, scope, parts, running);
+	return true;
+}

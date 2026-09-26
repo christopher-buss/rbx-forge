@@ -15,12 +15,14 @@ import type { StopRequest } from "../session/stop-source.ts";
  *
  * - argv: the {@link SessionRequest}, as JSON.
  * - stdin, the owner pipe: `{"type":"stop","signal":…}` lines when `start`
- *   gets a stop signal. EOF means `start` is gone: the session stops.
+ *   gets a stop signal. EOF means `start` is gone. Either way, the parts
+ *   `start` owns stop, and the session ends unless a part with no owner is
+ *   left.
  * - stdout: {@link SupervisorMessage} lines: progress events, then one
- *   result.
+ *   result; or `released` once the session goes on without `start`.
  */
 
-/** What session `start` asks for. */
+/** What session `start` or `up` asks for. */
 export interface SessionRequest {
 	/** `--no-compiler` sets it to `false`. */
 	compiler: boolean;
@@ -37,7 +39,10 @@ export interface SessionRequest {
 	 * bound is cleaned up by force.
 	 */
 	force?: boolean;
-	/** `--no-open` sets it to `false`. */
+	/**
+	 * Studio with its Rojo: `start --no-open` sets it to `false`; `up`
+	 * never opens Studio.
+	 */
 	open: boolean;
 }
 
@@ -52,8 +57,12 @@ export interface SupervisorFailure {
 /** One line from the supervisor. */
 export type SupervisorMessage =
 	| { data: Readonly<Record<string, unknown>>; ok: true; summary: string; type: "result" }
+	/** `start` let go of the session, which goes on without it. */
+	| { data: Readonly<Record<string, unknown>>; summary: string; type: "released" }
 	| { error: SupervisorFailure; ok: false; type: "result" }
 	| { event: ReporterEvent; type: "event" };
+
+const RECORD = "Record<string, unknown>";
 
 /** One line of JSON text, parsed. */
 const jsonLine = type("string.json.parse");
@@ -76,11 +85,12 @@ const event: Type<ReporterEvent> = type.or(
 
 const messageSchema: Type<SupervisorMessage> = type.or(
 	{ event, type: "'event'" },
-	{ data: "Record<string, unknown>", ok: "true", summary: "string", type: "'result'" },
+	{ data: RECORD, ok: "true", summary: "string", type: "'result'" },
+	{ data: RECORD, summary: "string", type: "'released'" },
 	{
 		error: {
 			"code": "string",
-			"details?": "Record<string, unknown>",
+			"details?": RECORD,
 			"hint?": "string",
 			"message": "string",
 		},

@@ -92,16 +92,25 @@ defineConfig({
 ### `rojoPort`
 
 - Type: `integer`, 1 to 65535
-- Default: `34872`
+- Default: none
 
-The fixed port of `rojo serve` in a session. forge never picks another port: a
-busy port fails the session with `port_in_use`. Give each worktree its own port
-so each Studio connects to the right server.
+The port of `rojo serve` in a session. A session chooses it when Rojo first
+starts (`forge start`, or `forge up --studio`), and keeps it for its whole life:
+a Rojo that starts again, such as after `forge up` repairs it, serves on the
+same port, so its Studio connects to the same server.
 
-The session is ready only when Rojo accepts connections on `127.0.0.1` at this
-port, within 60 s (else `service_failed`). A `serveAddress` in the Rojo project
-file that does not listen on `127.0.0.1` (for example a LAN address) makes the
-session fail; `0.0.0.0` is fine.
+- **Set**: the port is fixed. forge never picks another port: a busy port fails
+  with `port_in_use`.
+- **Not set**: forge takes `34872` (Rojo's default) when it is free, else a free
+  port the OS gives out. So sessions in several worktrees can each attach a
+  Studio. `forge status` and `services.rojo.port` in the state contract show the
+  port.
+
+Rojo is ready only when it accepts connections on `127.0.0.1` at this port. When
+it does not within 60 s, forge stops it and its part is `failed`; the session
+goes on. A `serveAddress` in the Rojo project file that does not listen on
+`127.0.0.1` (for example a LAN address) makes Rojo fail this way; `0.0.0.0` is
+fine.
 
 ```ts
 defineConfig({
@@ -231,33 +240,32 @@ defineConfig({
 
 ### `open`
 
-Options for `forge open` and the session's open step.
+Options for the session's open step (`start`, `up --studio`) and for
+`forge open`, which always builds a snapshot.
 
 #### `open.buildFirst`
 
 - Type: `boolean`
 - Default: `true`
-- Flag: `forge open --build` / `--no-build`
 
-Build the place before opening it. When off and the place is missing, forge asks
-at a terminal (answering no fails with `declined`); a run that cannot ask fails
-with `place_not_found`.
+Build the place before a session opens it. When off and the place is missing,
+the session fails with `place_not_found`. `forge open` always builds.
 
 #### `open.buildOutputPath`
 
 - Type: `string`
 - Default: `buildOutputPath`
-- Flag: `forge open --place <path>`
 
-The place to open (and to build, when building first). `forge stop` also looks
-for Studio's lock file next to this place.
+The place a session opens (and builds, when building first). `forge stop` also
+looks for Studio's lock file next to this place. `forge open` names its
+snapshots after this file.
 
 #### `open.projectPath`
 
 - Type: `string`
 - Default: `rojoProjectPath`
 
-The Rojo project to build before opening.
+The Rojo project to build before opening, also for snapshots.
 
 ```ts
 defineConfig({
@@ -269,9 +277,33 @@ The Studio executable is not a config option: its path differs per computer. Use
 `--studio-path` or `RBX_FORGE_STUDIO_PATH` (see
 [Opening Studio](./studio.md#opening-studio)).
 
+### `session`
+
+Options for the sessions of `forge start` and `forge up`.
+
+#### `session.idleTimeout`
+
+- Type: `number` >= 0, in minutes (fractions allowed)
+- Default: `30`
+
+After this many minutes with no activity, a session stops its parts with no
+owner, as `forge down` does: the compiler, Rojo, and Studio. It closes Studio as
+`stop` does, with its auto-recovery files handled as
+[`studio.autoRecovery`](#studioautorecovery) says. A part that a `forge start`
+terminal owns is never stopped. An `up` session with no part left ends. Activity
+is a client request (any forge command that talks to the session, such as
+`status` or `up`), a compile start, or a Studio save of the place. `0` turns the
+timeout off.
+
+```ts
+defineConfig({
+	session: { idleTimeout: 120 },
+});
+```
+
 ### `studio`
 
-Options for the Roblox Studio that `stop` and `down` close.
+Options for the Roblox Studio that `stop`, `down`, and the idle timeout close.
 
 #### `studio.autoRecovery`
 
@@ -388,8 +420,8 @@ option.
 - `pre` hooks run in order before the step. A failure aborts the command.
 - `post` hooks run in order only after the step succeeds. A failed `post` hook
   fails the command.
-- Chained steps run their own hooks. `forge open` that builds first runs: `open`
-  `pre`, `build` `pre`, the build, `build` `post`, Studio, `open` `post`.
+- Chained steps run their own hooks. `forge open` runs: `open` `pre`, `build`
+  `pre`, the build, `build` `post`, Studio, `open` `post`.
 - Each hook runs through the system shell (`cmd.exe` on Windows, `/bin/sh`
   elsewhere) in the project root, with `node_modules/.bin` first on `PATH`. The
   hooks work the same with pnpm, npm, bun, mise, or no task runner. forge does

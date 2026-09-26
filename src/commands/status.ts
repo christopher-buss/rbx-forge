@@ -4,7 +4,7 @@ import { fetchStatusAsync, findSession } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
-import type { SessionStatus } from "../session/status.ts";
+import type { ServicePart, SessionStatus } from "../session/status.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
@@ -89,6 +89,24 @@ function plural(count: number, noun: string): string {
 }
 
 /**
+ * A part's status; a failed one with its exit code.
+ *
+ * @param part - Its status and exit code.
+ * @returns Such as `ready` or `failed (exit code 1)`.
+ */
+function describePart({ exitCode, status }: ServicePart): string {
+	if (status !== "failed") {
+		return status;
+	}
+
+	return typeof exitCode === "number" ? `failed (exit code ${exitCode})` : "failed";
+}
+
+function portOf({ port }: SessionStatus["services"]["rojo"]): string {
+	return port === undefined ? "" : ` on port ${port}`;
+}
+
+/**
  * The TTY lines of a status: the session, then one line per service.
  *
  * @param status - The session's status.
@@ -105,8 +123,8 @@ function describeStatus({ phase, pid, services, sessionId }: SessionStatus): str
 	const synced = run === undefined ? "" : `, last run ${outcome}`;
 	const lines = [
 		`Session ${sessionId} (pid ${pid}): ${phase}`,
-		`  rojo: ${rojo.status} on port ${rojo.port}`,
-		`  compiler: ${compiler.status}${building}${built}`,
+		`  rojo: ${describePart(rojo)}${portOf(rojo)}`,
+		`  compiler: ${describePart(compiler)}${building}${built}`,
 		`  syncback: ${syncback.status}${synced}`,
 		`  studio: ${studio.status}`,
 	];

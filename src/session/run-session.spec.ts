@@ -102,31 +102,45 @@ describe(runSessionAsync, () => {
 		expect(signals.listeners()).toBe(0);
 	});
 
-	it("should end when a service exits, with its report", async () => {
+	it("should keep running when a service exits", async () => {
 		expect.assertions(2);
 
-		const { fake, outcome } = startSession();
+		const { fake, outcome, signals } = startSession();
 		await flushAsync();
 		fake.exit("rojo", REPORT);
+		await flushAsync();
+		const calls = [...fake.calls];
+		signals.fire("SIGINT");
 
-		await expect(outcome).resolves.toStrictEqual({
-			end: END,
-			reason: { report: REPORT, service: "rojo", type: "service_exited" },
+		await expect(outcome).resolves.toMatchObject({ reason: { type: "signal" } });
+		expect(calls).toStrictEqual(["go", "spawn rojo"]);
+	});
+
+	it("should stop one worker with the session's grace, and keep running", async () => {
+		expect.assertions(1);
+
+		const { fake, outcome, signals } = startSession(async (scope) => {
+			await startServicesAsync(scope, ["rojo"]);
+			scope.stopWorker("rojo");
 		});
-		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "terminate 250"]);
+		await flushAsync();
+		signals.fire("SIGINT");
+		await outcome;
+
+		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "stop rojo 250", "terminate 250"]);
 	});
 
 	it("should keep the first reason it ends with", async () => {
 		expect.assertions(1);
 
 		const { outcome, signals } = startSession(async (scope) => {
-			scope.end({ type: "studio_closed" });
+			scope.end({ type: "shutdown" });
 			scope.end({ error: new Error("late"), type: "failed" });
 		});
 		await flushAsync();
 		signals.fire("SIGINT");
 
-		await expect(outcome).resolves.toMatchObject({ reason: { type: "studio_closed" } });
+		await expect(outcome).resolves.toMatchObject({ reason: { type: "shutdown" } });
 	});
 
 	it("should let a forced shutdown hurry the reaper's end", async () => {

@@ -1,8 +1,16 @@
 // cspell:ignore SAPPHIR VERYLONGCOMPUTE VERYLONGCOMPUT VERYLONGCOMPUTX
 // cspell:ignore verylongcomputername STRASSE straße
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { isLockHost, isStudioExecutable, parseStudioLock, studioLockPath } from "./lock-file.ts";
+import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
+import {
+	isLockHost,
+	isStudioExecutable,
+	parseStudioLock,
+	readLockFile,
+	studioLockPath,
+} from "./lock-file.ts";
 
 /** A lock file as Roblox Studio 0.700 on Windows writes it. */
 const WINDOWS_LOCK = "47212\nRobloxStudioBeta\nSAPPHIRE\n4378769e-07d9-4eda-b5ee-187aa6c43cda\n\n";
@@ -137,5 +145,38 @@ describe(studioLockPath, () => {
 		expect.assertions(1);
 
 		expect(studioLockPath("/project/game.rbxl")).toBe("/project/game.rbxl.lock");
+	});
+});
+
+describe(readLockFile, () => {
+	const lockPath = path.join(PROJECT, "game.rbxl.lock");
+
+	it("should read the lock file's content", () => {
+		expect.assertions(1);
+
+		const { fileSystem } = createMemoryFileSystem({ "game.rbxl.lock": "7" });
+
+		expect(readLockFile(fileSystem, lockPath)).toBe("7");
+	});
+
+	it("should return undefined when there is no lock file", () => {
+		expect.assertions(1);
+
+		const { fileSystem } = createMemoryFileSystem();
+
+		expect(readLockFile(fileSystem, lockPath)).toBeUndefined();
+	});
+
+	it("should throw other read errors", () => {
+		expect.assertions(1);
+
+		const error = Object.assign(new Error("EACCES: denied"), { code: "EACCES" });
+		const fileSystem = {
+			readFileSync: () => {
+				throw error;
+			},
+		};
+
+		expect(() => readLockFile(fileSystem, lockPath)).toThrow(error);
 	});
 });

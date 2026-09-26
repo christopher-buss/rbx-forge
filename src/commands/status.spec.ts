@@ -43,10 +43,11 @@ describe(runStatusAsync, () => {
 				compiler: {
 					building: false,
 					lastBuild: { at: "t", diagnostics: [], errors: 2, startedAt: "t" },
+					owner: null,
 					status: "ready",
 				},
-				rojo: { port: 4000, status: "ready" },
-				studio: { status: "open" },
+				rojo: { owner: null, port: 4000, status: "ready" },
+				studio: { owner: null, status: "open" },
 				syncback: {
 					lastRun: { at: "t", durationMs: 1, hooks: [], ok: false },
 					status: "idle",
@@ -80,10 +81,11 @@ describe(runStatusAsync, () => {
 					compiler: {
 						building: false,
 						lastBuild: { at: "t", diagnostics: [], errors: 1, startedAt: "t" },
+						owner: null,
 						status: "ready",
 					},
-					rojo: { port: 1, status: "starting" },
-					studio: { status: "off" },
+					rojo: { owner: null, port: 1, status: "starting" },
+					studio: { owner: null, status: "off" },
 					syncback: {
 						lastRun: { at: "t", durationMs: 1, hooks: [], ok: true },
 						status: "running",
@@ -101,6 +103,56 @@ describe(runStatusAsync, () => {
 				"  studio: off",
 			].join("\n"),
 		});
+	});
+
+	it("should describe failed parts with their exit code", async () => {
+		expect.assertions(1);
+
+		const { context, ipc, memory } = makeContext();
+		const { services } = makeStatus();
+		await serveFakeSessionAsync(
+			memory,
+			ipc,
+			makeStatus({
+				services: {
+					...services,
+					compiler: {
+						building: false,
+						exitCode: null,
+						outputTail: [],
+						owner: null,
+						status: "failed",
+					},
+					rojo: { ...services.rojo, exitCode: 1, outputTail: ["boom"], status: "failed" },
+				},
+			}),
+		);
+
+		await expect(runStatusAsync(context)).resolves.toMatchObject({
+			summary: [
+				"Session s1 (pid 500): ready",
+				"  rojo: failed (exit code 1) on port 34872",
+				"  compiler: failed",
+				"  syncback: off",
+				"  studio: off",
+			].join("\n"),
+		});
+	});
+
+	it("should name no Rojo port before the session chose one", async () => {
+		expect.assertions(1);
+
+		const { context, ipc, memory } = makeContext();
+		const { services } = makeStatus();
+		await serveFakeSessionAsync(
+			memory,
+			ipc,
+			makeStatus({ services: { ...services, rojo: { owner: null, status: "off" } } }),
+		);
+
+		const { summary } = await runStatusAsync(context);
+
+		expect(summary.split("\n", 2)[1]).toBe("  rojo: off");
 	});
 
 	it("should report the plain lines of a fresh session", async () => {
@@ -239,7 +291,7 @@ describe(runStatusAsync, () => {
 			makeStatus({
 				services: {
 					...makeStatus().services,
-					compiler: { building: true, status: "starting" },
+					compiler: { building: true, owner: null, status: "starting" },
 				},
 			}),
 		);
