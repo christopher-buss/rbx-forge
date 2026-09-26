@@ -34,13 +34,6 @@ describe(restartedParts, () => {
 			false,
 			["studio"],
 		],
-		[
-			"Rojo that served with no Studio, after the compiler",
-			servicesWith({ owner: "start", status: "ready" }),
-			["rojo", "compiler"],
-			true,
-			["compiler", "rojo"],
-		],
 		["a failed compiler with no owner", servicesWith(FAILED), [], false, ["compiler"]],
 		["no failed compiler that has an owner", servicesWith(OWNED_FAILED), [], false, []],
 		[
@@ -51,11 +44,11 @@ describe(restartedParts, () => {
 			["compiler"],
 		],
 		[
-			"Rojo alone, and no compiler that is off",
+			"no Rojo alone, and no compiler that is off",
 			servicesWith({ status: "off" }),
 			["rojo"],
 			true,
-			["rojo"],
+			[],
 		],
 	])("should restart %s", ([, services, stopped, force, expected]) => {
 		expect.assertions(1);

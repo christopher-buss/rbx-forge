@@ -40,8 +40,7 @@ export interface RestarterParts {
 /**
  * The parts a restart starts again: those it stopped, and a failed compiler
  * that has no owner (or any, with `force`). Rojo comes with Studio, and the
- * adder starts it again for a Studio that stays; a Rojo that served with no
- * Studio (a `start --no-open` session) starts again alone.
+ * adder starts it again for a Studio that stays.
  *
  * @param services - The parts before the stop.
  * @param services.compiler - The compiler's status and owner.
@@ -56,11 +55,7 @@ export function restartedParts(
 ): Array<AddablePart> {
 	const isFailed = compiler.status === "failed" && (force || compiler.owner === null);
 	const parts: Array<AddablePart> = isFailed || stopped.includes("compiler") ? ["compiler"] : [];
-	if (stopped.includes("studio")) {
-		return [...parts, "studio"];
-	}
-
-	return stopped.includes("rojo") ? [...parts, "rojo"] : parts;
+	return stopped.includes("studio") ? [...parts, "studio"] : parts;
 }
 
 /**
