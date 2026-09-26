@@ -34,6 +34,8 @@ interface PartsRun {
 	parts: ServiceParts;
 	reporter: RecordingReporter;
 	status: StatusStore;
+	/** Every task the parts gave the scope to track. */
+	tracked: Array<Promise<unknown>>;
 }
 
 /**
@@ -46,6 +48,7 @@ async function makePartsAsync(isEnding = false): Promise<PartsRun> {
 	const fake = createFakeReaper();
 	const reaper = await fake.launch({ leasePath: "l", recordPath: "r", sessionId: "s1" });
 	const abort = new AbortController();
+	const tracked: Array<Promise<unknown>> = [];
 	const reporter = createRecordingReporter();
 	const clock = createManualClock(Date.UTC(2026, 0, 1));
 	const context = createCommandContext({
@@ -65,7 +68,9 @@ async function makePartsAsync(isEnding = false): Promise<PartsRun> {
 		stopWorker: (id) => {
 			reaper.stop(id, 100);
 		},
-		track: () => {},
+		track: (task) => {
+			tracked.push(task);
+		},
 	};
 	const status = createStatusStore(
 		{
@@ -81,7 +86,7 @@ async function makePartsAsync(isEnding = false): Promise<PartsRun> {
 		() => {},
 	);
 	const parts = createServiceParts({ context, directory: DIRECTORY, status }, scope);
-	return { abort, fake, parts, reporter, status };
+	return { abort, fake, parts, reporter, status, tracked };
 }
 
 describe(createServiceParts, () => {
@@ -104,6 +109,20 @@ describe(createServiceParts, () => {
 		expect(run.reporter.events).not.toContainEqual(
 			expect.objectContaining({ type: "warning" }),
 		);
+	});
+
+	it("should have the session track each part until its status tells how it ended", async () => {
+		expect.assertions(2);
+
+		const run = await makePartsAsync();
+		const rojo = await run.parts.startAsync(ROJO, { initial: "ready" });
+
+		expect(run.tracked).toStrictEqual([rojo!.stopped]);
+
+		run.fake.exit("rojo", EXITED);
+		await Promise.all(run.tracked);
+
+		expect(run.status.snapshot().services.rojo.status).toBe("failed");
 	});
 
 	it("should mark the parts off when the session ends", async () => {

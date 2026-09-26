@@ -694,7 +694,7 @@ describe(runSupervisorAsync, () => {
 	});
 
 	it("should stop Rojo as failed when it never listens within the bound, and go on", async () => {
-		expect.assertions(4);
+		expect.assertions(5);
 
 		const run = startCommand({ isListening: async () => false });
 		await flushAsync();
@@ -714,6 +714,10 @@ describe(runSupervisorAsync, () => {
 		expect(run.reporter.events).toContainEqual({
 			message: `rojo did not listen on port 4000 within 60 s; the session goes on without it. Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
 			type: "warning",
+		});
+		expect(run.reporter.events).toContainEqual({
+			message: "Press Ctrl+C to stop.",
+			type: "info",
 		});
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 	});
@@ -743,7 +747,7 @@ describe(runSupervisorAsync, () => {
 	});
 
 	it("should not report Rojo ready when it exited while its port was checked", async () => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const listening = Promise.withResolvers<boolean>();
 		const run = startCommand({ isListening: async () => listening.promise });
@@ -751,12 +755,17 @@ describe(runSupervisorAsync, () => {
 		run.fake.exit("rojo", EXITED);
 		await passAsync(run, OUTPUT_POLL_MS);
 		listening.resolve(true);
+		await flushAsync();
 		await passAsync(run, OUTPUT_POLL_MS);
 		const state = stateOf(run);
 		run.signals.fire("SIGINT");
 		await run.result;
 
 		expect(state).toMatchObject({ services: { rojo: { status: "failed" } } });
+		expect(run.reporter.events).toContainEqual({
+			message: "Press Ctrl+C to stop.",
+			type: "info",
+		});
 	});
 
 	it("should mark only the compiler failed when it exits, and keep Rojo serving", async () => {

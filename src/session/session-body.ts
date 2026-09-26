@@ -112,11 +112,8 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 			scope.track(watchStudioAsync(session, scope, { ...opened, flushSyncbackAsync }));
 		}
 
-		const parts = createServiceParts(session, scope);
-		const rojo = await startServicesAsync(session, parts);
-		const isServing = await waitForRojoAsync(session, scope, { parts, rojo });
-		// A stop request while the services started: the session is ending.
-		if (hasEnded(scope)) {
+		const isServing = await runServicesAsync(session, scope);
+		if (isServing === undefined) {
 			return;
 		}
 
@@ -184,6 +181,100 @@ async function startServicesAsync(
 	}
 
 	return rojo;
+}
+
+function hasEnded(scope: SessionScope): boolean {
+	return scope.signal.aborted;
+}
+
+/**
+ * Follow whether a part still runs.
+ *
+ * @param scope - Tracks the watch.
+ * @param stopped - Resolves once the part stopped.
+ * @returns Whether the part still runs.
+ */
+function watchRunning(scope: SessionScope, stopped: Promise<void>): () => boolean {
+	let isRunning = true;
+	async function markAsync(): Promise<void> {
+		await stopped;
+		isRunning = false;
+	}
+
+	scope.track(markAsync());
+	return () => isRunning;
+}
+
+/**
+ * Wait until Rojo listens on its port, so `ready` means a client can
+ * connect, then mark it ready. When it does not listen within
+ * {@link ROJO_LISTEN_BOUND_MS}, stop it as `failed`.
+ *
+ * @param session - The config, clock, network, and status.
+ * @param scope - Its end signal.
+ * @param rojo - The service parts, and Rojo's part.
+ * @param rojo.parts - Stops Rojo when it does not listen.
+ * @param rojo.rojo - Rojo's part.
+ * @returns `true` once Rojo listens; `false` when it stopped or the
+ *   session ended first.
+ */
+async function waitForRojoAsync(
+	session: SessionSetup,
+	scope: SessionScope,
+	{ parts, rojo }: { parts: ServiceParts; rojo: RunningPart },
+): Promise<boolean> {
+	const { config, context } = session;
+	const { clock, network } = context.seams;
+	const port = config.rojoPort;
+	const deadline = clock.now() + ROJO_LISTEN_BOUND_MS;
+	const { stopped } = rojo;
+	const isRunning = watchRunning(scope, stopped);
+	while (!hasEnded(scope) && isRunning()) {
+		if (await network.isListeningAsync(port)) {
+			// The session may have ended, or Rojo stopped, while the check ran.
+			if (hasEnded(scope) || !isRunning()) {
+				return false;
+			}
+
+			session.status.service("rojo", "ready");
+			return true;
+		}
+
+		if (clock.now() >= deadline) {
+			parts.stop(
+				"rojo",
+				`rojo did not listen on port ${port} within ${ROJO_LISTEN_BOUND_MS / 1000} s`,
+			);
+			return false;
+		}
+
+		// Rojo's stop or the session's end ends the pause early.
+		await settlesWithinAsync(clock, stopped, ROJO_LISTEN_POLL_MS, scope.signal);
+	}
+
+	return false;
+}
+
+/**
+ * Start the services as parts, and wait until Rojo listens or stopped.
+ *
+ * @param session - The resolved services.
+ * @param scope - Starts them; its end signal.
+ * @returns Whether Rojo serves; `undefined` once the session is ending.
+ */
+async function runServicesAsync(
+	session: SessionSetup,
+	scope: SessionScope,
+): Promise<boolean | undefined> {
+	const parts = createServiceParts(session, scope);
+	const rojo = await startServicesAsync(session, parts);
+	// A stop request while the services started: the session is ending.
+	if (rojo === undefined) {
+		return undefined;
+	}
+
+	const isServing = await waitForRojoAsync(session, scope, { parts, rojo });
+	return hasEnded(scope) ? undefined : isServing;
 }
 
 /**
@@ -322,82 +413,6 @@ async function watchStudioAsync(
 	session.status.studio("closed", place, process);
 	await settleSyncbackAsync(session.context.seams.clock, flushSyncbackAsync);
 	scope.end({ type: "studio_closed" });
-}
-
-function hasEnded(scope: SessionScope): boolean {
-	return scope.signal.aborted;
-}
-
-/**
- * Follow whether a part still runs.
- *
- * @param scope - Tracks the watch.
- * @param stopped - Resolves once the part stopped.
- * @returns Whether the part still runs.
- */
-function watchRunning(scope: SessionScope, stopped: Promise<void>): () => boolean {
-	let isRunning = true;
-	async function markAsync(): Promise<void> {
-		await stopped;
-		isRunning = false;
-	}
-
-	scope.track(markAsync());
-	return () => isRunning;
-}
-
-/**
- * Wait until Rojo listens on its port, so `ready` means a client can
- * connect, then mark it ready. When it does not listen within
- * {@link ROJO_LISTEN_BOUND_MS}, stop it as `failed`.
- *
- * @param session - The config, clock, network, and status.
- * @param scope - Its end signal.
- * @param rojo - The service parts, and Rojo's part.
- * @param rojo.parts - Stops Rojo when it does not listen.
- * @param rojo.rojo - Rojo's part; `undefined` when the session is ending.
- * @returns `true` once Rojo listens; `false` when it stopped or the
- *   session ended first.
- */
-async function waitForRojoAsync(
-	session: SessionSetup,
-	scope: SessionScope,
-	{ parts, rojo }: { parts: ServiceParts; rojo: RunningPart | undefined },
-): Promise<boolean> {
-	if (rojo === undefined) {
-		return false;
-	}
-
-	const { config, context } = session;
-	const { clock, network } = context.seams;
-	const port = config.rojoPort;
-	const deadline = clock.now() + ROJO_LISTEN_BOUND_MS;
-	const { stopped } = rojo;
-	const isRunning = watchRunning(scope, stopped);
-	while (!hasEnded(scope) && isRunning()) {
-		if (await network.isListeningAsync(port)) {
-			// The session may have ended, or Rojo stopped, while the check ran.
-			if (hasEnded(scope) || !isRunning()) {
-				return false;
-			}
-
-			session.status.service("rojo", "ready");
-			return true;
-		}
-
-		if (clock.now() >= deadline) {
-			parts.stop(
-				"rojo",
-				`rojo did not listen on port ${port} within ${ROJO_LISTEN_BOUND_MS / 1000} s`,
-			);
-			return false;
-		}
-
-		// Rojo's stop or the session's end ends the pause early.
-		await settlesWithinAsync(clock, stopped, ROJO_LISTEN_POLL_MS, scope.signal);
-	}
-
-	return false;
 }
 
 function announceReady({ config, context, plan }: SessionSetup, isServing: boolean): void {
