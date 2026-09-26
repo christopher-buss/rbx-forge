@@ -41,6 +41,7 @@ describe("forge config", () => {
 						rojoAlias: "rojo",
 						rojoPort: 4000,
 						rojoProjectPath: "default.project.json",
+						session: { idleTimeout: 30 },
 						studio: { autoRecovery: "move" },
 						syncback: { runOnStart: false },
 						typegen: {

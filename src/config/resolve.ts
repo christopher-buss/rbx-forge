@@ -26,6 +26,7 @@ export interface ConfigDefaults {
 	rojoAlias: string;
 	rojoPort: number | undefined;
 	rojoProjectPath: string;
+	session: { idleTimeout: number };
 	studio: { autoRecovery: AutoRecoveryMode };
 	syncback: {
 		inputPath: string | undefined;
@@ -57,6 +58,7 @@ export const DEFAULT_CONFIG: Readonly<ConfigDefaults> = {
 	rojoAlias: "rojo",
 	rojoPort: undefined,
 	rojoProjectPath: "default.project.json",
+	session: { idleTimeout: 30 },
 	studio: { autoRecovery: "move" },
 	syncback: { inputPath: undefined, projectPath: undefined, runOnStart: false },
 	typegen: {

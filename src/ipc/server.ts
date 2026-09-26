@@ -18,6 +18,8 @@ export type IpcHandler = (
 export interface IpcServerOptions {
 	/** The methods it serves; a missing one is answered as unavailable. */
 	handlers: Partial<Record<IpcMethod, IpcHandler>>;
+	/** Called on each request it reads from a client with the token. */
+	onRequest?: () => void;
 	/** The session's token; the hello must carry it. */
 	token: string;
 	/** How long each read and write waits. */
@@ -130,6 +132,7 @@ async function answerAsync(options: IpcServerOptions, line: string): Promise<Ipc
 		return failure("usage", "The request is not one this session reads.");
 	}
 
+	options.onRequest?.();
 	const handler = options.handlers[request.method];
 	if (handler === undefined) {
 		return failure("command_unavailable", `This session does not serve ${request.method}.`);

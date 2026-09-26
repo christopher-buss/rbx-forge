@@ -59,6 +59,16 @@ export interface StudioOptions {
 	autoRecovery?: AutoRecoveryMode;
 }
 
+/** Options for the sessions of `forge start` and `forge up`. */
+export interface SessionOptions {
+	/**
+	 * Minutes with no activity (a client request, a compile start, a Studio
+	 * save) after which a session stops its parts with no owner. 0 turns it
+	 * off.
+	 */
+	idleTimeout?: number;
+}
+
 /** Options for syncback (Studio edits back into the project). */
 export interface SyncbackOptions {
 	/** The place file syncback reads. Falls back to `buildOutputPath`. */
@@ -107,6 +117,7 @@ export interface ForgeConfig {
 	rojoPort?: number;
 	/** The Rojo project file. */
 	rojoProjectPath?: string;
+	session?: SessionOptions;
 	studio?: StudioOptions;
 	syncback?: SyncbackOptions;
 	typegen?: TypegenOptions;
@@ -155,6 +166,7 @@ const fileSchema = type({
 	"rojoAlias?": PATH,
 	"rojoPort?": "1 <= number.integer <= 65535",
 	"rojoProjectPath?": PATH,
+	"session?": { "+": "reject", "idleTimeout?": "number >= 0" },
 	"studio?": { "+": "reject", "autoRecovery?": "'delete' | 'keep' | 'move'" },
 	"syncback?": {
 		"+": "reject",

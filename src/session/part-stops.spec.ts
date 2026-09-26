@@ -16,6 +16,7 @@ import { DEFAULT_CONFIG } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
 import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
+import { IDLE_STOP } from "./idle.ts";
 import type {
 	PartStops,
 	StopPartsRequest,
@@ -416,6 +417,27 @@ describe(createPartStopper, () => {
 		});
 		expect({ alive: studio.alive, ended: world.ended }).toStrictEqual({
 			alive: true,
+			ended: [],
+		});
+	});
+
+	it("should keep owned parts for the idle stop, close the Studio with no owner, and go on", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(
+			servicesWith({ compiler: { ...READY, ...OWNED }, rojo: READY, studio: OPEN }),
+			["compiler", "rojo"],
+		);
+		const studio = openStudio(world);
+
+		await expect(stopAsync(world, IDLE_STOP)).resolves.toStrictEqual({
+			ending: false,
+			kept: [{ owner: "start", part: "compiler" }],
+			stopped: ["studio", "rojo"],
+			studio: CLOSED_BY_REQUEST,
+		});
+		expect({ alive: studio.alive, ended: world.ended }).toStrictEqual({
+			alive: false,
 			ended: [],
 		});
 	});

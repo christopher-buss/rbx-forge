@@ -60,7 +60,10 @@ Error codes are stable: a code is never renamed or reused. The full list is in
    hooks. It waits for a running save-triggered run, then runs once more.
    Failures keep their code, with hook results in `error.details.hooks`.
 6. `forge down --json`: stop the parts with no owner, and the session once none
-   is left. See below for its result.
+   is left. See below for its result. A session no command talks to, with no
+   compile start and no Studio save, does the same by itself after
+   [`session.idleTimeout`](./config.md#sessionidletimeout) minutes (30 by
+   default).
 
 Exit 6 means processes still live or the supervisor does not answer: retry with
 `--force`. Exit 5 means forge could not verify a process, so it killed nothing.

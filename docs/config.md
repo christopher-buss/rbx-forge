@@ -278,9 +278,33 @@ The Studio executable is not a config option: its path differs per computer. Use
 `--studio-path` or `RBX_FORGE_STUDIO_PATH` (see
 [Opening Studio](./studio.md#opening-studio)).
 
+### `session`
+
+Options for the sessions of `forge start` and `forge up`.
+
+#### `session.idleTimeout`
+
+- Type: `number` >= 0, in minutes (fractions allowed)
+- Default: `30`
+
+After this many minutes with no activity, a session stops its parts with no
+owner, as `forge down` does: the compiler, Rojo, and Studio. It closes Studio as
+`stop` does, with its auto-recovery files handled as
+[`studio.autoRecovery`](#studioautorecovery) says. A part that a `forge start`
+terminal owns is never stopped. An `up` session with no part left ends. Activity
+is a client request (any forge command that talks to the session, such as
+`status` or `up`), a compile start, or a Studio save of the place. `0` turns the
+timeout off.
+
+```ts
+defineConfig({
+	session: { idleTimeout: 120 },
+});
+```
+
 ### `studio`
 
-Options for the Roblox Studio that `stop` and `down` close.
+Options for the Roblox Studio that `stop`, `down`, and the idle timeout close.
 
 #### `studio.autoRecovery`
 

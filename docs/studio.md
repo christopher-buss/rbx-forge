@@ -84,9 +84,10 @@ launch does not offer to recover a place forge builds anyway:
 - `keep`: leave them.
 
 Set the mode with [`studio.autoRecovery`](./config.md#studioautorecovery) in the
-config, or `--recovery <mode>` on `stop` and `down`. forge acts only when it
-ended a Studio, and only on `<place>_AutoRecovery_<n>.rbxl` files (any case) for
-the place, written since that Studio started (2 seconds of slack). It searches:
+config, or `--recovery <mode>` on `stop` and `down`; the idle timeout uses the
+config's mode. forge acts only when it ended a Studio, and only on
+`<place>_AutoRecovery_<n>.rbxl` files (any case) for the place, written since
+that Studio started (2 seconds of slack). It searches:
 
 - Windows: `%LOCALAPPDATA%\Roblox\RobloxStudio\AutoSaves` and
   `%USERPROFILE%\Documents\ROBLOX\AutoSaves`.

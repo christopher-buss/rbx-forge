@@ -26,6 +26,7 @@ const FULL_CONFIG: ForgeConfig = {
 	rojoAlias: "rojo-custom",
 	rojoPort: 34_873,
 	rojoProjectPath: "build.project.json",
+	session: { idleTimeout: 0.5 },
 	syncback: { inputPath: "sync.rbxl", projectPath: "sync.project.json", runOnStart: true },
 	typegen: {
 		exclude: ["**/node_modules/**"],
@@ -76,6 +77,7 @@ describe(validateConfigFile, () => {
 	it.for([
 		[{ projectType: "rbxts", unknownKey: 1 }, "unknownKey must be removed"],
 		[{ projectType: "rbxts", typegen: { depth: 2 } }, "typegen.depth must be removed"],
+		[{ projectType: "rbxts", session: { ttl: 5 } }, "session.ttl must be removed"],
 		[{ hooks: { serve: { pre: [] } }, projectType: "rbxts" }, "hooks.serve must be removed"],
 		[
 			{ hooks: { build: { during: [] } }, projectType: "rbxts" },
@@ -97,6 +99,7 @@ describe(validateConfigFile, () => {
 		[{ projectType: "rbxts", rojoPort: 1.5 }, "rojoPort"],
 		[{ gracefulTimeoutMs: -1, projectType: "rbxts" }, "gracefulTimeoutMs"],
 		[{ hookTimeoutMs: 0, projectType: "rbxts" }, "hookTimeoutMs"],
+		[{ projectType: "rbxts", session: { idleTimeout: -1 } }, "session.idleTimeout"],
 		[{ projectType: "rbxts", typegen: { maxDepth: 0 } }, "typegen.maxDepth"],
 		[{ buildOutputPath: "", projectType: "rbxts" }, "buildOutputPath"],
 		[{ projectType: "rbxts", rbxts: { args: "--verbose" } }, "rbxts.args"],
