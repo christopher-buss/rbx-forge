@@ -12,10 +12,17 @@ import type { ReporterEvent } from "../../src/seams/reporter.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import { realTransport } from "../helpers/native-testing.ts";
-import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
+import type { WorkerRecord } from "../helpers/worker-log.ts";
+import {
+	isProcessAlive,
+	killWorkers,
+	readWorkerLog,
+	waitForDeathAsync,
+} from "../helpers/worker-log.ts";
 import type { Launched, Project } from "./session-harness.ts";
 import {
 	COMPILER_ONLY,
+	filesLeft,
 	launch,
 	launchUnowned,
 	makeProjectAsync,
@@ -227,4 +234,36 @@ describe("idle timeout", () => {
 			settled: false,
 		});
 	});
+
+	it("should end a session its start let go of once its part with no owner failed", async () => {
+		expect.assertions(3);
+
+		const project = await makeProjectAsync({
+			session: { idleTimeout: TIMEOUT },
+			studio: { autoRecovery: "keep" },
+		});
+		const run = launch(project, START_STUDIO, studioEnvironment(project));
+		const session = await waitForSessionAsync(project);
+		const target = { endpoint: session.identity.endpoint, token: session.token };
+		await callSessionAsync(realTransport(), target, "addParts", {
+			params: { parts: ["compiler"] },
+			responseTimeoutMs: SETTLE_MS,
+		});
+		run.stop("SIGINT");
+		const released = await settledWithinAsync(run, "release", SETTLE_MS);
+		killWorkers(workersOf(project, session.identity.sessionId).filter(isCompiler));
+
+		expect(released).toMatchObject({
+			ok: true,
+			result: { data: { ending: false } },
+		});
+		await expect(
+			waitForDeathAsync([session.identity.pid], TIMEOUT_MS + SETTLE_MS),
+		).resolves.toStrictEqual([]);
+		expect(filesLeft(project)).toStrictEqual([]);
+	});
 });
+
+function isCompiler({ args, role }: WorkerRecord): boolean {
+	return role === "rbxtsc" && args.includes("-w");
+}

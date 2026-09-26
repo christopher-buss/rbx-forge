@@ -48,6 +48,8 @@ export default defineConfig({
 				test: {
 					name: "integration",
 					clearMocks: true,
+					// A supervisor's stop, then a kill (`session-harness.ts`).
+					hookTimeout: 30_000,
 					include: ["test/integration/**/*.spec.ts"],
 					restoreMocks: true,
 					setupFiles,

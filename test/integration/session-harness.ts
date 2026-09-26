@@ -2,13 +2,13 @@
  * Real supervisors and reapers in a temporary Luau project with fake Rojo and
  * a fake watch-mode compiler on PATH, for the barrier and cleanup scenarios.
  * Everything a test starts is stopped when it finishes: supervisors get
- * SIGTERM through their owner pipe, paused reapers are resumed (so they stop
- * their workers and exit), and every fixture process still alive is killed.
+ * SIGTERM through their owner pipe (or a shutdown request) and are killed,
+ * failing the test, when they still run after {@link GRACE_MS}; paused
+ * reapers are resumed (so they stop their workers and exit), and every
+ * fixture process still alive is killed.
  */
 import { randomUUID } from "node:crypto";
 import nodeFs, { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import type { AddressInfo } from "node:net";
-import { createServer } from "node:net";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -21,6 +21,7 @@ import { launchReaperAsync } from "../../src/reaper/reaper-client.ts";
 import { nodeChildProcessRunner } from "../../src/seams/child-process.ts";
 import { nodeClock } from "../../src/seams/clock.ts";
 import { nodeHost } from "../../src/seams/host.ts";
+import { nodeNetwork } from "../../src/seams/network.ts";
 import type { CommandResult, ReporterEvent } from "../../src/seams/reporter.ts";
 import type { SessionRequest } from "../../src/supervisor/channel.ts";
 import { createSupervisorLauncher } from "../../src/supervisor/launcher.ts";
@@ -36,6 +37,7 @@ import {
 	REAPER_PATH,
 	studioVariables,
 } from "../helpers/real-native.ts";
+import { recordSpawns } from "../helpers/spawned-process.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { killLoggedWorkersAsync, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
@@ -45,6 +47,8 @@ const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fak
 const PATH_NAME = /^path$/i;
 const POLL_MS = 50;
 const WAIT_MS = 30_000;
+/** How long a test's end waits for its supervisor to stop before a kill. */
+const GRACE_MS = 20_000;
 /** The compiler alone: the fake `rbxtsc -w` runs until stopped. */
 export const COMPILER_ONLY: SessionRequest = { compiler: true, config: {}, open: false };
 /** Studio and its Rojo, with no compiler: see {@link studioEnvironment}. */
@@ -97,7 +101,7 @@ export async function makeProjectAsync(config: Record<string, unknown> = {}): Pr
 			gracefulTimeoutMs: 0,
 			luau: { watch: { args: ["-w"], command: "rbxtsc" } },
 			projectType: "luau",
-			rojoPort: await freePortAsync(),
+			rojoPort: await nodeNetwork.freePortAsync(),
 			...config,
 		},
 	});
@@ -117,8 +121,8 @@ export async function makeProjectAsync(config: Record<string, unknown> = {}): Pr
 
 /**
  * Launch a supervisor, as `forge start` does: it owns the parts the session
- * starts with. The test's end stops it, and ends a session its stop let
- * run on.
+ * starts with. The test's end stops it, ends a session its stop let run on,
+ * and kills a supervisor that still runs after that, failing the test.
  *
  * @param project - Where it runs.
  * @param request - What `start` asks for.
@@ -131,8 +135,9 @@ export function launch(
 	variables: Record<string, string> = {},
 ): Launched {
 	const events: Array<ReporterEvent> = [];
+	const spawned = recordSpawns();
 	const run = createSupervisorLauncher(
-		{ childProcess: nodeChildProcessRunner, host: nodeHost },
+		{ childProcess: spawned.runner, host: nodeHost },
 		SUPERVISOR,
 	)({
 		cwd: project.project,
@@ -146,12 +151,13 @@ export function launch(
 		.then((result): Settled => ({ ok: true, result }))
 		.catch((err: unknown): Settled => ({ error: err, ok: false }));
 	onTestFinished(async () => {
-		run.stop("SIGTERM");
-		const outcome = await settled;
-		if (outcome.ok && outcome.result.data["ending"] === false) {
-			await shutdownAsync(project);
-		}
+		const stopped =
+			request.detached === undefined
+				? endOwnerAsync(project, { settled, stop: run.stop })
+				: shutdownAsync(project);
+		await spawned.killAfterGraceAsync(stopped, GRACE_MS);
 	});
+
 	return { events, settled, stop: run.stop };
 }
 
@@ -174,9 +180,6 @@ export function launchUnowned(
 	mkdirSync(launches, { recursive: true });
 	const report = path.join(launches, `${randomUUID()}.ndjson`);
 	const run = launch(project, { ...request, detached: { report } }, variables);
-	onTestFinished(async () => {
-		await shutdownAsync(project);
-	});
 	return {
 		...run,
 		stop: () => {
@@ -383,19 +386,6 @@ function environmentFor({
 	};
 }
 
-async function freePortAsync(): Promise<number> {
-	const server = createServer();
-	await new Promise<void>((resolve) => {
-		server.listen({ host: "127.0.0.1", port: 0 }, resolve);
-	});
-	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a TCP server's address is an object
-	const { port } = server.address() as AddressInfo;
-	await new Promise((resolve) => {
-		server.close(resolve);
-	});
-	return port;
-}
-
 /**
  * Resume every paused process: delete its pause file.
  *
@@ -430,6 +420,24 @@ async function shutdownAsync(project: Project): Promise<void> {
 		// It is gone already, or never opened its endpoint.
 	});
 	await waitForDeathAsync([session.identity.pid], WAIT_MS);
+}
+
+/**
+ * End the owner of a session, as the end of `start` does, and shut down a
+ * session that runs on without it.
+ *
+ * @param project - Where it runs.
+ * @param run - The supervisor.
+ */
+async function endOwnerAsync(
+	project: Project,
+	run: Pick<Launched, "settled" | "stop">,
+): Promise<void> {
+	run.stop("SIGTERM");
+	const outcome = await run.settled;
+	if (outcome.ok && outcome.result.data["ending"] === false) {
+		await shutdownAsync(project);
+	}
 }
 
 async function launchOldReaperAsync(directory: string, sessionId: string): Promise<Reaper> {
