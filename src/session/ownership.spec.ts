@@ -170,6 +170,37 @@ describe(createOwnerHandlers, () => {
 		expect(status.snapshot().phase).toBe("stopping");
 	});
 
+	it("should take only the compiler when the join asks for no Studio", async () => {
+		expect.assertions(2);
+
+		const { handlers, status } = makeHandlers();
+		status.studio("open", "/p/game.rbxl", null);
+		status.service("rojo", "ready");
+
+		await expect(handlers.own({ parts: ["compiler"] })).resolves.toStrictEqual({
+			added: [],
+			taken: ["compiler"],
+		});
+		expect(status.snapshot().services).toMatchObject({
+			compiler: { owner: "start" },
+			rojo: { owner: null },
+			studio: { owner: null },
+		});
+	});
+
+	it("should take Studio and its Rojo when the join asks for Studio", async () => {
+		expect.assertions(1);
+
+		const { handlers, status } = makeHandlers();
+		status.studio("open", "/p/game.rbxl", null);
+		status.service("rojo", "ready");
+
+		await expect(handlers.own({ parts: ["studio"] })).resolves.toStrictEqual({
+			added: [],
+			taken: ["studio", "rojo", "compiler"],
+		});
+	});
+
 	it("should give back what it took when the add fails, and throw the failure", async () => {
 		expect.assertions(3);
 
@@ -192,7 +223,7 @@ describe(createOwnerHandlers, () => {
 		// `up` started the compiler again: it has no owner now.
 		status.owner("compiler", null);
 		await handlers.release({ type: "owner_gone" });
-		await handlers.own({ parts: [] });
+		await handlers.own({ parts: ["studio"] });
 		const second = await handlers.release({ type: "owner_gone" });
 
 		expect(second).toMatchObject({ released: ["studio", "compiler"], stopped: [] });

@@ -56,8 +56,9 @@ export interface ReleasePlan {
 /** Joins an owner, and ends one. */
 export interface OwnerHandlers {
 	/**
-	 * A `start` joins: it takes every running part, then starts the parts it
-	 * asks for that are missing or failed.
+	 * A `start` joins: it takes every running part (only the compiler when
+	 * it asks for no Studio), then starts the parts it asks for that are
+	 * missing or failed.
 	 *
 	 * @rejects {ForgeError} `session_running` while another `start` holds
 	 *   the session; the add's failure, once what it took is given back.
@@ -189,8 +190,9 @@ function partNames(parts: ReadonlyArray<PartId>): string {
 }
 
 /**
- * A `start` joins as the owner: take every running part, then start the
- * parts it asks for, and own them too.
+ * A `start` joins as the owner: take every running part (only the
+ * compiler when it asks for no Studio), then start the parts it asks for,
+ * and own them too.
  *
  * @param setup - The status.
  * @param owner - The adder and the ownership.
@@ -216,7 +218,9 @@ async function joinOwnerAsync(
 	}
 
 	ownership.isOwned = true;
-	const taken = PART_IDS.filter((part) => isPartRunning(services, part));
+	// `start --no-open` owns only the compiler: Studio and its Rojo stay.
+	const reach = join.request.parts.includes("studio") ? PART_IDS : ["compiler" as const];
+	const taken = reach.filter((part) => isPartRunning(services, part));
 	for (const part of taken) {
 		status.owner(part, "start");
 	}

@@ -95,8 +95,9 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 
 /**
  * How a session serves `own`: a `forge start` joins as its owner and holds
- * the connection. The join takes every running part, and starts the parts
- * in the `parts` param (as `addParts`); it answers with `sessionId`,
+ * the connection. The join takes every running part (only the compiler
+ * when `parts` has no Studio), and starts the parts in the `parts` param
+ * (as `addParts`); it answers with `sessionId`,
  * `taken`, and `added`, or `session_running` while another `start` owns the
  * session. A release, or the connection's end, stops what it started and
  * gives back what it took; a release is answered with `stopped`,

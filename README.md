@@ -79,16 +79,18 @@ Session commands:
 
 `start` runs the compiler, Rojo, and Studio, and owns them: `down`, `stop`,
 `restart`, and the idle timeout leave them alone. When a session runs (such as
-an agent's `up`), `start` joins it instead: it takes every running part, without
-a restart, and starts the missing ones. On Ctrl+C (or a closed terminal) it
-stops the parts it started and gives back the parts it took, which run on with
-no owner; the session ends when no part is left. It never closes Studio, and the
-close of its Studio stops nothing. Its flags:
+an agent's `up`), `start` joins it instead: it takes every running part (with
+`--no-open`, only the compiler), without a restart, and starts the missing ones.
+On Ctrl+C (or a closed terminal) it stops the parts it started and gives back
+the parts it took, which run on with no owner; the session ends when no part is
+left. It never closes Studio, and the close of its Studio stops nothing. Its
+flags:
 
 - `--no-compiler`: no compile, no build, no watch-mode compiler: only Rojo and
   Studio. The open step still builds when `open.buildFirst` is on.
 - `--no-open`: no Studio and no Rojo (Rojo runs only with Studio): only the
-  compiler. A `start` that joins adds only the compiler.
+  compiler. A `start` that joins takes and adds only the compiler; a Studio and
+  Rojo that run stay with no owner.
 - `--syncback`: run syncback and its hooks each time the place file is saved
   (config `syncback.runOnStart`).
 - `--force`: when a crashed earlier session still has processes after the wait,

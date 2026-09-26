@@ -114,6 +114,29 @@ describe("forge start next to an agent's session", () => {
 		expect(isProcessAlive(compiler)).toBeTrue();
 	});
 
+	it("should take only the compiler with --no-open, and leave the agent's Studio and Rojo to stop", async () => {
+		expect.assertions(3);
+
+		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
+		await runForgeAsync(fixture, [...UP, "--studio"]);
+		await startReadyAsync(fixture, ["start", "--no-open", "--json"]);
+		const owned = await waitForStatusAsync(fixture, (status) => {
+			return status.services.compiler.owner === "start";
+		});
+		const stop = await runForgeAsync(fixture, ["stop", "--json"]);
+
+		expect(ownersOf(owned)).toStrictEqual({
+			compiler: ["start", "ready"],
+			rojo: [null, "ready"],
+			studio: [null, "open"],
+		});
+		expect(stop.result).toMatchObject({
+			data: { parts: { kept: [], stopped: ["studio", "rojo"] }, stopped: true },
+			ok: true,
+		});
+		expect(stop.status).toBe(EXIT_SUCCESS);
+	});
+
 	it("should stop what it added and give back what it took once it is killed, leaving Studio open", async () => {
 		expect.assertions(4);
 

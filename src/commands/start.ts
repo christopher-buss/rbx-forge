@@ -65,7 +65,8 @@ const PART_NAMES: Readonly<Record<PartId, string>> = {
  * With no session, it runs one in a separate supervisor process
  * (`supervisor/run-supervisor.ts`), bound to this one by the owner pipe.
  * When a session runs (`forge up`), it joins it over the endpoint instead:
- * it takes every running part, and starts the missing ones.
+ * it takes every running part (with `--no-open`, only the compiler), and
+ * starts the missing ones.
  *
  * Either way, its end (Ctrl+C, a closed terminal, its death) stops the parts
  * it started and gives back the parts it took, which run on with no owner;

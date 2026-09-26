@@ -147,7 +147,8 @@ export interface JoinedSession {
 
 /**
  * Join a session as its owner (`forge start`): it takes every running part
- * and starts the parts the request asks for. The session holds them for
+ * (only the compiler when the request has no Studio) and starts the parts
+ * the request asks for. The session holds them for
  * this process until it lets go or ends.
  *
  * @param ipc - Reaches its endpoint.
