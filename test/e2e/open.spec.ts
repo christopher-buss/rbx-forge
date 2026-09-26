@@ -16,6 +16,8 @@ import { makeFixtureAsync } from "./session-fixture.ts";
 import { runForgeAsync, WATCH_COMMAND } from "./up-fixture.ts";
 
 const IS_WINDOWS = process.platform === "win32";
+/** The fixture role that stands in for the POSIX platform launcher. */
+const LAUNCHER = process.platform === "darwin" ? "open" : "xdg-open";
 
 /** The place every test names, in a folder with a space. */
 const PLACE = "My Places/game.rbxl";
@@ -247,6 +249,7 @@ describe("forge open", () => {
 			const { forge } = makeFixture();
 			const { status, stdout } = await forge(["open", "--json"], {
 				FIXTURE_EXIT_CODE: "4",
+				FIXTURE_FAIL_ROLE: LAUNCHER,
 				RBX_FORGE_STUDIO_PATH: "",
 			});
 

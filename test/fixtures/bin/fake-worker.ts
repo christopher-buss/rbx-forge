@@ -27,6 +27,8 @@
  * - `FIXTURE_IGNORE_SIGNALS=1`: this process and its grandchildren ignore
  *   SIGINT, SIGTERM, SIGHUP, and SIGBREAK.
  * - `FIXTURE_EXIT_CODE`: exit code of a one-shot run (default 0).
+ * - `FIXTURE_FAIL_ROLE`: only a one-shot run of this role takes
+ *   `FIXTURE_EXIT_CODE`; every other exits with code 0.
  * - `FIXTURE_HANG=1`: a hook stays alive instead of exiting.
  * - `FIXTURE_HOOK_MS`: a hook runs this long, then exits with code 0.
  * - `FIXTURE_HANG_ROLE`: a one-shot run of this role (such as `rbxtsc` for a
@@ -283,7 +285,9 @@ function exitOnce(): void {
 		return;
 	}
 
-	process.exitCode = Number(env["FIXTURE_EXIT_CODE"] ?? "0");
+	const failRole = env["FIXTURE_FAIL_ROLE"];
+	process.exitCode =
+		failRole === undefined || failRole === ROLE ? Number(env["FIXTURE_EXIT_CODE"] ?? "0") : 0;
 }
 
 function runSyncback(): void {
