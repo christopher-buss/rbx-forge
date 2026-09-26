@@ -10,6 +10,8 @@ import { waitForStudioCloseAsync, watchSaves } from "./watch.ts";
 
 const PLACE = path.join(PROJECT, "game.rbxl");
 const LOCK = `${PLACE}.lock`;
+const ANY_STUDIO = { path: LOCK, pid: undefined };
+const STUDIO_7 = { path: LOCK, pid: 7 };
 
 interface Watching {
 	abort: AbortController;
@@ -53,7 +55,7 @@ describe(waitForStudioCloseAsync, () => {
 
 		const watch = watching();
 		const onOpen = vi.fn<() => void>();
-		const closed = waitForStudioCloseAsync(watch.options, LOCK, onOpen);
+		const closed = waitForStudioCloseAsync(watch.options, ANY_STUDIO, onOpen);
 		await watch.tickAsync();
 
 		expect(onOpen).not.toHaveBeenCalled();
@@ -75,7 +77,7 @@ describe(waitForStudioCloseAsync, () => {
 
 		const watch = watching();
 		const onOpen = vi.fn<() => void>();
-		const closed = waitForStudioCloseAsync(watch.options, LOCK, onOpen);
+		const closed = waitForStudioCloseAsync(watch.options, ANY_STUDIO, onOpen);
 		await flushAsync();
 		watch.abort.abort();
 
@@ -88,12 +90,54 @@ describe(waitForStudioCloseAsync, () => {
 
 		const watch = watching({ "game.rbxl.lock": "1" });
 		const onOpen = vi.fn<() => void>();
-		const closed = waitForStudioCloseAsync(watch.options, LOCK, onOpen);
+		const closed = waitForStudioCloseAsync(watch.options, ANY_STUDIO, onOpen);
 		await flushAsync();
 		watch.abort.abort();
 
 		await expect(closed).resolves.toBeFalse();
 		expect(onOpen).toHaveBeenCalledOnce();
+	});
+
+	it("should wait for a lock file that names the recorded Studio, not an old one", async () => {
+		expect.assertions(2);
+
+		const watch = watching({ "game.rbxl.lock": "3\nRobloxStudioBeta\nhost\n" });
+		const onOpen = vi.fn<() => void>();
+		const closed = waitForStudioCloseAsync(watch.options, STUDIO_7, onOpen);
+		await watch.tickAsync();
+
+		expect(onOpen).not.toHaveBeenCalled();
+
+		watch.memory.fileSystem.writeFileSync(LOCK, "7\nRobloxStudioBeta\nhost\n");
+		await watch.tickAsync();
+		watch.abort.abort();
+		await closed;
+
+		expect(onOpen).toHaveBeenCalledOnce();
+	});
+
+	it("should resolve true once the lock file names another process", async () => {
+		expect.assertions(1);
+
+		const watch = watching({ "game.rbxl.lock": "7" });
+		const closed = waitForStudioCloseAsync(watch.options, STUDIO_7, vi.fn<() => void>());
+		await watch.tickAsync();
+		watch.memory.fileSystem.writeFileSync(LOCK, "8");
+		await watch.tickAsync();
+
+		await expect(closed).resolves.toBeTrue();
+	});
+
+	it("should resolve true once the recorded Studio's lock file went away", async () => {
+		expect.assertions(1);
+
+		const watch = watching({ "game.rbxl.lock": "7" });
+		const closed = waitForStudioCloseAsync(watch.options, STUDIO_7, vi.fn<() => void>());
+		await watch.tickAsync();
+		watch.memory.fileSystem.rmSync(LOCK);
+		await watch.tickAsync();
+
+		await expect(closed).resolves.toBeTrue();
 	});
 });
 

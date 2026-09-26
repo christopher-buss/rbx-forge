@@ -10,7 +10,14 @@ import type { RecoveryReport } from "./auto-recovery.ts";
 import { autoSaveDirectories, handleAutoRecoveryAsync } from "./auto-recovery.ts";
 import type { StudioProcess } from "./launcher.ts";
 import type { StudioLock } from "./lock-file.ts";
-import { isLockHost, isStudioExecutable, parseStudioLock, studioLockPath } from "./lock-file.ts";
+import {
+	isLockHost,
+	isMissingFile,
+	isStudioExecutable,
+	parseStudioLock,
+	readLockFile,
+	studioLockPath,
+} from "./lock-file.ts";
 
 /**
  * How long Studio gets to close its place on the close request when it
@@ -149,7 +156,7 @@ export async function closeStudioAsync(
 		target.process === undefined ? undefined : checkOwn(seams, target.process, lockPath);
 	let pinned = own;
 	if (pinned === undefined) {
-		const text = readLockText(seams, lockPath);
+		const text = readLockFile(seams.fileSystem, lockPath);
 		if (text === undefined) {
 			return { status: "not_open" };
 		}
@@ -181,28 +188,29 @@ export async function closeStudioAsync(
 }
 
 /**
- * Whether a file system call failed because the file is gone: Studio
- * deletes its lock file when it closes, at any time.
+ * The Studio that has a place open, verified as {@link closeStudioAsync}
+ * verifies the one its lock file names: a lock file this computer wrote,
+ * naming the Studio executable, which started before the lock file.
  *
- * @param err - What the call threw.
- * @returns True for `ENOENT`.
+ * @param seams - The clock, file system, OS, and native addon.
+ * @param place - The absolute path of the place file.
+ * @returns The Studio; `undefined` when the place has no lock file, or one
+ *   that names no verified Studio.
+ * @throws {ForgeError} `native_missing`.
  */
-function isMissingFile(err: unknown): boolean {
-	return err instanceof Error && Reflect.get(err, "code") === "ENOENT";
-}
+export function findPlaceStudio(seams: StudioSeams, place: string): StudioProcess | undefined {
+	const lockPath = studioLockPath(place);
+	const text = readLockFile(seams.fileSystem, lockPath);
+	if (text === undefined) {
+		return undefined;
+	}
 
-/**
- * Read a lock file that Studio may delete at any time.
- *
- * @param seams - The file system.
- * @param lockPath - The lock file.
- * @returns Its content, or `undefined` when there is none.
- */
-function readLockText(seams: StudioSeams, lockPath: string): string | undefined {
 	try {
-		return seams.fileSystem.readFileSync(lockPath, "utf8");
+		const { pid } = readStudioLock(seams, text, lockPath);
+		const check = checkStudio(seams, pid, lockPath);
+		return check.status === "studio" ? { pid, startTime: check.pinned.startTime } : undefined;
 	} catch (err) {
-		if (isMissingFile(err)) {
+		if (err instanceof ForgeError && err.code === "identity_mismatch") {
 			return undefined;
 		}
 
@@ -438,7 +446,7 @@ function checkOwn(
 		return undefined;
 	}
 
-	const text = readLockText(seams, lockPath);
+	const text = readLockFile(seams.fileSystem, lockPath);
 	const lock = text === undefined ? undefined : readStudioLock(seams, text, lockPath);
 	if (lock !== undefined && lock.pid !== pid) {
 		throw new ForgeError(

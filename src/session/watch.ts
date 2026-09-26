@@ -1,5 +1,6 @@
 import type { Clock } from "../seams/clock.ts";
 import type { FileSystem } from "../seams/file-system.ts";
+import { parseStudioLock, readLockFile } from "../studio/lock-file.ts";
 
 /** What a file watch polls with. */
 export interface WatchOptions {
@@ -19,27 +20,39 @@ export interface SaveWatch {
 	done: Promise<void>;
 }
 
+/** The lock file of a place a session's Studio has open. */
+export interface StudioLockWatch {
+	/** The place's lock file. */
+	path: string;
+	/**
+	 * The Studio the session recorded: the lock file must name it. With
+	 * none, any lock file counts.
+	 */
+	pid: number | undefined;
+}
+
 /**
- * Wait until Studio closes a place: its lock file appears, then goes away.
+ * Wait until Studio closes a place: its lock file appears, naming the
+ * recorded Studio, then goes away or names another process.
  *
  * @param options - The clock, file system, interval, and end signal.
- * @param lockPath - The place's lock file.
- * @param onOpen - Called once, when the lock file first appears.
+ * @param lock - The place's lock file, and the Studio it must name.
+ * @param onOpen - Called once, when the lock file first names it.
  * @returns `true` once Studio closed the place; `false` when the watch
  *   ended first.
  */
 export async function waitForStudioCloseAsync(
 	options: WatchOptions,
-	lockPath: string,
+	lock: StudioLockWatch,
 	onOpen: () => void,
 ): Promise<boolean> {
 	const { fileSystem } = options;
-	if (!(await pollAsync(options, () => fileSystem.existsSync(lockPath)))) {
+	if (!(await pollAsync(options, () => holdsLock(fileSystem, lock)))) {
 		return false;
 	}
 
 	onOpen();
-	return pollAsync(options, () => !fileSystem.existsSync(lockPath));
+	return pollAsync(options, () => !holdsLock(fileSystem, lock));
 }
 
 /**
@@ -63,6 +76,22 @@ export function watchSaves(options: WatchOptions, file: string, onSave: () => vo
 	}
 
 	return { check, done: watchUntilEndAsync(options, check) };
+}
+
+/**
+ * Whether the lock file names the recorded Studio now.
+ *
+ * @param fileSystem - Reads the lock file.
+ * @param lock - The lock file, and the Studio it must name.
+ * @returns True when it names it, or is there when no Studio was recorded.
+ */
+function holdsLock(fileSystem: FileSystem, { path, pid }: StudioLockWatch): boolean {
+	if (pid === undefined) {
+		return fileSystem.existsSync(path);
+	}
+
+	const text = readLockFile(fileSystem, path);
+	return text !== undefined && parseStudioLock(text)?.pid === pid;
 }
 
 /**

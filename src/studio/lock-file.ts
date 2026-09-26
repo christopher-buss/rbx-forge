@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import type { FileSystem } from "../seams/file-system.ts";
+
 /**
  * Roblox Studio's place lock file. While Studio has a place open it keeps
  * `<place>.lock` next to it. Studio 0.700 on Windows writes, one per line:
@@ -49,6 +51,39 @@ const EXE_EXTENSION = /\.exe$/i;
  */
 export function studioLockPath(placePath: string): string {
 	return `${placePath}.lock`;
+}
+
+/**
+ * Whether a file system call failed because the file is gone: Studio
+ * deletes its lock file when it closes, at any time.
+ *
+ * @param err - What the call threw.
+ * @returns True for `ENOENT`.
+ */
+export function isMissingFile(err: unknown): boolean {
+	return err instanceof Error && Reflect.get(err, "code") === "ENOENT";
+}
+
+/**
+ * Read a lock file that Studio may delete at any time.
+ *
+ * @param fileSystem - Reads the file.
+ * @param lockPath - Where Studio keeps it, next to the place.
+ * @returns Its content, or `undefined` when there is none.
+ */
+export function readLockFile(
+	fileSystem: Pick<FileSystem, "readFileSync">,
+	lockPath: string,
+): string | undefined {
+	try {
+		return fileSystem.readFileSync(lockPath, "utf8");
+	} catch (err) {
+		if (isMissingFile(err)) {
+			return undefined;
+		}
+
+		throw err;
+	}
 }
 
 /**

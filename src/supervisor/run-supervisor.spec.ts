@@ -8,13 +8,14 @@ import type { FakeReaper, FakeReaperOptions, FakeSignals } from "../../test/help
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { ManualClock } from "../../test/helpers/manual-clock.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
-import type { FakeNative } from "../../test/helpers/native.ts";
+import type { FakeNative, FakeProcess } from "../../test/helpers/native.ts";
 import {
 	createCommandContext,
 	createMemoryFileSystem,
 	createRecordingReporter,
 	createTestSeams,
 	PROJECT,
+	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
 import type { MemoryFileSystem, RecordingReporter } from "../../test/helpers/seams.ts";
 import type { FlagValues } from "../cli/flags.ts";
@@ -63,6 +64,12 @@ const IDENTITY: Pick<
 	version: "9.9.9",
 };
 const TOOL_FILES = { "tools/rbxtsc": "", "tools/rojo": "" };
+/** A Studio that opened the place at boot, before the test. */
+const STUDIO_PID = 777;
+const OPEN_STUDIO: Record<number, FakeProcess> = {
+	[STUDIO_PID]: { alive: true, executablePath: "/opt/RobloxStudio", startTime: "0" },
+};
+const STUDIO_LOCK = `${STUDIO_PID}\nRobloxStudio\n${TEST_HOSTNAME}\n`;
 const WITH_OLD = { ...TOOL_FILES, ".forge/sessions/old/supervisor.id": "{}" };
 
 interface StartSetup {
@@ -84,6 +91,8 @@ interface StartSetup {
 	pause?: (stop: StopSource) => Pause;
 	/** The host OS; Linux by default. */
 	platform?: NodeJS.Platform;
+	/** More processes in the fake process table, such as a Studio. */
+	processes?: Record<number, FakeProcess>;
 	projectType?: "luau" | "rbxts";
 	reaper?: FakeReaperOptions;
 	/** The addon's private file writer (Windows). */
@@ -175,6 +184,7 @@ function startCommand({
 	onReady,
 	pause = () => neverPauseAsync,
 	platform = "linux",
+	processes = {},
 	projectType = "luau",
 	reaper = {},
 	writePrivateFile,
@@ -187,7 +197,10 @@ function startCommand({
 	signals.onStop(stop.request);
 	const ipc = makeTransport();
 	const seams = createTestSeams();
-	const native = createFakeNative({ 4242: { alive: true, executablePath: "/node" } });
+	const native = createFakeNative({
+		4242: { alive: true, executablePath: "/node" },
+		...processes,
+	});
 	const reporter = createRecordingReporter();
 	const isPortFreeAsync = vi.fn<Network["isPortFreeAsync"]>().mockResolvedValue(isPortFree);
 	const isListeningAsync = vi.fn<Network["isListeningAsync"]>(isListening);
@@ -561,6 +574,120 @@ describe(runSupervisorAsync, () => {
 			type: "info",
 		});
 		expect(run.fake.calls.at(-1)).toBe("terminate 3000");
+	});
+
+	it("should attach the Studio that has the place open: no build, no launch", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({
+			files: { ...TOOL_FILES, "game.rbxl.lock": STUDIO_LOCK },
+			flags: {},
+			processes: OPEN_STUDIO,
+			projectType: "rbxts",
+		});
+		await passAsync(run, FILE_POLL_MS);
+		const open = stateOf(run);
+		run.memory.fileSystem.rmSync(LOCK);
+		await passAsync(run, FILE_POLL_MS);
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "studio_closed" } });
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"start-1: ",
+			"rojo: serve default.project.json --port 4000",
+			"compiler: -w",
+		]);
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+		expect(open).toMatchObject({
+			services: {
+				studio: { pid: STUDIO_PID, place: PLACE, startTime: "0", status: "open" },
+			},
+		});
+	});
+
+	it("should say it uses the Studio that has the place open", async () => {
+		expect.assertions(1);
+
+		const run = await stoppedAsync({
+			files: { ...TOOL_FILES, "game.rbxl.lock": STUDIO_LOCK },
+			flags: { compiler: false },
+			processes: OPEN_STUDIO,
+		});
+		await run.result;
+
+		expect(run.reporter.events).toContainEqual({
+			message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it.`,
+			type: "info",
+		});
+	});
+
+	it("should still build the session's place when the attached Studio has another one open", async () => {
+		expect.assertions(2);
+
+		const run = await stoppedAsync({
+			file: { open: { buildOutputPath: "other.rbxl" } },
+			files: { ...TOOL_FILES, "other.rbxl.lock": STUDIO_LOCK },
+			flags: {},
+			processes: OPEN_STUDIO,
+			projectType: "rbxts",
+		});
+		await run.result;
+
+		expect(spawnedIds(run.fake).filter((id) => id.includes("build"))).toStrictEqual([
+			"start-2: build default.project.json --output game.rbxl",
+		]);
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+	});
+
+	it("should build and launch Studio when the lock file names no Studio", async () => {
+		expect.assertions(2);
+
+		const run = await stoppedAsync({
+			files: { ...TOOL_FILES, "game.rbxl.lock": STUDIO_LOCK },
+			flags: { compiler: false },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: "/usr/bin/vim" } },
+			projectType: "rbxts",
+		});
+		await run.result;
+
+		expect(spawnedIds(run.fake)).toContain(
+			"start-1: build default.project.json --output game.rbxl",
+		);
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+	});
+
+	it("should launch Studio when the Studio the lock file names has exited", async () => {
+		expect.assertions(1);
+
+		const run = await stoppedAsync({
+			files: { ...TOOL_FILES, "game.rbxl.lock": STUDIO_LOCK },
+			flags: { compiler: false },
+		});
+		await run.result;
+
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+	});
+
+	it("should wait for the Studio it launched, not the one an old lock file names", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			files: { ...TOOL_FILES, "game.rbxl.lock": STUDIO_LOCK },
+			flags: { compiler: false },
+		});
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: 900, startTime: "900" },
+			type: "launched",
+		});
+		await passAsync(run, FILE_POLL_MS);
+		const opening = stateOf(run);
+		run.memory.fileSystem.writeFileSync(LOCK, `900\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+		const open = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(opening).toMatchObject({ services: { studio: { status: "opening" } } });
+		expect(open).toMatchObject({ services: { studio: { pid: 900, status: "open" } } });
 	});
 
 	it("should fail with service_failed when Rojo exits, naming its log", async () => {

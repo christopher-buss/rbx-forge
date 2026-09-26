@@ -66,6 +66,16 @@ interface Place {
 const STEP = "open Roblox Studio";
 
 /**
+ * The place `forge open` opens, as the config names it.
+ *
+ * @param config - The resolved config.
+ * @returns `open.buildOutputPath`, else `buildOutputPath`.
+ */
+export function openPlacePath(config: Pick<ResolvedConfig, "buildOutputPath" | "open">): string {
+	return config.open.buildOutputPath ?? config.buildOutputPath;
+}
+
+/**
  * The open step with its `open` hooks: build the place when configured or
  * missing (unless the caller built it), then open it in Studio. `forge open`
  * runs it, and so does `forge start`.
@@ -129,16 +139,6 @@ export async function runOpenAsync(
 		data: { ...opened },
 		summary: `Opened ${opened.place} in Roblox Studio.`,
 	};
-}
-
-/**
- * The place `forge open` opens, as the config names it.
- *
- * @param config - The resolved config.
- * @returns `open.buildOutputPath`, else `buildOutputPath`.
- */
-function openPlacePath(config: Pick<ResolvedConfig, "buildOutputPath" | "open">): string {
-	return config.open.buildOutputPath ?? config.buildOutputPath;
 }
 
 async function shouldBuildAsync(

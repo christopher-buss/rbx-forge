@@ -25,6 +25,12 @@ When forge finds no executable, or the terminal's job forbids breakaway
 `xdg-open`). The session then has no PID for Studio, and finds it only through
 the place's lock file.
 
+`start` and `up` attach a Studio that already has the place open, as after
+Ctrl+C on `start`: when the place's lock file names a Studio that `stop` would
+verify (see [Closing Studio](#closing-studio)), the session records that Studio,
+builds nothing into the place, and opens no second Studio. The session ends when
+the lock file goes or names another process.
+
 ## Closing Studio
 
 `down` and `stop` close Studio the same way. forge sends a close request, as

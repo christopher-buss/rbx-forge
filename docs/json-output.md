@@ -43,7 +43,7 @@ Error codes are stable: a code is never renamed or reused. The full list is in
    and `startedAt` and `at` (when the compile started and ended). `--wait` makes
    it the build of your edit; see below. `data.services.studio` has `status`
    (`opening`, `open`, `closed`, `off`), `place`, and, for a Studio forge
-   started, `pid` and `startTime`.
+   started or attached, `pid` and `startTime`.
 4. Play and read the console with the Roblox Studio MCP.
 5. `forge sync --json`: pull Studio edits into the project, with the syncback
    hooks. It waits for a running save-triggered run, then runs once more.
