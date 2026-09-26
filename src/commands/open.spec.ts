@@ -271,6 +271,20 @@ describe(runOpenAsync, () => {
 		expect(launcher.mock.calls[0]![0].studioPath).toBe(path.join(PROJECT, "bin/Studio.exe"));
 	});
 
+	it("should report the build and opening Studio as steps", async () => {
+		expect.assertions(1);
+
+		const { context, reporter } = makeOpen();
+		await runOpenAsync(context, input());
+
+		expect(reporter.events).toStrictEqual([
+			{ name: "rojo build", status: "started", type: "step" },
+			{ name: "rojo build", status: "succeeded", type: "step" },
+			{ name: "open Roblox Studio", status: "started", type: "step" },
+			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
+		]);
+	});
+
 	it("should pass on the launcher's hint", async () => {
 		expect.assertions(1);
 
