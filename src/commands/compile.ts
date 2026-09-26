@@ -239,7 +239,7 @@ async function sessionBuildAsync(
 	const { hooks, value } = await runWithHooksAsync(context, config, "compile", async () => {
 		const status = await fetchStatusAsync(context.seams.ipc, session, FRESH_BUILD_TIMEOUT_MS);
 		const build = status.services.compiler.lastBuild;
-		assert(build !== undefined, "A fresh build of a roblox-ts compiler exists.");
+		assert(build !== undefined);
 		const { diagnostics, errors } = build;
 		if (errors > 0) {
 			throw sessionCompileError(sessionId, { diagnostics, errors, log });
