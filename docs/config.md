@@ -96,7 +96,8 @@ defineConfig({
 
 The fixed port of `rojo serve` in a session. forge never picks another port: a
 busy port fails the session with `port_in_use`. Give each worktree its own port
-so each Studio connects to the right server.
+so each Studio connects to the right server. A session started with `--no-rojo`
+takes no port.
 
 The session is ready only when Rojo accepts connections on `127.0.0.1` at this
 port, within 60 s (else `service_failed`). A `serveAddress` in the Rojo project

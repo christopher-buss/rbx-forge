@@ -27,10 +27,10 @@ import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { Pause, PausePoint } from "../session/pause.ts";
 import { neverPauseAsync } from "../session/pause.ts";
+import { ROJO_LISTEN_BOUND_MS } from "../session/rojo-ready.ts";
 import {
 	FILE_POLL_MS,
 	OUTPUT_POLL_MS,
-	ROJO_LISTEN_BOUND_MS,
 	STUDIO_CLOSED_SYNCBACK_MS,
 } from "../session/session-body.ts";
 import type { StopSource } from "../session/stop-source.ts";
@@ -64,6 +64,7 @@ const IDENTITY: Pick<
 };
 const TOOL_FILES = { "tools/rbxtsc": "", "tools/rojo": "" };
 const WITH_OLD = { ...TOOL_FILES, ".forge/sessions/old/supervisor.id": "{}" };
+const NO_ROJO: FlagValues = { open: false, rojo: false };
 
 interface StartSetup {
 	/** The config file's content besides `projectType`. */
@@ -104,6 +105,12 @@ interface StartRun {
 	stop: StopSource;
 	studioLauncher: ReturnType<typeof vi.fn<StudioLauncher>>;
 }
+
+/** A Luau project whose watch command is `darklua`. */
+const DARKLUA: StartSetup = {
+	file: { luau: { watch: { command: "darklua" } } },
+	files: { ...TOOL_FILES, "tools/darklua": "" },
+};
 
 const SYNCBACK: StartSetup = {
 	file: { hooks: { syncback: { post: ["lint"] } } },
@@ -160,6 +167,7 @@ function requestFor(flags: FlagValues): SessionRequest {
 		compiler: flags["compiler"] !== false,
 		config: flags["syncback"] === true ? { syncback: { runOnStart: true } } : {},
 		open: flags["open"] !== false,
+		rojo: flags["rojo"] !== false,
 		...(flags["force"] === true ? { force: true } : {}),
 	};
 }
@@ -940,6 +948,95 @@ describe(runSupervisorAsync, () => {
 	});
 });
 
+describe("forge start --no-rojo", () => {
+	it("should run no Rojo serve and check no port, even a busy one", async () => {
+		expect.assertions(4);
+
+		const run = await stoppedAsync({ flags: NO_ROJO, isPortFree: false, projectType: "rbxts" });
+
+		await expect(run.result).resolves.toStrictEqual({
+			data: { port: null, reason: "SIGINT", reports: [] },
+			summary: "Stopped on SIGINT; every process of the session is gone.",
+		});
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"start-1: ",
+			"start-2: build default.project.json --output game.rbxl",
+			"compiler: -w",
+		]);
+		expect(run.isPortFreeAsync).not.toHaveBeenCalled();
+		expect(run.isListeningAsync).not.toHaveBeenCalled();
+	});
+
+	it("should be ready after the first compile, with Rojo off", async () => {
+		expect.assertions(3);
+
+		const onReady = vi.fn<() => void>();
+		const run = startCommand({ flags: NO_ROJO, onReady, projectType: "rbxts" });
+		await flushAsync();
+		const before = stateOf(run);
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "compiler.log"),
+			"Found 0 errors. Watching for file changes.\n",
+		);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		expect(before).toMatchObject({
+			phase: "starting",
+			services: { rojo: { port: null, status: "off" } },
+		});
+		expect(stateOf(run)).toMatchObject({
+			phase: "ready",
+			services: { rojo: { port: null, status: "off" } },
+		});
+		expect(onReady).toHaveBeenCalledOnce();
+	});
+
+	it("should report ready once the Luau watch command runs, naming no port", async () => {
+		expect.assertions(2);
+
+		const run = await stoppedAsync({ ...DARKLUA, flags: NO_ROJO });
+		await run.result;
+
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"start-1: build default.project.json --output game.rbxl",
+			"compiler: ",
+		]);
+		expect(run.reporter.events.at(-1)).toStrictEqual({
+			message: "The compiler watches your code. Press Ctrl+C to stop.",
+			type: "info",
+		});
+	});
+
+	it("should not report ready after a stop signal while the compiler starts", async () => {
+		expect.assertions(1);
+
+		const run: StartRun = startCommand({
+			...DARKLUA,
+			flags: NO_ROJO,
+			reaper: {
+				onSpawn: onSpawnOf("compiler", () => {
+					run.signals.fire("SIGINT");
+				}),
+			},
+		});
+		await run.result;
+
+		expect(run.reporter.events).not.toContainEqual(expect.objectContaining({ type: "info" }));
+	});
+
+	it("should fail with usage with --no-compiler too, before it creates any session file", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ flags: { compiler: false, rojo: false } });
+
+		await expect(run.result).rejects.toMatchObject({ code: "usage" });
+		expect(run.fake.launches).toStrictEqual([]);
+		expect(
+			Object.keys(run.memory.files()).filter((file) => file.startsWith(".forge")),
+		).toStrictEqual([]);
+	});
+});
+
 describe("forge start hooks and syncback", () => {
 	/**
 	 * Start a syncback session, wait until it watches the place, then save.
@@ -1100,6 +1197,27 @@ describe("forge start hooks and syncback", () => {
 			message: `Synced ${PLACE} into default.project.json.`,
 			type: "info",
 		});
+	});
+
+	it("should run syncback on each save with no Rojo serve", async () => {
+		expect.assertions(1);
+
+		const run = await savedAsync({
+			...SYNCBACK,
+			file: { ...SYNCBACK.file, luau: { watch: { command: "darklua" } } },
+			files: { ...TOOL_FILES, "game.rbxl": "v1", "tools/darklua": "" },
+			flags: { open: false, rojo: false, syncback: true },
+		});
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"start-1: syncback --help",
+			"start-2: build default.project.json --output game.rbxl",
+			"compiler: ",
+			"syncback-1: syncback default.project.json --input game.rbxl --non-interactive",
+			"syncback-2: -c lint",
+		]);
 	});
 
 	it("should give a hook the hook stack, so a forge run inside it skips it", async () => {

@@ -31,6 +31,16 @@ const START_SLACK_MS = process.platform === "linux" ? 1000 : 100;
 let native: NativeAddon | undefined;
 
 /**
+ * Whether a fixture log record is a `rojo serve`.
+ *
+ * @param record - One record.
+ * @returns `true` for a fake Rojo that serves.
+ */
+export function isRojoServe({ args, role }: WorkerRecord): boolean {
+	return role === "rojo" && args[0] === "serve";
+}
+
+/**
  * Read every record in a fixture log. A missing file means no worker started.
  *
  * @param logFile - The `FIXTURE_LOG` path.

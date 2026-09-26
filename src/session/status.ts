@@ -80,7 +80,8 @@ export interface SessionStatus {
 	services: {
 		/** `building`: a compile runs (from its start line to its summary). */
 		compiler: { building: boolean; lastBuild?: LastBuild; status: ServiceStatus };
-		rojo: { port: number; status: ServiceStatus };
+		/** `port` is `null` when the session runs no Rojo serve. */
+		rojo: { port: null | number; status: ServiceStatus };
 		/**
 		 * `place`: the place Studio opens or has open, once forge launched
 		 * it. `pid` and `startTime`: the Studio forge started directly.
@@ -140,7 +141,8 @@ export interface StatusStart {
 	/** The session opens Studio. */
 	open: boolean;
 	pid: number;
-	port: number;
+	/** Rojo's port; `null` when the session serves no Rojo. */
+	port: null | number;
 	sessionId: string;
 	startedAt: string;
 	/** The session runs syncback on save. */
@@ -148,8 +150,8 @@ export interface StatusStart {
 }
 
 /**
- * Whether a session is ready: Rojo serves, and the compiler, if any, has
- * finished its first compile (or does not report compiles).
+ * Whether a session is ready: Rojo, if any, serves, and the compiler, if any,
+ * has finished its first compile (or does not report compiles).
  *
  * @param status - The session's status.
  * @returns `true` once `forge up` may return.
@@ -206,7 +208,10 @@ function initialStatus(start: StatusStart): SessionStatus {
 		running: true,
 		services: {
 			compiler: { building: false, status: start.compiler ? "starting" : "off" },
-			rojo: { port: start.port, status: "starting" },
+			rojo:
+				start.port === null
+					? { port: null, status: "off" }
+					: { port: start.port, status: "starting" },
 			studio: { status: start.open ? "opening" : "off" },
 			syncback: { status: start.syncback ? "idle" : "off" },
 		},
@@ -259,10 +264,19 @@ function createRecorder(
 	};
 }
 
+/**
+ * Whether a service lets the session be ready.
+ *
+ * @param status - The service's status.
+ * @returns `true` when it is ready, or the session does not run it.
+ */
+function isUp(status: ServiceStatus): boolean {
+	return status === "off" || status === "ready";
+}
+
 function derivePhase(status: SessionStatus): SessionPhase {
 	const { compiler, rojo } = status.services;
-	const isCompilerReady = compiler.status === "off" || compiler.status === "ready";
-	return isCompilerReady && rojo.status === "ready" ? "ready" : "starting";
+	return isUp(compiler.status) && isUp(rojo.status) ? "ready" : "starting";
 }
 
 const TEXT = "string";
@@ -305,7 +319,7 @@ const statusSchema: Type<SessionStatus> = type({
 			},
 			"status": serviceStatus,
 		},
-		rojo: { port: INTEGER, status: serviceStatus },
+		rojo: { port: INTEGER_OR_NULL, status: serviceStatus },
 		studio: {
 			"pid?": INTEGER,
 			"place?": TEXT,

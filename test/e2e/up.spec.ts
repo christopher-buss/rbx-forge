@@ -16,6 +16,7 @@ import { realNativePath } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import {
 	isProcessAlive,
+	isRojoServe,
 	readWorkerLog,
 	waitForDeathAsync,
 	waitForWorkersAsync,
@@ -27,8 +28,7 @@ import { runForgeAsync, stopDetachedAsync, UP_ROJO_ONLY } from "./up-fixture.ts"
 const IN_JOB = path.join(import.meta.dirname, "..", "fixtures", "bin", "in-job.ts");
 
 function rojoServes(log: string): number {
-	return readWorkerLog(log).filter(({ args, role }) => role === "rojo" && args[0] === "serve")
-		.length;
+	return readWorkerLog(log).filter(isRojoServe).length;
 }
 
 /**

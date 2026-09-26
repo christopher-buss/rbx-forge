@@ -6,8 +6,8 @@ syncback) for one Rojo project, and owns every process it starts.
 ## Sessions
 
 **Session**:\
-One running dev environment for one project: Rojo, the compiler, an optional
-syncback watch, and an optional Studio.\
+One running dev environment for one project: Rojo and the compiler (at least one
+of them), an optional syncback watch, and an optional Studio.\
 _Avoid_: dev server, watch mode, run
 
 **Supervisor**:\

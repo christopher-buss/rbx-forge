@@ -112,6 +112,7 @@ describe(runUpAsync, () => {
 				config: {},
 				detached: { report: path.join(LAUNCH_DIRECTORY, "l1.ndjson") },
 				open: true,
+				rojo: true,
 			},
 		});
 		expect(up.reporter.events).toStrictEqual([{ message: "compiling", type: "info" }]);
@@ -141,7 +142,7 @@ describe(runUpAsync, () => {
 		expect(up.reporter.events).toStrictEqual([{ message: "half", type: "info" }]);
 	});
 
-	it("should pass --no-compiler, --no-open, and the flags' config on", async () => {
+	it("should pass --no-compiler, --no-open, --no-rojo, and the flags' config on", async () => {
 		expect.assertions(1);
 
 		const { up } = makeUp((_request, self) => {
@@ -162,13 +163,30 @@ describe(runUpAsync, () => {
 		});
 		await runUpAsync(context, {
 			config: { syncback: { runOnStart: true } },
-			flags: { compiler: false, open: false },
+			flags: { compiler: false, open: false, rojo: false },
 		});
 
 		expect(up.detachedSupervisor.mock.calls[0]![0].request).toMatchObject({
 			compiler: false,
 			config: { syncback: { runOnStart: true } },
 			open: false,
+			rojo: false,
+		});
+	});
+
+	it("should name no port for a session with no Rojo serve", async () => {
+		expect.assertions(1);
+
+		const { run, up } = makeUp();
+		const status = makeStatus();
+		await serveFakeSessionAsync(
+			up.memory,
+			up.ipc,
+			makeStatus({ services: { ...status.services, rojo: { port: null, status: "off" } } }),
+		);
+
+		await expect(run()).resolves.toMatchObject({
+			summary: "Found session s1: no Rojo serve.",
 		});
 	});
 

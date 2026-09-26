@@ -46,7 +46,7 @@ describe(runStartAsync, () => {
 		expect.assertions(2);
 
 		const plain = startWith();
-		const bare = startWith({ compiler: false, open: false });
+		const bare = startWith({ compiler: false, open: false, rojo: false });
 
 		expect(plain.launches).toMatchObject([
 			{
@@ -55,7 +55,11 @@ describe(runStartAsync, () => {
 				request: { compiler: true, config: { rojoPort: 5000 }, open: true },
 			},
 		]);
-		expect(bare.launches[0]!.request).toMatchObject({ compiler: false, open: false });
+		expect(bare.launches[0]!.request).toMatchObject({
+			compiler: false,
+			open: false,
+			rojo: false,
+		});
 	});
 
 	it("should ask for forced cleanup of an earlier session only with --force", () => {
@@ -69,11 +73,13 @@ describe(runStartAsync, () => {
 			config: { rojoPort: 5000 },
 			force: true,
 			open: true,
+			rojo: true,
 		});
 		expect(plain.launches[0]!.request).toStrictEqual({
 			compiler: true,
 			config: { rojoPort: 5000 },
 			open: true,
+			rojo: true,
 		});
 	});
 
