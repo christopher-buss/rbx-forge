@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ForgeError } from "../errors.ts";
-import type { PartAdder } from "./part-requests.ts";
-import { createPartRequests, parseAddableParts } from "./part-requests.ts";
+import type { PartAdder, PartRequest } from "./part-requests.ts";
+import { createPartRequests, parsePartRequest } from "./part-requests.ts";
+
+const COMPILER = { parts: ["compiler"] } satisfies PartRequest;
 
 async function flushAsync(): Promise<void> {
 	await new Promise((resolve) => {
@@ -16,14 +18,14 @@ describe(createPartRequests, () => {
 
 		const requests = createPartRequests();
 		const add = vi.fn<PartAdder>().mockResolvedValue(["compiler"]);
-		const added = requests.addAsync(["compiler"]);
+		const added = requests.addAsync(COMPILER);
 		await flushAsync();
 		const calledEarly = add.mock.calls.length;
 		requests.attach(add);
 
 		await expect(added).resolves.toStrictEqual(["compiler"]);
 		expect(calledEarly).toBe(0);
-		expect(add).toHaveBeenCalledExactlyOnceWith(["compiler"]);
+		expect(add).toHaveBeenCalledExactlyOnceWith(COMPILER);
 	});
 
 	it("should run one request at a time, also after a failed one", async () => {
@@ -37,9 +39,9 @@ describe(createPartRequests, () => {
 			.mockRejectedValueOnce(new ForgeError("compiler_missing", "gone"))
 			.mockResolvedValue([]);
 		requests.attach(add);
-		const one = requests.addAsync(["compiler"]);
-		const two = requests.addAsync(["compiler"]);
-		const three = requests.addAsync([]);
+		const one = requests.addAsync(COMPILER);
+		const two = requests.addAsync(COMPILER);
+		const three = requests.addAsync({ parts: [] });
 		await flushAsync();
 		const callsWhileFirstRuns = add.mock.calls.length;
 		first.resolve(["compiler"]);
@@ -57,7 +59,7 @@ describe(createPartRequests, () => {
 		expect.assertions(2);
 
 		const requests = createPartRequests();
-		const waiting = requests.addAsync(["compiler"]);
+		const waiting = requests.addAsync(COMPILER);
 		requests.close();
 		requests.attach(vi.fn<PartAdder>());
 
@@ -66,7 +68,7 @@ describe(createPartRequests, () => {
 			hint: 'Start a session with "forge up".',
 			message: "The session is stopping; it adds no parts.",
 		});
-		await expect(requests.addAsync(["compiler"])).rejects.toMatchObject({
+		await expect(requests.addAsync(COMPILER)).rejects.toMatchObject({
 			code: "not_running",
 		});
 	});
@@ -79,17 +81,22 @@ describe(createPartRequests, () => {
 		requests.attach(add);
 		requests.close();
 
-		await expect(requests.addAsync(["compiler"])).rejects.toMatchObject({
+		await expect(requests.addAsync(COMPILER)).rejects.toMatchObject({
 			code: "not_running",
 		});
 	});
 });
 
-describe(parseAddableParts, () => {
-	it("should read a list of parts", () => {
+describe(parsePartRequest, () => {
+	it("should read a list of parts, and a Studio path", () => {
 		expect.assertions(2);
 
-		expect(parseAddableParts(["compiler"])).toStrictEqual(["compiler"]);
-		expect(parseAddableParts([])).toStrictEqual([]);
+		expect(parsePartRequest({ parts: ["compiler", "studio"] })).toStrictEqual({
+			parts: ["compiler", "studio"],
+		});
+		expect(parsePartRequest({ parts: [], studioPath: "/opt/Studio" })).toStrictEqual({
+			parts: [],
+			studioPath: "/opt/Studio",
+		});
 	});
 });

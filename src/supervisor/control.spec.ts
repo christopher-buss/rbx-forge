@@ -150,25 +150,30 @@ describe(controlHandlers, () => {
 
 		const { addAsync, handlers } = makeTarget();
 
-		await expect(handlers.addParts!({ parts: ["compiler"] })).resolves.toStrictEqual({
-			added: ["compiler"],
+		await expect(
+			handlers.addParts!({ parts: ["compiler", "studio"], studioPath: "/opt/Studio" }),
+		).resolves.toStrictEqual({ added: ["compiler"] });
+		expect(addAsync).toHaveBeenCalledExactlyOnceWith({
+			parts: ["compiler", "studio"],
+			studioPath: "/opt/Studio",
 		});
-		expect(addAsync).toHaveBeenCalledExactlyOnceWith(["compiler"]);
 	});
 
-	it.for([[{}], [{ parts: "compiler" }], [{ parts: ["studio"] }]] as const)(
-		"should refuse addParts params %j with usage",
-		async ([parameters]) => {
-			expect.assertions(3);
+	it.for([
+		[{}],
+		[{ parts: "compiler" }],
+		[{ parts: ["rojo"] }],
+		[{ parts: [], studioPath: 1 }],
+	] as const)("should refuse addParts params %j with usage", async ([parameters]) => {
+		expect.assertions(3);
 
-			const { addAsync, handlers } = makeTarget();
-			const added = handlers.addParts!(parameters);
+		const { addAsync, handlers } = makeTarget();
+		const added = handlers.addParts!(parameters);
 
-			await expect(added).rejects.toMatchObject({ code: "usage" });
-			await expect(added).rejects.toThrow("addParts takes a list of parts: ");
-			expect(addAsync).not.toHaveBeenCalled();
-		},
-	);
+		await expect(added).rejects.toMatchObject({ code: "usage" });
+		await expect(added).rejects.toThrow("addParts takes a list of parts: ");
+		expect(addAsync).not.toHaveBeenCalled();
+	});
 
 	it("should answer sync with the session's syncback run", async () => {
 		expect.assertions(2);

@@ -5,7 +5,6 @@ import { callSessionAsync } from "../ipc/client.ts";
 import type { CleanupReport, PinnedProcess } from "../native/addon.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import type { Seams } from "../seams/seams.ts";
-import { STUDIO_CLOSED_SYNCBACK_MS } from "../session/session-body.ts";
 import type { RecoveryReport } from "../studio/auto-recovery.ts";
 import type { RecoveryOptions, StudioEnd, StudioStop } from "../studio/close-studio.ts";
 import { closeStudioAsync } from "../studio/close-studio.ts";
@@ -14,7 +13,7 @@ import { SETTLE_MS, targetOf, waitForBarrierAsync } from "../supervisor/barrier.
 import type { ForgeFiles, SessionFiles } from "../supervisor/session-files.ts";
 import { removeSession } from "../supervisor/session-files.ts";
 import type { KnownSession } from "./session.ts";
-import { sessionStudioTarget, waitForSessionStudioAsync } from "./studio.ts";
+import { sessionStudioTarget, waitForSessionStudioAsync, waitForStudioEndAsync } from "./studio.ts";
 
 /** How long `down` waits after its first shutdown request. */
 export const DOWN_TIMEOUT_MS = 15_000;
@@ -22,11 +21,6 @@ export const DOWN_TIMEOUT_MS = 15_000;
 export const FORCED_SHUTDOWN_MS = 5000;
 /** How long `down --force` waits for the supervisor it killed. */
 export const KILL_WAIT_MS = 5000;
-/**
- * How long `down` lets a session whose Studio it closed end by itself,
- * before it asks: the session waits for syncback of a last save first.
- */
-export const STUDIO_END_WAIT_MS: number = STUDIO_CLOSED_SYNCBACK_MS + 5000;
 
 /** How often `down` looks at the supervisor again. */
 const DOWN_POLL_MS = 100;
@@ -119,9 +113,10 @@ interface Target {
  *
  * First it closes the session's Studio (unless `keepStudio`): the one the
  * session reports, once past `opening` (`waitForSessionStudioAsync`), through
- * `closeStudioAsync` (a close request, then a kill). The session then ends by
- * itself once syncback of a last save is done; `down` waits {@link
- * STUDIO_END_WAIT_MS} for that before it asks. `stopped` needs both:
+ * `closeStudioAsync` (a close request, then a kill). A session whose own
+ * Studio closed then ends by itself once syncback of a last save is done;
+ * `down` waits for that before it asks (`waitForStudioEndAsync`). `stopped`
+ * needs both:
  *
  * 1. Its supervisor has exited: its pinned process (PID plus start time)
  *    is gone. A supervisor lets go of the singleton lock before it writes
@@ -371,8 +366,7 @@ function unresponsive({ session }: Target, force: boolean): ForgeError {
 
 /**
  * Condition 1 of {@link stopSessionAsync}, with its escalation. A session
- * whose Studio `down` closed gets {@link STUDIO_END_WAIT_MS} to end by
- * itself first.
+ * whose own Studio `down` closed gets time to end by itself first.
  *
  * @param seams - The clock, transport, and native addon.
  * @param target - The session and its pinned supervisor.
@@ -391,7 +385,7 @@ async function stopSupervisorAsync(
 
 	if (
 		options.studio.status === "closed" &&
-		(await waitGoneAsync(seams, target, STUDIO_END_WAIT_MS))
+		(await waitForStudioEndAsync(seams, target.session, () => isGone(target)))
 	) {
 		return "studio_closed";
 	}

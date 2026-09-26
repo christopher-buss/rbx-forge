@@ -104,13 +104,21 @@ describe(addPartsAsync, () => {
 		const asked: Array<unknown> = [];
 		fake.addParts = (parameters) => {
 			asked.push(parameters);
-			return { added: ["compiler"] };
+			return { added: ["compiler", "studio", "rojo"] };
 		};
 
+		const session = findSession(memory.fileSystem, FORGE)!;
+
 		await expect(
-			addPartsAsync(transport, findSession(memory.fileSystem, FORGE)!, ["compiler"], 1000),
-		).resolves.toStrictEqual(["compiler"]);
-		expect(asked).toStrictEqual([{ parts: ["compiler"] }]);
+			addPartsAsync(transport, session, { parts: ["compiler", "studio"] }, 1000),
+		).resolves.toStrictEqual(["compiler", "studio", "rojo"]);
+
+		await addPartsAsync(transport, session, { parts: ["studio"], studioPath: "/opt/S" }, 1000);
+
+		expect(asked).toStrictEqual([
+			{ parts: ["compiler", "studio"] },
+			{ parts: ["studio"], studioPath: "/opt/S" },
+		]);
 	});
 
 	it("should reject an answer that is not a list of parts as internal_error", async () => {
@@ -119,8 +127,13 @@ describe(addPartsAsync, () => {
 		const memory = createMemoryFileSystem();
 		const transport = createMemoryTransport();
 		const fake = await serveFakeSessionAsync(memory, transport);
-		fake.addParts = () => ({ added: ["studio"] });
-		const added = addPartsAsync(transport, findSession(memory.fileSystem, FORGE)!, [], 1000);
+		fake.addParts = () => ({ added: ["syncback"] });
+		const added = addPartsAsync(
+			transport,
+			findSession(memory.fileSystem, FORGE)!,
+			{ parts: [] },
+			1000,
+		);
 
 		await expect(added).rejects.toMatchObject({
 			code: "internal_error",

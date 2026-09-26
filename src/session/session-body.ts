@@ -1,33 +1,33 @@
-import path from "node:path";
-
-import { buildAsync } from "../commands/build.ts";
 import { compileAsync } from "../commands/compile.ts";
 import type { CommandContext } from "../commands/context.ts";
-import { openPlaceAsync } from "../commands/open.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
-import { logFilePath, openLogFile } from "../output/log-file.ts";
 import type { Clock } from "../seams/clock.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
-import { studioLockPath } from "../studio/lock-file.ts";
 import type { OpenedStudio } from "./attach.ts";
-import { attachStudio } from "./attach.ts";
 import type { AdderSetup, CompilerService } from "./compiler-part.ts";
 import { createPartAdder, startCompilerAsync } from "./compiler-part.ts";
 import type { PartRequests } from "./part-requests.ts";
 import type { SessionPlan } from "./plan.ts";
-import { createReaperRunner } from "./reaper-runner.ts";
+import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./rojo-part.ts";
 import type { SessionScope } from "./run-session.ts";
-import type { RunningPart, ServiceInvocation, ServiceParts } from "./service-parts.ts";
 import { createServiceParts } from "./service-parts.ts";
 import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
 import { checkSyncbackOnce, startSyncback, watchSavesForSyncback } from "./session-syncback.ts";
-import type { StatusRecorder } from "./status.ts";
-import type { SaveWatch, WatchOptions } from "./watch.ts";
-import { waitForStudioCloseAsync } from "./watch.ts";
+import type { StatusRecorder, StatusStore } from "./status.ts";
+import type { StudioSetup, StudioState } from "./studio-part.ts";
+import {
+	buildPlaceAsync,
+	createStudioAdder,
+	followStudioAsync,
+	openStudioAsync,
+} from "./studio-part.ts";
+import type { SaveWatch } from "./watch.ts";
+import { watchOptions, workerContext } from "./worker-context.ts";
 
 /** Everything one dev session runs with. */
-export interface SessionSetup extends AdderSetup {
+export interface SessionSetup extends AdderSetup, StudioSetup {
+	builds: AdderSetup["builds"] & StudioSetup["builds"];
 	/** The compiler service, when the plan starts one. */
 	compiler: CompilerService | undefined;
 	config: ResolvedConfig;
@@ -36,29 +36,24 @@ export interface SessionSetup extends AdderSetup {
 	/** Gets the session's part adder, for `forge up`. */
 	parts: Pick<PartRequests, "attach">;
 	plan: SessionPlan;
-	/** Rojo's service, when the plan serves Rojo. */
-	rojo: ServiceInvocation | undefined;
 	/** Gets what the session does, for `status` and `state.json`. */
-	status: StatusRecorder;
+	status: Pick<StatusStore, "phase"> & StatusRecorder;
 	/** Gets the session's syncback runner, for `forge sync`. */
 	sync: Pick<SessionSync, "attach" | "close">;
 }
 
-/** How often the session looks at the place and Studio's lock file. */
-export const FILE_POLL_MS = 500;
-
-/** How often the session checks whether Rojo listens on its port. */
-const ROJO_LISTEN_POLL_MS = 100;
-/**
- * How long Rojo gets to listen on its port once it runs. Rojo builds the
- * whole project tree before it listens, so a big project takes a while.
- */
-export const ROJO_LISTEN_BOUND_MS = 60_000;
 /**
  * How long a session whose Studio closed waits for syncback before it ends:
  * a save just before the close still syncs back.
  */
 export const STUDIO_CLOSED_SYNCBACK_MS = 30_000;
+
+/** What the session body hands from one stage to the next. */
+interface BodyState {
+	/** The steps context: steps and hooks run as its workers. */
+	steps: CommandContext;
+	studio: StudioState;
+}
 
 /**
  * The body of a dev session, for
@@ -73,7 +68,7 @@ export const STUDIO_CLOSED_SYNCBACK_MS = 30_000;
  * 4. Start Rojo and the watch-mode compiler, as the plan asks. Each is a
  *    service with its part: its exit stops only that part, which is then
  *    `failed`. From then on, `forge up` can add the parts that are missing
- *    or failed.
+ *    or failed, and attach Studio with its Rojo (`studio-part.ts`).
  * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
  *    on each place save: one run at a time, with requests during a run
  *    folded into one more run. Rojo's syncback support is checked once per
@@ -90,7 +85,9 @@ export const STUDIO_CLOSED_SYNCBACK_MS = 30_000;
 export function createSessionBody(session: SessionSetup): (scope: SessionScope) => Promise<void> {
 	return async (scope) => {
 		const requireSyncback = checkSyncbackOnce(session.config);
-		const opened = await runStepsAsync(session, scope, requireSyncback);
+		const steps = workerContext(session, scope, "start");
+		const opened = await runStepsAsync(session, scope, { requireSyncback, steps });
+		const state: BodyState = { steps, studio: { isAttached: opened !== undefined } };
 		const syncback = startSyncback(session, scope, {
 			context: workerContext(session, scope, "syncback"),
 			requireSyncback,
@@ -98,7 +95,6 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 		// The save watch starts once Rojo serves; until then no save is seen.
 		const saves: Pick<SaveWatch, "check"> = { check: noSaveWatch };
 		if (opened !== undefined) {
-			session.status.studio("opening", opened.place, opened.studio);
 			async function flushSyncbackAsync(): Promise<void> {
 				saves.check();
 				await syncback.settled();
@@ -107,20 +103,36 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 			scope.track(watchStudioAsync(session, scope, { ...opened, flushSyncbackAsync }));
 		}
 
-		const isServing = await runServicesAsync(session, scope);
-		if (isServing === undefined) {
+		const served = await runServicesAsync(session, scope, state);
+		if (served === undefined) {
 			return;
 		}
 
-		announceReady(session, isServing);
+		announceReady(session, served.port);
 		if (session.plan.syncback) {
-			const watch = watchSavesForSyncback(session, watchOptions(session, scope), syncback);
-			saves.check = watch.check;
-			// The watch ends with the session either way; tracking orders it.
-			// Stryker disable next-line CallExpression: equivalent
-			scope.track(watch.done);
+			saves.check = watchSaves(session, scope, syncback);
 		}
 	};
+}
+
+/**
+ * Run syncback on each place save, until the session ends.
+ *
+ * @param session - The config and context.
+ * @param scope - Its end signal; tracks the watch.
+ * @param syncback - Runs syncback.
+ * @returns A look at the place now.
+ */
+function watchSaves(
+	session: SessionSetup,
+	scope: SessionScope,
+	syncback: ReturnType<typeof startSyncback>,
+): SaveWatch["check"] {
+	const watch = watchSavesForSyncback(session, watchOptions(session.context, scope), syncback);
+	// The watch ends with the session either way; tracking orders it.
+	// Stryker disable next-line CallExpression: equivalent
+	scope.track(watch.done);
+	return watch.check;
 }
 
 function noSaveWatch(): void {
@@ -128,146 +140,40 @@ function noSaveWatch(): void {
 }
 
 /**
- * Start Rojo, then the watch-mode compiler, as the plan asks. Rojo is ready
- * once it listens; a compiler that reports compiles, after its first one.
- *
- * @param session - The resolved services.
- * @param parts - Starts them.
- * @returns Rojo's part, if it runs.
- */
-async function startServicesAsync(
-	session: SessionSetup,
-	parts: ServiceParts,
-): Promise<RunningPart | undefined> {
-	const rojo =
-		session.rojo === undefined
-			? undefined
-			: await parts.startAsync(session.rojo, { initial: "starting" });
-	if (session.compiler !== undefined) {
-		await startCompilerAsync(session, parts, session.compiler);
-	}
-
-	return rojo;
-}
-
-function hasEnded(scope: SessionScope): boolean {
-	return scope.signal.aborted;
-}
-
-/**
- * Follow whether a part still runs.
- *
- * @param scope - Tracks the watch.
- * @param stopped - Resolves once the part stopped.
- * @returns Whether the part still runs.
- */
-function watchRunning(scope: SessionScope, stopped: Promise<void>): () => boolean {
-	let isRunning = true;
-	async function markAsync(): Promise<void> {
-		await stopped;
-		isRunning = false;
-	}
-
-	scope.track(markAsync());
-	return () => isRunning;
-}
-
-/**
- * Wait until Rojo listens on its port, so `ready` means a client can
- * connect, then mark it ready. When it does not listen within
- * {@link ROJO_LISTEN_BOUND_MS}, stop it as `failed`.
- *
- * @param session - The config, clock, network, and status.
- * @param scope - Its end signal.
- * @param rojo - The service parts, and Rojo's part.
- * @param rojo.parts - Stops Rojo when it does not listen.
- * @param rojo.rojo - Rojo's part.
- * @returns `true` once Rojo listens; `false` when it stopped or the
- *   session ended first.
- */
-async function waitForRojoAsync(
-	session: SessionSetup,
-	scope: SessionScope,
-	{ parts, rojo }: { parts: ServiceParts; rojo: RunningPart },
-): Promise<boolean> {
-	const { config, context } = session;
-	const { clock, network } = context.seams;
-	const port = config.rojoPort;
-	const deadline = clock.now() + ROJO_LISTEN_BOUND_MS;
-	const { stopped } = rojo;
-	const isRunning = watchRunning(scope, stopped);
-	while (!hasEnded(scope) && isRunning()) {
-		if (await network.isListeningAsync(port)) {
-			// The session may have ended, or Rojo stopped, while the check ran.
-			if (hasEnded(scope) || !isRunning()) {
-				return false;
-			}
-
-			session.status.service("rojo", "ready");
-			return true;
-		}
-
-		if (clock.now() >= deadline) {
-			parts.stop(
-				"rojo",
-				`rojo did not listen on port ${port} within ${ROJO_LISTEN_BOUND_MS / 1000} s`,
-			);
-			return false;
-		}
-
-		// Rojo's stop or the session's end ends the pause early.
-		await settlesWithinAsync(clock, stopped, ROJO_LISTEN_POLL_MS, scope.signal);
-	}
-
-	return false;
-}
-
-/**
- * Start the services as parts, hand the part adder over, and wait until
- * Rojo listens or stopped.
+ * Start Rojo, then the watch-mode compiler, as the plan asks, hand the part
+ * adder over, and wait until Rojo listens or stopped. Rojo is ready once it
+ * listens; a compiler that reports compiles, after its first one.
  *
  * @param session - The resolved services.
  * @param scope - Starts them; its end signal.
- * @returns Whether Rojo serves; `undefined` once the session is ending.
+ * @param state - The steps context and the Studio state, for the adder.
+ * @returns Rojo's port while it serves; `undefined` once the session is
+ *   ending.
+ * @rejects `port_in_use` or `rojo_missing` (resolved before, so neither
+ *   comes), or as `ServiceParts.startAsync`.
  */
 async function runServicesAsync(
 	session: SessionSetup,
 	scope: SessionScope,
-): Promise<boolean | undefined> {
+	state: BodyState,
+): Promise<undefined | { port: number | undefined }> {
 	const parts = createServiceParts(session, scope);
-	const rojo = await startServicesAsync(session, parts);
-	session.parts.attach(createPartAdder(session, parts));
-	session.status.started();
-	const isServing =
-		rojo !== undefined && (await waitForRojoAsync(session, scope, { parts, rojo }));
-	return hasEnded(scope) ? undefined : isServing;
-}
+	const rojo = session.plan.rojo
+		? await startRojoAsync(session, parts, await resolveRojoAsync(session))
+		: undefined;
+	if (session.compiler !== undefined) {
+		await startCompilerAsync(session, parts, session.compiler);
+	}
 
-/**
- * The command context with a process runner that runs through the session's
- * reaper, so every step and hook is a worker.
- *
- * @param session - The context and the session directory.
- * @param scope - Its reaper and end signal.
- * @param name - The log and worker-id prefix, such as `start`.
- * @returns The context for the steps.
- */
-function workerContext(
-	{ context, directory }: SessionSetup,
-	scope: SessionScope,
-	name: string,
-): CommandContext {
-	const { clock, fileSystem } = context.seams;
-	const processRunner = createReaperRunner({
-		name,
-		clock,
-		fileSystem,
-		log: openLogFile(fileSystem, logFilePath(context.cwd, name)),
-		reaper: scope.reaper,
-		signal: scope.signal,
-		spoolDirectory: path.join(directory, "output"),
-	});
-	return { ...context, seams: { ...context.seams, processRunner } };
+	const addStudio = createStudioAdder(session, scope, { ...state, parts, state: state.studio });
+	session.parts.attach(createPartAdder(session, parts, addStudio));
+	session.status.started();
+	const isServing = rojo !== undefined && (await waitForRojoAsync(session, scope, parts, rojo));
+	if (hasEnded(scope)) {
+		return undefined;
+	}
+
+	return { port: isServing ? rojo.port : undefined };
 }
 
 /**
@@ -275,7 +181,10 @@ function workerContext(
  *
  * @param session - The config, plan, and context.
  * @param scope - Its reaper and end signal.
- * @param requireSyncback - The session's check of Rojo's syncback support.
+ * @param stages - The session's check of Rojo's syncback support, and the
+ *   steps context.
+ * @param stages.requireSyncback - Checks Rojo's syncback support.
+ * @param stages.steps - Runs the steps and their hooks as workers.
  * @returns The place opened in Studio and the Studio forge started or
  *   attached, or `undefined` when none was.
  * @rejects A step's failure. A step that the session's end
@@ -284,10 +193,9 @@ function workerContext(
 async function runStepsAsync(
 	session: SessionSetup,
 	scope: SessionScope,
-	requireSyncback: SyncbackCheck,
+	{ requireSyncback, steps }: { requireSyncback: SyncbackCheck; steps: CommandContext },
 ): Promise<OpenedStudio | undefined> {
-	const { config, context, plan } = session;
-	const steps = workerContext(session, scope, "start");
+	const { config, plan } = session;
 	if (plan.syncback) {
 		await requireSyncback(steps);
 	}
@@ -298,31 +206,15 @@ async function runStepsAsync(
 		await compileAsync(steps, config);
 	}
 
-	const attached = plan.open ? attachStudio(context, config) : undefined;
-	// Never build a place under the Studio that has it open.
-	if (plan.build && attached?.place !== path.resolve(context.cwd, config.buildOutputPath)) {
-		await buildAsync(steps, config, {
-			project: config.rojoProjectPath,
-			target: { output: config.buildOutputPath, type: "output" },
-		});
+	if (plan.open) {
+		return openStudioAsync(session, steps, { build: plan.build, signal: scope.signal });
 	}
 
-	// Studio starts outside the reaper, so this step checks by itself.
-	if (!plan.open || scope.signal.aborted) {
-		return undefined;
+	if (plan.build) {
+		await buildPlaceAsync(steps, config);
 	}
 
-	// The build above wrote the place `open` would build.
-	const isBuilt =
-		plan.build &&
-		config.open.buildOutputPath === undefined &&
-		config.open.projectPath === undefined;
-	return attached ?? (await openPlaceAsync(steps, config, { isBuilt }));
-}
-
-function watchOptions(session: SessionSetup, scope: SessionScope): WatchOptions {
-	const { clock, fileSystem } = session.context.seams;
-	return { clock, fileSystem, intervalMs: FILE_POLL_MS, signal: scope.signal };
+	return undefined;
 }
 
 /**
@@ -341,8 +233,9 @@ async function settleSyncbackAsync(
 }
 
 /**
- * End the session with `studio_closed` once Studio closes the place, after
- * the syncback of a save just before the close.
+ * Follow the session's own Studio from `opening` on, and end the session
+ * with `studio_closed` once Studio closes the place, after the syncback of a
+ * save just before the close.
  *
  * @param session - The clock, file system, and reporter.
  * @param scope - Where the end goes.
@@ -350,42 +243,32 @@ async function settleSyncbackAsync(
  *   syncback flush.
  * @param opened.flushSyncbackAsync - Looks at the place and waits for the
  *   runs.
- * @param opened.place - The absolute path of the place file.
- * @param opened.studio - The Studio forge started directly or attached, if
- *   any.
  */
 async function watchStudioAsync(
 	session: SessionSetup,
 	scope: SessionScope,
-	{
-		flushSyncbackAsync,
-		place,
-		studio,
-	}: OpenedStudio & { flushSyncbackAsync: () => Promise<void> },
+	opened: OpenedStudio & { flushSyncbackAsync: () => Promise<void> },
 ): Promise<void> {
-	const { reporter } = session.context;
-	const lock = { path: studioLockPath(place), pid: studio?.pid };
-	const isClosed = await waitForStudioCloseAsync(watchOptions(session, scope), lock, () => {
-		session.status.studio("open", place, studio);
-		reporter.emit({
-			message: `Roblox Studio has ${place} open. The session ends when Studio closes it.`,
-			type: "info",
-		});
+	session.status.studio("opening", opened.place, opened.studio);
+	const isClosed = await followStudioAsync(session, scope, opened, {
+		whenClosed: "The session ends when Studio closes it.",
 	});
 	// A watch that ended first ended with the session: Studio stays open.
 	if (!isClosed) {
 		return;
 	}
 
-	session.status.studio("closed", place, studio);
-	await settleSyncbackAsync(session.context.seams.clock, flushSyncbackAsync);
+	// Stopping before closed: `down` tells this session from one that goes
+	// on without its Studio.
+	session.status.phase("stopping");
+	session.status.studio("closed", opened.place, opened.studio);
+	await settleSyncbackAsync(session.context.seams.clock, opened.flushSyncbackAsync);
 	scope.end({ type: "studio_closed" });
 }
 
-function announceReady({ config, context, plan }: SessionSetup, isServing: boolean): void {
-	const rojo = isServing
-		? `Rojo serves ${config.rojoProjectPath} on port ${config.rojoPort}. `
-		: "";
+function announceReady({ config, context, plan }: SessionSetup, port: number | undefined): void {
+	const rojo =
+		port === undefined ? "" : `Rojo serves ${config.rojoProjectPath} on port ${port}. `;
 	const compiler = plan.compiler === undefined ? "" : "The compiler watches your code. ";
 	context.reporter.emit({
 		message: `${rojo}${compiler}Press Ctrl+C to stop.`,

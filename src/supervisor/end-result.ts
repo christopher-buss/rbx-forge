@@ -27,7 +27,8 @@ export function endedResult(
 	data: {
 		cleanups?: Array<ForcedCleanup>;
 		escalation?: ReaperEnd["escalation"];
-		port: number;
+		/** Rojo's port, once the session chose one. */
+		port?: number;
 		reports: Array<FinalReport>;
 	},
 ): CommandResult {

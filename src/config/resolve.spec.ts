@@ -49,8 +49,8 @@ const CASES: ReadonlyArray<PrecedenceCase> = [
 	precedenceCase({
 		read: (config) => config.rojoPort,
 		set: (value: number) => ({ rojoPort: value }),
-		type: "number",
-		values: { default: 34_872, file: 4000, flag: 5000 },
+		type: "port (no default)",
+		values: { default: undefined, file: 4000, flag: 5000 },
 	}),
 	precedenceCase({
 		read: (config) => config.hookTimeoutMs,

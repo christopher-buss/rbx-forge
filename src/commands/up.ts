@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import path from "node:path";
 
 import type { FlagDefinition } from "../cli/flags.ts";
@@ -6,9 +7,10 @@ import { addPartsAsync, probeSessionAsync } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { PinnedProcess } from "../native/addon.ts";
 import type { CommandResult } from "../seams/reporter.ts";
-import type { AddablePart } from "../session/part-requests.ts";
-import type { ServiceId, SessionStatus } from "../session/status.ts";
+import type { AddablePart, PartRequest } from "../session/part-requests.ts";
+import type { PartId, PartStatus, SessionStatus, StudioStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
+import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import type { SessionRequest, SupervisorMessage } from "../supervisor/channel.ts";
 import { failureError, parseMessage } from "../supervisor/channel.ts";
 import type { ForgeFiles } from "../supervisor/session-files.ts";
@@ -22,7 +24,14 @@ export const UP_FLAGS: ReadonlyArray<FlagDefinition> = [
 		kind: "boolean",
 		text: "Run the compiler in watch mode (the default); --no-compiler starts no part.",
 	},
-	...START_FLAGS.filter(({ name }) => name === "force" || name === "syncback"),
+	...START_FLAGS.filter(({ name }) => name === "force"),
+	{
+		name: "studio",
+		kind: "boolean",
+		text: "Also attach Studio with the place open, and Rojo; the Studio that has it open already is used.",
+	},
+	{ ...STUDIO_PATH_FLAG, text: `${STUDIO_PATH_FLAG.text} Needs --studio.` },
+	...START_FLAGS.filter(({ name }) => name === "syncback"),
 ];
 
 /**
@@ -41,15 +50,19 @@ type ResultMessage = Extract<SupervisorMessage, { type: "result" }>;
 
 /** A ready session, the parts this `up` started, and whether it started it. */
 interface Ready {
-	added: Array<ServiceId>;
+	added: Array<PartId>;
 	isStarted: boolean;
 	status: SessionStatus;
 }
 
 /** The parts `up` names, in the order a session starts them. */
-const SERVICE_IDS: ReadonlyArray<ServiceId> = ["compiler", "rojo"];
+const PART_IDS: ReadonlyArray<PartId> = ["compiler", "studio", "rojo"];
 
-const PART_NAMES: Readonly<Record<ServiceId, string>> = { compiler: "the compiler", rojo: "Rojo" };
+const PART_NAMES: Readonly<Record<PartId, string>> = {
+	compiler: "the compiler",
+	rojo: "Rojo",
+	studio: "Studio",
+};
 
 /** A supervisor this `up` started, and its report file. */
 interface Launched {
@@ -62,27 +75,27 @@ interface Launched {
 
 /** Where one `up` is. */
 interface UpState {
-	/**
-	 * The parts a session this `up` did not start added for it; unset until
-	 * it asked.
-	 */
-	added: Array<ServiceId> | undefined;
+	/** The parts a session added for this `up`; unset until it asked. */
+	added: Array<PartId> | undefined;
 	deadline: number;
 	/** When a session last answered, or when `up` began to wait for one. */
 	lastAnswer: number;
 	launched: Launched | undefined;
 	relaunched: boolean;
-	/** The parts `up` asks for. */
-	wanted: ReadonlyArray<AddablePart>;
+	/** The parts `up` asks for, and the Studio executable to start. */
+	wanted: PartRequest;
 }
 
 /**
  * `forge up`: start the dev session in the background with the watch-mode
- * compiler alone, and return once no part starts: the compiler finished its
- * first compile or stopped. The session runs in a detached supervisor
+ * compiler, and return once no part starts: the compiler finished its first
+ * compile or stopped. With `--studio`, it then attaches Studio with the
+ * place open (the Studio that has it open already, else a new one) and Rojo
+ * on the session's port, and returns once Rojo listens and Studio has the
+ * place open. The session runs in a detached supervisor
  * (`supervisor/detached-launcher.ts`) until `forge down`; a failed service
- * stops only its part. A project with no compiler gets a session with no
- * part.
+ * stops only its part, and the attached Studio's close stops only its Rojo.
+ * A project with no compiler gets a session with no part.
  *
  * It is idempotent: when a session runs, it starts only the parts that are
  * missing or failed, reports them in `added`, and never touches a part that
@@ -94,16 +107,17 @@ interface UpState {
  * @param input - The parsed flags.
  * @returns The session's status, the parts this `up` started, and whether
  *   it started the session.
- * @rejects {ForgeError} `detach_unsupported` when the host forbids a
- *   detached process; the session's own startup failure (such as
- *   `compiler_missing`); `supervisor_unresponsive` when it is not ready in
- *   time.
+ * @rejects {ForgeError} `usage`; `detach_unsupported` when the host forbids
+ *   a detached process; the session's own startup failure (such as
+ *   `compiler_missing`); an attach failure (such as `port_in_use`);
+ *   `supervisor_unresponsive` when it is not ready in time.
  */
 export async function runUpAsync(
 	context: CommandContext,
 	input: CommandInput,
 ): Promise<CommandResult> {
 	const { clock } = context.seams;
+	const wanted = wantedParts(context, input.flags);
 	const request: SessionRequest = {
 		compiler: input.flags["compiler"] !== false,
 		config: input.config,
@@ -119,7 +133,7 @@ export async function runUpAsync(
 		launched:
 			found === undefined ? launch(context, forgeFiles(context.cwd), request) : undefined,
 		relaunched: false,
-		wanted: request.compiler ? ["compiler"] : [],
+		wanted,
 	};
 	const { added, isStarted, status } = await waitReadyAsync(context, request, state);
 	const session = isStarted
@@ -131,9 +145,49 @@ export async function runUpAsync(
 	};
 }
 
-function describeAdded(added: ReadonlyArray<ServiceId>): string {
+/**
+ * What `up` asks a session to add: the compiler unless `--no-compiler`,
+ * Studio with `--studio`.
+ *
+ * @param context - The project root, for `--studio-path`.
+ * @param flags - The parsed flags.
+ * @returns The parts, and the Studio executable to start.
+ * @throws {ForgeError} `usage` for `--studio-path` without `--studio`.
+ */
+function wantedParts(context: CommandContext, flags: CommandInput["flags"]): PartRequest {
+	const studioPath = flags[STUDIO_PATH_FLAG.name];
+	const hasStudio = flags["studio"] === true;
+	if (typeof studioPath === "string" && !hasStudio) {
+		throw new ForgeError("usage", "--studio-path needs --studio.");
+	}
+
+	const parts: Array<AddablePart> = flags["compiler"] === false ? [] : ["compiler"];
+	return {
+		parts: hasStudio ? [...parts, "studio"] : parts,
+		...(typeof studioPath === "string"
+			? { studioPath: path.resolve(context.cwd, studioPath) }
+			: {}),
+	};
+}
+
+function describeAdded(added: ReadonlyArray<PartId>): string {
 	const names = added.map((id) => PART_NAMES[id]);
 	return names.length === 0 ? "added no part" : `started ${names.join(" and ")}`;
+}
+
+function describeStudio({ place, status }: SessionStatus["services"]["studio"]): string {
+	return status === "open" ? `Studio has ${place} open` : `Studio is ${status}`;
+}
+
+/**
+ * Whether a part runs: a service not `off`, a Studio that opens or has the
+ * place open.
+ *
+ * @param status - The part's status.
+ * @returns Whether it runs.
+ */
+function isRunning(status: PartStatus | StudioStatus): boolean {
+	return status !== "off" && status !== "closed";
 }
 
 /**
@@ -142,7 +196,7 @@ function describeAdded(added: ReadonlyArray<ServiceId>): string {
  * @param status - The session's status.
  * @returns Such as `the compiler is ready, Rojo serves on port 34872`.
  */
-function describeParts({ services: { compiler, rojo } }: SessionStatus): string {
+function describeParts({ services: { compiler, rojo, studio } }: SessionStatus): string {
 	const parts: Array<string> = [];
 	if (compiler.status !== "off") {
 		parts.push(`the compiler is ${compiler.status}`);
@@ -152,6 +206,10 @@ function describeParts({ services: { compiler, rojo } }: SessionStatus): string 
 		parts.push(`Rojo serves on port ${rojo.port}`);
 	} else if (rojo.status !== "off") {
 		parts.push(`Rojo is ${rojo.status}`);
+	}
+
+	if (isRunning(studio.status)) {
+		parts.push(describeStudio(studio));
 	}
 
 	return parts.length === 0 ? "no part runs" : parts.join(", ");
@@ -258,12 +316,13 @@ function checkLaunched(context: CommandContext, state: UpState): void {
 		: failureError(result.error);
 }
 
-function runningParts(status: SessionStatus): Array<ServiceId> {
-	return SERVICE_IDS.filter((id) => status.services[id].status !== "off");
+function runningParts(status: SessionStatus): Array<PartId> {
+	return PART_IDS.filter((id) => isRunning(status.services[id].status));
 }
 
 /**
- * Ask a session this `up` did not start to add the parts it wants, once.
+ * Ask the session to add the parts `up` wants, once: a session this `up`
+ * did not start, and its own one for Studio, which it starts without.
  *
  * @param context - The seams.
  * @param state - Where `up` is; notes what was added.
@@ -271,15 +330,16 @@ function runningParts(status: SessionStatus): Array<ServiceId> {
  * @param found.session - Its identity record and token.
  * @param found.status - Its status, for its PID.
  * @returns Whether it asked now: the status it has is from before the add.
- * @rejects {ForgeError} The add's failure, such as `compiler_missing`;
- *   `not_running` passes as no answer.
+ * @rejects {ForgeError} The add's failure, such as `compiler_missing` or
+ *   `port_in_use`; `not_running` passes as no answer.
  */
 async function addOnceAsync(
 	context: CommandContext,
 	state: UpState,
 	{ session, status }: { session: KnownSession; status: SessionStatus },
 ): Promise<boolean> {
-	if (status.pid === state.launched?.pid || state.added !== undefined) {
+	const isOwn = status.pid === state.launched?.pid;
+	if ((isOwn && !state.wanted.parts.includes("studio")) || state.added !== undefined) {
 		return false;
 	}
 
@@ -324,10 +384,14 @@ async function probeReadyAsync(
 		forget(context, launched);
 	}
 
-	// Only a session this `up` did not start was asked to add parts.
+	// Every part of a session this `up` started is its own; any other session
+	// was asked.
+	const isStarted = found.status.pid === launched?.pid;
+	const added = isStarted ? runningParts(found.status) : state.added;
+	assert(added !== undefined);
 	return {
-		added: state.added ?? runningParts(found.status),
-		isStarted: found.status.pid === launched?.pid,
+		added,
+		isStarted,
 		status: found.status,
 	};
 }

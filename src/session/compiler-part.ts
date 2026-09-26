@@ -9,7 +9,7 @@ import type {
 	ServiceInvocation,
 	ServiceParts,
 } from "./service-parts.ts";
-import type { ServiceId } from "./status.ts";
+import type { PartId } from "./status.ts";
 
 /** The watch-mode compiler service of a session, resolved. */
 export interface CompilerService {
@@ -62,29 +62,33 @@ export async function startCompilerAsync(
 }
 
 /**
- * Add the parts a client asks for that are missing or failed: the compiler,
- * when the project has one and it does not run. A part that runs is never
- * touched.
+ * Add the parts a client asks for that are missing or failed: first the
+ * compiler, when the project has one and it does not run; then Studio and
+ * its Rojo, through `addStudio`. A part that runs is never touched.
  *
  * @param setup - The builds, reporter, and compiler resolution.
  * @param parts - The session's service parts.
+ * @param addStudio - Adds Studio and Rojo, once the compiler runs.
  * @returns The adder the control channel calls.
  */
-export function createPartAdder(setup: AdderSetup, parts: ServiceParts): PartAdder {
-	return async (wanted) => {
-		const added: Array<ServiceId> = [];
-		if (!wanted.includes("compiler") || parts.isRunning("compiler")) {
-			return added;
-		}
-
-		const compiler = setup.resolveCompiler();
+export function createPartAdder(
+	setup: AdderSetup,
+	parts: Pick<ServiceParts, "isRunning" | "startAsync">,
+	addStudio: PartAdder,
+): PartAdder {
+	return async (request) => {
+		const added: Array<PartId> = [];
+		const compiler =
+			request.parts.includes("compiler") && !parts.isRunning("compiler")
+				? setup.resolveCompiler()
+				: undefined;
 		const part =
 			compiler === undefined ? undefined : await startCompilerAsync(setup, parts, compiler);
 		if (part !== undefined) {
 			added.push("compiler");
 		}
 
-		return added;
+		return [...added, ...(await addStudio(request))];
 	};
 }
 

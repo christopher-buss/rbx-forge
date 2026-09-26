@@ -49,8 +49,13 @@ Error codes are stable: a code is never renamed or reused. The full list is in
    it the build of your edit; see below. `data.services.studio` has `status`
    (`opening`, `open`, `closed`, `off`), `place`, and, for a Studio forge
    started or attached, `pid` and `startTime`.
-4. To play, `forge open --json` opens the place in Studio; read the console with
-   the Roblox Studio MCP.
+4. To play, `forge up --studio --json` attaches Studio and Rojo to the session
+   (`data.added` names `studio` and `rojo` when it started them), and returns
+   once Rojo listens and Studio has the place open; read the console with the
+   Roblox Studio MCP. A Studio that has the place open already is used. A busy
+   configured `rojoPort` fails with `port_in_use`; with none set, the session
+   picks a port, in `data.services.rojo.port`. `forge open --json` opens the
+   place for a one-time look.
 5. `forge sync --json`: pull Studio edits into the project, with the syncback
    hooks. It waits for a running save-triggered run, then runs once more.
    Failures keep their code, with hook results in `error.details.hooks`.
@@ -71,9 +76,13 @@ has:
   `outputTail`, the last lines of its output. `forge logs <part>` has all of it.
 
 A service's exit stops only its part: the session and its other parts keep
-running. A second `forge up` starts a `failed` compiler again, as a new part.
-The phase is `ready` once the session started its parts and none is `starting`,
-also with a part `off` or `failed`. `data.services.studio` also has `owner`.
+running. A second `forge up` starts a `failed` compiler again, as a new part,
+and the `failed` Rojo of an attached Studio on the same port. When a Studio that
+`up --studio` attached closes the place, only its Rojo stops (`off`). The phase
+is `ready` once the session started its parts and none is `starting`, also with
+a part `off` or `failed`. `data.services.studio` also has `owner`.
+`data.services.rojo.port` is there once the session chose Rojo's port; it keeps
+it from then on.
 
 ## Fresh builds: `status --wait`
 

@@ -22,6 +22,7 @@ import { JOIN_SILENCE_MS, runUpAsync, UP_FLAGS, UP_POLL_MS, UP_TIMEOUT_MS } from
 
 const INPUT: CommandInput = { config: {}, flags: {} };
 const LAUNCH_DIRECTORY = path.join(PROJECT, ".forge", "launch");
+const PLACE = path.join(PROJECT, "game.rbxl");
 
 /** What each `sleep` of `up` runs, in order; later sleeps run nothing. */
 type Tick = () => Promise<void> | void;
@@ -37,7 +38,10 @@ interface UpRun {
 	writeReport: (request: SessionRequest, messages: ReadonlyArray<SupervisorMessage>) => void;
 }
 
-function makeUp(launch: (request: SessionRequest, up: UpRun) => number = () => 700) {
+function makeUp(
+	launch: (request: SessionRequest, up: UpRun) => number = () => 700,
+	input: CommandInput = INPUT,
+) {
 	const memory = createMemoryFileSystem();
 	const ipc = createMemoryTransport();
 	const reporter = createRecordingReporter();
@@ -81,7 +85,7 @@ function makeUp(launch: (request: SessionRequest, up: UpRun) => number = () => 7
 			randomId: () => "l1",
 		}),
 	});
-	return { run: async () => runUpAsync(context, INPUT), up };
+	return { run: async () => runUpAsync(context, input), up };
 }
 
 /**
@@ -111,10 +115,16 @@ function launchFiles(up: UpRun): Array<string> {
 }
 
 describe("up flags", () => {
-	it("should take --compiler, --force, and --syncback: no Studio, no Rojo", () => {
+	it("should take --compiler, --force, --studio, --studio-path, and --syncback", () => {
 		expect.assertions(1);
 
-		expect(UP_FLAGS.map(({ name }) => name)).toStrictEqual(["compiler", "force", "syncback"]);
+		expect(UP_FLAGS.map(({ name }) => name)).toStrictEqual([
+			"compiler",
+			"force",
+			"studio",
+			"studio-path",
+			"syncback",
+		]);
 	});
 });
 
@@ -293,6 +303,80 @@ describe(runUpAsync, () => {
 		await expect(run()).resolves.toMatchObject({
 			summary: "Found session s1 and started the compiler and Rojo: the compiler is ready.",
 		});
+	});
+
+	it("should start a session, then attach Studio and Rojo to it with --studio", async () => {
+		expect.assertions(2);
+
+		const asked: Array<unknown> = [];
+		const ready = compilerStatus("ready", { pid: 700 });
+		const attached: SessionStatus = {
+			...ready,
+			services: {
+				...ready.services,
+				rojo: { owner: null, port: 34_872, status: "ready" },
+				studio: { owner: null, place: PLACE, status: "open" },
+			},
+		};
+		const { run } = makeUp(
+			(_request, self) => {
+				self.ticks.push(async () => {
+					const session = await serveFakeSessionAsync(self.memory, self.ipc, ready);
+					session.addParts = (parameters) => {
+						asked.push(parameters);
+						session.status = attached;
+						return { added: ["studio", "rojo"] };
+					};
+				});
+				return 700;
+			},
+			{ config: {}, flags: { "studio": true, "studio-path": "Studio.exe" } },
+		);
+
+		await expect(run()).resolves.toStrictEqual({
+			data: { ...attached, added: ["compiler", "studio", "rojo"], started: true },
+			summary: `Started session s1: the compiler is ready, Rojo serves on port 34872, Studio has ${PLACE} open.`,
+		});
+		expect(asked).toStrictEqual([
+			{ parts: ["compiler", "studio"], studioPath: path.join(PROJECT, "Studio.exe") },
+		]);
+	});
+
+	it("should name a Studio that still opens the place, and none that closed it", async () => {
+		expect.assertions(2);
+
+		const { run, up } = makeUp(undefined, { config: {}, flags: { studio: true } });
+		const status = compilerStatus("ready");
+		const session = await serveFakeSessionAsync(up.memory, up.ipc, {
+			...status,
+			services: { ...status.services, studio: { owner: null, status: "opening" } },
+		});
+		const opening = await run();
+		session.status = {
+			...status,
+			services: { ...status.services, studio: { owner: null, status: "closed" } },
+		};
+		const closed = await run();
+
+		expect(opening.summary).toBe(
+			"Found session s1 and added no part: the compiler is ready, Studio is opening.",
+		);
+		expect(closed.summary).toBe("Found session s1 and added no part: the compiler is ready.");
+	});
+
+	it("should fail with usage for --studio-path without --studio, and start nothing", async () => {
+		expect.assertions(2);
+
+		const { run, up } = makeUp(undefined, {
+			config: {},
+			flags: { "studio-path": "Studio.exe" },
+		});
+
+		await expect(run()).rejects.toMatchObject({
+			code: "usage",
+			message: "--studio-path needs --studio.",
+		});
+		expect(up.detachedSupervisor).not.toHaveBeenCalled();
 	});
 
 	it("should fail with the session's failure to add a part", async () => {

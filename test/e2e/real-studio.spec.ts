@@ -28,7 +28,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 
 import { pinNow, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { makeFixtureAsync, START_STUDIO, startReadyAsync } from "./session-fixture.ts";
+import { makeFixtureAsync } from "./session-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
 const { env } = process;
@@ -121,6 +121,18 @@ async function makeRealProjectAsync(fixturePlace: string): Promise<Fixture> {
 }
 
 /**
+ * Start a session with `up --studio`, which opens the place in the
+ * installed Studio.
+ *
+ * @param fixture - The project.
+ * @returns The session's id.
+ */
+async function upStudioAsync(fixture: Fixture): Promise<string> {
+	const up = await runForgeAsync(fixture, ["up", "--studio", "--json"], realVariables(fixture));
+	return String(up.result.data!["sessionId"]);
+}
+
+/**
  * Wait until Studio has the place open (the session says so), and is free
  * of dialogs (such as "Opening place") for a while.
  *
@@ -164,7 +176,7 @@ async function waitForLoadedAsync(fixture: Fixture, sessionId: string): Promise<
 
 describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 	it(
-		"should open Studio directly with start, and close it with down",
+		"should open Studio directly with up --studio, and close it with down",
 		{ timeout: 240_000 },
 		async () => {
 			expect.assertions(4);
@@ -172,11 +184,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("saved.rbxl");
 			const started = Date.now();
-			const { sessionId } = await startReadyAsync(
-				fixture,
-				START_STUDIO,
-				realVariables(fixture),
-			);
+			const sessionId = await upStudioAsync(fixture);
 			const [recorded, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			const opened = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables(fixture));
@@ -196,7 +204,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 		killNewStudiosAtEnd();
 		const fixture = await makeRealProjectAsync("saved.rbxl");
-		const { sessionId } = await startReadyAsync(fixture, START_STUDIO, realVariables(fixture));
+		const sessionId = await upStudioAsync(fixture);
 		const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 		const loaded = Date.now();
 		const stop = await runForgeAsync(fixture, ["stop", "--json"], realVariables(fixture));
@@ -219,11 +227,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("unsaved.rbxl");
-			const { sessionId } = await startReadyAsync(
-				fixture,
-				START_STUDIO,
-				realVariables(fixture),
-			);
+			const sessionId = await upStudioAsync(fixture);
 			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			const loaded = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables(fixture));

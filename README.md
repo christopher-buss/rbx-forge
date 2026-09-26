@@ -66,14 +66,14 @@ The bins `forge` and `rbx-forge` are the same. Run forge from the project root.
 
 Session commands:
 
-| Command             | What it does                                                                                                                                                                               |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `forge start`       | Run the session in this terminal. Ctrl+C, a closed terminal, or a killed `start` stops every process of the session.                                                                       |
-| `forge up`          | Start a session in the background with the watch-mode compiler alone. Returns when its first compile is done, or it failed. On a running session, starts only the missing or failed parts. |
-| `forge status`      | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                          |
-| `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                                                                             |
-| `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                           |
-| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.                                                            |
+| Command             | What it does                                                                                                                                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `forge start`       | Run the session in this terminal. Ctrl+C, a closed terminal, or a killed `start` stops every process of the session.                                                                                                           |
+| `forge up`          | Start a session in the background with the watch-mode compiler. Returns when its first compile is done, or it failed. `--studio` also attaches Studio and Rojo. On a running session, starts only the missing or failed parts. |
+| `forge status`      | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                                                              |
+| `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                                                                                                                 |
+| `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                                                               |
+| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.                                                                                                |
 
 `start` runs the compiler, Rojo, and Studio. Its flags:
 
@@ -88,13 +88,19 @@ Session commands:
 - `--studio-path <path>`: the Roblox Studio executable to start (see
   [Opening Studio](./docs/studio.md#opening-studio)).
 
-`up` runs no Rojo and no Studio, and builds no place: it starts the watch-mode
-compiler, which does the first compile. A project with no compiler (Luau with no
-`luau.watch.command`) gets a session with no part. `up` takes `--syncback`,
-`--force`, and `--no-compiler` (start no part). On a running session, `up`
-starts the parts it asks for that are missing or failed, such as a compiler that
-crashed, and names them in `data.added`; it never stops or restarts a part that
-runs.
+`up` starts the watch-mode compiler, which does the first compile. A project
+with no compiler (Luau with no `luau.watch.command`) gets a session with no
+part. `up` takes `--syncback`, `--force`, and `--no-compiler` (start no part).
+On a running session, `up` starts the parts it asks for that are missing or
+failed, such as a compiler that crashed, or the Rojo of an attached Studio, and
+names them in `data.added`; it never stops or restarts a part that runs.
+
+`up --studio` also attaches Studio and Rojo, once the compiler's build is fresh:
+it uses the Studio that has the place open (verified as `stop` does), or builds
+the place and opens it (`--studio-path <path>` names the executable). Rojo
+serves on the session's port (see [`rojoPort`](./docs/config.md#rojoport)). It
+returns when Rojo listens and Studio has the place open. When that Studio closes
+the place, only its Rojo stops; the compiler runs on.
 
 `down` takes `--timeout <seconds>` (default 15), `--force` (kill a supervisor
 that does not stop, and what is left of its session, each verified),
@@ -146,7 +152,6 @@ export default defineConfig({
 		syncback: { post: ["pnpm eslint --fix src"] },
 	},
 	projectType: "rbxts",
-	rojoPort: 34872,
 	syncback: { runOnStart: true },
 });
 ```
@@ -165,8 +170,9 @@ stable, and each maps to one exit code. The loop:
 3. `forge status --json --wait` gives the compile errors with file, line, and
    column. `--wait` waits for the compile of your edit, so the result is never
    the build before it.
-4. To play, open the place with `forge open --json`, and read the console with
-   the Roblox Studio MCP.
+4. To play, `forge up --studio --json` attaches Studio and Rojo to the session;
+   read the console with the Roblox Studio MCP. For a one-time look,
+   `forge open --json` opens the place.
 5. `forge sync --json` pulls Studio edits into the project.
 6. `forge down --json` stops the session.
 

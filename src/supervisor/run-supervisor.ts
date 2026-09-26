@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import type { CommandContext } from "../commands/context.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
-import { ForgeError } from "../errors.ts";
 import { resolveInvocation } from "../process/run-tool.ts";
 import type { ReaperEnd } from "../reaper/reaper-client.ts";
+import type { RojoPort } from "../rojo/rojo-port.ts";
+import { createRojoPort, DEFAULT_ROJO_PORT } from "../rojo/rojo-port.ts";
 import { rojoInvocation, rojoServeArgs } from "../rojo/rojo.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
@@ -18,6 +19,7 @@ import type { SessionPlan } from "../session/plan.ts";
 import { compilerWatch, planSession } from "../session/plan.ts";
 import type { SessionOutcome } from "../session/run-session.ts";
 import { runSessionAsync } from "../session/run-session.ts";
+import type { ServiceInvocation } from "../session/service-parts.ts";
 import type { SessionSetup } from "../session/session-body.ts";
 import { createSessionBody } from "../session/session-body.ts";
 import type { SessionSync } from "../session/session-sync.ts";
@@ -64,7 +66,7 @@ export interface SupervisorOptions {
 /** The services of a session, resolved before it starts. */
 type SessionServices = Pick<
 	SessionSetup,
-	"compiler" | "config" | "context" | "plan" | "resolveCompiler" | "rojo"
+	"compiler" | "config" | "context" | "plan" | "resolveCompiler" | "resolveRojo"
 >;
 
 /** One session's config, files, and resolved services. */
@@ -76,6 +78,8 @@ interface OwnSession {
 	forge: ForgeFiles;
 	/** Links `forge up` on the control channel to the session body. */
 	parts: PartRequests;
+	/** Rojo's port, chosen once and kept. */
+	rojoPort: RojoPort;
 	services: SessionServices;
 	status: StatusStore;
 	/** Links `forge sync` on the control channel to the session body. */
@@ -96,7 +100,7 @@ interface OwnSession {
  *    lease is free and a scan finds none), and delete those sessions'
  *    directories. With `request.force`, an older session that outlives the
  *    bound is cleaned up by force first.
- * 4. Check the fixed Rojo port, when the session serves Rojo.
+ * 4. Choose Rojo's port, when the session serves Rojo (`rojo/rojo-port.ts`).
  * 5. Create the session directory: write-once identity record, token,
  *    `current`. Open the control endpoint (`status`, `freshStatus`,
  *    `addParts`, `sync`, `shutdown`), and keep `state.json` up to date.
@@ -113,7 +117,7 @@ interface OwnSession {
  * @param request - What `start` asked for.
  * @param options - Stop requests, pause points, and version.
  * @returns The stop reason and every worker's report, once all are gone.
- * @rejects {ForgeError} `session_running`; `previous_generation_alive`;
+ * @rejects `session_running`; `previous_generation_alive`;
  *   `cleanup_unverifiable` (only with `force`); `port_in_use`; `rojo_missing`
  *   or `compiler_missing`; a step's failure (such as `compile_failed` or
  *   `hook_failed`);
@@ -208,23 +212,24 @@ function identityOf(
 }
 
 /**
- * Step 4 of {@link runSupervisorAsync}: a session that serves Rojo needs its
- * fixed port free.
+ * Step 4 of {@link runSupervisorAsync}: the session's Rojo port, chosen now
+ * when the session serves Rojo from the start, else at its first attach.
  *
- * @param network - Checks the port.
+ * @param network - Checks and finds ports.
  * @param services - The plan and the config's port.
- * @rejects {ForgeError} `port_in_use`.
+ * @returns The port, kept for the session's life.
+ * @rejects `port_in_use` when the configured port is busy.
  */
-async function requireFreePortAsync(
+async function sessionPortAsync(
 	network: Network,
 	{ config, plan }: SessionServices,
-): Promise<void> {
-	const port = config.rojoPort;
-	if (plan.rojo && !(await network.isPortFreeAsync(port))) {
-		throw new ForgeError("port_in_use", `Rojo port ${port} is in use.`, {
-			hint: "Stop the program that uses it, or set rojoPort to a free port.",
-		});
+): Promise<RojoPort> {
+	const port = createRojoPort(network, config.rojoPort);
+	if (plan.rojo) {
+		await port.chooseAsync();
 	}
+
+	return port;
 }
 
 /**
@@ -271,7 +276,7 @@ async function clearOldAsync(
 async function runSessionOnceAsync(
 	seams: CommandContext["seams"],
 	{ pause, stop }: SupervisorOptions,
-	{ builds, config, files, forge, parts, services, status, sync }: OwnSession,
+	{ builds, config, files, forge, parts, rojoPort, services, status, sync }: OwnSession,
 ): Promise<SessionOutcome> {
 	try {
 		return await runSessionAsync(
@@ -289,6 +294,7 @@ async function runSessionOnceAsync(
 				builds,
 				directory: files.directory,
 				parts,
+				rojoPort,
 				status,
 				sync,
 			}),
@@ -316,7 +322,7 @@ async function runOpenSessionAsync(
 	session: OwnSession,
 	cleanups: Array<ForcedCleanup>,
 ): Promise<CommandResult> {
-	const { config, files, forge, status } = session;
+	const { files, forge, rojoPort, status } = session;
 	const { end, reason } = await runSessionOnceAsync(seams, options, session);
 	status.phase("stopping");
 	const { escalation } = end;
@@ -326,8 +332,9 @@ async function runOpenSessionAsync(
 
 	await finalBarrierAsync(seams, forge, files, end.reports);
 	status.phase("stopped");
+	const port = rojoPort.value();
 	return endedResult(reason, {
-		port: config.rojoPort,
+		...(port === undefined ? {} : { port }),
 		reports: end.reports,
 		...(cleanups.length > 0 ? { cleanups } : {}),
 		...(escalation === undefined ? {} : { escalation }),
@@ -373,7 +380,7 @@ async function runLockedAsync(
 		force,
 		signal: options.stop.signal,
 	});
-	await requireFreePortAsync(context.seams.network, services);
+	const rojoPort = await sessionPortAsync(context.seams.network, services);
 	const late = stopped(options.stop);
 	if (late !== undefined) {
 		return late;
@@ -387,11 +394,11 @@ async function runLockedAsync(
 		identity: identityOf(context, config, options.version),
 		onReady: options.onReady,
 		pause: async () => options.pause("control", options.stop.signal),
-		port: config.rojoPort,
+		port: rojoPort.value(),
 		stop: options.stop,
 	});
 	try {
-		const session = { ...links, builds, config, files, forge, services, status };
+		const session = { ...links, builds, config, files, forge, rojoPort, services, status };
 		return await runOpenSessionAsync(context, options, session, cleanups);
 	} finally {
 		// A body that never ran syncback, or never started its parts, leaves
@@ -408,7 +415,7 @@ async function runLockedAsync(
  * @param context - The project root, environment, and seams.
  * @param config - The resolved config.
  * @returns The compiler service, or `undefined` when the project has none.
- * @throws {ForgeError} `compiler_missing`.
+ * @throws `compiler_missing`.
  */
 function resolveCompiler(
 	context: CommandContext,
@@ -431,28 +438,42 @@ function resolveCompiler(
 
 /**
  * Find Rojo and the compiler the session starts with before anything starts,
- * so a missing tool fails first.
+ * so a missing tool fails first. Rojo is resolved again on its port once
+ * the session chose it.
  *
  * @param context - The project root, environment, and seams.
  * @param config - The resolved config.
  * @param plan - What the session runs.
  * @returns The session, without its directory.
- * @throws {ForgeError} `rojo_missing` or `compiler_missing`.
+ * @throws `rojo_missing` or `compiler_missing`.
  */
 function resolveServices(
 	context: CommandContext,
 	config: ResolvedConfig,
 	plan: SessionPlan,
 ): SessionServices {
-	const rojo = plan.rojo
-		? rojoInvocation(context, config, rojoServeArgs(config.rojoProjectPath, config.rojoPort))
-		: undefined;
+	/**
+	 * `rojo serve` on a port.
+	 *
+	 * @param port - Where Rojo serves.
+	 * @returns Its service.
+	 * @throws `rojo_missing`.
+	 */
+	function resolveRojo(port: number): ServiceInvocation {
+		const rojo = rojoInvocation(context, config, rojoServeArgs(config.rojoProjectPath, port));
+		return { ...rojo, id: "rojo", step: "rojo serve" };
+	}
+
+	if (plan.rojo) {
+		resolveRojo(config.rojoPort ?? DEFAULT_ROJO_PORT);
+	}
+
 	return {
 		compiler: plan.compiler === undefined ? undefined : resolveCompiler(context, config),
 		config,
 		context,
 		plan,
 		resolveCompiler: () => resolveCompiler(context, config),
-		rojo: rojo === undefined ? undefined : { ...rojo, id: "rojo", step: "rojo serve" },
+		resolveRojo,
 	};
 }
