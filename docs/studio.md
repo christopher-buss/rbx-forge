@@ -1,17 +1,17 @@
 # Studio
 
-How `open`, `start`, and `up` open Roblox Studio, how `stop` and `down` close
-it, and what forge does with Studio's auto-recovery files.
+How `open` and `start` open Roblox Studio, how `stop` and `down` close it, and
+what forge does with Studio's auto-recovery files.
 
 ## Opening Studio
 
-`open`, `start`, and `up` start the Studio executable directly, with the place
-as its only argument, as a double-click on the place does. Studio runs outside
-every process group and job of forge, so it outlives forge. The session records
-the Studio process's PID and start time, so `stop` and `down` can verify it
-later. forge finds the executable in this order:
+`open` and `start` start the Studio executable directly, with the place as its
+only argument, as a double-click on the place does. Studio runs outside every
+process group and job of forge, so it outlives forge. The session records the
+Studio process's PID and start time, so `stop` and `down` can verify it later.
+forge finds the executable in this order:
 
-1. `--studio-path <path>` (`open`, `start`, `up`).
+1. `--studio-path <path>` (`open`, `start`).
 2. The `RBX_FORGE_STUDIO_PATH` environment variable (empty means unset).
 3. Windows: the command that opens `roblox-studio:` links
    (`HKCU\Software\Classes\roblox-studio\shell\open\command`), then the command
@@ -25,11 +25,11 @@ When forge finds no executable, or the terminal's job forbids breakaway
 `xdg-open`). The session then has no PID for Studio, and finds it only through
 the place's lock file.
 
-`start` and `up` attach a Studio that already has the place open, as after
-Ctrl+C on `start`: when the place's lock file names a Studio that `stop` would
-verify (see [Closing Studio](#closing-studio)), the session records that Studio,
-builds nothing into the place, and opens no second Studio. The session ends when
-the lock file goes or names another process.
+`start` attaches a Studio that already has the place open, as after Ctrl+C on
+`start`: when the place's lock file names a Studio that `stop` would verify (see
+[Closing Studio](#closing-studio)), the session records that Studio, builds
+nothing into the place, and opens no second Studio. The session ends when the
+lock file goes or names another process.
 
 ## Closing Studio
 

@@ -2,6 +2,8 @@ import { ForgeError } from "../errors.ts";
 import type { IpcServerOptions } from "../ipc/server.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
+import type { PartRequests } from "../session/part-requests.ts";
+import { parseAddableParts } from "../session/part-requests.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { StatusStore } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
@@ -9,6 +11,7 @@ import type { StopSource } from "../session/stop-source.ts";
 /** What the control channel of one session reaches. */
 export interface ControlTarget {
 	builds: Pick<BuildWatch, "tick" | "waitAsync">;
+	parts: Pick<PartRequests, "addAsync">;
 	sessionId: string;
 	status: Pick<StatusStore, "snapshot">;
 	stop: Pick<StopSource, "request">;
@@ -18,6 +21,10 @@ export interface ControlTarget {
 /**
  * The methods a session serves on its control channel:
  *
+ * - `addParts`: start the parts in the `parts` param (`compiler`) that are
+ *   missing or failed; a part that runs is never touched. Waits until the
+ *   session has started its own parts, and answers once the new ones run,
+ *   with `added`: the parts it started.
  * - `status`: the state contract (`session/status.ts`).
  * - `freshStatus`: the state contract once the compiler's last build is
  *   fresh (`session/build-watch.ts`), waiting up to the `timeoutMs` param
@@ -32,12 +39,13 @@ export interface ControlTarget {
  *   with the save watch. Answers once the run ended,
  *   with what was synced and each hook result, or with the run's failure.
  *
- * @param target - The session's builds, id, status, stop requests, and
- *   syncback.
+ * @param target - The session's builds, parts, id, status, stop requests,
+ *   and syncback.
  * @returns The handlers of the session.
  */
 export function controlHandlers(target: ControlTarget): IpcServerOptions["handlers"] {
 	return {
+		addParts: async ({ parts }) => addPartsAsync(target, parts),
 		freshStatus: async ({ timeoutMs }) => {
 			await target.builds.waitAsync(
 				typeof timeoutMs === "number" && timeoutMs >= 0
@@ -65,6 +73,14 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 		status: () => snapshot(target),
 		sync: async () => target.sync.runAsync(),
 	};
+}
+
+async function addPartsAsync(
+	target: ControlTarget,
+	parts: unknown,
+): Promise<Record<string, unknown>> {
+	const added = await target.parts.addAsync(parseAddableParts(parts));
+	return { added };
 }
 
 function snapshot({ builds, status }: ControlTarget): Record<string, unknown> {

@@ -18,7 +18,7 @@ import { realTransport } from "../helpers/native-testing.ts";
 import { isProcessAlive } from "../helpers/worker-log.ts";
 import { launch, makeProjectAsync, waitForAsync, workersOf } from "./session-harness.ts";
 
-const WITH_COMPILER: SessionRequest = { compiler: true, config: {}, open: false };
+const WITH_COMPILER: SessionRequest = { compiler: true, config: {}, open: false, rojo: true };
 const POLL_MS = 50;
 const WAIT_MS = 20_000;
 
@@ -27,8 +27,8 @@ const WAIT_MS = 20_000;
  * with code 7 after 1.5 s, and wait until that part has failed.
  *
  * @param role - `rojo` or `rbxtsc`.
- * @returns The status once the part failed, the live workers by role, and
- *   how the supervisor ends.
+ * @returns The status once the part failed, the live workers by role, how
+ *   the supervisor ends, and how to ask it.
  */
 async function crashAsync(role: string) {
 	const project = await makeProjectAsync({ projectType: "rbxts" });
@@ -56,7 +56,36 @@ async function crashAsync(role: string) {
 	const alive = workersOf(project, session.identity.sessionId)
 		.filter(({ pid }) => isProcessAlive(pid))
 		.map(({ args, role: name }) => (args.includes("-w") ? `${name} -w` : name));
-	return { alive, run, status };
+	/**
+	 * Ask the session to add the compiler.
+	 *
+	 * @returns Its answer, and its status after the add.
+	 */
+	async function addCompilerAsync() {
+		const answer = await callSessionAsync(transport, target, "addParts", {
+			params: { parts: ["compiler"] },
+			responseTimeoutMs: WAIT_MS,
+		});
+		const after = parseStatus(await callSessionAsync(transport, target, "status"));
+		assert(after !== undefined, "expected a status");
+		return { after, answer };
+	}
+
+	/**
+	 * Wait until the compiler has started twice.
+	 *
+	 * @returns Its starts.
+	 */
+	async function secondCompilerAsync() {
+		return waitForAsync(() => {
+			const starts = workersOf(project, session.identity.sessionId).filter(
+				({ args, role: name }) => name === "rbxtsc" && args.includes("-w"),
+			);
+			return starts.length >= 2 ? starts : undefined;
+		});
+	}
+
+	return { addCompilerAsync, alive, run, secondCompilerAsync, status };
 }
 
 describe("a service's exit", () => {
@@ -105,5 +134,20 @@ describe("a service's exit", () => {
 		});
 		expect(status.services.compiler.outputTail).toContain("rbxtsc exits on its own");
 		expect(alive).toContain("rojo");
+	}, 60_000);
+
+	it("should start the failed compiler again on addParts, as a new part", async () => {
+		expect.assertions(4);
+
+		const { addCompilerAsync, run, secondCompilerAsync } = await crashAsync("rbxtsc");
+		const { after, answer } = await addCompilerAsync();
+		const starts = await secondCompilerAsync();
+		run.stop("SIGINT");
+
+		expect(answer).toStrictEqual({ added: ["compiler"] });
+		// The new part is not the failed one: no exit code, no output tail.
+		expect(after.services.compiler).toMatchObject({ owner: null, status: "starting" });
+		expect(after.services.compiler).not.toHaveProperty("exitCode");
+		expect(starts).toHaveLength(2);
 	}, 60_000);
 });

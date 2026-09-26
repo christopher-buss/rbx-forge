@@ -1,12 +1,14 @@
 import path from "node:path";
 
-import { probeSessionAsync } from "../client/session.ts";
+import type { FlagDefinition } from "../cli/flags.ts";
+import type { KnownSession } from "../client/session.ts";
+import { addPartsAsync, probeSessionAsync } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { PinnedProcess } from "../native/addon.ts";
 import type { CommandResult } from "../seams/reporter.ts";
-import type { SessionStatus } from "../session/status.ts";
+import type { AddablePart } from "../session/part-requests.ts";
+import type { ServiceId, SessionStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
-import { withStudioPath } from "../studio/discover.ts";
 import type { SessionRequest, SupervisorMessage } from "../supervisor/channel.ts";
 import { failureError, parseMessage } from "../supervisor/channel.ts";
 import type { ForgeFiles } from "../supervisor/session-files.ts";
@@ -14,11 +16,17 @@ import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 import { START_FLAGS } from "./start.ts";
 
-/** `up` takes the flags of `start`. */
-export const UP_FLAGS: typeof START_FLAGS = START_FLAGS;
+export const UP_FLAGS: ReadonlyArray<FlagDefinition> = [
+	{
+		name: "compiler",
+		kind: "boolean",
+		text: "Run the compiler in watch mode (the default); --no-compiler starts no part.",
+	},
+	...START_FLAGS.filter(({ name }) => name === "force" || name === "syncback"),
+];
 
 /**
- * How long `up` waits for a session to be ready: compile and build included.
+ * How long `up` waits for a session to be ready: the first compile included.
  */
 export const UP_TIMEOUT_MS = 300_000;
 /**
@@ -31,11 +39,17 @@ export const UP_POLL_MS = 100;
 
 type ResultMessage = Extract<SupervisorMessage, { type: "result" }>;
 
-/** A ready session, and whether this `up` started it. */
+/** A ready session, the parts this `up` started, and whether it started it. */
 interface Ready {
+	added: Array<ServiceId>;
 	isStarted: boolean;
 	status: SessionStatus;
 }
+
+/** The parts `up` names, in the order a session starts them. */
+const SERVICE_IDS: ReadonlyArray<ServiceId> = ["compiler", "rojo"];
+
+const PART_NAMES: Readonly<Record<ServiceId, string>> = { compiler: "the compiler", rojo: "Rojo" };
 
 /** A supervisor this `up` started, and its report file. */
 interface Launched {
@@ -48,63 +62,99 @@ interface Launched {
 
 /** Where one `up` is. */
 interface UpState {
+	/**
+	 * The parts a session this `up` did not start added for it; unset until
+	 * it asked.
+	 */
+	added: Array<ServiceId> | undefined;
 	deadline: number;
 	/** When a session last answered, or when `up` began to wait for one. */
 	lastAnswer: number;
 	launched: Launched | undefined;
 	relaunched: boolean;
+	/** The parts `up` asks for. */
+	wanted: ReadonlyArray<AddablePart>;
 }
 
 /**
- * `forge up`: start the dev session in the background and return once no
- * part starts: Rojo serves or stopped, and the compiler finished its first
- * compile or stopped. The session runs in a detached supervisor
- * (`supervisor/detached-launcher.ts`) until `forge down` or until Studio
- * closes the place; a failed service stops only its part.
+ * `forge up`: start the dev session in the background with the watch-mode
+ * compiler alone, and return once no part starts: the compiler finished its
+ * first compile or stopped. The session runs in a detached supervisor
+ * (`supervisor/detached-launcher.ts`) until `forge down`; a failed service
+ * stops only its part. A project with no compiler gets a session with no
+ * part.
  *
- * It is idempotent: when a session runs, it reports that session instead
- * (`started: false`); when one is starting, it waits for it. Two `up`s at
- * once start one session: the second supervisor finds the singleton lock
- * taken, and its `up` waits for the first one's session.
+ * It is idempotent: when a session runs, it starts only the parts that are
+ * missing or failed, reports them in `added`, and never touches a part that
+ * runs (`started: false`); when one is starting, it waits for it. Two `up`s
+ * at once start one session: the second supervisor finds the singleton lock
+ * taken, and its `up` joins the first one's session.
  *
- * @param command - The run: project root, environment, seams, and reporter.
- * @param input - The parsed flags (as `start`).
- * @returns The session's status, and whether this `up` started it.
+ * @param context - The run: project root, environment, seams, and reporter.
+ * @param input - The parsed flags.
+ * @returns The session's status, the parts this `up` started, and whether
+ *   it started the session.
  * @rejects {ForgeError} `detach_unsupported` when the host forbids a
  *   detached process; the session's own startup failure (such as
- *   `port_in_use` or `compile_failed`); `supervisor_unresponsive` when it is
- *   not ready in time.
+ *   `compiler_missing`); `supervisor_unresponsive` when it is not ready in
+ *   time.
  */
 export async function runUpAsync(
-	command: CommandContext,
+	context: CommandContext,
 	input: CommandInput,
 ): Promise<CommandResult> {
-	const { cwd, env, seams } = command;
-	// The session reads `--studio-path` from its environment.
-	const context = { ...command, env: withStudioPath(env, cwd, seams.host.platform, input.flags) };
 	const { clock } = context.seams;
 	const request: SessionRequest = {
 		compiler: input.flags["compiler"] !== false,
 		config: input.config,
-		open: input.flags["open"] !== false,
+		open: false,
+		rojo: false,
 	};
 	const found = await probeSessionAsync(context.seams, forgeFiles(context.cwd));
 	const now = clock.now();
 	const state: UpState = {
+		added: undefined,
 		deadline: now + UP_TIMEOUT_MS,
 		lastAnswer: now,
 		launched:
 			found === undefined ? launch(context, forgeFiles(context.cwd), request) : undefined,
 		relaunched: false,
+		wanted: request.compiler ? ["compiler"] : [],
 	};
-	const { isStarted, status } = await waitReadyAsync(context, request, state);
-	const { rojo } = status.services;
-	const serving =
-		rojo.status === "ready" ? `Rojo serves on port ${rojo.port}` : `Rojo is ${rojo.status}`;
+	const { added, isStarted, status } = await waitReadyAsync(context, request, state);
+	const session = isStarted
+		? `Started session ${status.sessionId}`
+		: `Found session ${status.sessionId} and ${describeAdded(added)}`;
 	return {
-		data: { ...status, started: isStarted },
-		summary: `${isStarted ? "Started" : "Found"} session ${status.sessionId}: ${serving}.`,
+		data: { ...status, added, started: isStarted },
+		summary: `${session}: ${describeParts(status)}.`,
 	};
+}
+
+function describeAdded(added: ReadonlyArray<ServiceId>): string {
+	const names = added.map((id) => PART_NAMES[id]);
+	return names.length === 0 ? "added no part" : `started ${names.join(" and ")}`;
+}
+
+/**
+ * Say where each part that runs is.
+ *
+ * @param status - The session's status.
+ * @returns Such as `the compiler is ready, Rojo serves on port 34872`.
+ */
+function describeParts({ services: { compiler, rojo } }: SessionStatus): string {
+	const parts: Array<string> = [];
+	if (compiler.status !== "off") {
+		parts.push(`the compiler is ${compiler.status}`);
+	}
+
+	if (rojo.status === "ready") {
+		parts.push(`Rojo serves on port ${rojo.port}`);
+	} else if (rojo.status !== "off") {
+		parts.push(`Rojo is ${rojo.status}`);
+	}
+
+	return parts.length === 0 ? "no part runs" : parts.join(", ");
 }
 
 /**
@@ -208,12 +258,52 @@ function checkLaunched(context: CommandContext, state: UpState): void {
 		: failureError(result.error);
 }
 
+function runningParts(status: SessionStatus): Array<ServiceId> {
+	return SERVICE_IDS.filter((id) => status.services[id].status !== "off");
+}
+
 /**
- * Ask the project's session for its status.
+ * Ask a session this `up` did not start to add the parts it wants, once.
+ *
+ * @param context - The seams.
+ * @param state - Where `up` is; notes what was added.
+ * @param found - The session that answered, and its status.
+ * @param found.session - Its identity record and token.
+ * @param found.status - Its status, for its PID.
+ * @returns Whether it asked now: the status it has is from before the add.
+ * @rejects {ForgeError} The add's failure, such as `compiler_missing`;
+ *   `not_running` passes as no answer.
+ */
+async function addOnceAsync(
+	context: CommandContext,
+	state: UpState,
+	{ session, status }: { session: KnownSession; status: SessionStatus },
+): Promise<boolean> {
+	if (status.pid === state.launched?.pid || state.added !== undefined) {
+		return false;
+	}
+
+	const waitMs = state.deadline - context.seams.clock.now();
+	try {
+		state.added = await addPartsAsync(context.seams.ipc, session, state.wanted, waitMs);
+	} catch (err) {
+		// The session ended meanwhile: wait for the next one, as for silence.
+		if (!(err instanceof ForgeError) || err.code !== "not_running") {
+			throw err;
+		}
+	}
+
+	return true;
+}
+
+/**
+ * Ask the project's session for its status. A session this `up` did not
+ * start is first asked to add the parts `up` wants.
  *
  * @param context - The seams.
  * @param state - Where `up` is; notes the answer.
  * @returns The status once the session is ready, else `undefined`.
+ * @rejects {ForgeError} As {@link addOnceAsync}.
  */
 async function probeReadyAsync(
 	context: CommandContext,
@@ -225,7 +315,7 @@ async function probeReadyAsync(
 	}
 
 	state.lastAnswer = context.seams.clock.now();
-	if (!isReady(found.status)) {
+	if ((await addOnceAsync(context, state, found)) || !isReady(found.status)) {
 		return undefined;
 	}
 
@@ -234,7 +324,12 @@ async function probeReadyAsync(
 		forget(context, launched);
 	}
 
-	return { isStarted: found.status.pid === launched?.pid, status: found.status };
+	// Only a session this `up` did not start was asked to add parts.
+	return {
+		added: state.added ?? runningParts(found.status),
+		isStarted: found.status.pid === launched?.pid,
+		status: found.status,
+	};
 }
 
 function unresponsive(what: string): ForgeError {

@@ -27,7 +27,7 @@ import { isProcessAlive, readWorkerLog, waitForDeathAsync } from "../helpers/wor
 
 const SUPERVISOR = path.join(import.meta.dirname, "..", "..", "src", "supervisor.ts");
 const PATH_NAME = /^path$/i;
-const ROJO_ONLY: SessionRequest = { compiler: false, config: {}, open: false };
+const ROJO_ONLY: SessionRequest = { compiler: false, config: {}, open: false, rojo: true };
 const WAIT_MS = 20_000;
 const native = loadRealNative();
 

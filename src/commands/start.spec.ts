@@ -52,7 +52,7 @@ describe(runStartAsync, () => {
 			{
 				cwd: PROJECT,
 				env: { PATH: "/bin" },
-				request: { compiler: true, config: { rojoPort: 5000 }, open: true },
+				request: { compiler: true, config: { rojoPort: 5000 }, open: true, rojo: true },
 			},
 		]);
 		expect(bare.launches[0]!.request).toMatchObject({ compiler: false, open: false });
@@ -69,11 +69,13 @@ describe(runStartAsync, () => {
 			config: { rojoPort: 5000 },
 			force: true,
 			open: true,
+			rojo: true,
 		});
 		expect(plain.launches[0]!.request).toStrictEqual({
 			compiler: true,
 			config: { rojoPort: 5000 },
 			open: true,
+			rojo: true,
 		});
 	});
 

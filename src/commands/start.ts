@@ -59,6 +59,7 @@ export async function runStartAsync(
 			compiler: input.flags["compiler"] !== false,
 			config: input.config,
 			open: input.flags["open"] !== false,
+			rojo: true,
 			...(input.flags["force"] === true ? { force: true } : {}),
 		},
 	});

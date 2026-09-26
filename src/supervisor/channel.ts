@@ -20,7 +20,7 @@ import type { StopRequest } from "../session/stop-source.ts";
  *   result.
  */
 
-/** What session `start` asks for. */
+/** What session `start` or `up` asks for. */
 export interface SessionRequest {
 	/** `--no-compiler` sets it to `false`. */
 	compiler: boolean;
@@ -37,8 +37,10 @@ export interface SessionRequest {
 	 * bound is cleaned up by force.
 	 */
 	force?: boolean;
-	/** `--no-open` sets it to `false`. */
+	/** `start --no-open` sets it to `false`; `up` never opens Studio. */
 	open: boolean;
+	/** Serve Rojo: `start` does, `up` does not. */
+	rojo: boolean;
 }
 
 /** A failed session, as the supervisor reports it. */
@@ -101,6 +103,7 @@ const requestSchema = jsonLine.pipe(
 		"detached?": { report: "string" },
 		"force?": "boolean",
 		"open": "boolean",
+		"rojo": "boolean",
 	}),
 );
 
@@ -145,6 +148,7 @@ export function parseSessionRequest(text: string | undefined): SessionRequest {
 		config,
 		...(parsed.detached === undefined ? {} : { detached: parsed.detached }),
 		open: parsed.open,
+		rojo: parsed.rojo,
 		...(parsed.force === true ? { force: true } : {}),
 	};
 }

@@ -5,7 +5,8 @@ import { callSessionAsync } from "../ipc/client.ts";
 import { IPC_WAIT_MS } from "../ipc/protocol.ts";
 import type { IpcTransport } from "../ipc/transport.ts";
 import type { FileSystem } from "../seams/file-system.ts";
-import type { SessionStatus } from "../session/status.ts";
+import type { AddablePart } from "../session/part-requests.ts";
+import type { ServiceId, SessionStatus } from "../session/status.ts";
 import { parseStatus } from "../session/status.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "../supervisor/session-files.ts";
 import { sessionFiles } from "../supervisor/session-files.ts";
@@ -106,6 +107,46 @@ export async function fetchStatusAsync(
 	}
 
 	return status;
+}
+
+const addedResult = type({ added: "('compiler' | 'rojo')[]" });
+
+/**
+ * Ask a session to start the parts that are missing or failed.
+ *
+ * @param ipc - Reaches its endpoint.
+ * @param session - Its identity record and token.
+ * @param parts - The parts to add.
+ * @param waitMs - How long the answer may take: the session answers once it
+ *   has started its own parts and then the new ones.
+ * @returns The parts it started.
+ * @rejects {ForgeError} As {@link fetchStatusAsync}; the add's own failure,
+ *   such as `compiler_missing`.
+ */
+export async function addPartsAsync(
+	ipc: IpcTransport,
+	session: KnownSession,
+	parts: ReadonlyArray<AddablePart>,
+	waitMs: number,
+): Promise<Array<ServiceId>> {
+	const result = await callSessionAsync(
+		ipc,
+		{ endpoint: session.identity.endpoint, token: session.token },
+		"addParts",
+		{ params: { parts }, responseTimeoutMs: waitMs },
+	);
+	const parsed = addedResult(result);
+	if (parsed instanceof type.errors) {
+		throw new ForgeError(
+			"internal_error",
+			"The session answered addParts with something else.",
+			{
+				hint: "The session may run another forge version. Stop it, then start it again.",
+			},
+		);
+	}
+
+	return parsed.added;
 }
 
 /**

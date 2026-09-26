@@ -169,6 +169,7 @@ function requestFor(flags: FlagValues): SessionRequest {
 		compiler: flags["compiler"] !== false,
 		config: flags["syncback"] === true ? { syncback: { runOnStart: true } } : {},
 		open: flags["open"] !== false,
+		rojo: flags["rojo"] !== false,
 		...(flags["force"] === true ? { force: true } : {}),
 	};
 }
@@ -2096,6 +2097,236 @@ describe("forge up control channel", () => {
 });
 
 /** A sync call that may take as long as the test needs. */
+/** What `forge up` asks for: the compiler, no Studio, no Rojo. */
+const UP: FlagValues = { open: false, rojo: false };
+const ADD_CALL = { params: { parts: ["compiler"] }, responseTimeoutMs: 60_000 };
+
+/**
+ * Ask the session to add the compiler.
+ *
+ * @param run - The session.
+ * @returns The answer, or the failure it rejected with.
+ */
+async function addCompilerAsync(run: StartRun): Promise<unknown> {
+	const answer = callSessionAsync(run.ipc, CONTROL_TARGET, "addParts", ADD_CALL).catch(
+		(err: unknown) => err,
+	);
+	await passAsync(run, OUTPUT_POLL_MS);
+	return answer;
+}
+
+/**
+ * Ask the session for a fresh build within 1 ms.
+ *
+ * @param run - The session.
+ * @returns The failure it rejected with, or its answer.
+ */
+async function freshWithinAsync(run: StartRun): Promise<unknown> {
+	const waiting = callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", {
+		params: { timeoutMs: 1 },
+	}).catch((err: unknown) => err);
+	await flushAsync();
+	run.clock.advance(1);
+	return waiting;
+}
+
+describe("forge up parts", () => {
+	it("should start only the compiler for up: no compile or build step, no Rojo, no port check", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ flags: UP, projectType: "rbxts" });
+		await flushAsync();
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(spawnedIds(run.fake)).toStrictEqual(["compiler: -w"]);
+		expect(run.isPortFreeAsync).not.toHaveBeenCalled();
+		expect(state).toMatchObject({
+			phase: "starting",
+			services: {
+				compiler: { status: "starting" },
+				rojo: { port: 4000, status: "off" },
+				studio: { status: "off" },
+			},
+		});
+	});
+
+	it("should be ready at once with no part in a Luau project with no watch command", async () => {
+		expect.assertions(3);
+
+		const onReady = vi.fn<() => void>();
+		const run = startCommand({ flags: UP, onReady });
+		await flushAsync();
+		const state = stateOf(run);
+		const fresh = await freshWithinAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(state).toMatchObject({
+			phase: "ready",
+			services: { compiler: { status: "off" }, rojo: { status: "off" } },
+		});
+		expect(fresh).toMatchObject({ services: { compiler: { status: "off" } } });
+		expect(onReady).toHaveBeenCalledOnce();
+	});
+
+	it("should start the compiler again once it failed, and wait for its new first build", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({ flags: UP, projectType: "rbxts" });
+		await flushAsync();
+		run.fake.exit("compiler", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const answer = await addCompilerAsync(run);
+		const state = stateOf(run);
+		const fresh = await freshWithinAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: ["compiler"] });
+		expect(spawnedIds(run.fake)).toStrictEqual(["compiler: -w", "compiler: -w"]);
+		expect(state).toMatchObject({
+			phase: "starting",
+			services: { compiler: { status: "starting" } },
+		});
+		// The failure of the compiler before is gone: the wait is for a build.
+		expect(fresh).toMatchObject({ code: "compile_timeout" });
+	});
+
+	it("should read only the output of the compiler that runs now", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: UP, projectType: "rbxts" });
+		const spool = path.join(SESSION, "output", "compiler.log");
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(spool, "Found 3 errors. Watching for file changes.\n");
+		await passAsync(run, OUTPUT_POLL_MS);
+		run.fake.exit("compiler", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await addCompilerAsync(run);
+		run.memory.fileSystem.writeFileSync(spool, "Found 0 errors. Watching for file changes.\n", {
+			flag: "a",
+		});
+		await passAsync(run, OUTPUT_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect({
+			compiled: run.reporter.events.filter(({ type }) => type === "compiled"),
+			state,
+		}).toMatchObject({
+			compiled: [{ errors: 3 }, { errors: 0 }],
+			state: {
+				phase: "ready",
+				services: { compiler: { lastBuild: { errors: 0 }, status: "ready" } },
+			},
+		});
+	});
+
+	it("should add nothing while every part it asks for runs", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ flags: UP, projectType: "rbxts" });
+		await flushAsync();
+		const answer = await addCompilerAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: [] });
+		expect(spawnedIds(run.fake)).toStrictEqual(["compiler: -w"]);
+	});
+
+	it("should add the compiler to a session that started without it", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ projectType: "rbxts" });
+		await flushAsync();
+		const before = await freshWithinAsync(run);
+		const answer = await addCompilerAsync(run);
+		const after = await freshWithinAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: ["compiler"] });
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"rojo: serve default.project.json --port 4000",
+			"compiler: -w",
+		]);
+		expect([before, after]).toMatchObject([
+			{ services: { compiler: { status: "off" } } },
+			{ code: "compile_timeout" },
+		]);
+	});
+
+	it("should add a Luau watch command, which is ready once it runs", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			file: { luau: { watch: { command: "darklua" } } },
+			files: { ...TOOL_FILES, "tools/darklua": "" },
+			flags: { ...UP, compiler: false },
+		});
+		await flushAsync();
+		const answer = await addCompilerAsync(run);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: ["compiler"] });
+		expect(state).toMatchObject({
+			phase: "ready",
+			services: { compiler: { status: "ready" } },
+		});
+	});
+
+	it("should add no compiler to a project that has none", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		const answer = await addCompilerAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: [] });
+		expect(spawnedIds(run.fake)).toStrictEqual([]);
+	});
+
+	it("should fail with compiler_missing when the compiler is gone since the session started", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: UP, projectType: "rbxts" });
+		await flushAsync();
+		run.fake.exit("compiler", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		run.memory.fileSystem.rmSync(path.join(TOOLS, "rbxtsc"));
+		const answer = await addCompilerAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toMatchObject({ code: "compiler_missing" });
+	});
+
+	it("should answer not_running when the session stops before its parts started", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			flags: { open: false },
+			oneShot: oneShotsWith({ "start-1": "hold" }),
+			projectType: "rbxts",
+		});
+		await flushAsync();
+		const answer = callSessionAsync(run.ipc, CONTROL_TARGET, "addParts", ADD_CALL);
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await run.result.catch(ignoreFailure);
+
+		await expect(answer).rejects.toMatchObject({ code: "not_running" });
+	});
+});
+
 const SYNC_CALL = { responseTimeoutMs: 60_000 };
 const LINT_HOOK: StartSetup = {
 	file: { hooks: { syncback: { post: ["lint"] } } },

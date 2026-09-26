@@ -11,12 +11,14 @@ import {
 	createTestSeams,
 	PROJECT,
 } from "../../test/helpers/seams.ts";
+import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
+import type { SessionStatus } from "../session/status.ts";
 import type { SessionRequest, SupervisorMessage } from "../supervisor/channel.ts";
 import { encodeMessage } from "../supervisor/channel.ts";
 import type { DetachedLaunch, DetachedLauncher } from "../supervisor/detached-launcher.ts";
 import type { CommandInput } from "./context.ts";
-import { JOIN_SILENCE_MS, runUpAsync, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
+import { JOIN_SILENCE_MS, runUpAsync, UP_FLAGS, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
 
 const INPUT: CommandInput = { config: {}, flags: {} };
 const LAUNCH_DIRECTORY = path.join(PROJECT, ".forge", "launch");
@@ -82,9 +84,39 @@ function makeUp(launch: (request: SessionRequest, up: UpRun) => number = () => 7
 	return { run: async () => runUpAsync(context, INPUT), up };
 }
 
+/**
+ * The status of a session with the compiler alone.
+ *
+ * @param compiler - The compiler part's status.
+ * @param overrides - Other fields to change.
+ * @returns A session that runs no Rojo.
+ */
+function compilerStatus(
+	compiler: SessionStatus["services"]["compiler"]["status"],
+	overrides: Partial<SessionStatus> = {},
+): SessionStatus {
+	const status = makeStatus(overrides);
+	return {
+		...status,
+		services: {
+			...status.services,
+			compiler: { building: false, owner: null, status: compiler },
+			rojo: { owner: null, port: 34_872, status: "off" },
+		},
+	};
+}
+
 function launchFiles(up: UpRun): Array<string> {
 	return Object.keys(up.memory.files()).filter((file) => file.startsWith(".forge/launch/"));
 }
+
+describe("up flags", () => {
+	it("should take --compiler, --force, and --syncback: no Studio, no Rojo", () => {
+		expect.assertions(1);
+
+		expect(UP_FLAGS.map(({ name }) => name)).toStrictEqual(["compiler", "force", "syncback"]);
+	});
+});
 
 describe(runUpAsync, () => {
 	it("should start a detached session, relay its events, and return once it is ready", async () => {
@@ -95,14 +127,15 @@ describe(runUpAsync, () => {
 				{ event: { message: "compiling", type: "info" }, type: "event" },
 			]);
 			self.ticks.push(async () => {
-				await serveFakeSessionAsync(self.memory, self.ipc, makeStatus({ pid: 700 }));
+				const status = compilerStatus("ready", { pid: 700 });
+				await serveFakeSessionAsync(self.memory, self.ipc, status);
 			});
 			return 700;
 		});
 
 		await expect(run()).resolves.toStrictEqual({
-			data: { ...makeStatus({ pid: 700 }), started: true },
-			summary: "Started session s1: Rojo serves on port 34872.",
+			data: { ...compilerStatus("ready", { pid: 700 }), added: ["compiler"], started: true },
+			summary: "Started session s1: the compiler is ready.",
 		});
 		expect(up.detachedSupervisor).toHaveBeenCalledExactlyOnceWith({
 			cwd: PROJECT,
@@ -111,7 +144,8 @@ describe(runUpAsync, () => {
 				compiler: true,
 				config: {},
 				detached: { report: path.join(LAUNCH_DIRECTORY, "l1.ndjson") },
-				open: true,
+				open: false,
+				rojo: false,
 			},
 		});
 		expect(up.reporter.events).toStrictEqual([{ message: "compiling", type: "info" }]);
@@ -141,7 +175,7 @@ describe(runUpAsync, () => {
 		expect(up.reporter.events).toStrictEqual([{ message: "half", type: "info" }]);
 	});
 
-	it("should pass --no-compiler, --no-open, and the flags' config on", async () => {
+	it("should pass --no-compiler and the flags' config on, with no Studio and no Rojo", async () => {
 		expect.assertions(1);
 
 		const { up } = makeUp((_request, self) => {
@@ -162,49 +196,123 @@ describe(runUpAsync, () => {
 		});
 		await runUpAsync(context, {
 			config: { syncback: { runOnStart: true } },
-			flags: { compiler: false, open: false },
+			flags: { compiler: false },
 		});
 
-		expect(up.detachedSupervisor.mock.calls[0]![0].request).toMatchObject({
+		expect(up.detachedSupervisor.mock.calls[0]![0].request).toStrictEqual({
 			compiler: false,
 			config: { syncback: { runOnStart: true } },
+			detached: { report: path.join(LAUNCH_DIRECTORY, "l1.ndjson") },
 			open: false,
+			rojo: false,
 		});
 	});
 
-	it("should report a running session instead of starting a second one", async () => {
+	it("should add the compiler a running session misses, and wait until it is ready", async () => {
+		expect.assertions(4);
+
+		const { run, up } = makeUp();
+		const session = await serveFakeSessionAsync(up.memory, up.ipc, compilerStatus("failed"));
+		const asked: Array<unknown> = [];
+		session.addParts = (parameters) => {
+			asked.push(parameters);
+			session.status = compilerStatus("starting", { phase: "starting" });
+			return { added: ["compiler"] };
+		};
+
+		up.ticks.push(() => {
+			session.status = compilerStatus("ready");
+		});
+
+		await expect(run()).resolves.toStrictEqual({
+			data: { ...compilerStatus("ready"), added: ["compiler"], started: false },
+			summary: "Found session s1 and started the compiler: the compiler is ready.",
+		});
+		expect(asked).toStrictEqual([{ parts: ["compiler"] }]);
+		expect(up.detachedSupervisor).not.toHaveBeenCalled();
+		expect(up.now()).toBe(UP_POLL_MS);
+	});
+
+	it("should ask a running session for no part with --no-compiler", async () => {
+		expect.assertions(2);
+
+		const { up } = makeUp();
+		const session = await serveFakeSessionAsync(up.memory, up.ipc, compilerStatus("off"));
+		const asked: Array<unknown> = [];
+		session.addParts = (parameters) => {
+			asked.push(parameters);
+			return { added: [] };
+		};
+
+		const context = createCommandContext({
+			seams: createTestSeams({ fileSystem: up.memory.fileSystem, ipc: up.ipc }),
+		});
+
+		await expect(
+			runUpAsync(context, { config: {}, flags: { compiler: false } }),
+		).resolves.toMatchObject({
+			summary: "Found session s1 and added no part: no part runs.",
+		});
+		expect(asked).toStrictEqual([{ parts: [] }]);
+	});
+
+	it("should name each part that runs, and how", async () => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp();
-		await serveFakeSessionAsync(up.memory, up.ipc);
+		const status = makeStatus();
+		const failed = { exitCode: 1, outputTail: [], owner: null, status: "failed" as const };
+		const session = await serveFakeSessionAsync(
+			up.memory,
+			up.ipc,
+			makeStatus({
+				services: {
+					...status.services,
+					compiler: { ...failed, building: false },
+					rojo: { ...failed, port: 1 },
+				},
+			}),
+		);
+		const both = await run();
+		session.status = makeStatus();
+		const rojo = await run();
 
-		await expect(run()).resolves.toStrictEqual({
-			data: { ...makeStatus(), started: false },
-			summary: "Found session s1: Rojo serves on port 34872.",
-		});
-		expect(up.detachedSupervisor).not.toHaveBeenCalled();
+		expect(both.summary).toBe(
+			"Found session s1 and added no part: the compiler is failed, Rojo is failed.",
+		);
+		expect(rojo.summary).toBe("Found session s1 and added no part: Rojo serves on port 34872.");
 	});
 
-	it("should name Rojo's status when it does not serve", async () => {
+	it("should fail with the session's failure to add a part", async () => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp();
-		const status = makeStatus();
-		const rojo = {
-			...status.services.rojo,
-			exitCode: 1,
-			outputTail: [],
-			status: "failed" as const,
+		const session = await serveFakeSessionAsync(up.memory, up.ipc, compilerStatus("off"));
+		session.addParts = () => {
+			throw new ForgeError("compiler_missing", "rbxtsc is missing.");
 		};
-		await serveFakeSessionAsync(
-			up.memory,
-			up.ipc,
-			makeStatus({ services: { ...status.services, rojo } }),
-		);
 
-		await expect(run()).resolves.toMatchObject({
-			summary: "Found session s1: Rojo is failed.",
+		await expect(run()).rejects.toMatchObject({ code: "compiler_missing" });
+	});
+
+	it("should wait on when the session stops while it adds, and ask the next one once", async () => {
+		expect.assertions(2);
+
+		const { run, up } = makeUp();
+		const session = await serveFakeSessionAsync(up.memory, up.ipc, compilerStatus("off"));
+		const answers = [
+			() => {
+				throw new ForgeError("not_running", "The session is stopping; it adds no parts.");
+			},
+			() => ({ added: [] }),
+		];
+		session.addParts = () => answers.shift()!();
+		up.ticks.push(() => {
+			session.status = compilerStatus("ready");
 		});
+
+		await expect(run()).resolves.toMatchObject({ data: { added: [], started: false } });
+		expect(answers).toStrictEqual([]);
 	});
 
 	it("should wait for a session that is starting instead of starting one", async () => {
@@ -261,6 +369,29 @@ describe(runUpAsync, () => {
 
 		await expect(run()).resolves.toMatchObject({ data: { pid: 800, started: false } });
 		expect(launchFiles(up)).toStrictEqual([]);
+	});
+
+	it("should ask another session that is ready before its own supervisor reported to add parts", async () => {
+		expect.assertions(1);
+
+		const { run } = makeUp((_request, self) => {
+			self.ticks.push(async () => {
+				const other = await serveFakeSessionAsync(
+					self.memory,
+					self.ipc,
+					compilerStatus("off", { pid: 800 }),
+				);
+				other.addParts = () => {
+					other.status = compilerStatus("ready", { pid: 800 });
+					return { added: ["compiler"] };
+				};
+			});
+			return 700;
+		});
+
+		await expect(run()).resolves.toMatchObject({
+			data: { added: ["compiler"], pid: 800, started: false },
+		});
 	});
 
 	it("should fail with not_running when the session ended before it was ready", async () => {

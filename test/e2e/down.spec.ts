@@ -1,7 +1,7 @@
 /**
- * `forge down` as a real process against a detached session with fake Rojo
- * and the real reaper. Only NDJSON output, exit codes, files, and the process
- * table are checked.
+ * `forge down` as a real process against a session with fake Rojo, compiler,
+ * and Studio, and the real reaper. Only NDJSON output, exit codes, files, and
+ * the process table are checked.
  */
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -18,12 +18,17 @@ import {
 	waitForWorkersAsync,
 } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { closedOnRequest, IS_MACOS, IS_WINDOWS, makeFixtureAsync } from "./session-fixture.ts";
-import { runForgeAsync, UP_ROJO_ONLY } from "./up-fixture.ts";
+import {
+	closedOnRequest,
+	IS_MACOS,
+	IS_WINDOWS,
+	makeFixtureAsync,
+	START_STUDIO,
+	startReadyAsync,
+} from "./session-fixture.ts";
+import { runForgeAsync, UP, WATCH_COMMAND } from "./up-fixture.ts";
 
 const DOWN = ["down", "--json"];
-/** Rojo and Studio: the open step builds the place first. */
-const UP_STUDIO = ["up", "--no-compiler", "--json"];
 /** How long a dead process may stay a zombie before its parent reaps it. */
 const REAP_MS = 2000;
 /**
@@ -88,8 +93,8 @@ async function waitForStudioOpenAsync(fixture: Fixture, sessionId: unknown): Pro
 }
 
 /**
- * Start a detached session whose stand-in Studio has the place open, and a
- * second stand-in Studio with another place open.
+ * Start a session whose stand-in Studio has the place open, and a second
+ * stand-in Studio with another place open.
  *
  * @param variables - Fixture variables for the session and its Studio.
  * @returns The fixture, the session id, the session's Studio PID, and the
@@ -105,8 +110,7 @@ async function upWithStudioAsync(variables: Record<string, string> = {}): Promis
 }> {
 	const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
 	const other = await openStudioStandInAsync(path.join(fixture.project, "other.rbxl"));
-	const up = await runForgeAsync(fixture, UP_STUDIO, variables);
-	const { sessionId } = up.result.data!;
+	const { sessionId } = await startReadyAsync(fixture, START_STUDIO, variables);
 	const recorded = await waitForStudioOpenAsync(fixture, sessionId);
 	const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
 	return { fixture, other: pidOf(other), recorded, sessionId, studio: studio!.pid };
@@ -178,7 +182,7 @@ describe("forge down", () => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
-		await runForgeAsync(fixture, UP_STUDIO, { FIXTURE_STUDIO_LOCK_DELAY_MS: "3000" });
+		await startReadyAsync(fixture, START_STUDIO, { FIXTURE_STUDIO_LOCK_DELAY_MS: "3000" });
 		const down = await runForgeAsync(fixture, DOWN);
 		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
 
@@ -239,8 +243,8 @@ describe("forge down", () => {
 	it("should stop a detached session and report stopped only once every process is gone", async () => {
 		expect.assertions(4);
 
-		const fixture = await makeFixtureAsync();
-		const up = await runForgeAsync(fixture, UP_ROJO_ONLY, { FIXTURE_GRANDCHILDREN: "2" });
+		const fixture = await makeFixtureAsync(WATCH_COMMAND);
+		const up = await runForgeAsync(fixture, UP, { FIXTURE_GRANDCHILDREN: "2" });
 		const { pid, sessionId } = up.result.data!;
 		const records = await waitForWorkersAsync(fixture.log, 3, 30_000);
 		const workers = records.map((record) => record.pid);
@@ -266,9 +270,9 @@ describe("forge down", () => {
 	it("should report a hung supervisor as unresponsive, then kill it with --force", async () => {
 		expect.assertions(4);
 
-		const fixture = await makeFixtureAsync();
+		const fixture = await makeFixtureAsync(WATCH_COMMAND);
 		const pauses = makeTemporaryDirectory();
-		const up = await runForgeAsync(fixture, UP_ROJO_ONLY, {
+		const up = await runForgeAsync(fixture, UP, {
 			RBX_FORGE_TEST_PAUSE: "block",
 			RBX_FORGE_TEST_PAUSE_DIR: pauses,
 		});

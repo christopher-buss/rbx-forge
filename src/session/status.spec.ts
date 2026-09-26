@@ -10,16 +10,26 @@ const START: StatusStart = {
 	open: true,
 	pid: 42,
 	port: 34_872,
+	rojo: true,
 	sessionId: "s1",
 	startedAt: AT,
 	syncback: true,
 };
 
-function makeStore(start: StatusStart = START) {
+function makeStoreBeforeStart(start: StatusStart) {
 	const onChange = vi.fn<(status: SessionStatus) => void>();
 	const store = createStatusStore(start, () => NOW, onChange);
 	return { onChange, store };
 }
+
+function makeStore(start: StatusStart = START) {
+	const made = makeStoreBeforeStart(start);
+	made.store.started();
+	made.onChange.mockClear();
+	return made;
+}
+
+const NO_PARTS: StatusStart = { ...START, compiler: false, open: false, rojo: false };
 
 describe(createStatusStore, () => {
 	it("should start with every planned service starting and the rest off", () => {
@@ -30,6 +40,7 @@ describe(createStatusStore, () => {
 			...START,
 			compiler: false,
 			open: false,
+			rojo: false,
 			syncback: false,
 		});
 
@@ -48,10 +59,23 @@ describe(createStatusStore, () => {
 		});
 		expect(bare.snapshot().services).toStrictEqual({
 			compiler: { building: false, owner: null, status: "off" },
-			rojo: { owner: null, port: 34_872, status: "starting" },
+			rojo: { owner: null, port: 34_872, status: "off" },
 			studio: { owner: null, status: "off" },
 			syncback: { status: "off" },
 		});
+	});
+
+	it("should stay starting until the session started its parts, then be ready with none", () => {
+		expect.assertions(3);
+
+		const { onChange, store } = makeStoreBeforeStart(NO_PARTS);
+		store.syncbackStarted();
+		const before = store.snapshot().phase;
+		store.started();
+
+		expect(before).toBe("starting");
+		expect(isReady(store.snapshot())).toBeTrue();
+		expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "ready" }));
 	});
 
 	it("should be ready once Rojo serves and the compiler finished its first compile", () => {

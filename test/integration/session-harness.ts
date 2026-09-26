@@ -33,7 +33,7 @@ const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fak
 const PATH_NAME = /^path$/i;
 const POLL_MS = 50;
 const WAIT_MS = 30_000;
-export const ROJO_ONLY: SessionRequest = { compiler: false, config: {}, open: false };
+export const ROJO_ONLY: SessionRequest = { compiler: false, config: {}, open: false, rojo: true };
 export const native = loadRealNative();
 
 export interface Project {

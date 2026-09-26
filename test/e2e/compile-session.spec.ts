@@ -29,7 +29,7 @@ describe("forge compile with a running session", () => {
 		expect.assertions(5);
 
 		const { fixture, watched } = await watchedFixtureAsync();
-		const up = await runForgeAsync(fixture, ["up", "--no-open", "--json"], {
+		const up = await runForgeAsync(fixture, ["up", "--json"], {
 			FIXTURE_COMPILER_WATCH: watched,
 		});
 		const runs = compilerRuns(fixture);
@@ -56,7 +56,7 @@ describe("forge compile with a running session", () => {
 		expect.assertions(3);
 
 		const { fixture } = await watchedFixtureAsync();
-		await runForgeAsync(fixture, ["up", "--no-open", "--no-compiler", "--json"]);
+		await runForgeAsync(fixture, ["up", "--no-compiler", "--json"]);
 		const compile = await runForgeAsync(fixture, ["compile", "--json"]);
 
 		expect(compile.status).toBe(EXIT_FAILURE);

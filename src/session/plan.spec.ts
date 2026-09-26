@@ -5,7 +5,7 @@ import type { ConfigLayer, ProjectType } from "../config/schema.ts";
 import { COMPILER_MISSING_HINT, planSession } from "./plan.ts";
 import type { SessionFlags } from "./plan.ts";
 
-const ALL: SessionFlags = { compiler: true, open: true };
+const ALL: SessionFlags = { compiler: true, open: true, rojo: true };
 
 function plan(projectType: ProjectType, flags: SessionFlags = ALL, layer: ConfigLayer = {}) {
 	return planSession(resolveConfig({ projectType }, layer), flags);
@@ -31,6 +31,7 @@ describe(planSession, () => {
 			compile: true,
 			compiler: RBXTSC,
 			open: true,
+			rojo: true,
 			syncback: false,
 		});
 	});
@@ -46,11 +47,12 @@ describe(planSession, () => {
 	it("should run only Rojo with --no-open --no-compiler", () => {
 		expect.assertions(1);
 
-		expect(plan("rbxts", { compiler: false, open: false })).toStrictEqual({
+		expect(plan("rbxts", { compiler: false, open: false, rojo: true })).toStrictEqual({
 			build: false,
 			compile: false,
 			compiler: undefined,
 			open: false,
+			rojo: true,
 			syncback: false,
 		});
 	});
@@ -58,10 +60,32 @@ describe(planSession, () => {
 	it("should run the compiler without Studio with --no-open", () => {
 		expect.assertions(1);
 
-		expect(plan("rbxts", { compiler: true, open: false })).toMatchObject({
+		expect(plan("rbxts", { compiler: true, open: false, rojo: true })).toMatchObject({
 			build: true,
 			compile: true,
 			open: false,
+		});
+	});
+
+	it("should run only the compiler, with no compile or build step, for up", () => {
+		expect.assertions(1);
+
+		expect(plan("rbxts", { compiler: true, open: false, rojo: false })).toStrictEqual({
+			build: false,
+			compile: false,
+			compiler: RBXTSC,
+			open: false,
+			rojo: false,
+			syncback: false,
+		});
+	});
+
+	it("should build for Studio without Rojo", () => {
+		expect.assertions(1);
+
+		expect(plan("rbxts", { compiler: true, open: true, rojo: false })).toMatchObject({
+			build: true,
+			compile: true,
 		});
 	});
 
@@ -90,6 +114,7 @@ describe(planSession, () => {
 				parsesDiagnostics: false,
 			},
 			open: true,
+			rojo: true,
 			syncback: false,
 		});
 	});

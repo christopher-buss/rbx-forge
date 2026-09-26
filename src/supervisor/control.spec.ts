@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ForgeError } from "../errors.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
+import type { PartRequests } from "../session/part-requests.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { SessionStatus } from "../session/status.ts";
 import { createStatusStore } from "../session/status.ts";
@@ -17,6 +18,7 @@ function makeTarget() {
 			open: false,
 			pid: 7,
 			port: 1,
+			rojo: true,
 			sessionId: "s1",
 			startedAt: "2026-01-01T00:00:00.000Z",
 			syncback: false,
@@ -25,14 +27,17 @@ function makeTarget() {
 		vi.fn<(next: SessionStatus) => void>(),
 	);
 	const runAsync = vi.fn<SessionSync["runAsync"]>().mockResolvedValue({ input: "game.rbxl" });
+	const addAsync = vi.fn<PartRequests["addAsync"]>().mockResolvedValue(["compiler"]);
 	const builds = {
 		tick: vi.fn<BuildWatch["tick"]>(),
 		waitAsync: vi.fn<BuildWatch["waitAsync"]>().mockResolvedValue(),
 	};
 	return {
+		addAsync,
 		builds,
 		handlers: controlHandlers({
 			builds,
+			parts: { addAsync },
 			sessionId: "s1",
 			status,
 			stop: { request },
@@ -139,6 +144,31 @@ describe(controlHandlers, () => {
 		);
 		expect(request).not.toHaveBeenCalled();
 	});
+
+	it("should answer addParts with the parts the session started", async () => {
+		expect.assertions(2);
+
+		const { addAsync, handlers } = makeTarget();
+
+		await expect(handlers.addParts!({ parts: ["compiler"] })).resolves.toStrictEqual({
+			added: ["compiler"],
+		});
+		expect(addAsync).toHaveBeenCalledExactlyOnceWith(["compiler"]);
+	});
+
+	it.for([[{}], [{ parts: "compiler" }], [{ parts: ["studio"] }]] as const)(
+		"should refuse addParts params %j with usage",
+		async ([parameters]) => {
+			expect.assertions(3);
+
+			const { addAsync, handlers } = makeTarget();
+			const added = handlers.addParts!(parameters);
+
+			await expect(added).rejects.toMatchObject({ code: "usage" });
+			await expect(added).rejects.toThrow("addParts takes a list of parts: ");
+			expect(addAsync).not.toHaveBeenCalled();
+		},
+	);
 
 	it("should answer sync with the session's syncback run", async () => {
 		expect.assertions(2);

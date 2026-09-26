@@ -282,6 +282,59 @@ describe(createBuildWatch, () => {
 		await expect(wait().wait).rejects.toMatchObject({ code: "service_failed" });
 	});
 
+	it("should wait for the first build of a compiler that starts again after a failure", async () => {
+		expect.assertions(2);
+
+		const { advanceAsync, lineAsync, wait, watch } = await builtAsync();
+		watch.fail(new ForgeError("service_failed", "The compiler exited."));
+		watch.restart();
+		const waiting = wait();
+		await advanceAsync(QUIET_WINDOW_MS);
+		const isEarly = waiting.settled();
+		await lineAsync(START);
+		await lineAsync(FOUND);
+		await advanceAsync(QUIET_WINDOW_MS);
+
+		// The old compiler's build is not the new one's.
+		expect(isEarly).toBeFalse();
+		await expect(waiting.wait).resolves.toBeUndefined();
+	});
+
+	it("should answer a wait from before the compiler started with its first build", async () => {
+		expect.assertions(1);
+
+		const { advanceAsync, lineAsync, wait, watch } = makeWatch();
+		const waiting = wait();
+		await advanceAsync(1000);
+		watch.restart();
+		await lineAsync(START);
+		await lineAsync(FOUND);
+		await advanceAsync(QUIET_WINDOW_MS);
+
+		await expect(waiting.wait).resolves.toBeUndefined();
+	});
+
+	it("should wait for the builds of a compiler added to a session that tracked none", async () => {
+		expect.assertions(1);
+
+		const { advanceAsync, wait, watch } = makeWatch(false);
+		watch.restart();
+		const waiting = wait(2000);
+		await advanceAsync(2000);
+
+		await expect(waiting.wait).rejects.toMatchObject({ code: "compile_timeout" });
+	});
+
+	it("should stay closed when a compiler starts once the session stops", async () => {
+		expect.assertions(1);
+
+		const { wait, watch } = makeWatch();
+		watch.close();
+		watch.restart();
+
+		await expect(wait().wait).rejects.toMatchObject({ code: "not_running" });
+	});
+
 	it("should tell when the quiet window is longer than the wait", async () => {
 		expect.assertions(1);
 

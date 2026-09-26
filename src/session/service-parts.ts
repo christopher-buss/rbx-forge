@@ -42,6 +42,8 @@ export interface RunningPart {
  * `failed` and leaves the session and the other parts running.
  */
 export interface ServiceParts {
+	/** Whether a part's service runs: started, and its tree not gone yet. */
+	isRunning: (id: ServiceId) => boolean;
 	/**
 	 * Start a service as its part, through the reaper.
 	 *
@@ -98,6 +100,7 @@ interface PartRun {
 export function createServiceParts(setup: PartsSetup, scope: SessionScope): ServiceParts {
 	const running = new Map<ServiceId, PartRun>();
 	return {
+		isRunning: (id) => running.has(id),
 		startAsync: async (service, hooks) => {
 			const started = await spawnAsync(setup, scope, service, hooks);
 			if (started === undefined) {
@@ -146,6 +149,8 @@ async function spawnAsync(
 	const spoolDirectory = path.join(setup.directory, "output");
 	const spool = path.join(spoolDirectory, `${service.id}.log`);
 	fileSystem.mkdirSync(spoolDirectory, { recursive: true });
+	// The reaper appends: a part that starts again reads only its own output.
+	fileSystem.rmSync(spool, { force: true });
 	const log = openLogFile(fileSystem, logFilePath(cwd, service.id));
 	const startedAt = new Date(clock.now());
 	log.write(`--- forge start ${startedAt.toISOString()} ---`);
