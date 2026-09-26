@@ -32,7 +32,8 @@ export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
 /**
  * `forge restart`: restart every part of the project's session that the
  * caller may touch. The session closes its Studio without a save (as
- * `stop` does), stops Rojo and the compiler, and waits until the reaper
+ * `stop` does; a Studio it cannot close fails the restart before any
+ * part stops), stops Rojo and the compiler, and waits until the reaper
  * reports each tree gone; then it starts the compiler again, and, once the
  * compiler's first build is done, builds the place, opens it in a new
  * Studio, and serves Rojo on the same port. A failed compiler starts again
@@ -48,9 +49,9 @@ export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
  * @rejects {ForgeError} `not_running` when no session runs or it stops
  *   meanwhile; `cleanup_in_progress` when an old tree is not proven gone
  *   (nothing started again); Studio's close failure, such as
- *   `identity_mismatch`; the add's failure, such as `compiler_missing` or
- *   `port_in_use`; `supervisor_unresponsive` when it is not ready in time;
- *   config errors from `loadProjectConfigAsync`.
+ *   `identity_mismatch` (nothing stopped or started); the add's failure, such
+ *   as `compiler_missing` or `port_in_use`; `supervisor_unresponsive` when it
+ *   is not ready in time; config errors from `loadProjectConfigAsync`.
  */
 export async function runRestartAsync(
 	context: CommandContext,
@@ -73,7 +74,11 @@ export async function runRestartAsync(
 	);
 	const outcome = restarts.studio;
 	if (outcome !== undefined && "error" in outcome) {
-		throw failureError(outcome.error);
+		const { message } = outcome.error;
+		throw failureError({
+			...outcome.error,
+			message: `${message} forge closed no Studio and restarted no part.`,
+		});
 	}
 
 	const status = await waitReadyAsync(context, session);

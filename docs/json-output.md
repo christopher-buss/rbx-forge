@@ -208,5 +208,6 @@ It restarts only the parts that run with no owner (all with `--force`), and a
 opens once the compiler's first build is done; Rojo keeps its port. Failures:
 `not_running` (exit 3) with no session; `cleanup_in_progress` (exit 6,
 `details.parts`) when a stopped service's process tree is not proven gone, with
-nothing started again; Studio's close failure, such as `identity_mismatch`; an
-add failure, such as `compiler_missing` or `port_in_use`.
+nothing started again; Studio's close failure, such as `identity_mismatch`, with
+no part stopped or started; an add failure, such as `compiler_missing` or
+`port_in_use`.

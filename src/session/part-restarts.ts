@@ -82,7 +82,9 @@ export function createPartRestarter(
 		const { services } = setup.status.snapshot();
 		const stops = await restart.stop({ force, keepStudio: false, recovery, scope: "restart" });
 		requireGone(restart.parts, stops.stopped);
-		const parts = restartedParts(services, stops.stopped, force);
+		// A Studio it cannot close holds the restart: nothing starts again.
+		const isHeld = stops.studio !== undefined && "error" in stops.studio;
+		const parts = isHeld ? [] : restartedParts(services, stops.stopped, force);
 		const added = parts.length === 0 ? [] : await restart.add({ parts, studioPath });
 		return {
 			added,

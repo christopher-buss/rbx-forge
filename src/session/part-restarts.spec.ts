@@ -134,6 +134,27 @@ describe(createPartRestarter, () => {
 		expect(add).not.toHaveBeenCalled();
 	});
 
+	it("should start nothing, not even a failed compiler, when it cannot close Studio", async () => {
+		expect.assertions(2);
+
+		const studio = {
+			error: { code: "identity_mismatch", message: "Not Studio." },
+			place: "/p/game.rbxl",
+		};
+		const { add, restart } = makeRestarter(
+			{ ending: false, kept: [], stopped: [], studio },
+			{ services: servicesWith(FAILED) },
+		);
+
+		await expect(restart({ force: false })).resolves.toStrictEqual({
+			added: [],
+			kept: [],
+			stopped: [],
+			studio,
+		});
+		expect(add).not.toHaveBeenCalled();
+	});
+
 	it("should start a failed compiler with no owner again", async () => {
 		expect.assertions(1);
 

@@ -230,12 +230,14 @@ describe(runRestartAsync, () => {
 		expect(waits).toContain(STOP_PARTS_WAIT_MS + 1234 + UP_TIMEOUT_MS);
 	});
 
-	it("should fail as Studio's close failed", async () => {
+	it("should fail as Studio's close failed, and say it restarted nothing", async () => {
 		expect.assertions(1);
 
 		const run = makeRestart();
 		await serveAsync(run, {
-			...EVERY_PART,
+			added: [],
+			kept: [],
+			stopped: [],
 			studio: {
 				error: { code: "identity_mismatch", hint: "Close it.", message: "Not Studio." },
 				place: PLACE,
@@ -245,7 +247,7 @@ describe(runRestartAsync, () => {
 		await expect(restartAsync(run)).rejects.toMatchObject({
 			code: "identity_mismatch",
 			hint: "Close it.",
-			message: "Not Studio.",
+			message: "Not Studio. forge closed no Studio and restarted no part.",
 		});
 	});
 

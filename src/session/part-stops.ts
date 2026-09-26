@@ -217,10 +217,11 @@ export function createPartStopper(
 		}
 
 		const isStudioGone = studio?.isGone === true;
-		const serviceParts = await stopServicesAsync(stopper, request.scope, {
-			isStudioGone,
-			stop,
-		});
+		// A restart that cannot close Studio touches no service.
+		const isHeld = request.scope === "restart" && isFailure(studio?.outcome);
+		const serviceParts = isHeld
+			? []
+			: await stopServicesAsync(stopper, request.scope, { isStudioGone, stop });
 		const stopped: Array<PartId> = isStudioGone ? ["studio", ...serviceParts] : serviceParts;
 		const isEnding = await endIfEmptyAsync(setup, scope, stopper, {
 			hasClosedStudio: isStudioGone,
@@ -319,6 +320,10 @@ async function stopServicesAsync(
 	}
 
 	return services;
+}
+
+function isFailure(outcome: StudioOutcome | undefined): boolean {
+	return outcome !== undefined && "error" in outcome;
 }
 
 /**
