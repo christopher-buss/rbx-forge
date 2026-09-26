@@ -3130,3 +3130,217 @@ describe("forge start owners", () => {
 function ignoreFailure(): void {
 	// The compile the stop cut short fails; only the sync answer matters.
 }
+
+const MINUTE_MS = 60_000;
+/** An up session whose idle timeout is one minute. */
+const IDLE_UP: StartSetup = { file: { session: { idleTimeout: 1 } }, flags: UP };
+
+/**
+ * Whether the run has ended, looked at later.
+ *
+ * @param run - The session.
+ * @returns Reads whether it ended.
+ */
+function endedFlag(run: StartRun): () => boolean {
+	let isEnded = false;
+	void run.result.finally(() => {
+		isEnded = true;
+	});
+	return () => isEnded;
+}
+
+/**
+ * Let time pass in one step, then let what it woke settle.
+ *
+ * @param run - The session.
+ * @param ms - How long.
+ */
+async function jumpAsync(run: StartRun, ms: number): Promise<void> {
+	run.clock.advance(ms);
+	await flushAsync();
+	await flushAsync();
+}
+
+describe("idle timeout", () => {
+	it("should stop the compiler with no owner and end the up session after the timeout", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...IDLE_UP, projectType: "rbxts" });
+		await flushAsync();
+		await jumpAsync(run, MINUTE_MS - 1);
+
+		expect(run.fake.calls).not.toContain("stop compiler 3000");
+
+		await jumpAsync(run, 1);
+		run.fake.exit("compiler", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
+		expect(run.reporter.events).toContainEqual({
+			message: "No activity for 1 min: stopped compiler.",
+			type: "info",
+		});
+	});
+
+	it("should end an up session with no part after the timeout", async () => {
+		expect.assertions(1);
+
+		const run = startCommand(IDLE_UP);
+		await flushAsync();
+		await jumpAsync(run, MINUTE_MS);
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
+	});
+
+	it("should never stop the parts a start owns, nor end its session", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ ...IDLE_UP, owned: true, projectType: "rbxts" });
+		const isEnded = endedFlag(run);
+		await flushAsync();
+		await jumpAsync(run, 10 * MINUTE_MS);
+		const wasEnded = isEnded();
+		run.owner.request({ signal: "SIGINT", type: "signal" });
+		await run.result;
+
+		expect(wasEnded).toBeFalse();
+		expect(run.fake.calls).not.toContain("stop compiler 3000");
+	});
+
+	it("should wait 30 minutes by default", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ flags: UP });
+		const isEnded = endedFlag(run);
+		await flushAsync();
+		await jumpAsync(run, 30 * MINUTE_MS - 1);
+
+		expect(isEnded()).toBeFalse();
+
+		await jumpAsync(run, 1);
+
+		expect(isEnded()).toBeTrue();
+	});
+
+	it("should never stop with an idle timeout of 0", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ file: { session: { idleTimeout: 0 } }, flags: UP });
+		const isEnded = endedFlag(run);
+		await flushAsync();
+		await jumpAsync(run, 1000 * MINUTE_MS);
+		const wasEnded = isEnded();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(wasEnded).toBeFalse();
+	});
+
+	it("should start the time again on each client request", async () => {
+		expect.assertions(2);
+
+		const run = startCommand(IDLE_UP);
+		const isEnded = endedFlag(run);
+		await flushAsync();
+		await jumpAsync(run, 50_000);
+		await callSessionAsync(run.ipc, CONTROL_TARGET, "status");
+		await jumpAsync(run, 50_000);
+
+		expect(isEnded()).toBeFalse();
+
+		await jumpAsync(run, 10_000);
+
+		expect(isEnded()).toBeTrue();
+	});
+
+	it("should start the time again on each compile start", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ ...IDLE_UP, projectType: "rbxts" });
+		await flushAsync();
+		await jumpAsync(run, 50_000);
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "compiler.log"),
+			"[10:00:00] Starting compilation in watch mode...\n",
+		);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await jumpAsync(run, 50_000);
+		const before = [...run.fake.calls];
+		await jumpAsync(run, 10_000);
+		const after = [...run.fake.calls];
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(before).not.toContain("stop compiler 3000");
+		expect(after).toContain("stop compiler 3000");
+	});
+
+	it("should count no compile end as activity, such as the compiler's exit mid-compile", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ ...IDLE_UP, projectType: "rbxts" });
+		const isEnded = endedFlag(run);
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "compiler.log"),
+			"[10:00:00] Starting compilation in watch mode...\n",
+		);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await jumpAsync(run, 50_000);
+		run.fake.exit("compiler", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await jumpAsync(run, 10_000);
+
+		expect(isEnded()).toBeTrue();
+	});
+
+	it("should count no write of the place once its Studio closed", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ ...IDLE_UP, files: { ...TOOL_FILES, "game.rbxl": "v1" } });
+		const isEnded = endedFlag(run);
+		await flushAsync();
+		await attachAsync(run);
+		run.memory.fileSystem.rmSync(LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		run.fake.exit("rojo", OK);
+		await jumpAsync(run, 50_000);
+		run.memory.setModifiedTime("game.rbxl", Date.UTC(2026, 0, 2));
+		await passAsync(run, 15_000);
+
+		expect(isEnded()).toBeTrue();
+	});
+
+	it("should start the time again on each Studio save, then close Studio", async () => {
+		expect.assertions(2);
+
+		const studio: FakeProcess = {
+			alive: true,
+			executablePath: "/opt/RobloxStudio",
+			startTime: "900",
+		};
+		const run = startCommand({
+			...IDLE_UP,
+			file: { session: { idleTimeout: 1 }, studio: { autoRecovery: "keep" } },
+			files: { ...TOOL_FILES, "game.rbxl": "v1" },
+			processes: { [LAUNCHED_PID]: studio },
+		});
+		studio.onClose = () => {
+			run.memory.fileSystem.rmSync(LOCK);
+		};
+
+		await flushAsync();
+		await attachAsync(run);
+		await jumpAsync(run, 50_000);
+		run.memory.setModifiedTime("game.rbxl", Date.UTC(2026, 0, 2));
+		await passAsync(run, 50_000);
+		const before = studio.closeRequests;
+		await passAsync(run, 15_000);
+		const after = studio.closeRequests;
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(before).toBeUndefined();
+		expect(after).toBe(1);
+	});
+});

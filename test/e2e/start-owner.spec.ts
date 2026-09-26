@@ -79,7 +79,7 @@ describe("forge start next to an agent's session", () => {
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
 		await runForgeAsync(fixture, UP);
-		const [compiler] = pidsOf(fixture, "rbxtsc");
+		const { pid: compiler } = await waitForRoleAsync(fixture.log, "rbxtsc");
 		await startReadyAsync(fixture, START);
 		const owned = await waitForStatusAsync(fixture, (status) => {
 			return status.services.studio.status === "open";
@@ -111,7 +111,7 @@ describe("forge start next to an agent's session", () => {
 			{ code: "studio_owned", details: { owner: "start" } },
 		]);
 		expect(pidsOf(fixture, "rbxtsc")).toStrictEqual([compiler]);
-		expect(isProcessAlive(compiler!)).toBeTrue();
+		expect(isProcessAlive(compiler)).toBeTrue();
 	});
 
 	it("should stop what it added and give back what it took once it is killed, leaving Studio open", async () => {
@@ -119,7 +119,7 @@ describe("forge start next to an agent's session", () => {
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
 		await runForgeAsync(fixture, UP);
-		const [compiler] = pidsOf(fixture, "rbxtsc");
+		const { pid: compiler } = await waitForRoleAsync(fixture.log, "rbxtsc");
 		const { session } = await startReadyAsync(fixture, START);
 		const studio = await waitForRoleAsync(fixture.log, "studio");
 		const rojo = pidsOf(fixture, "rojo");
@@ -136,7 +136,7 @@ describe("forge start next to an agent's session", () => {
 		});
 		await expect(waitForDeathAsync(rojo, REAP_MS)).resolves.toStrictEqual([]);
 		expect({
-			compiler: isProcessAlive(compiler!),
+			compiler: isProcessAlive(compiler),
 			studio: isProcessAlive(studio.pid),
 		}).toStrictEqual({ compiler: true, studio: true });
 
@@ -186,7 +186,7 @@ describe("forge start next to an agent's session", () => {
 });
 
 describe("forge stop --force on a Studio a start owns", () => {
-	it("should close it, and end the start session left with no part", async () => {
+	it("should close it, and keep the start session, which ends on its owner's end", async () => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -194,16 +194,16 @@ describe("forge stop --force on a Studio a start owns", () => {
 		const studio = await waitForRoleAsync(fixture.log, "studio");
 		await waitForStatusAsync(fixture, ({ services }) => services.studio.status === "open");
 		const stop = await runForgeAsync(fixture, ["stop", "--force", "--json"]);
-		const status = await session.closed;
+		const after = await waitForStatusAsync(fixture, () => true);
 
 		expect(stop.result).toMatchObject({
 			data: { parts: { kept: [], stopped: ["studio", "rojo"] } },
 			ok: true,
 		});
-		expect([status, parseResult(session.stdout()).data]).toMatchObject([
-			EXIT_SUCCESS,
-			{ reason: "shutdown" },
-		]);
+		expect({ phase: after.phase, start: session.child.exitCode }).toStrictEqual({
+			phase: "ready",
+			start: null,
+		});
 		await expect(waitForDeathAsync([studio.pid], REAP_MS)).resolves.toStrictEqual([]);
 	});
 });

@@ -11,13 +11,14 @@ import type { OpenedStudio } from "./attach.ts";
 import { attachStudio } from "./attach.ts";
 import type { BuildWatch } from "./build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
+import type { IdleTracker } from "./idle.ts";
 import type { PartAdder, PartRequest } from "./part-requests.ts";
 import type { RojoService, RojoSetup } from "./rojo-part.ts";
 import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./rojo-part.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
 import type { PartId, StatusRecorder, StatusStore } from "./status.ts";
-import { waitForStudioCloseAsync } from "./watch.ts";
+import { waitForStudioCloseAsync, watchSaves } from "./watch.ts";
 import { watchOptions } from "./worker-context.ts";
 
 /**
@@ -38,6 +39,8 @@ export interface StudioSetup extends RojoSetup {
 	/** Waits for the compiler's fresh build before the place is built. */
 	builds: Pick<BuildWatch, "waitAsync">;
 	config: ResolvedConfig;
+	/** Gets each save of the session's Studio as activity. */
+	idle: Pick<IdleTracker, "activity">;
 	status: Pick<StatusRecorder, "rojoPort" | "service" | "studio"> & Pick<StatusStore, "snapshot">;
 }
 
@@ -58,6 +61,9 @@ interface AttachParts {
 	/** The session's steps context: builds and hooks run as its workers. */
 	steps: CommandContext;
 }
+
+/** What follows the session's Studio: its context, idle tracker, and status. */
+type FollowSetup = Pick<StudioSetup, "context" | "idle" | "status">;
 
 /** The session's Studio parts, as a follow changes them. */
 type FollowParts = Pick<AttachParts, "parts" | "state">;
@@ -112,11 +118,11 @@ export async function openStudioAsync(
 
 /**
  * Attach a Studio to the session as its part (`opening`), and follow it
- * until it closes the place: `open` once its lock file names it. The close
- * of a Studio with no owner stops its Rojo; the close of an owned one stops
- * nothing, as its owner decides.
+ * until it closes the place: `open` once its lock file names it, and each
+ * save of the place is activity. The close of a Studio with no owner stops
+ * its Rojo; the close of an owned one stops nothing, as its owner decides.
  *
- * @param setup - The context and status.
+ * @param setup - The context, idle tracker, and status.
  * @param scope - Its end signal; tracks the follow.
  * @param follow - The parts and the Studio state.
  * @param opened - The place and its Studio.
@@ -124,7 +130,7 @@ export async function openStudioAsync(
  *   ended.
  */
 export function followSessionStudio(
-	setup: Pick<StudioSetup, "context" | "status">,
+	setup: FollowSetup,
 	scope: Pick<SessionScope, "signal" | "track">,
 	follow: FollowParts,
 	opened: OpenedStudio,
@@ -208,6 +214,44 @@ export function createStudioAdder(
 }
 
 /**
+ * Wait until Studio closes the place, and count each save of it as
+ * activity meanwhile.
+ *
+ * @param setup - The context, idle tracker, and status.
+ * @param scope - Ends the watch.
+ * @param opened - The place, its Studio, and what gets its open.
+ * @returns `true` once Studio closed the place; `false` when the watch
+ *   ended first.
+ */
+async function watchStudioAsync(
+	{ context, idle, status }: FollowSetup,
+	scope: Pick<SessionScope, "signal">,
+	opened: OpenedStudio & { onOpen: () => void },
+): Promise<boolean> {
+	const { place, studio } = opened;
+	const options = watchOptions(context, scope);
+	const followed = new AbortController();
+	const saves = watchSaves(
+		{ ...options, signal: AbortSignal.any([options.signal, followed.signal]) },
+		place,
+		() => {
+			idle.activity(context.seams.clock.now());
+		},
+	);
+	const lock = { path: studioLockPath(place), pid: studio?.pid };
+	try {
+		return await waitForStudioCloseAsync(options, lock, () => {
+			status.studio("open", place, studio);
+			context.reporter.emit({ message: `Roblox Studio has ${place} open.`, type: "info" });
+			opened.onOpen();
+		});
+	} finally {
+		followed.abort();
+		await saves.done;
+	}
+}
+
+/**
  * Follow an attached Studio until it closes the place, or the follow ends.
  *
  * @param setup - The context and status.
@@ -216,18 +260,14 @@ export function createStudioAdder(
  * @param opened - The place, its Studio, and what gets its open.
  */
 async function followAsync(
-	{ context, status }: Pick<StudioSetup, "context" | "status">,
+	setup: FollowSetup,
 	scope: Pick<SessionScope, "signal">,
 	{ parts, state }: FollowParts,
 	opened: OpenedStudio & { onOpen: () => void },
 ): Promise<void> {
+	const { status } = setup;
 	const { place, studio } = opened;
-	const lock = { path: studioLockPath(place), pid: studio?.pid };
-	const isClosed = await waitForStudioCloseAsync(watchOptions(context, scope), lock, () => {
-		status.studio("open", place, studio);
-		context.reporter.emit({ message: `Roblox Studio has ${place} open.`, type: "info" });
-		opened.onOpen();
-	});
+	const isClosed = await watchStudioAsync(setup, scope, opened);
 	opened.onOpen();
 	if (!isClosed) {
 		return;

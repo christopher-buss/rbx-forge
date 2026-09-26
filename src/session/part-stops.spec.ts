@@ -16,6 +16,7 @@ import { DEFAULT_CONFIG } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
 import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
+import { IDLE_STOP } from "./idle.ts";
 import type {
 	PartStops,
 	StopPartsRequest,
@@ -230,6 +231,8 @@ interface StopWorld {
 	/** Runs on each sleep, once the time moved. */
 	onSleep: Array<(now: number) => void>;
 	phase: ReturnType<typeof vi.fn<StatusStore["phase"]>>;
+	/** What `studio` recorded. */
+	recorded: ReturnType<typeof vi.fn<StatusStore["studio"]>>;
 	running: Set<ServiceId>;
 	/** What `snapshot` answers; change it to move the session on. */
 	services: Services;
@@ -258,6 +261,7 @@ function makeWorld(services: Services, running: Array<ServiceId> = []): StopWorl
 		now: () => now,
 		onSleep,
 		phase: vi.fn<StatusStore["phase"]>(),
+		recorded: vi.fn<StatusStore["studio"]>(),
 		running: new Set(running),
 		services,
 		stopped: [],
@@ -265,6 +269,7 @@ function makeWorld(services: Services, running: Array<ServiceId> = []): StopWorl
 			flushSyncbackAsync: async () => {
 				flushes += 1;
 			},
+			ownership: { isOwned: false },
 			parts: {
 				isRunning: (id) => world.running.has(id),
 				stopAsync: async (id) => {
@@ -333,6 +338,7 @@ async function stopAsync(world: StopWorld, request: StopPartsRequest): Promise<P
 			status: {
 				phase: world.phase,
 				snapshot: () => ({ ...makeStatus(), services: world.services }),
+				studio: world.recorded,
 			},
 		},
 		{
@@ -352,7 +358,7 @@ const CLOSED_BY_REQUEST: StudioOutcome = {
 
 describe(createPartStopper, () => {
 	it("should close Studio, stop Rojo and the compiler, then end the session for down", async () => {
-		expect.assertions(4);
+		expect.assertions(5);
 
 		const world = makeWorld(servicesWith({ compiler: READY, rojo: READY, studio: OPEN }), [
 			"compiler",
@@ -367,6 +373,7 @@ describe(createPartStopper, () => {
 			studio: CLOSED_BY_REQUEST,
 		});
 		expect(studio).toMatchObject({ alive: false, closeRequests: 1 });
+		expect(world.recorded.mock.calls).toStrictEqual([["closed", PLACE, null]]);
 		expect({ flushed: world.flushed(), stopped: world.stopped }).toStrictEqual({
 			flushed: 1,
 			stopped: ["rojo", "compiler"],
@@ -375,6 +382,20 @@ describe(createPartStopper, () => {
 			ended: [{ type: "shutdown" }],
 			phase: [["stopping"]],
 		});
+	});
+
+	it("should never end a session a start holds, even with no part left", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(servicesWith({ compiler: READY }));
+		world.stopper.ownership.isOwned = true;
+
+		await expect(stopAsync(world, DOWN)).resolves.toStrictEqual({
+			ending: false,
+			kept: [],
+			stopped: ["compiler"],
+		});
+		expect(world.ended).toStrictEqual([]);
 	});
 
 	it("should end an up session with no part for down, and stop nothing", async () => {
@@ -416,6 +437,27 @@ describe(createPartStopper, () => {
 		});
 		expect({ alive: studio.alive, ended: world.ended }).toStrictEqual({
 			alive: true,
+			ended: [],
+		});
+	});
+
+	it("should keep owned parts for the idle stop, close the Studio with no owner, and go on", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(
+			servicesWith({ compiler: { ...READY, ...OWNED }, rojo: READY, studio: OPEN }),
+			["compiler", "rojo"],
+		);
+		const studio = openStudio(world);
+
+		await expect(stopAsync(world, IDLE_STOP)).resolves.toStrictEqual({
+			ending: false,
+			kept: [{ owner: "start", part: "compiler" }],
+			stopped: ["studio", "rojo"],
+			studio: CLOSED_BY_REQUEST,
+		});
+		expect({ alive: studio.alive, ended: world.ended }).toStrictEqual({
+			alive: false,
 			ended: [],
 		});
 	});
@@ -657,8 +699,13 @@ describe(createPartStopper, () => {
 		await expect(stopAsync(world, STOP)).resolves.toMatchObject({
 			studio: { stop: { end: "exited", pid: STUDIO_PID, status: "stopped" } },
 		});
-		expect({ alive: studio.alive, waited: world.now() }).toStrictEqual({
+		expect({
+			alive: studio.alive,
+			recorded: world.recorded.mock.calls,
+			waited: world.now(),
+		}).toStrictEqual({
 			alive: false,
+			recorded: [["closed", PLACE, { pid: STUDIO_PID, startTime: String(STUDIO_PID) }]],
 			waited: STUDIO_OPEN_WAIT_MS,
 		});
 	});

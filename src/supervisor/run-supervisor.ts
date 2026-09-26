@@ -9,6 +9,7 @@ import { createRojoPort } from "../rojo/rojo-port.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
+import type { IdleTracker } from "../session/idle.ts";
 import type { PartRequests } from "../session/part-requests.ts";
 import { createPartRequests } from "../session/part-requests.ts";
 import type { Pause } from "../session/pause.ts";
@@ -73,6 +74,8 @@ interface OwnSession {
 	config: ResolvedConfig;
 	files: SessionFiles;
 	forge: ForgeFiles;
+	/** When the session is idle. */
+	idle: IdleTracker;
 	/** Links `forge up` on the control channel to the session body. */
 	parts: PartRequests;
 	/** Rojo's port, chosen once and kept. */
@@ -277,7 +280,7 @@ async function clearOldAsync(
 async function runSessionOnceAsync(
 	seams: CommandContext["seams"],
 	{ pause, stop }: SupervisorOptions,
-	{ builds, config, files, forge, parts, rojoPort, services, status, sync }: OwnSession,
+	{ config, files, forge, services, ...body }: OwnSession,
 ): Promise<SessionOutcome> {
 	try {
 		return await runSessionAsync(
@@ -290,15 +293,7 @@ async function runSessionOnceAsync(
 				recordPath: files.record,
 				sessionId: files.sessionId,
 			},
-			createSessionBody({
-				...services,
-				builds,
-				directory: files.directory,
-				parts,
-				rojoPort,
-				status,
-				sync,
-			}),
+			createSessionBody({ ...services, ...body, directory: files.directory }),
 		);
 	} catch (err) {
 		removeSession(seams.fileSystem, forge, files.sessionId);
@@ -343,17 +338,20 @@ async function runOpenSessionAsync(
 }
 
 /**
- * What the control channel knows of the session's services.
+ * What the control channel knows of the session's services, and its idle
+ * timeout.
  *
- * @param services - The plan, the resolved compiler, and the owner.
- * @returns What the session runs, and whether it reads builds.
+ * @param services - The config, plan, resolved compiler, and owner.
+ * @returns What the session runs, whether it reads builds, and the timeout.
  */
 function controlPlan({
 	compiler,
+	config,
 	owner,
 	plan,
-}: SessionServices): Pick<ControlSetup, "plan" | "readsBuilds"> {
+}: SessionServices): Pick<ControlSetup, "idleTimeout" | "plan" | "readsBuilds"> {
 	return {
+		idleTimeout: config.session.idleTimeout,
 		plan: { ...plan, compiler: compiler !== undefined, owner },
 		readsBuilds: compiler?.parsesDiagnostics === true,
 	};
@@ -390,7 +388,7 @@ async function runLockedAsync(
 	}
 
 	const links = { parts, sync: createSessionSync() };
-	const { builds, files, status, ...control } = await openSessionAsync(context.seams, {
+	const { closeAsync, files, ...state } = await openSessionAsync(context.seams, {
 		...controlPlan(services),
 		...links,
 		forge,
@@ -401,13 +399,13 @@ async function runLockedAsync(
 		stop: options.stop,
 	});
 	try {
-		const session = { ...links, builds, config, files, forge, rojoPort, services, status };
+		const session = { ...links, ...state, config, files, forge, rojoPort, services };
 		return await runOpenSessionAsync(context, options, session, cleanups);
 	} finally {
 		// A body that never ran syncback, or never started its parts, leaves
 		// no `forge sync` or `forge up` waiting.
 		links.parts.close();
 		links.sync.close();
-		await control.closeAsync();
+		await closeAsync();
 	}
 }

@@ -25,6 +25,14 @@ When forge finds no executable, or the terminal's job forbids breakaway
 `xdg-open`). The session then has no PID for Studio, and finds it only through
 the place's lock file.
 
+`open` builds a snapshot, a copy of the place, into
+`.forge/snapshots/<time>_<place>` and opens it, with no session and no Rojo. A
+running session changes nothing: `open` never opens the session's place, so two
+Studios never share one place file. `open` keeps the five newest snapshots, and
+every snapshot that has a lock file (a Studio has it open). A snapshot is a
+normal place file: `forge syncback --input <snapshot>` syncs changes made in it
+back into the project.
+
 `start` and `up --studio` attach a Studio that already has the place open, as
 after Ctrl+C on `start`: when the place's lock file names a Studio that `stop`
 would verify (see [Closing Studio](#closing-studio)), the session records that
@@ -64,12 +72,13 @@ It never touches another Studio.
 `stop` and `down` ask the running session to close its Studio; the session
 closes it and stops its Rojo. `stop` falls back to the lock file of the
 configured place (or of `--place <path>`) when the session has no Studio of that
-place. When the session reports Studio as `opening` (started, the place not open
-yet), the session waits up to 60 seconds for it to be `open`, then closes it. A
-session with no part left ends, once a syncback run for a last save is done. A
-Studio that a `forge start` terminal owns stays: `stop` fails with
-`studio_owned`, and `stop --force` closes it. `--force` does not change how
-Studio closes.
+place. With no `--place`, `stop` first closes every snapshot Studio: each
+snapshot with a lock file, verified as above. When the session reports Studio as
+`opening` (started, the place not open yet), the session waits up to 60 seconds
+for it to be `open`, then closes it. A session with no part left ends, once a
+syncback run for a last save is done. A Studio that a `forge start` terminal
+owns stays: `stop` fails with `studio_owned`, and `stop --force` closes it.
+`--force` does not change how Studio closes.
 
 ## Auto-recovery
 
@@ -85,9 +94,10 @@ launch does not offer to recover a place forge builds anyway:
 - `keep`: leave them.
 
 Set the mode with [`studio.autoRecovery`](./config.md#studioautorecovery) in the
-config, or `--recovery <mode>` on `stop` and `down`. forge acts only when it
-ended a Studio, and only on `<place>_AutoRecovery_<n>.rbxl` files (any case) for
-the place, written since that Studio started (2 seconds of slack). It searches:
+config, or `--recovery <mode>` on `stop` and `down`; the idle timeout uses the
+config's mode. forge acts only when it ended a Studio, and only on
+`<place>_AutoRecovery_<n>.rbxl` files (any case) for the place, written since
+that Studio started (2 seconds of slack). It searches:
 
 - Windows: `%LOCALAPPDATA%\Roblox\RobloxStudio\AutoSaves` and
   `%USERPROFILE%\Documents\ROBLOX\AutoSaves`.

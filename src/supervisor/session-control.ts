@@ -5,6 +5,8 @@ import { startIpcServer } from "../ipc/server.ts";
 import type { Seams } from "../seams/seams.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
 import { createBuildWatch } from "../session/build-watch.ts";
+import type { IdleTracker } from "../session/idle.ts";
+import { createIdleTracker } from "../session/idle.ts";
 import type { PartRequests } from "../session/part-requests.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { PartOwner, SessionStatus, StatusStore } from "../session/status.ts";
@@ -18,6 +20,8 @@ import { createSession, removeSession } from "./session-files.ts";
 export interface ControlSetup {
 	forge: ForgeFiles;
 	identity: IdentityRecord;
+	/** `session.idleTimeout`, in minutes; 0 turns it off. */
+	idleTimeout: number;
 	/** Called once, when the session is first ready. */
 	onReady: (() => void) | undefined;
 	/**
@@ -58,6 +62,11 @@ export interface SessionControl {
 	 */
 	closeAsync: () => Promise<void>;
 	files: SessionFiles;
+	/**
+	 * When the session is idle. Each client request and each compile start
+	 * is activity; the session body adds Studio saves.
+	 */
+	idle: IdleTracker;
 	status: StatusStore;
 }
 
@@ -88,7 +97,12 @@ export async function openSessionAsync(
 		value: token,
 		write: tokenWriter(seams),
 	});
-	const { builds, status } = createSessionState(seams, setup, files.state);
+	const idle = createIdleTracker(setup.idleTimeout, seams.clock.now());
+	function activity(): void {
+		idle.activity(seams.clock.now());
+	}
+
+	const { builds, status } = createSessionState(seams, setup, files.state, activity);
 	await setup.pause();
 	const listener = await listenOrRemoveAsync(seams, setup, files.sessionId);
 	const server = startIpcServer(listener, {
@@ -100,17 +114,11 @@ export async function openSessionAsync(
 			stop: setup.stop,
 			sync: setup.sync,
 		}),
+		onRequest: activity,
 		owner: controlOwner({ parts: setup.parts, sessionId: setup.identity.sessionId }),
 		token,
 	});
-	return {
-		builds,
-		closeAsync: async () => {
-			await server.closeAsync();
-		},
-		files,
-		status,
-	};
+	return { builds, closeAsync: server.closeAsync, files, idle, status };
 }
 
 /**
@@ -201,17 +209,28 @@ function createSessionStatus(
  * @param seams - The clock and file system.
  * @param setup - The identity, plan, port, stop requests, and `onReady`.
  * @param stateFile - `state.json`.
+ * @param activity - Records activity now: a compile start is activity.
  * @returns The status store and the build watch.
  */
 function createSessionState(
 	seams: Pick<ControlSeams, "clock" | "fileSystem">,
 	setup: ControlSetup,
 	stateFile: string,
-): { builds: BuildWatch; status: StatusStore } {
+	activity: () => void,
+): Pick<SessionControl, "builds" | "status"> {
 	const store = createSessionStatus(seams, setup, stateFile);
 	const builds = createBuildWatch({
 		clock: seams.clock,
-		recorder: store,
+		recorder: {
+			building: (isBuilding) => {
+				if (isBuilding) {
+					activity();
+				}
+
+				store.building(isBuilding);
+			},
+			compiled: store.compiled,
+		},
 		tracks: setup.readsBuilds,
 	});
 	const status: StatusStore = {

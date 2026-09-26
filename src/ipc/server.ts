@@ -40,6 +40,8 @@ export interface IpcServerOptions {
 	 * unavailable.
 	 */
 	handlers: Partial<Record<Exclude<IpcMethod, "own">, IpcHandler>>;
+	/** Called on each request it reads from a client with the token. */
+	onRequest?: () => void;
 	/** Serves `own`; without it, `own` is unavailable. */
 	owner?: IpcOwner | undefined;
 	/** The session's token; the hello must carry it. */
@@ -97,6 +99,10 @@ export async function serveConnectionAsync(
 		}
 
 		const request = parseRequest(second.line);
+		if (request !== undefined) {
+			options.onRequest?.();
+		}
+
 		if (request?.method === "own" && options.owner !== undefined) {
 			await serveOwnerAsync(connection, options.owner, request.params, { closing, waitMs });
 			return;

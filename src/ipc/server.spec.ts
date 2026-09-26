@@ -97,6 +97,39 @@ describe(serveConnectionAsync, () => {
 		expect(connection.isClosed()).toBeTrue();
 	});
 
+	it("should count each request it reads as activity, before its answer", async () => {
+		expect.assertions(2);
+
+		const onRequest = vi.fn<() => void>();
+		const status = vi.fn<IpcHandler>(() => {
+			expect(onRequest).toHaveBeenCalledOnce();
+
+			return {};
+		});
+		await serveConnectionAsync(scriptedConnection([HELLO, STATUS]), {
+			...options({ status }),
+			onRequest,
+		});
+		await serveConnectionAsync(scriptedConnection([HELLO, "nonsense"]), {
+			...options({ status }),
+			onRequest,
+		});
+
+		expect(onRequest).toHaveBeenCalledOnce();
+	});
+
+	it("should count no activity for a client with the wrong token", async () => {
+		expect.assertions(1);
+
+		const onRequest = vi.fn<() => void>();
+		await serveConnectionAsync(
+			scriptedConnection(['{"protocol":1,"token":"secret_token","type":"hello"}', STATUS]),
+			{ ...options(), onRequest },
+		);
+
+		expect(onRequest).not.toHaveBeenCalled();
+	});
+
 	it("should close without an answer when the hello or request never comes", async () => {
 		expect.assertions(4);
 

@@ -37,7 +37,8 @@ describe("attach an open Studio", () => {
 		const { session } = await startReadyAsync(fixture, START);
 		const stop = await runForgeAsync(fixture, ["stop", "--force", "--json"]);
 
-		await expect(session.closed).resolves.toBe(0);
+		// The start that owns the session holds it until its own end.
+		expect(session.child.exitCode).toBeNull();
 		expect(stop.result).toMatchObject({
 			data: { pid: studio, place: fixture.place, stopped: true },
 			ok: true,

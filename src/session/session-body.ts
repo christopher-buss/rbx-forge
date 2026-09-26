@@ -4,6 +4,8 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import type { OpenedStudio } from "./attach.ts";
 import type { AdderSetup, CompilerService } from "./compiler-part.ts";
 import { createPartAdder, startCompilerAsync } from "./compiler-part.ts";
+import type { IdleTracker } from "./idle.ts";
+import { stopWhenIdleAsync } from "./idle.ts";
 import type { Ownership } from "./ownership.ts";
 import { createOwnerHandlers } from "./ownership.ts";
 import type { PartAdder, PartRequests } from "./part-requests.ts";
@@ -35,10 +37,15 @@ export interface SessionSetup extends AdderSetup, StudioSetup {
 	config: ResolvedConfig;
 	/** `.forge/sessions/<id>`: raw worker output while the session runs. */
 	directory: string;
+	/** When the session is idle; its Studio's saves are activity. */
+	idle: IdleTracker;
 	/** The owner of the parts the session starts with: `start`, or none. */
 	owner: null | PartOwner;
-	/** Gets the session's part handlers, for `up`, `down`, `stop`, `start`. */
-	parts: Pick<PartRequests, "attach">;
+	/**
+	 * Gets the session's part handlers, for `up`, `down`, `stop`, `start`,
+	 * and queues the idle stop with the requests.
+	 */
+	parts: Pick<PartRequests, "attach" | "stopAsync">;
 	plan: SessionPlan;
 	/** Gets what the session does, for `status` and `state.json`. */
 	status: Pick<StatusStore, "phase" | "snapshot"> & StatusRecorder;
@@ -74,9 +81,10 @@ const ALL_PARTS = ["studio", "rojo", "compiler"] as const;
  *    service with its part: its exit stops only that part, which is then
  *    `failed`. From then on, `forge up` can add the parts that are missing
  *    or failed, and attach Studio with its Rojo (`studio-part.ts`); `down`
- *    and `stop` can stop the parts with no owner (`part-stops.ts`); a
- *    `start` can join as the owner, and its end stops what it started and
- *    gives back what it took (`ownership.ts`).
+ *    and `stop` can stop the parts with no owner (`part-stops.ts`), and
+ *    so does the idle timeout (`idle.ts`); a `start` can join as the
+ *    owner, and its end stops what it started and gives back what it took
+ *    (`ownership.ts`).
  * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
  *    on each place save: one run at a time, with requests during a run
  *    folded into one more run. Rojo's syncback support is checked once per
@@ -200,6 +208,24 @@ function withNoOwner(session: SessionSetup, add: PartAdder): PartAdder {
 }
 
 /**
+ * Stop the parts with no owner each time the session is idle, through the
+ * request queue, until the session ends.
+ *
+ * @param session - The config, context, idle tracker, and part requests.
+ * @param scope - Its end signal; tracks the watch.
+ */
+function watchIdle({ config, context, idle, parts }: SessionSetup, scope: SessionScope): void {
+	const setup = {
+		clock: context.seams.clock,
+		idle,
+		minutes: config.session.idleTimeout,
+		reporter: context.reporter,
+		stopAsync: parts.stopAsync,
+	};
+	scope.track(stopWhenIdleAsync(setup, scope.signal));
+}
+
+/**
  * Start Rojo, then the watch-mode compiler, as the plan asks, hand the part
  * adder and stopper over, and wait until Rojo listens or stopped. Rojo is
  * ready once it listens; a compiler that reports compiles, after its first
@@ -234,10 +260,11 @@ async function runServicesAsync(
 	};
 	session.parts.attach({
 		add: withNoOwner(session, add),
-		stop: createPartStopper(session, scope, { ...state, state: state.studio }),
+		stop: createPartStopper(session, scope, { ...state, ownership, state: state.studio }),
 		...createOwnerHandlers(session, scope, { add, ownership, parts, studio: state.studio }),
 	});
 	session.status.started();
+	watchIdle(session, scope);
 	const isServing = rojo !== undefined && (await waitForRojoAsync(session, scope, parts, rojo));
 	if (hasEnded(scope)) {
 		return undefined;
