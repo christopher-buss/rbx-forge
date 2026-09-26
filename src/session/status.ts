@@ -181,15 +181,13 @@ export interface StatusStore extends StatusRecorder {
 export interface StatusStart {
 	/** The session runs a watch-mode compiler. */
 	compiler: boolean;
-	/** The session opens Studio. */
+	/** The session opens Studio, and serves Rojo. */
 	open: boolean;
 	/** The owner of every part the session starts with. */
 	owner: null | PartOwner;
 	pid: number;
 	/** Rojo's port, when the session chose it before it started. */
 	port: number | undefined;
-	/** The session serves Rojo. */
-	rojo: boolean;
 	sessionId: string;
 	startedAt: string;
 	/** The session runs syncback on save. */
@@ -269,9 +267,9 @@ function initialStatus(start: StatusStart): SessionStatus {
 				status: start.compiler ? "starting" : "off",
 			},
 			rojo: {
-				owner: ownerOf(start.rojo),
+				owner: ownerOf(start.open),
 				...(start.port === undefined ? {} : { port: start.port }),
-				status: start.rojo ? "starting" : "off",
+				status: start.open ? "starting" : "off",
 			},
 			studio: { owner: ownerOf(start.open), status: start.open ? "opening" : "off" },
 			syncback: { status: start.syncback ? "idle" : "off" },

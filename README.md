@@ -87,7 +87,8 @@ close of its Studio stops nothing. Its flags:
 
 - `--no-compiler`: no compile, no build, no watch-mode compiler: only Rojo and
   Studio. The open step still builds when `open.buildFirst` is on.
-- `--no-open`: do not open Studio. A `start` that joins adds only the compiler.
+- `--no-open`: no Studio and no Rojo (Rojo runs only with Studio): only the
+  compiler. A `start` that joins adds only the compiler.
 - `--syncback`: run syncback and its hooks each time the place file is saved
   (config `syncback.runOnStart`).
 - `--force`: when a crashed earlier session still has processes after the wait,

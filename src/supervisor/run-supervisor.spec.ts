@@ -42,7 +42,8 @@ import { runSupervisorAsync } from "./run-supervisor.ts";
 import type { IdentityRecord } from "./session-files.ts";
 
 const TOOLS = path.join(PROJECT, "tools");
-const ROJO_ONLY: FlagValues = { compiler: false, open: false };
+/** Studio with its Rojo, and no compiler. */
+const NO_COMPILER: FlagValues = { compiler: false };
 const OK: WorkerReport = { exitCode: 0, forced: false, incomplete: false, signal: null };
 const EXITED: WorkerReport = { ...OK, exitCode: 3 };
 const PLACE = path.join(PROJECT, "game.rbxl");
@@ -71,6 +72,11 @@ const OPEN_STUDIO: Record<number, FakeProcess> = {
 	[STUDIO_PID]: { alive: true, executablePath: "/opt/RobloxStudio", startTime: "0" },
 };
 const STUDIO_LOCK = `${STUDIO_PID}\nRobloxStudio\n${TEST_HOSTNAME}\n`;
+/** Studio has the place open: the session attaches it, no build, no launch. */
+const ATTACHED = {
+	files: { ...TOOL_FILES, "game.rbxl.lock": STUDIO_LOCK },
+	processes: OPEN_STUDIO,
+} satisfies StartSetup;
 const WITH_OLD = { ...TOOL_FILES, ".forge/sessions/old/supervisor.id": "{}" };
 
 interface StartSetup {
@@ -178,7 +184,6 @@ function requestFor(flags: FlagValues): SessionRequest {
 		compiler: flags["compiler"] !== false,
 		config: flags["syncback"] === true ? { syncback: { runOnStart: true } } : {},
 		open: flags["open"] !== false,
-		rojo: flags["rojo"] !== false,
 		...(flags["force"] === true ? { force: true } : {}),
 	};
 }
@@ -186,7 +191,7 @@ function requestFor(flags: FlagValues): SessionRequest {
 function startCommand({
 	file = {},
 	files = TOOL_FILES,
-	flags = ROJO_ONLY,
+	flags = NO_COMPILER,
 	ipc: makeTransport = createMemoryTransport,
 	isListening = async () => true,
 	isPortFree = true,
@@ -382,7 +387,7 @@ describe(runSupervisorAsync, () => {
 	it("should give every worker the project, the environment, and an output file", async () => {
 		expect.assertions(1);
 
-		const run = await stoppedAsync({ flags: { open: false }, projectType: "rbxts" });
+		const run = await stoppedAsync({ flags: {}, projectType: "rbxts" });
 		await run.result;
 
 		expect(
@@ -406,10 +411,10 @@ describe(runSupervisorAsync, () => {
 		);
 	});
 
-	it("should run only Rojo with --no-open --no-compiler", async () => {
+	it("should serve only Rojo with no compiler and the Studio that has the place open", async () => {
 		expect.assertions(4);
 
-		const run = await stoppedAsync({ projectType: "rbxts" });
+		const run = await stoppedAsync({ ...ATTACHED, projectType: "rbxts" });
 
 		await expect(run.result).resolves.toStrictEqual({
 			data: { port: 4000, reason: "SIGINT", reports: [] },
@@ -435,6 +440,22 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
 
+	it("should run no part with --no-open --no-compiler", async () => {
+		expect.assertions(3);
+
+		const run = await stoppedAsync({
+			flags: { compiler: false, open: false },
+			projectType: "rbxts",
+		});
+
+		await expect(run.result).resolves.toStrictEqual({
+			data: { reason: "SIGINT", reports: [] },
+			summary: "Stopped on SIGINT; every process of the session is gone.",
+		});
+		expect(run.fake.spawned).toStrictEqual([]);
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+	});
+
 	it("should report ready once Rojo runs, naming the port", async () => {
 		expect.assertions(1);
 
@@ -451,6 +472,7 @@ describe(runSupervisorAsync, () => {
 		expect.assertions(1);
 
 		const run: StartRun = startCommand({
+			...ATTACHED,
 			reaper: {
 				onSpawn: onSpawnOf("rojo", () => {
 					run.signals.fire("SIGINT");
@@ -459,7 +481,15 @@ describe(runSupervisorAsync, () => {
 		});
 		await run.result;
 
-		expect(run.reporter.events.map(({ type }) => type)).toStrictEqual(["step", "step"]);
+		expect(run.reporter.events).toStrictEqual([
+			{
+				message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it.`,
+				type: "info",
+			},
+			{ message: `Roblox Studio has ${PLACE} open.`, type: "info" },
+			{ name: "rojo serve", status: "started", type: "step" },
+			{ name: "rojo serve", status: "succeeded", type: "step" },
+		]);
 	});
 
 	it("should never open Studio after a stop signal during the build", async () => {
@@ -491,7 +521,7 @@ describe(runSupervisorAsync, () => {
 	it("should report each step and a ready line", async () => {
 		expect.assertions(1);
 
-		const run = await stoppedAsync({ flags: { open: false }, projectType: "rbxts" });
+		const run = await stoppedAsync({ flags: {}, projectType: "rbxts" });
 		await run.result;
 
 		expect(run.reporter.events).toStrictEqual([
@@ -499,6 +529,8 @@ describe(runSupervisorAsync, () => {
 			{ name: "rbxtsc", status: "succeeded", type: "step" },
 			{ name: "rojo build", status: "started", type: "step" },
 			{ name: "rojo build", status: "succeeded", type: "step" },
+			{ name: "open Roblox Studio", status: "started", type: "step" },
+			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
 			{ name: "rojo serve", status: "started", type: "step" },
 			{ name: "rojo serve", status: "succeeded", type: "step" },
 			{ name: "rbxtsc watch", status: "started", type: "step" },
@@ -562,7 +594,7 @@ describe(runSupervisorAsync, () => {
 		const run = await stoppedAsync({
 			file: { luau: { watch: { args: ["watch"], command: "darklua" } } },
 			files: { ...TOOL_FILES, "tools/darklua": "" },
-			flags: { open: false },
+			flags: {},
 		});
 		await run.result;
 
@@ -746,7 +778,7 @@ describe(runSupervisorAsync, () => {
 	it("should mark only Rojo failed when it exits, with its exit code and output tail", async () => {
 		expect.assertions(4);
 
-		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
+		const run = startCommand({ flags: {}, projectType: "rbxts" });
 		await flushAsync();
 		run.memory.fileSystem.writeFileSync(
 			path.join(SESSION, "output", "rojo.log"),
@@ -908,7 +940,7 @@ describe(runSupervisorAsync, () => {
 		const run = startCommand({
 			file: { luau: { watch: { command: "darklua" } } },
 			files: { ...TOOL_FILES, "tools/darklua": "" },
-			flags: { open: false },
+			flags: {},
 			isListening: async () => false,
 		});
 		await flushAsync();
@@ -951,7 +983,7 @@ describe(runSupervisorAsync, () => {
 	it("should mark only the compiler failed when it exits, and keep Rojo serving", async () => {
 		expect.assertions(2);
 
-		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
+		const run = startCommand({ flags: {}, projectType: "rbxts" });
 		await flushAsync();
 		run.fake.exit("compiler", EXITED);
 		await passAsync(run, OUTPUT_POLL_MS);
@@ -992,7 +1024,7 @@ describe(runSupervisorAsync, () => {
 		expect.assertions(2);
 
 		const run = startCommand({
-			flags: { open: false },
+			flags: {},
 			oneShot: oneShotsWith({ "start-1": EXITED }),
 			projectType: "rbxts",
 		});
@@ -1038,7 +1070,7 @@ describe(runSupervisorAsync, () => {
 		expect.assertions(1);
 
 		const run: StartRun = startCommand({
-			flags: { open: false },
+			flags: {},
 			projectType: "rbxts",
 			reaper: {
 				onSpawn: onSpawnOf("rojo", () => {
@@ -1137,7 +1169,7 @@ describe(runSupervisorAsync, () => {
 	it("should remove the session directory and keep the logs when the session ends", async () => {
 		expect.assertions(2);
 
-		const run = await stoppedAsync({ flags: { open: false }, projectType: "rbxts" });
+		const run = await stoppedAsync({ flags: {}, projectType: "rbxts" });
 		await run.result;
 		const files = Object.keys(run.memory.files());
 
@@ -1161,7 +1193,7 @@ describe(runSupervisorAsync, () => {
 	it("should serve Rojo on a free port when none is set and the default port is busy", async () => {
 		expect.assertions(2);
 
-		const run = await stoppedAsync({ isPortFree: false, rojoPort: "unset" });
+		const run = await stoppedAsync({ ...ATTACHED, isPortFree: false, rojoPort: "unset" });
 
 		await expect(run.result).resolves.toMatchObject({ data: { port: FREE_PORT } });
 		expect(spawnedIds(run.fake)).toStrictEqual([
@@ -1250,7 +1282,10 @@ describe("forge start hooks and syncback", () => {
 	 * @returns The run, after one save.
 	 */
 	async function savedAsync(setup: StartSetup = SYNCBACK): Promise<StartRun> {
-		const run = startCommand({ files: { ...TOOL_FILES, "game.rbxl": "v1" }, ...setup });
+		const run = startCommand({
+			...setup,
+			files: { ...(setup.files ?? TOOL_FILES), "game.rbxl": "v1" },
+		});
 		await flushAsync();
 		run.memory.setModifiedTime("game.rbxl", Date.UTC(2026, 0, 2));
 		await passAsync(run, FILE_POLL_MS);
@@ -1260,7 +1295,7 @@ describe("forge start hooks and syncback", () => {
 	it("should not run syncback on a save without --syncback", async () => {
 		expect.assertions(1);
 
-		const run = await savedAsync({ ...SYNCBACK, flags: ROJO_ONLY });
+		const run = await savedAsync({ ...SYNCBACK, ...ATTACHED, flags: NO_COMPILER });
 		run.signals.fire("SIGINT");
 		await run.result;
 
@@ -1291,7 +1326,6 @@ describe("forge start hooks and syncback", () => {
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: syncback --help",
-			"rojo: serve default.project.json --port 4000",
 			"syncback-1: syncback default.project.json --input game.rbxl --non-interactive",
 			"syncback-2: -c lint",
 		]);
@@ -1451,7 +1485,7 @@ describe("forge start hooks and syncback", () => {
 
 		const run = await stoppedAsync({
 			file: { hooks: { build: { pre: ["codegen"] } } },
-			flags: { open: false },
+			flags: {},
 			projectType: "rbxts",
 		});
 		await run.result;
@@ -1520,7 +1554,7 @@ describe("forge start session files", () => {
 	it("should delete the current hint with the session directory", async () => {
 		expect.assertions(1);
 
-		const run = await stoppedAsync();
+		const run = await stoppedAsync(ATTACHED);
 		await run.result;
 
 		expect(
@@ -1639,7 +1673,7 @@ describe("forge start session files", () => {
 	it("should kill an older session that outlives the wait with --force, then start", async () => {
 		expect.assertions(4);
 
-		const run = startCommand({ files: WITH_OLD, flags: { ...ROJO_ONLY, force: true } });
+		const run = startCommand({ files: WITH_OLD, flags: { ...NO_COMPILER, force: true } });
 		const lease = run.native.addon.tryLockFile(OLD_LEASE, "shared");
 		assert(lease !== null);
 		run.native.sessions.set("old", [{ isReaper: true, lease, pid: 77 }, { pid: 78 }]);
@@ -1659,7 +1693,7 @@ describe("forge start session files", () => {
 	it("should leave cleanups out of the result when no older session needed one", async () => {
 		expect.assertions(1);
 
-		const run = await stoppedAsync({ files: WITH_OLD, flags: { ...ROJO_ONLY, force: true } });
+		const run = await stoppedAsync({ files: WITH_OLD, flags: { ...NO_COMPILER, force: true } });
 		const { data } = await run.result;
 
 		expect(Object.keys(data)).not.toContain("cleanups");
@@ -1742,7 +1776,7 @@ describe("forge up control channel", () => {
 	it("should serve its status on the control endpoint while it runs, then close it", async () => {
 		expect.assertions(2);
 
-		const run = startCommand();
+		const run = startCommand(ATTACHED);
 		await flushAsync();
 		const status = await callSessionAsync(run.ipc, CONTROL_TARGET, "status");
 		run.signals.fire("SIGINT");
@@ -1755,7 +1789,13 @@ describe("forge up control channel", () => {
 			services: {
 				compiler: { building: false, owner: null, status: "off" },
 				rojo: { owner: null, port: 4000, status: "ready" },
-				studio: { owner: null, status: "off" },
+				studio: {
+					owner: null,
+					pid: STUDIO_PID,
+					place: PLACE,
+					startTime: "0",
+					status: "open",
+				},
 				syncback: { status: "off" },
 			},
 			sessionId: "session-1",
@@ -2038,7 +2078,7 @@ describe("forge up control channel", () => {
 
 /** A sync call that may take as long as the test needs. */
 /** What `forge up` asks for: the compiler, no Studio, no Rojo. */
-const UP: FlagValues = { open: false, rojo: false };
+const UP: FlagValues = { open: false };
 const ADD_CALL = { params: { parts: ["compiler"] }, responseTimeoutMs: 60_000 };
 
 /**
@@ -2170,7 +2210,7 @@ describe("forge up parts", () => {
 		expect.assertions(1);
 
 		const run = startCommand({
-			flags: { open: false },
+			flags: {},
 			oneShot: oneShotsWith({ "start-1": "hold" }),
 			projectType: "rbxts",
 		});
@@ -2198,7 +2238,7 @@ describe("forge up parts", () => {
 	it("should add the compiler to a session that started without it", async () => {
 		expect.assertions(3);
 
-		const run = startCommand({ projectType: "rbxts" });
+		const run = startCommand({ ...ATTACHED, projectType: "rbxts" });
 		await flushAsync();
 		const before = await freshWithinAsync(run);
 		const answer = await addCompilerAsync(run);
@@ -2270,7 +2310,7 @@ describe("forge up parts", () => {
 		expect.assertions(1);
 
 		const run = startCommand({
-			flags: { open: false },
+			flags: {},
 			oneShot: oneShotsWith({ "start-1": "hold" }),
 			projectType: "rbxts",
 		});
@@ -2496,8 +2536,12 @@ describe("forge up --studio", () => {
 	it("should attach Studio to a session whose Rojo runs, and start no second Rojo", async () => {
 		expect.assertions(2);
 
-		const run = startCommand();
+		const run = startCommand({ owned: true });
 		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, "1");
+		await passAsync(run, FILE_POLL_MS);
+		run.memory.fileSystem.rmSync(LOCK);
+		await passAsync(run, FILE_POLL_MS);
 		const answer = await attachAsync(run);
 		run.signals.fire("SIGINT");
 		await run.result;
@@ -2670,6 +2714,7 @@ describe("forge sync control channel", () => {
 			project: "default.project.json",
 		});
 		expect(spawnedIds(run.fake)).toStrictEqual([
+			"start-1: build default.project.json --output game.rbxl",
 			"rojo: serve default.project.json --port 4000",
 			"syncback-1: syncback --help",
 			"syncback-2: syncback default.project.json --input game.rbxl --non-interactive",
@@ -2767,7 +2812,7 @@ describe("forge sync control channel", () => {
 		expect.assertions(1);
 
 		const run = startCommand({
-			flags: { open: false },
+			flags: {},
 			oneShot: oneShotsWith({ "start-1": "hold" }),
 			projectType: "rbxts",
 		});
@@ -2960,7 +3005,7 @@ describe("forge start owners", () => {
 	it("should give its owner every part it starts with, and end as before once it goes", async () => {
 		expect.assertions(3);
 
-		const run = startCommand({ owned: true });
+		const run = startCommand({ ...ATTACHED, owned: true });
 		await flushAsync();
 		const owned = stateOf(run);
 		run.owner.request({ signal: "SIGINT", type: "signal" });
@@ -2969,7 +3014,7 @@ describe("forge start owners", () => {
 			services: {
 				compiler: { owner: null, status: "off" },
 				rojo: { owner: "start", status: "ready" },
-				studio: { owner: null, status: "off" },
+				studio: { owner: "start", status: "open" },
 			},
 		});
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
@@ -2980,7 +3025,7 @@ describe("forge start owners", () => {
 		expect.assertions(2);
 
 		const run = startCommand({
-			flags: { open: false },
+			flags: {},
 			oneShot: oneShotsWith({ "start-1": "hold" }),
 			owned: true,
 			projectType: "rbxts",
@@ -3009,7 +3054,12 @@ describe("forge start owners", () => {
 	it("should stop what its owner started and run on with a part up added, once it goes", async () => {
 		expect.assertions(3);
 
-		const run = startCommand({ ...WATCH, owned: true });
+		const run = startCommand({
+			...WATCH,
+			...ATTACHED,
+			files: { ...ATTACHED.files, "tools/darklua": "" },
+			owned: true,
+		});
 		await flushAsync();
 		await addCompilerAsync(run);
 		run.owner.request({ signal: "SIGINT", type: "signal" });
@@ -3033,9 +3083,9 @@ describe("forge start owners", () => {
 				released: [],
 				sessionId: "session-1",
 				stopped: ["rojo"],
-				studioLeft: false,
+				studioLeft: true,
 			},
-			summary: "Let go of session session-1: stopped Rojo.",
+			summary: "Let go of session session-1: stopped Rojo; left Studio open.",
 		});
 		expect(run.fake.calls).toContain("stop rojo 3000");
 	});
@@ -3043,7 +3093,7 @@ describe("forge start owners", () => {
 	it("should give no owner to a part that up started again after it failed", async () => {
 		expect.assertions(2);
 
-		const run = startCommand({ ...WATCH, flags: { open: false }, owned: true });
+		const run = startCommand({ ...WATCH, flags: {}, owned: true });
 		await flushAsync();
 		run.fake.exit("compiler", EXITED);
 		await passAsync(run, OUTPUT_POLL_MS);
@@ -3524,31 +3574,6 @@ describe("forge restart control channel", () => {
 		});
 		expect(state).toMatchObject({
 			services: { compiler: { owner: "start", status: "ready" } },
-		});
-	});
-
-	it("should serve Rojo again that ran with no Studio, on its port and with its owner", async () => {
-		expect.assertions(3);
-
-		const run = startCommand({ owned: true });
-		await flushAsync();
-		const answer = askRestartAsync(run, { force: true });
-		await exitOnStopAsync(run, "rojo");
-		const state = stateOf(run);
-		run.owner.request({ signal: "SIGINT", type: "signal" });
-		await run.result;
-
-		await expect(answer).resolves.toStrictEqual({
-			added: ["rojo"],
-			kept: [],
-			stopped: ["rojo"],
-		});
-		expect(spawnedIds(run.fake)).toStrictEqual([
-			"rojo: serve default.project.json --port 4000",
-			"rojo: serve default.project.json --port 4000",
-		]);
-		expect(state).toMatchObject({
-			services: { rojo: { owner: "start", port: 4000, status: "ready" } },
 		});
 	});
 

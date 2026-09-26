@@ -69,22 +69,6 @@ type FollowSetup = Pick<StudioSetup, "context" | "idle" | "status">;
 type FollowParts = Pick<AttachParts, "parts" | "state">;
 
 /**
- * Build the session's place with Rojo, as a step.
- *
- * @param steps - The steps context.
- * @param config - The project and the place.
- */
-export async function buildPlaceAsync(
-	steps: CommandContext,
-	config: ResolvedConfig,
-): Promise<void> {
-	await buildAsync(steps, config, {
-		project: config.rojoProjectPath,
-		target: { output: config.buildOutputPath, type: "output" },
-	});
-}
-
-/**
  * Open the place in Studio, or attach the verified Studio that has it open.
  * A place is never built under the Studio that has it open.
  *
@@ -211,6 +195,19 @@ export function createStudioAdder(
 		const added: Array<PartId> = opening === undefined ? [] : ["studio"];
 		return isRojoStarted ? [...added, "rojo"] : added;
 	};
+}
+
+/**
+ * Build the session's place with Rojo, as a step.
+ *
+ * @param steps - The steps context.
+ * @param config - The project and the place.
+ */
+async function buildPlaceAsync(steps: CommandContext, config: ResolvedConfig): Promise<void> {
+	await buildAsync(steps, config, {
+		project: config.rojoProjectPath,
+		target: { output: config.buildOutputPath, type: "output" },
+	});
 }
 
 /**

@@ -12,28 +12,22 @@ import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { ReporterEvent } from "../../src/seams/reporter.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
-import type { SessionRequest } from "../../src/supervisor/channel.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
-import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
 import { realTransport } from "../helpers/native-testing.ts";
-import { makeStudioExecutable, studioVariables } from "../helpers/real-native.ts";
-import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
 import type { Launched, Project } from "./session-harness.ts";
 import {
+	COMPILER_ONLY,
 	launch,
 	launchUnowned,
 	makeProjectAsync,
-	ROJO_ONLY,
 	settledWithinAsync,
+	START_STUDIO,
+	studioEnvironment,
 	waitForAsync,
 	workersOf,
 } from "./session-harness.ts";
 
-/** What `forge up` asks for: the compiler alone. */
-const UP: SessionRequest = { compiler: true, config: {}, open: false, rojo: false };
-/** What `forge start` asks for in a Luau project: Studio and Rojo. */
-const START_STUDIO: SessionRequest = { compiler: false, config: {}, open: true, rojo: true };
 /** 1.2 s with no activity. */
 const SHORT_TIMEOUT = 0.02;
 /** 3 s with no activity: longer than the time between two activities. */
@@ -58,28 +52,8 @@ async function startUpAsync(
 	const watched = path.join(project.project, "src", "main.ts");
 	mkdirSync(path.dirname(watched), { recursive: true });
 	writeFileSync(watched, "export {};\n");
-	const run = launchUnowned(project, UP, { FIXTURE_COMPILER_WATCH: watched });
+	const run = launchUnowned(project, COMPILER_ONLY, { FIXTURE_COMPILER_WATCH: watched });
 	return { project, run, watched };
-}
-
-/**
- * The variables of a session that opens a stand-in Studio, with a scratch
- * home, so no auto-recovery file of the user's Studio is ever touched.
- *
- * @returns The variables.
- */
-function studioEnvironment(): Record<string, string> {
-	const home = makeTemporaryDirectory();
-	return {
-		FIXTURE_PLACE_CONTENT: studioPlaceContent(),
-		HOME: home,
-		LOCALAPPDATA: path.join(home, "AppData", "Local"),
-		// With an `--import`, Node loads the place as ESM, and the stand-in
-		// does not run.
-		NODE_OPTIONS: "",
-		USERPROFILE: home,
-		...studioVariables(makeStudioExecutable()),
-	};
 }
 
 function isIdleStop(event: ReporterEvent): boolean {
@@ -198,7 +172,7 @@ describe("idle timeout", () => {
 				studio: { autoRecovery: "keep" },
 			});
 			const place = path.join(project.project, "game.rbxl");
-			const run = launchUnowned(project, START_STUDIO, studioEnvironment());
+			const run = launchUnowned(project, START_STUDIO, studioEnvironment(project));
 			await waitForStatusAsync(project, ({ services }) => services.studio.status === "open");
 			const opened = Date.now();
 			await keepActiveAsync(run, () => {
@@ -217,10 +191,10 @@ describe("idle timeout", () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync({
-			luau: { watch: { args: ["-w"], command: "rbxtsc" } },
 			session: { idleTimeout: SHORT_TIMEOUT },
+			studio: { autoRecovery: "keep" },
 		});
-		const run = launch(project, ROJO_ONLY);
+		const run = launch(project, START_STUDIO, studioEnvironment(project));
 		let isSettled = false;
 		void run.settled.finally(() => {
 			isSettled = true;
@@ -236,13 +210,14 @@ describe("idle timeout", () => {
 		// Longer than two more timeouts.
 		await sleep(3000);
 		const idle = await waitForStatusAsync(project, () => true);
-		const rojo = workersOf(project, session.identity.sessionId).find(({ role }) => {
-			return role === "rojo";
-		});
+		const rojo = workersOf(project, session.identity.sessionId)
+			.filter(({ role }) => role === "rojo")
+			.find(({ args }) => args.includes("serve"));
 
 		expect(idle.services).toMatchObject({
 			compiler: { owner: null, status: "off" },
 			rojo: { owner: "start", status: "ready" },
+			studio: { owner: "start", status: "open" },
 		});
 		expect(run.events).toContainEqual({
 			message: `No activity for ${SHORT_TIMEOUT} min: stopped compiler.`,

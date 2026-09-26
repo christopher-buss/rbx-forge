@@ -155,7 +155,6 @@ describe(runUpAsync, () => {
 				config: {},
 				detached: { report: path.join(LAUNCH_DIRECTORY, "l1.ndjson") },
 				open: false,
-				rojo: false,
 			},
 		});
 		expect(up.reporter.events).toStrictEqual([{ message: "compiling", type: "info" }]);
@@ -214,7 +213,6 @@ describe(runUpAsync, () => {
 			config: { syncback: { runOnStart: true } },
 			detached: { report: path.join(LAUNCH_DIRECTORY, "l1.ndjson") },
 			open: false,
-			rojo: false,
 		});
 	});
 

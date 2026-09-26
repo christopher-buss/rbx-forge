@@ -147,7 +147,6 @@ export async function runUpAsync(
 		compiler: input.flags["compiler"] !== false,
 		config: input.config,
 		open: false,
-		rojo: false,
 	};
 	const found = await probeSessionAsync(context.seams, forgeFiles(context.cwd));
 	const now = clock.now();

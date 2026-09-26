@@ -229,7 +229,7 @@ async function sessionPortAsync(
 	{ config, plan }: SessionServices,
 ): Promise<RojoPort> {
 	const port = createRojoPort(network, config.rojoPort);
-	if (plan.rojo) {
+	if (plan.open) {
 		await port.chooseAsync();
 	}
 

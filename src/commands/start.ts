@@ -28,7 +28,7 @@ export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
 		name: "open",
 		kind: "boolean",
-		text: "Open the place in Studio and serve Rojo (the default); --no-open leaves Studio alone.",
+		text: "Open the place in Studio and serve Rojo (the default); --no-open runs neither.",
 	},
 	STUDIO_PATH_FLAG,
 	{
@@ -122,7 +122,6 @@ async function superviseAsync(
 			compiler: input.flags["compiler"] !== false,
 			config: input.config,
 			open: input.flags["open"] !== false,
-			rojo: true,
 			...(input.flags["force"] === true ? { force: true } : {}),
 		},
 	});

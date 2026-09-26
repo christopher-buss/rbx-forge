@@ -119,7 +119,6 @@ function makeHandlers(add: PartAdder = async () => []) {
 			owner: null,
 			pid: 1,
 			port: 1,
-			rojo: false,
 			sessionId: "s1",
 			startedAt: "t",
 			syncback: false,

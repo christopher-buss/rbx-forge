@@ -39,10 +39,11 @@ export interface SessionRequest {
 	 * bound is cleaned up by force.
 	 */
 	force?: boolean;
-	/** `start --no-open` sets it to `false`; `up` never opens Studio. */
+	/**
+	 * Studio with its Rojo: `start --no-open` sets it to `false`; `up`
+	 * never opens Studio.
+	 */
 	open: boolean;
-	/** Serve Rojo: `start` does, `up` does not. */
-	rojo: boolean;
 }
 
 /** A failed session, as the supervisor reports it. */
@@ -110,7 +111,6 @@ const requestSchema = jsonLine.pipe(
 		"detached?": { report: "string" },
 		"force?": "boolean",
 		"open": "boolean",
-		"rojo": "boolean",
 	}),
 );
 
@@ -155,7 +155,6 @@ export function parseSessionRequest(text: string | undefined): SessionRequest {
 		config,
 		...(parsed.detached === undefined ? {} : { detached: parsed.detached }),
 		open: parsed.open,
-		rojo: parsed.rojo,
 		...(parsed.force === true ? { force: true } : {}),
 	};
 }

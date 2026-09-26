@@ -50,7 +50,6 @@ describe(parseSessionRequest, () => {
 			compiler: false,
 			config: { syncback: { runOnStart: true } },
 			open: true,
-			rojo: true,
 		};
 
 		expect(parseSessionRequest(encodeSessionRequest(request))).toStrictEqual(request);
@@ -64,7 +63,6 @@ describe(parseSessionRequest, () => {
 			config: {},
 			detached: { report: "/r.ndjson" },
 			open: false,
-			rojo: false,
 		};
 
 		expect(parseSessionRequest(encodeSessionRequest(request))).toStrictEqual(request);
@@ -73,14 +71,13 @@ describe(parseSessionRequest, () => {
 	it("should read back --force, and leave it out when false", () => {
 		expect.assertions(2);
 
-		const forced = { compiler: true, config: {}, force: true, open: true, rojo: true };
+		const forced = { compiler: true, config: {}, force: true, open: true };
 
 		expect(parseSessionRequest(encodeSessionRequest(forced))).toStrictEqual(forced);
 		expect(parseSessionRequest(JSON.stringify({ ...forced, force: false }))).toStrictEqual({
 			compiler: true,
 			config: {},
 			open: true,
-			rojo: true,
 		});
 	});
 
@@ -104,7 +101,7 @@ describe(parseSessionRequest, () => {
 		expect.assertions(1);
 
 		const config = { gracefulTimeoutMs: "y", rojoPort: "x" };
-		const text = JSON.stringify({ compiler: true, config, open: true, rojo: true });
+		const text = JSON.stringify({ compiler: true, config, open: true });
 		const error = catchForgeError(() => parseSessionRequest(text));
 
 		expect([error.code, error.message]).toStrictEqual([
