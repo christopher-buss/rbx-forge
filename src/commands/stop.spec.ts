@@ -167,7 +167,10 @@ function makeProject({
  */
 async function serveSessionAsync(
 	project: StopProject,
-	studio: () => SessionStatus["services"]["studio"],
+	studio: () => Pick<
+		SessionStatus["services"]["studio"],
+		"pid" | "place" | "startTime" | "status"
+	>,
 ): Promise<void> {
 	const { fileSystem, ipc } = project.context.seams;
 	for (const [file, content] of Object.entries(SESSION_FILES)) {
@@ -184,9 +187,9 @@ async function serveSessionAsync(
 					pid: 500,
 					running: true,
 					services: {
-						compiler: { building: false, status: "off" },
-						rojo: { port: 34_872, status: "ready" },
-						studio: studio(),
+						compiler: { building: false, owner: null, status: "off" },
+						rojo: { owner: null, port: 34_872, status: "ready" },
+						studio: { owner: null, ...studio() },
 						syncback: { status: "off" },
 					},
 					sessionId: "s1",
@@ -488,7 +491,10 @@ describe(runStopAsync, () => {
 	it("should wait while the session's Studio is opening", async () => {
 		expect.assertions(2);
 
-		let status: SessionStatus["services"]["studio"] = { status: "opening" };
+		let status: Pick<
+			SessionStatus["services"]["studio"],
+			"pid" | "place" | "startTime" | "status"
+		> = { status: "opening" };
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
 			onSleep: [

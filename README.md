@@ -66,14 +66,14 @@ The bins `forge` and `rbx-forge` are the same. Run forge from the project root.
 
 Session commands:
 
-| Command             | What it does                                                                                                                               |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `forge start`       | Run the session in this terminal. Ctrl+C, a closed terminal, or a killed `start` stops every process of the session.                       |
-| `forge up`          | Start the same session in the background. Returns when Rojo listens and the first compile is done. Reports a running session if one runs.  |
-| `forge status`      | Each service's state, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below. |
-| `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                             |
-| `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.           |
-| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.            |
+| Command             | What it does                                                                                                                                                                       |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `forge start`       | Run the session in this terminal. Ctrl+C, a closed terminal, or a killed `start` stops every process of the session.                                                               |
+| `forge up`          | Start the same session in the background. Returns when no part is starting: Rojo listens and the first compile is done, or the part failed. Reports a running session if one runs. |
+| `forge status`      | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                  |
+| `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                                                                     |
+| `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                   |
+| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.                                                    |
 
 `start` and `up` take the same flags:
 

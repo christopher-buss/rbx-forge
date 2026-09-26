@@ -1,4 +1,4 @@
-import type { WorkerReport, WorkerSpec } from "../reaper/protocol.ts";
+import type { WorkerSpec } from "../reaper/protocol.ts";
 import type { Reaper, ReaperEnd, ReaperLauncher, SpawnedWorker } from "../reaper/reaper-client.ts";
 import type { Pause } from "./pause.ts";
 import type { OnStop, StopRequest } from "./stop-source.ts";
@@ -9,8 +9,6 @@ export type SessionEndReason =
 	| StopRequest
 	/** A step before the services failed, or a service could not start. */
 	| { error: unknown; type: "failed" }
-	/** A service's tree is gone: it exited, or its reaper died. */
-	| { report: WorkerReport; service: string; type: "service_exited" }
 	/** Studio closed the place the session opened. */
 	| { type: "studio_closed" };
 
@@ -49,12 +47,15 @@ export interface SessionScope {
 	/** Aborts once the session ends: nothing new starts after that. */
 	signal: AbortSignal;
 	/**
-	 * Start a long-running service. Its exit ends the session.
+	 * Start a long-running service. Its exit stops only its part, never the
+	 * session.
 	 *
 	 * @returns The worker, or `undefined` when the session is ending.
 	 * @rejects `process_failed` or `reaper_unavailable`.
 	 */
 	startServiceAsync: (service: WorkerSpec) => Promise<SpawnedWorker | undefined>;
+	/** Stop one worker: graceful signal, a kill after the session's grace. */
+	stopWorker: (id: string) => void;
 	/**
 	 * Keep a background task, such as a file watch. Once the reaper has
 	 * ended, the session waits for every task before it returns.
@@ -64,6 +65,13 @@ export interface SessionScope {
 
 /** What starts a session: its reaper launcher, and the test pause points. */
 export type SessionSeams = Readonly<{ pause: Pause; reaper: ReaperLauncher }>;
+
+/** What {@link admit} runs once the reaper is leased. */
+interface Admission {
+	body: (scope: SessionScope) => Promise<void>;
+	graceMs: number;
+	reaper: Reaper;
+}
 
 /** The parts of a session the helpers below share. */
 interface SessionState {
@@ -75,8 +83,8 @@ interface SessionState {
 
 /**
  * Run one session: start its reaper, run `body` (the steps, services, and
- * watches), and wait for the first end trigger: a stop request, a service's
- * exit, a failed step, or a reason `body` passes to `end`. Then terminate the
+ * watches), and wait for the first end trigger: a stop request, a failed
+ * step, or a reason `body` passes to `end`. Then terminate the
  * reaper, which stops every worker, and return once it has exited and every
  * tracked task has settled. The reaper also ends every worker when this
  * process dies, however it dies.
@@ -105,7 +113,7 @@ export async function runSessionAsync(
 			recordPath: options.recordPath,
 			sessionId: options.sessionId,
 		});
-		admit(seams.pause, state, reaper, body);
+		admit(seams.pause, state, { body, graceMs: options.graceMs, reaper });
 
 		const reason = await state.ended;
 		const end = await reaper.terminateAsync(options.graceMs, options.hurry);
@@ -116,23 +124,7 @@ export async function runSessionAsync(
 	}
 }
 
-/**
- * End the session once a service's tree is gone.
- *
- * @param state - The session.
- * @param id - The service's id.
- * @param exited - Resolves with its report.
- */
-async function endOnExitAsync(
-	state: SessionState,
-	id: string,
-	exited: Promise<WorkerReport>,
-): Promise<void> {
-	const report = await exited;
-	state.finish({ report, service: id, type: "service_exited" });
-}
-
-function makeScope(state: SessionState, reaper: Reaper): SessionScope {
+function makeScope(state: SessionState, reaper: Reaper, graceMs: number): SessionScope {
 	const { signal } = state.abort;
 	return {
 		end: state.finish,
@@ -143,9 +135,10 @@ function makeScope(state: SessionState, reaper: Reaper): SessionScope {
 				return;
 			}
 
-			const worker = await reaper.spawnAsync(service);
-			state.tasks.push(endOnExitAsync(state, service.id, worker.exited));
-			return worker;
+			return reaper.spawnAsync(service);
+		},
+		stopWorker: (id) => {
+			reaper.stop(id, graceMs);
 		},
 		track: (task) => {
 			state.tasks.push(task);
@@ -162,15 +155,14 @@ function hasEnded(state: SessionState): boolean {
  *
  * @param pause - The test pause points.
  * @param state - The session.
- * @param reaper - The leased reaper.
- * @param body - What the session runs.
+ * @param admission - The leased reaper, what the session runs, and the
+ *   grace of a worker's stop.
  * @rejects What the body rejects with.
  */
 async function admitAsync(
 	pause: Pause,
 	state: SessionState,
-	reaper: Reaper,
-	body: (scope: SessionScope) => Promise<void>,
+	{ body, graceMs, reaper }: Admission,
 ): Promise<void> {
 	await pause("leased", state.abort.signal);
 	if (hasEnded(state)) {
@@ -180,7 +172,7 @@ async function admitAsync(
 	reaper.go();
 	await pause("admitted", state.abort.signal);
 	if (!hasEnded(state)) {
-		await body(makeScope(state, reaper));
+		await body(makeScope(state, reaper, graceMs));
 	}
 }
 
@@ -191,16 +183,11 @@ async function admitAsync(
  *
  * @param pause - The test pause points.
  * @param state - The session.
- * @param reaper - The leased reaper.
- * @param body - What the session runs.
+ * @param admission - The leased reaper, what the session runs, and the
+ *   grace of a worker's stop.
  */
-function admit(
-	pause: Pause,
-	state: SessionState,
-	reaper: Reaper,
-	body: (scope: SessionScope) => Promise<void>,
-): void {
-	const admitted = admitAsync(pause, state, reaper, body).catch((err: unknown) => {
+function admit(pause: Pause, state: SessionState, admission: Admission): void {
+	const admitted = admitAsync(pause, state, admission).catch((err: unknown) => {
 		state.finish({ error: err, type: "failed" });
 	});
 	state.tasks.push(admitted);

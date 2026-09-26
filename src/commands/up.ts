@@ -56,10 +56,11 @@ interface UpState {
 }
 
 /**
- * `forge up`: start the dev session in the background and return once Rojo
- * serves and the compiler finished its first compile. The session runs in a
- * detached supervisor (`supervisor/detached-launcher.ts`) until `forge down`,
- * Studio closing the place, or a service failing.
+ * `forge up`: start the dev session in the background and return once no
+ * part starts: Rojo serves or stopped, and the compiler finished its first
+ * compile or stopped. The session runs in a detached supervisor
+ * (`supervisor/detached-launcher.ts`) until `forge down` or until Studio
+ * closes the place; a failed service stops only its part.
  *
  * It is idempotent: when a session runs, it reports that session instead
  * (`started: false`); when one is starting, it waits for it. Two `up`s at
@@ -98,9 +99,11 @@ export async function runUpAsync(
 	};
 	const { isStarted, status } = await waitReadyAsync(context, request, state);
 	const { rojo } = status.services;
+	const serving =
+		rojo.status === "ready" ? `Rojo serves on port ${rojo.port}` : `Rojo is ${rojo.status}`;
 	return {
 		data: { ...status, started: isStarted },
-		summary: `${isStarted ? "Started" : "Found"} session ${status.sessionId}: Rojo serves on port ${rojo.port}.`,
+		summary: `${isStarted ? "Started" : "Found"} session ${status.sessionId}: ${serving}.`,
 	};
 }
 

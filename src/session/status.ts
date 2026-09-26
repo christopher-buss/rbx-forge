@@ -13,18 +13,41 @@ import type { StudioProcess } from "../studio/launcher.ts";
  * {
  *   "running": true, "sessionId": "…", "pid": 1234, "startedAt": "…", "phase": "ready",
  *   "services": {
- *     "rojo":     { "status": "ready", "port": 34872 },
- *     "compiler": { "status": "ready", "building": false,
+ *     "rojo":     { "status": "failed", "owner": null, "port": 34872, "exitCode": 1, "outputTail": ["…"] },
+ *     "compiler": { "status": "ready", "owner": null, "building": false,
  *                   "lastBuild": { "startedAt": "…", "at": "…", "errors": 0, "diagnostics": [] } },
  *     "syncback": { "status": "idle", "lastRun": { "at": "…", "ok": true, "durationMs": 812, "hooks": [] } },
- *     "studio":   { "status": "open", "place": "…", "pid": 5678, "startTime": "…" }
+ *     "studio":   { "status": "open", "owner": null, "place": "…", "pid": 5678, "startTime": "…" }
  *   }
  * }
  * ```
  */
 
-/** Where a service is: `off` when the session does not run it. */
-export type ServiceStatus = "off" | "ready" | "starting" | "stopped";
+/**
+ * Where a service's part is: `off` when it does not run (never started, or
+ * stopped on request); `failed` once its service exited by itself.
+ */
+export type PartStatus = "failed" | "off" | "ready" | "starting";
+
+/** Who owns a part: the `start` terminal, or `null` for none. */
+export type PartOwner = "start";
+
+/** How a part's service ended when it failed. */
+export interface PartFailure {
+	/** The exit code; `null` when a signal or a kill ended it. */
+	exitCode: null | number;
+	/** The last lines of its output. */
+	outputTail: Array<string>;
+}
+
+/** A service's part: a failed one also has its {@link PartFailure}. */
+export interface ServicePart extends Partial<PartFailure> {
+	owner: null | PartOwner;
+	status: PartStatus;
+}
+
+/** The services a session can run, by their part's name. */
+export type ServiceId = "compiler" | "rojo";
 
 /** Where the whole session is. */
 export type SessionPhase = "ready" | "starting" | "stopped" | "stopping";
@@ -65,6 +88,7 @@ export type StudioStatus = "closed" | "off" | "open" | "opening";
 
 /** The Studio of a session. */
 export interface SessionStudio {
+	owner: null | PartOwner;
 	pid?: number;
 	place?: string;
 	startTime?: string;
@@ -79,8 +103,8 @@ export interface SessionStatus {
 	running: boolean;
 	services: {
 		/** `building`: a compile runs (from its start line to its summary). */
-		compiler: { building: boolean; lastBuild?: LastBuild; status: ServiceStatus };
-		rojo: { port: number; status: ServiceStatus };
+		compiler: ServicePart & { building: boolean; lastBuild?: LastBuild };
+		rojo: ServicePart & { port: number };
 		/**
 		 * `place`: the place Studio opens or has open, once forge launched
 		 * it. `pid` and `startTime`: the Studio forge started directly.
@@ -107,9 +131,11 @@ export interface StatusRecorder {
 	compiled: (build: LastBuild, isBuilding: boolean) => void;
 	/**
 	 * A service's worker started (`ready` or, for a compiler that reports
-	 * compiles, `starting`) or its tree is gone.
+	 * compiles, `starting`), or its tree is gone after a stop (`off`).
 	 */
-	service: (id: "compiler" | "rojo", status: ServiceStatus) => void;
+	service: (id: ServiceId, status: Exclude<PartStatus, "failed">) => void;
+	/** A service's tree is gone and nothing stopped it: its part failed. */
+	serviceFailed: (id: ServiceId, failure: PartFailure) => void;
 	/**
 	 * Studio was launched with the place, has it open, or closed it.
 	 * `process`: the Studio forge started directly, if it did.
@@ -148,8 +174,8 @@ export interface StatusStart {
 }
 
 /**
- * Whether a session is ready: Rojo serves, and the compiler, if any, has
- * finished its first compile (or does not report compiles).
+ * Whether a session is ready: no part is starting. A failed or stopped part
+ * does not hold it back.
  *
  * @param status - The session's status.
  * @returns `true` once `forge up` may return.
@@ -205,13 +231,51 @@ function initialStatus(start: StatusStart): SessionStatus {
 		pid: start.pid,
 		running: true,
 		services: {
-			compiler: { building: false, status: start.compiler ? "starting" : "off" },
-			rojo: { port: start.port, status: "starting" },
-			studio: { status: start.open ? "opening" : "off" },
+			compiler: { building: false, owner: null, status: start.compiler ? "starting" : "off" },
+			rojo: { owner: null, port: start.port, status: "starting" },
+			studio: { owner: null, status: start.open ? "opening" : "off" },
 			syncback: { status: start.syncback ? "idle" : "off" },
 		},
 		sessionId: start.sessionId,
 		startedAt: start.startedAt,
+	};
+}
+
+/**
+ * Set a part's status; a failure's fields stay only with `failed`.
+ *
+ * @param part - The part, changed in place.
+ * @param next - Its new status, and the failure for `failed`.
+ */
+function setPart(
+	part: ServicePart,
+	next: Partial<PartFailure> & Pick<ServicePart, "status">,
+): void {
+	delete part.exitCode;
+	delete part.outputTail;
+	Object.assign(part, next);
+}
+
+/**
+ * The service half of a recorder.
+ *
+ * @param status - The status it changes.
+ * @param changed - Called after each change.
+ * @returns What records a service's part.
+ */
+function createPartRecorder(
+	status: SessionStatus,
+	changed: () => void,
+): Pick<StatusRecorder, "service" | "serviceFailed"> {
+	return {
+		service: (id, partStatus) => {
+			setPart(status.services[id], { status: partStatus });
+			changed();
+		},
+		serviceFailed: (id, failure) => {
+			setPart(status.services[id], { ...failure, status: "failed" });
+			changed();
+		},
 	};
 }
 
@@ -237,15 +301,14 @@ function createRecorder(
 			changed();
 		},
 		compiled: (lastBuild, isBuilding) => {
-			status.services.compiler = { building: isBuilding, lastBuild, status: "ready" };
+			const { owner } = status.services.compiler;
+			status.services.compiler = { building: isBuilding, lastBuild, owner, status: "ready" };
 			changed();
 		},
-		service: (id, serviceStatus) => {
-			status.services[id].status = serviceStatus;
-			changed();
-		},
+		...createPartRecorder(status, changed),
 		studio: (studioStatus, place, process) => {
-			status.services.studio = { ...process, place, status: studioStatus };
+			const { owner } = status.services.studio;
+			status.services.studio = { ...process, owner, place, status: studioStatus };
 			changed();
 		},
 		syncbackFinished: (run) => {
@@ -261,8 +324,7 @@ function createRecorder(
 
 function derivePhase(status: SessionStatus): SessionPhase {
 	const { compiler, rojo } = status.services;
-	const isCompilerReady = compiler.status === "off" || compiler.status === "ready";
-	return isCompilerReady && rojo.status === "ready" ? "ready" : "starting";
+	return compiler.status === "starting" || rojo.status === "starting" ? "starting" : "ready";
 }
 
 const TEXT = "string";
@@ -278,7 +340,14 @@ const diagnostic = type({
 	severity: "'error' | 'warning'",
 });
 
-const serviceStatus = type("'off' | 'ready' | 'starting' | 'stopped'");
+const OWNER = "'start' | null";
+
+const servicePart = type({
+	"exitCode?": INTEGER_OR_NULL,
+	"outputTail?": "string[]",
+	"owner": OWNER,
+	"status": "'failed' | 'off' | 'ready' | 'starting'",
+});
 
 const hookResult = type({
 	id: TEXT,
@@ -295,7 +364,7 @@ const statusSchema: Type<SessionStatus> = type({
 	pid: INTEGER,
 	running: "boolean",
 	services: {
-		compiler: {
+		compiler: servicePart.and({
 			"building": "boolean",
 			"lastBuild?": {
 				at: TEXT,
@@ -303,10 +372,10 @@ const statusSchema: Type<SessionStatus> = type({
 				errors: INTEGER,
 				startedAt: TEXT,
 			},
-			"status": serviceStatus,
-		},
-		rojo: { port: INTEGER, status: serviceStatus },
+		}),
+		rojo: servicePart.and({ port: INTEGER }),
 		studio: {
+			"owner": OWNER,
 			"pid?": INTEGER,
 			"place?": TEXT,
 			"startTime?": TEXT,

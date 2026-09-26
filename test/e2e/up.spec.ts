@@ -8,9 +8,11 @@ import { appendFileSync, existsSync, rmSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, expect, it, onTestFinished } from "vitest";
 
 import { EXIT_NOT_RUNNING, EXIT_SUCCESS } from "../../src/exit-codes.ts";
+import type { SessionStatus } from "../../src/session/status.ts";
+import { parseStatus } from "../../src/session/status.ts";
 import { parseLines } from "../helpers/output.ts";
 import { realNativePath } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
@@ -21,6 +23,7 @@ import {
 	waitForWorkersAsync,
 } from "../helpers/worker-log.ts";
 import { BIN } from "./run-bin.ts";
+import type { Fixture } from "./session-fixture.ts";
 import { IS_WINDOWS, makeFixtureAsync } from "./session-fixture.ts";
 import { runForgeAsync, stopDetachedAsync, UP_ROJO_ONLY } from "./up-fixture.ts";
 
@@ -29,6 +32,27 @@ const IN_JOB = path.join(import.meta.dirname, "..", "fixtures", "bin", "in-job.t
 function rojoServes(log: string): number {
 	return readWorkerLog(log).filter(({ args, role }) => role === "rojo" && args[0] === "serve")
 		.length;
+}
+
+/**
+ * Run `forge status --json` until Rojo's part has failed.
+ *
+ * @param fixture - The project and its environment.
+ * @returns That status.
+ * @rejects When 30 seconds pass first.
+ */
+async function waitForRojoFailedAsync(fixture: Fixture): Promise<SessionStatus> {
+	const deadline = Date.now() + 30_000;
+	for (;;) {
+		const { result } = await runForgeAsync(fixture, ["status", "--json"]);
+		const status = parseStatus(result.data);
+		if (status?.services.rojo.status === "failed") {
+			return status;
+		}
+
+		assert(Date.now() < deadline, "Rojo never failed");
+		await sleep(100);
+	}
 }
 
 /**
@@ -49,6 +73,29 @@ async function waitForAsync(isDone: () => boolean): Promise<void> {
 }
 
 describe("forge up", () => {
+	it("should keep the session up once Rojo exits, and show each part's status and owner", async () => {
+		expect.assertions(3);
+
+		const fixture = await makeFixtureAsync();
+		const up = await runForgeAsync(fixture, UP_ROJO_ONLY, {
+			FIXTURE_EXIT_AFTER_MS: "1500",
+			FIXTURE_EXIT_CODE: "3",
+		});
+		const status = await waitForRojoFailedAsync(fixture);
+
+		expect(up.status).toBe(EXIT_SUCCESS);
+		expect(status).toMatchObject({
+			phase: "ready",
+			running: true,
+			services: {
+				compiler: { owner: null, status: "off" },
+				rojo: { exitCode: 3, owner: null, port: fixture.port, status: "failed" },
+				studio: { owner: null, status: "off" },
+			},
+		});
+		expect(status.services.rojo.outputTail).toContain("rojo exits on its own");
+	});
+
 	it("should start a detached session, report it on a second up, and serve its status", async () => {
 		expect.assertions(4);
 

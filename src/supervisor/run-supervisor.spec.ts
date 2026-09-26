@@ -27,9 +27,9 @@ import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { Pause, PausePoint } from "../session/pause.ts";
 import { neverPauseAsync } from "../session/pause.ts";
+import { OUTPUT_POLL_MS, PART_TAIL_LINES } from "../session/service-parts.ts";
 import {
 	FILE_POLL_MS,
-	OUTPUT_POLL_MS,
 	ROJO_LISTEN_BOUND_MS,
 	STUDIO_CLOSED_SYNCBACK_MS,
 } from "../session/session-body.ts";
@@ -563,18 +563,59 @@ describe(runSupervisorAsync, () => {
 		expect(run.fake.calls.at(-1)).toBe("terminate 3000");
 	});
 
-	it("should fail with service_failed when Rojo exits, naming its log", async () => {
+	it("should mark only Rojo failed when it exits, with its exit code and output tail", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "rojo.log"),
+			"\u001B[32m-first-\u001B[39m\nlast\n",
+		);
+		run.fake.exit("rojo", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const state = stateOf(run);
+		const calls = [...run.fake.calls];
+		run.signals.fire("SIGINT");
+
+		expect(state).toMatchObject({
+			running: true,
+			services: {
+				compiler: { owner: null, status: "starting" },
+				rojo: {
+					exitCode: 3,
+					outputTail: ["-first-", "last"],
+					owner: null,
+					status: "failed",
+				},
+			},
+		});
+		expect(calls).not.toContainEqual(expect.stringMatching(/^terminate/));
+		expect(run.reporter.events).toContainEqual({
+			message: `rojo exited (exit code 3); the session goes on without it. Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
+			type: "warning",
+		});
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
+	});
+
+	it("should keep only the last lines of a failed service's output", async () => {
 		expect.assertions(1);
 
 		const run = startCommand();
 		await flushAsync();
+		const lines = Array.from({ length: PART_TAIL_LINES + 5 }, (_, index) => `line ${index}`);
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "rojo.log"),
+			`${lines.join("\n")}\n`,
+		);
 		run.fake.exit("rojo", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
 
-		await expect(run.result).rejects.toMatchObject({
-			code: "service_failed",
-			details: { reason: "service_failed:rojo", reports: [] },
-			hint: `Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
-			message: "rojo exited (exit code 3), so the session stopped.",
+		expect(state).toMatchObject({
+			services: { rojo: { outputTail: lines.slice(-PART_TAIL_LINES) } },
 		});
 	});
 
@@ -652,48 +693,110 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should fail with service_failed when Rojo never listens within the bound", async () => {
-		expect.assertions(2);
+	it("should stop Rojo as failed when it never listens within the bound, and go on", async () => {
+		expect.assertions(4);
 
 		const run = startCommand({ isListening: async () => false });
-		const failed = run.result.catch((err: unknown) => err);
 		await flushAsync();
 		await passAsync(run, ROJO_LISTEN_BOUND_MS);
+		const stopped = [...run.fake.calls];
+		run.fake.exit("rojo", { ...EXITED, exitCode: null });
+		await passAsync(run, OUTPUT_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
 
-		await expect(failed).resolves.toMatchObject({
-			code: "service_failed",
-			details: { reason: "service_failed:rojo" },
-			hint: `Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
-			message: "rojo did not listen on port 4000 within 60 s, so the session stopped.",
+		expect(stopped.at(-1)).toBe("stop rojo 3000");
+		expect(state).toMatchObject({
+			phase: "ready",
+			running: true,
+			services: { rojo: { exitCode: null, outputTail: [], status: "failed" } },
 		});
-		expect(run.reporter.events).not.toContainEqual(expect.objectContaining({ type: "info" }));
+		expect(run.reporter.events).toContainEqual({
+			message: `rojo did not listen on port 4000 within 60 s; the session goes on without it. Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
+			type: "warning",
+		});
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 	});
 
-	it("should fail with service_failed when the compiler exits", async () => {
+	it("should stop waiting for Rojo to listen once it exits, and announce the compiler alone", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			file: { luau: { watch: { command: "darklua" } } },
+			files: { ...TOOL_FILES, "tools/darklua": "" },
+			flags: { open: false },
+			isListening: async () => false,
+		});
+		await flushAsync();
+		run.fake.exit("rojo", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const checks = run.isListeningAsync.mock.calls.length;
+		await passAsync(run, 4 * OUTPUT_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(run.isListeningAsync).toHaveBeenCalledTimes(checks);
+		expect(run.reporter.events).toContainEqual({
+			message: "The compiler watches your code. Press Ctrl+C to stop.",
+			type: "info",
+		});
+	});
+
+	it("should not report Rojo ready when it exited while its port was checked", async () => {
 		expect.assertions(1);
+
+		const listening = Promise.withResolvers<boolean>();
+		const run = startCommand({ isListening: async () => listening.promise });
+		await flushAsync();
+		run.fake.exit("rojo", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		listening.resolve(true);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(state).toMatchObject({ services: { rojo: { status: "failed" } } });
+	});
+
+	it("should mark only the compiler failed when it exits, and keep Rojo serving", async () => {
+		expect.assertions(2);
 
 		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
 		await flushAsync();
 		run.fake.exit("compiler", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
 
-		await expect(run.result).rejects.toMatchObject({
-			code: "service_failed",
-			details: { reason: "service_failed:compiler" },
-			hint: `Its output is in ${path.join(PROJECT, ".forge", "logs", "compiler.log")}.`,
+		expect(state).toMatchObject({
+			phase: "ready",
+			running: true,
+			services: {
+				compiler: { exitCode: 3, owner: null, status: "failed" },
+				rojo: { owner: null, status: "ready" },
+			},
 		});
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 	});
 
 	it.for([
-		[{ exitCode: null, signal: 9 }, "rojo exited (signal 9), so the session stopped."],
-		[{ exitCode: null, signal: null }, "rojo exited (killed), so the session stopped."],
-	] as const)("should describe an exit of %o", async ([exit, message]) => {
+		[{ exitCode: null, signal: 9 }, "rojo exited (signal 9)"],
+		[{ exitCode: null, signal: null }, "rojo exited (killed)"],
+	] as const)("should describe an exit of %o", async ([exit, why]) => {
 		expect.assertions(1);
 
 		const run = startCommand();
 		await flushAsync();
 		run.fake.exit("rojo", { ...EXITED, ...exit });
+		await passAsync(run, OUTPUT_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
 
-		await expect(run.result).rejects.toMatchObject({ message });
+		expect(run.reporter.events).toContainEqual({
+			message: `${why}; the session goes on without it. Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
+			type: "warning",
+		});
 	});
 
 	it("should stop the session and start no service when the compile fails", async () => {
@@ -924,7 +1027,7 @@ describe(runSupervisorAsync, () => {
 		const end: ReaperEnd = { reports, terminated: true };
 		const run = startCommand({ reaper: { end } });
 		await flushAsync();
-		run.fake.exit("rojo", EXITED);
+		run.signals.fire("SIGINT");
 
 		await expect(run.result).rejects.toMatchObject({
 			code: "cleanup_in_progress",
@@ -1554,9 +1657,9 @@ describe("forge up control channel", () => {
 			pid: 4242,
 			running: true,
 			services: {
-				compiler: { building: false, status: "off" },
-				rojo: { port: 4000, status: "ready" },
-				studio: { status: "off" },
+				compiler: { building: false, owner: null, status: "off" },
+				rojo: { owner: null, port: 4000, status: "ready" },
+				studio: { owner: null, status: "off" },
 				syncback: { status: "off" },
 			},
 			sessionId: "session-1",

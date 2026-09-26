@@ -185,6 +185,28 @@ describe(runUpAsync, () => {
 		expect(up.detachedSupervisor).not.toHaveBeenCalled();
 	});
 
+	it("should name Rojo's status when it does not serve", async () => {
+		expect.assertions(1);
+
+		const { run, up } = makeUp();
+		const status = makeStatus();
+		const rojo = {
+			...status.services.rojo,
+			exitCode: 1,
+			outputTail: [],
+			status: "failed" as const,
+		};
+		await serveFakeSessionAsync(
+			up.memory,
+			up.ipc,
+			makeStatus({ services: { ...status.services, rojo } }),
+		);
+
+		await expect(run()).resolves.toMatchObject({
+			summary: "Found session s1: Rojo is failed.",
+		});
+	});
+
 	it("should wait for a session that is starting instead of starting one", async () => {
 		expect.assertions(3);
 

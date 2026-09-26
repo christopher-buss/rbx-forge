@@ -36,7 +36,8 @@ Error codes are stable: a code is never renamed or reused. The full list is in
 ## Agent loop
 
 1. `forge up --json`: start the session, or find the running one
-   (`data.started`). Returns when Rojo listens and the first compile is done.
+   (`data.started`). Returns when no part is `starting`: Rojo listens and the
+   first compile is done, or the part failed (see [Parts](#parts)).
 2. Edit code.
 3. `forge status --json --wait`: `data.services.compiler.lastBuild` has `errors`
    and `diagnostics` (`file`, `line`, `column`, `code`, `message`, `severity`),
@@ -52,6 +53,21 @@ Error codes are stable: a code is never renamed or reused. The full list is in
 
 Exit 6 means processes still live or the supervisor does not answer: retry with
 `--force`. Exit 5 means forge could not verify a process, so it killed nothing.
+
+## Parts
+
+`data.services.compiler` and `data.services.rojo` are parts of the session. Each
+has:
+
+- `status`: `starting`, `ready`, `off` (not run, or stopped on request), or
+  `failed` (its service exited by itself).
+- `owner`: `start` (the `forge start` terminal that owns it) or `null`.
+- With `failed` only: `exitCode` (`null` when a signal ended it) and
+  `outputTail`, the last lines of its output. `forge logs <part>` has all of it.
+
+A service's exit stops only its part: the session and its other parts keep
+running. The phase is `ready` once no part is `starting`, also with a part `off`
+or `failed`. `data.services.studio` also has `owner`.
 
 ## Fresh builds: `status --wait`
 

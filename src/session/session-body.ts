@@ -1,5 +1,4 @@
 import path from "node:path";
-import { stripVTControlCharacters } from "node:util";
 
 import { buildAsync } from "../commands/build.ts";
 import { compileAsync } from "../commands/compile.ts";
@@ -8,32 +7,27 @@ import { openPlaceAsync } from "../commands/open.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import { logFilePath, openLogFile } from "../output/log-file.ts";
-import type { Invocation } from "../process/command-line.ts";
-import type { SpawnedWorker } from "../reaper/reaper-client.ts";
 import type { Clock } from "../seams/clock.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
 import type { BuildWatch } from "./build-watch.ts";
-import type { OutputFollower } from "./output-follower.ts";
-import { followOutput } from "./output-follower.ts";
 import type { SessionPlan } from "./plan.ts";
 import { createReaperRunner } from "./reaper-runner.ts";
 import type { SessionScope } from "./run-session.ts";
+import type {
+	RunningPart,
+	ServiceHooks,
+	ServiceInvocation,
+	ServiceParts,
+} from "./service-parts.ts";
+import { createServiceParts } from "./service-parts.ts";
 import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
 import { checkSyncbackOnce, startSyncback, watchSavesForSyncback } from "./session-syncback.ts";
 import type { StatusRecorder } from "./status.ts";
 import type { SaveWatch, WatchOptions } from "./watch.ts";
 import { waitForStudioCloseAsync } from "./watch.ts";
-
-/** A long-running service of the session, resolved before it starts. */
-export interface ServiceInvocation extends Invocation {
-	/** Its id: the worker id and the name of its log. */
-	id: "compiler" | "rojo";
-	/** The step name the reporter shows, such as `rojo serve`. */
-	step: string;
-}
 
 /** Everything one dev session runs with. */
 export interface SessionSetup {
@@ -54,31 +48,14 @@ export interface SessionSetup {
 	sync: Pick<SessionSync, "attach" | "close">;
 }
 
-/** How the session body follows one service. */
-interface ServiceHooks {
-	/** Its status once it runs. */
-	initial: "ready" | "starting";
-	/** Gets each output line. */
-	onLine?: ((line: string) => void) | undefined;
-	/** Called once its tree is gone. */
-	onStopped?: (() => void) | undefined;
-}
-
 /** The place the session opened, and the Studio it started. */
 interface OpenedStudio {
 	place: string;
 	process: null | StudioProcess;
 }
 
-/** How often the session reads a service's output. */
-export const OUTPUT_POLL_MS = 250;
 /** How often the session looks at the place and Studio's lock file. */
 export const FILE_POLL_MS = 500;
-
-/** A promise that never settles: a pause that only time or a signal ends. */
-const NEVER = new Promise<void>(() => {
-	// Never resolves.
-});
 
 /** How often the session checks whether Rojo listens on its port. */
 const ROJO_LISTEN_POLL_MS = 100;
@@ -101,8 +78,8 @@ export const STUDIO_CLOSED_SYNCBACK_MS = 30_000;
  * 2. Compile (roblox-ts) and build once, when the session has a compiler.
  * 3. Open the place in Studio, and end the session when Studio closes it,
  *    once a save just before the close has synced back.
- * 4. Start Rojo and the watch-mode compiler. Each is a service: its exit
- *    ends the session.
+ * 4. Start Rojo and the watch-mode compiler. Each is a service with its
+ *    part: its exit stops only that part, which is then `failed`.
  * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
  *    on each place save: one run at a time, with requests during a run
  *    folded into one more run. Rojo's syncback support is checked once per
@@ -135,13 +112,15 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 			scope.track(watchStudioAsync(session, scope, { ...opened, flushSyncbackAsync }));
 		}
 
-		await startServicesAsync(session, scope);
+		const parts = createServiceParts(session, scope);
+		const rojo = await startServicesAsync(session, parts);
+		const isServing = await waitForRojoAsync(session, scope, { parts, rojo });
 		// A stop request while the services started: the session is ending.
-		if (!(await waitForRojoAsync(session, scope))) {
+		if (hasEnded(scope)) {
 			return;
 		}
 
-		announceReady(session);
+		announceReady(session, isServing);
 		if (session.plan.syncback) {
 			const watch = watchSavesForSyncback(session, watchOptions(session, scope), syncback);
 			saves.check = watch.check;
@@ -184,122 +163,27 @@ function compileReader(session: SessionSetup): Pick<ServiceHooks, "onLine" | "on
 }
 
 /**
- * Note when a service's tree is gone.
- *
- * @param worker - The service.
- * @param state - Gets `isRunning: false` once the tree is gone.
- */
-async function markExitAsync(worker: SpawnedWorker, state: { isRunning: boolean }): Promise<void> {
-	await worker.exited;
-	state.isRunning = false;
-}
-
-/**
- * Read a service's output until its tree is gone.
- *
- * @param clock - Runs the poll timer.
- * @param worker - The service.
- * @param follower - Reads its output file.
- */
-async function followUntilExitAsync(
-	clock: Clock,
-	worker: SpawnedWorker,
-	follower: OutputFollower,
-): Promise<void> {
-	const state = { isRunning: true };
-	const exited = markExitAsync(worker, state);
-	while (state.isRunning) {
-		await settlesWithinAsync(clock, exited, OUTPUT_POLL_MS);
-		follower.read();
-	}
-
-	follower.finish();
-}
-
-/**
- * Read a service's output until its tree is gone, then mark it stopped.
- *
- * @param session - Its status.
- * @param id - Which service: its entry in the status.
- * @param watch - The clock, the service's worker, its output reader, and
- *   what to do once it stopped.
- */
-async function followServiceAsync(
-	session: SessionSetup,
-	id: ServiceInvocation["id"],
-	{
-		clock,
-		follower,
-		onStopped,
-		worker,
-	}: Pick<ServiceHooks, "onStopped"> & {
-		clock: Clock;
-		follower: OutputFollower;
-		worker: SpawnedWorker;
-	},
-): Promise<void> {
-	await followUntilExitAsync(clock, worker, follower);
-	session.status.service(id, "stopped");
-	onStopped?.();
-}
-
-/**
- * Start one service through the reaper. Its output goes line by line to its
- * rotated log and to `onLine`.
- *
- * @param session - The context and the session directory.
- * @param scope - Starts the service and tracks its output.
- * @param service - The resolved service.
- * @param hooks - Its status once it runs, what else gets each output line,
- *   and what to do once it stopped.
- */
-async function startServiceAsync(
-	session: SessionSetup,
-	scope: SessionScope,
-	service: ServiceInvocation,
-	{ initial, onLine, onStopped }: ServiceHooks,
-): Promise<void> {
-	const { cwd, env, reporter, seams } = session.context;
-	const { clock, fileSystem } = seams;
-	const spoolDirectory = path.join(session.directory, "output");
-	const spool = path.join(spoolDirectory, `${service.id}.log`);
-	fileSystem.mkdirSync(spoolDirectory, { recursive: true });
-	const log = openLogFile(fileSystem, logFilePath(cwd, service.id));
-	const startedAt = new Date(clock.now());
-	log.write(`--- forge start ${startedAt.toISOString()} ---`);
-
-	const { step, ...invocation } = service;
-	reporter.emit({ name: step, status: "started", type: "step" });
-	const worker = await scope.startServiceAsync({ ...invocation, cwd, env, log: spool });
-	if (worker === undefined) {
-		return;
-	}
-
-	reporter.emit({ name: step, status: "succeeded", type: "step" });
-	session.status.service(service.id, initial);
-	const follower = followOutput(fileSystem, spool, (line) => {
-		log.write(stripVTControlCharacters(line));
-		onLine?.(line);
-	});
-	scope.track(followServiceAsync(session, service.id, { clock, follower, onStopped, worker }));
-}
-
-/**
  * Start Rojo, then the watch-mode compiler, if any. Rojo is ready once it
  * listens; a compiler that reports compiles, after its first one.
  *
  * @param session - The resolved services.
- * @param scope - Starts them.
+ * @param parts - Starts them.
+ * @returns Rojo's part, or `undefined` when the session is ending.
  */
-async function startServicesAsync(session: SessionSetup, scope: SessionScope): Promise<void> {
-	await startServiceAsync(session, scope, session.rojo, { initial: "starting" });
+async function startServicesAsync(
+	session: SessionSetup,
+	parts: ServiceParts,
+): Promise<RunningPart | undefined> {
+	const rojo = await parts.startAsync(session.rojo, { initial: "starting" });
 	const { compiler } = session;
 	if (compiler !== undefined) {
 		const hooks: ServiceHooks = compiler.parsesDiagnostics
 			? { ...compileReader(session), initial: "starting" }
 			: { initial: "ready" };
-		await startServiceAsync(session, scope, compiler.service, hooks);
+		await parts.startAsync(compiler.service, hooks);
 	}
+
+	return rojo;
 }
 
 /**
@@ -445,24 +329,55 @@ function hasEnded(scope: SessionScope): boolean {
 }
 
 /**
+ * Follow whether a part still runs.
+ *
+ * @param scope - Tracks the watch.
+ * @param stopped - Resolves once the part stopped.
+ * @returns Whether the part still runs.
+ */
+function watchRunning(scope: SessionScope, stopped: Promise<void>): () => boolean {
+	let isRunning = true;
+	async function markAsync(): Promise<void> {
+		await stopped;
+		isRunning = false;
+	}
+
+	scope.track(markAsync());
+	return () => isRunning;
+}
+
+/**
  * Wait until Rojo listens on its port, so `ready` means a client can
- * connect, then mark it ready.
+ * connect, then mark it ready. When it does not listen within
+ * {@link ROJO_LISTEN_BOUND_MS}, stop it as `failed`.
  *
  * @param session - The config, clock, network, and status.
  * @param scope - Its end signal.
- * @returns `true` once Rojo listens; `false` when the session ended first.
- * @rejects {ForgeError} `service_failed` when Rojo does not listen within
- *   {@link ROJO_LISTEN_BOUND_MS}.
+ * @param rojo - The service parts, and Rojo's part.
+ * @param rojo.parts - Stops Rojo when it does not listen.
+ * @param rojo.rojo - Rojo's part; `undefined` when the session is ending.
+ * @returns `true` once Rojo listens; `false` when it stopped or the
+ *   session ended first.
  */
-async function waitForRojoAsync(session: SessionSetup, scope: SessionScope): Promise<boolean> {
+async function waitForRojoAsync(
+	session: SessionSetup,
+	scope: SessionScope,
+	{ parts, rojo }: { parts: ServiceParts; rojo: RunningPart | undefined },
+): Promise<boolean> {
+	if (rojo === undefined) {
+		return false;
+	}
+
 	const { config, context } = session;
 	const { clock, network } = context.seams;
 	const port = config.rojoPort;
 	const deadline = clock.now() + ROJO_LISTEN_BOUND_MS;
-	while (!hasEnded(scope)) {
+	const { stopped } = rojo;
+	const isRunning = watchRunning(scope, stopped);
+	while (!hasEnded(scope) && isRunning()) {
 		if (await network.isListeningAsync(port)) {
-			// The session may have ended while the check ran.
-			if (hasEnded(scope)) {
+			// The session may have ended, or Rojo stopped, while the check ran.
+			if (hasEnded(scope) || !isRunning()) {
 				return false;
 			}
 
@@ -471,27 +386,27 @@ async function waitForRojoAsync(session: SessionSetup, scope: SessionScope): Pro
 		}
 
 		if (clock.now() >= deadline) {
-			throw new ForgeError(
-				"service_failed",
-				`rojo did not listen on port ${port} within ${ROJO_LISTEN_BOUND_MS / 1000} s, so the session stopped.`,
-				{
-					details: { reason: "service_failed:rojo" },
-					hint: `Its output is in ${logFilePath(context.cwd, "rojo")}.`,
-				},
+			parts.stop(
+				"rojo",
+				`rojo did not listen on port ${port} within ${ROJO_LISTEN_BOUND_MS / 1000} s`,
 			);
+			return false;
 		}
 
-		// The session's end ends the pause early.
-		await settlesWithinAsync(clock, NEVER, ROJO_LISTEN_POLL_MS, scope.signal);
+		// Rojo's stop or the session's end ends the pause early.
+		await settlesWithinAsync(clock, stopped, ROJO_LISTEN_POLL_MS, scope.signal);
 	}
 
 	return false;
 }
 
-function announceReady({ config, context, plan }: SessionSetup): void {
-	const services = plan.compiler === undefined ? "" : " The compiler watches your code.";
+function announceReady({ config, context, plan }: SessionSetup, isServing: boolean): void {
+	const rojo = isServing
+		? `Rojo serves ${config.rojoProjectPath} on port ${config.rojoPort}. `
+		: "";
+	const compiler = plan.compiler === undefined ? "" : "The compiler watches your code. ";
 	context.reporter.emit({
-		message: `Rojo serves ${config.rojoProjectPath} on port ${config.rojoPort}.${services} Press Ctrl+C to stop.`,
+		message: `${rojo}${compiler}Press Ctrl+C to stop.`,
 		type: "info",
 	});
 }

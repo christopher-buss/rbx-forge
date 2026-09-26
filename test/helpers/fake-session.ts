@@ -47,9 +47,9 @@ export function makeStatus(overrides: Partial<SessionStatus> = {}): SessionStatu
 		pid: 500,
 		running: true,
 		services: {
-			compiler: { building: false, status: "off" },
-			rojo: { port: 34_872, status: "ready" },
-			studio: { status: "off" },
+			compiler: { building: false, owner: null, status: "off" },
+			rojo: { owner: null, port: 34_872, status: "ready" },
+			studio: { owner: null, status: "off" },
 			syncback: { status: "off" },
 		},
 		sessionId: "s1",
