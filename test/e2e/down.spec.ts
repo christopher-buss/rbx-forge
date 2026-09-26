@@ -43,6 +43,8 @@ const CLOSED_END: unknown = expect.toBeOneOf(["exited", "lock_released"]);
  * limit.
  */
 const BLOCKED_END = IS_WINDOWS ? "dialog" : "timeout";
+/** The parts `down` stopped: Studio first, then the services that ran. */
+const WITH_STUDIO: unknown = expect.arrayContaining(["studio"]);
 
 /**
  * The AutoSaves folder the stand-in writes to, under a scratch home.
@@ -169,9 +171,9 @@ describe("forge down", () => {
 		const down = await runForgeAsync(fixture, DOWN);
 		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
 
-		// The session of `start` ends by itself once its Studio closed.
 		expect(down.result.data).toMatchObject({
-			stoppedBy: "studio_closed",
+			parts: { kept: [], stopped: WITH_STUDIO },
+			stoppedBy: "shutdown",
 			studio: { end: CLOSED_END, pid: studio!.pid, status: "closed" },
 		});
 		expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
@@ -242,7 +244,12 @@ describe("forge down", () => {
 
 		expect([down.status, again.status]).toStrictEqual([EXIT_SUCCESS, EXIT_NOT_RUNNING]);
 		expect(down.result).toMatchObject({
-			data: { sessionId, status: "stopped", stoppedBy: "shutdown" },
+			data: {
+				parts: { kept: [], stopped: ["compiler"] },
+				sessionId,
+				status: "stopped",
+				stoppedBy: "shutdown",
+			},
 			ok: true,
 		});
 		expect(again.result.error!.code).toBe("not_running");
@@ -250,6 +257,25 @@ describe("forge down", () => {
 			alive: [],
 			files: [],
 		});
+	});
+
+	it("should succeed and say so when the session has no part to stop", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync();
+		const up = await runForgeAsync(fixture, ["up", "--no-compiler", "--json"]);
+		const down = await runForgeAsync(fixture, DOWN);
+
+		expect(down.result).toMatchObject({
+			data: {
+				parts: { kept: [], stopped: [] },
+				sessionId: up.result.data!["sessionId"],
+				status: "stopped",
+				stoppedBy: "shutdown",
+			},
+			ok: true,
+		});
+		expect(filesLeft(fixture.project)).toStrictEqual([]);
 	});
 
 	it("should report a hung supervisor as unresponsive, then kill it with --force", async () => {

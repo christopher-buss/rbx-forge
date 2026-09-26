@@ -6,6 +6,8 @@ import { IPC_WAIT_MS } from "../ipc/protocol.ts";
 import type { IpcTransport } from "../ipc/transport.ts";
 import type { FileSystem } from "../seams/file-system.ts";
 import type { PartRequest } from "../session/part-requests.ts";
+import { parseStopResult } from "../session/part-stop-schema.ts";
+import type { PartStops, StopPartsRequest } from "../session/part-stops.ts";
 import type { PartId, SessionStatus } from "../session/status.ts";
 import { parseStatus } from "../session/status.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "../supervisor/session-files.ts";
@@ -18,6 +20,9 @@ export interface KnownSession {
 	/** The token its control channel wants. */
 	token: string;
 }
+
+/** The hint for an answer this forge cannot read. */
+const OTHER_VERSION = "The session may run another forge version. Stop it, then start it again.";
 
 const identityLine = type("string.json.parse").pipe(
 	type({
@@ -102,7 +107,7 @@ export async function fetchStatusAsync(
 	const status = parseStatus(result);
 	if (status === undefined) {
 		throw new ForgeError("internal_error", "The session answered status with something else.", {
-			hint: "The session may run another forge version. Stop it, then start it again.",
+			hint: OTHER_VERSION,
 		});
 	}
 
@@ -142,12 +147,54 @@ export async function addPartsAsync(
 			"internal_error",
 			"The session answered addParts with something else.",
 			{
-				hint: "The session may run another forge version. Stop it, then start it again.",
+				hint: OTHER_VERSION,
 			},
 		);
 	}
 
 	return parsed.added;
+}
+
+/**
+ * Ask a session to stop the parts a request may stop.
+ *
+ * @param ipc - Reaches its endpoint.
+ * @param session - Its identity record and token.
+ * @param request - The scope, `force`, place, and recovery mode.
+ * @param waitMs - How long the answer may take: the session answers once
+ *   the parts are gone.
+ * @returns What it stopped and kept.
+ * @rejects {ForgeError} As {@link fetchStatusAsync}; `session_replaced` when
+ *   another session answers; `not_running` while it starts or stops.
+ */
+export async function stopPartsAsync(
+	ipc: IpcTransport,
+	session: KnownSession,
+	request: StopPartsRequest,
+	waitMs: number,
+): Promise<PartStops> {
+	const result = await callSessionAsync(
+		ipc,
+		{ endpoint: session.identity.endpoint, token: session.token },
+		"stopParts",
+		// JSON leaves an unset `place` and `recovery` out.
+		{
+			params: { ...request, sessionId: session.identity.sessionId },
+			responseTimeoutMs: waitMs,
+		},
+	);
+	const parsed = parseStopResult(result);
+	if (parsed === undefined) {
+		throw new ForgeError(
+			"internal_error",
+			"The session answered stopParts with something else.",
+			{
+				hint: OTHER_VERSION,
+			},
+		);
+	}
+
+	return parsed;
 }
 
 /**

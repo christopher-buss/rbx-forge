@@ -151,6 +151,33 @@ describe(createServiceParts, () => {
 		expect(run.fake.calls).toStrictEqual(["spawn rojo"]);
 	});
 
+	it("should stop a part on request and wait until its tree is gone", async () => {
+		expect.assertions(3);
+
+		const run = await makePartsAsync();
+		await run.parts.startAsync(ROJO, { initial: "ready" });
+		const stopping = run.parts.stopAsync("rojo");
+		const early = await Promise.race([
+			stopping.then(() => "stopped"),
+			Promise.resolve("waiting"),
+		]);
+		run.fake.exit("rojo", EXITED);
+		await stopping;
+
+		expect(early).toBe("waiting");
+		expect(run.fake.calls).toStrictEqual(["spawn rojo", "stop rojo 100"]);
+		expect(run.status.snapshot().services.rojo.status).toBe("off");
+	});
+
+	it("should stop a part that does not run at once", async () => {
+		expect.assertions(2);
+
+		const run = await makePartsAsync();
+
+		await expect(run.parts.stopAsync("compiler")).resolves.toBeUndefined();
+		expect(run.fake.calls).toStrictEqual([]);
+	});
+
 	it("should start nothing once the session is ending", async () => {
 		expect.assertions(2);
 

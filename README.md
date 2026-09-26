@@ -73,7 +73,7 @@ Session commands:
 | `forge status`      | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                                                              |
 | `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                                                                                                                 |
 | `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                                                               |
-| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.                                                                                                |
+| `forge down`        | Stop the session's parts that have no owner (Studio first), and end the session when none is left. Reports `stopped` only when its supervisor and every process of it are gone.                                                |
 
 `start` runs the compiler, Rojo, and Studio. Its flags:
 
@@ -102,9 +102,12 @@ serves on the session's port (see [`rojoPort`](./docs/config.md#rojoport)). It
 returns when Rojo listens and Studio has the place open. When that Studio closes
 the place, only its Rojo stops; the compiler runs on.
 
-`down` takes `--timeout <seconds>` (default 15), `--force` (kill a supervisor
-that does not stop, and what is left of its session, each verified),
-`--keep-studio` (leave the session's Studio open), and `--recovery <mode>` (see
+`down` acts only on parts with no owner. A part that a `forge start` terminal
+owns keeps running, and so does the session: `down` names it in
+`data.parts.kept` and still succeeds. `down` takes `--timeout <seconds>`
+(default 15), `--force` (kill a supervisor that does not stop, and what is left
+of its session, each verified), `--keep-studio` (leave the session's Studio
+open), and `--recovery <mode>` (see
 [Auto-recovery](./docs/studio.md#auto-recovery)).
 
 `status --wait` returns the status once the compiler's last build is fresh: no
@@ -120,16 +123,23 @@ is gone.
 
 One-shot commands:
 
-| Command          | What it does                                                                                             |
-| ---------------- | -------------------------------------------------------------------------------------------------------- |
-| `forge init`     | Create `rbx-forge.config.ts`. `--type <rbxts\|luau>`, `--force` to replace.                              |
-| `forge config`   | Print the resolved config.                                                                               |
-| `forge build`    | Build the Rojo project. `-o, --output <path>`, or `--plugin <name>` for Studio's plugins folder.         |
-| `forge compile`  | Compile roblox-ts once and report errors (rbxts only). While a session runs: see below.                  |
-| `forge open`     | Open the place in Studio. `--place <path>`, `--build` / `--no-build`, `--studio-path <path>`.            |
-| `forge stop`     | Close the Studio of the session or of this project's place, after it verifies it. `--recovery <mode>`.   |
-| `forge syncback` | Sync the place back into the project once. `--input <path>`, `--project <path>`.                         |
-| `forge typegen`  | Write service types from the Rojo sourcemap. `-o`, `--include`, `--exclude`, `--max-depth` (rbxts only). |
+| Command          | What it does                                                                                              |
+| ---------------- | --------------------------------------------------------------------------------------------------------- |
+| `forge init`     | Create `rbx-forge.config.ts`. `--type <rbxts\|luau>`, `--force` to replace.                               |
+| `forge config`   | Print the resolved config.                                                                                |
+| `forge build`    | Build the Rojo project. `-o, --output <path>`, or `--plugin <name>` for Studio's plugins folder.          |
+| `forge compile`  | Compile roblox-ts once and report errors (rbxts only). While a session runs: see below.                   |
+| `forge open`     | Open the place in Studio. `--place <path>`, `--build` / `--no-build`, `--studio-path <path>`.             |
+| `forge stop`     | Close the session's Studio (and stop its Rojo) or the Studio of a place, after it verifies it. See below. |
+| `forge syncback` | Sync the place back into the project once. `--input <path>`, `--project <path>`.                          |
+| `forge typegen`  | Write service types from the Rojo sourcemap. `-o`, `--include`, `--exclude`, `--max-depth` (rbxts only).  |
+
+`stop` closes the session's Studio and stops its Rojo; the compiler keeps
+running, and an `up` session with no part left ends. A Studio that a
+`forge start` terminal owns fails with `studio_owned` (exit 1); `--force` closes
+it too. With no session Studio, `stop` closes the Studio that the place's lock
+file names. `--place <path>` selects the place, and `--recovery <mode>` handles
+the auto-recovery files.
 
 While a session runs, `forge compile` starts no second compiler: it waits for
 the session's fresh build (as `status --wait`), with its `compile` hooks around
@@ -172,9 +182,11 @@ stable, and each maps to one exit code. The loop:
    the build before it.
 4. To play, `forge up --studio --json` attaches Studio and Rojo to the session;
    read the console with the Roblox Studio MCP. For a one-time look,
-   `forge open --json` opens the place.
+   `forge open --json` opens the place. `forge stop --json` closes Studio and
+   its Rojo; the compiler runs on.
 5. `forge sync --json` pulls Studio edits into the project.
-6. `forge down --json` stops the session.
+6. `forge down --json` stops the parts with no owner, and the session once none
+   is left. It never fails because a `forge start` terminal owns a part.
 
 See [docs/json-output.md](./docs/json-output.md) for the result fields and exit
 codes.

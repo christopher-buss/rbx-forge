@@ -7,6 +7,7 @@ import type { OpenedStudio } from "./attach.ts";
 import type { AdderSetup, CompilerService } from "./compiler-part.ts";
 import { createPartAdder, startCompilerAsync } from "./compiler-part.ts";
 import type { PartRequests } from "./part-requests.ts";
+import { createPartStopper, STUDIO_CLOSED_SYNCBACK_MS } from "./part-stops.ts";
 import type { SessionPlan } from "./plan.ts";
 import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./rojo-part.ts";
 import type { SessionScope } from "./run-session.ts";
@@ -37,19 +38,15 @@ export interface SessionSetup extends AdderSetup, StudioSetup {
 	parts: Pick<PartRequests, "attach">;
 	plan: SessionPlan;
 	/** Gets what the session does, for `status` and `state.json`. */
-	status: Pick<StatusStore, "phase"> & StatusRecorder;
+	status: Pick<StatusStore, "phase" | "snapshot"> & StatusRecorder;
 	/** Gets the session's syncback runner, for `forge sync`. */
 	sync: Pick<SessionSync, "attach" | "close">;
 }
 
-/**
- * How long a session whose Studio closed waits for syncback before it ends:
- * a save just before the close still syncs back.
- */
-export const STUDIO_CLOSED_SYNCBACK_MS = 30_000;
-
 /** What the session body hands from one stage to the next. */
 interface BodyState {
+	/** Looks at the place once more and waits for the syncback runs. */
+	flushSyncbackAsync: () => Promise<void>;
 	/** The steps context: steps and hooks run as its workers. */
 	steps: CommandContext;
 	studio: StudioState;
@@ -68,7 +65,8 @@ interface BodyState {
  * 4. Start Rojo and the watch-mode compiler, as the plan asks. Each is a
  *    service with its part: its exit stops only that part, which is then
  *    `failed`. From then on, `forge up` can add the parts that are missing
- *    or failed, and attach Studio with its Rojo (`studio-part.ts`).
+ *    or failed, and attach Studio with its Rojo (`studio-part.ts`); `down`
+ *    and `stop` can stop the parts with no owner (`part-stops.ts`).
  * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
  *    on each place save: one run at a time, with requests during a run
  *    folded into one more run. Rojo's syncback support is checked once per
@@ -87,19 +85,17 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 		const requireSyncback = checkSyncbackOnce(session.config);
 		const steps = workerContext(session, scope, "start");
 		const opened = await runStepsAsync(session, scope, { requireSyncback, steps });
-		const state: BodyState = { steps, studio: { isAttached: opened !== undefined } };
-		const syncback = startSyncback(session, scope, {
-			context: workerContext(session, scope, "syncback"),
+		const { flushSyncbackAsync, saves, syncback } = startSyncbackRuns(
+			session,
+			scope,
 			requireSyncback,
-		});
-		// The save watch starts once Rojo serves; until then no save is seen.
-		const saves: Pick<SaveWatch, "check"> = { check: noSaveWatch };
+		);
+		const state: BodyState = {
+			flushSyncbackAsync,
+			steps,
+			studio: { isAttached: opened !== undefined },
+		};
 		if (opened !== undefined) {
-			async function flushSyncbackAsync(): Promise<void> {
-				saves.check();
-				await syncback.settled();
-			}
-
 			scope.track(watchStudioAsync(session, scope, { ...opened, flushSyncbackAsync }));
 		}
 
@@ -112,6 +108,44 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 		if (session.plan.syncback) {
 			saves.check = watchSaves(session, scope, syncback);
 		}
+	};
+}
+
+function noSaveWatch(): void {
+	// No save watch runs: syncback runs only for `forge sync`.
+}
+
+/**
+ * Start the session's syncback runner, with no save watch yet: it starts
+ * once Rojo serves, and until then no save is seen.
+ *
+ * @param session - The config and context.
+ * @param scope - Its reaper and end signal.
+ * @param requireSyncback - Checks Rojo's syncback support.
+ * @returns The runner, the save watch's look at the place, and the flush
+ *   of a closing Studio.
+ */
+function startSyncbackRuns(
+	session: SessionSetup,
+	scope: SessionScope,
+	requireSyncback: SyncbackCheck,
+): {
+	flushSyncbackAsync: () => Promise<void>;
+	saves: Pick<SaveWatch, "check">;
+	syncback: ReturnType<typeof startSyncback>;
+} {
+	const syncback = startSyncback(session, scope, {
+		context: workerContext(session, scope, "syncback"),
+		requireSyncback,
+	});
+	const saves: Pick<SaveWatch, "check"> = { check: noSaveWatch };
+	return {
+		flushSyncbackAsync: async () => {
+			saves.check();
+			await syncback.settled();
+		},
+		saves,
+		syncback,
 	};
 }
 
@@ -135,14 +169,11 @@ function watchSaves(
 	return watch.check;
 }
 
-function noSaveWatch(): void {
-	// No save watch runs: syncback runs only for `forge sync`.
-}
-
 /**
  * Start Rojo, then the watch-mode compiler, as the plan asks, hand the part
- * adder over, and wait until Rojo listens or stopped. Rojo is ready once it
- * listens; a compiler that reports compiles, after its first one.
+ * adder and stopper over, and wait until Rojo listens or stopped. Rojo is
+ * ready once it listens; a compiler that reports compiles, after its first
+ * one.
  *
  * @param session - The resolved services.
  * @param scope - Starts them; its end signal.
@@ -166,7 +197,10 @@ async function runServicesAsync(
 	}
 
 	const addStudio = createStudioAdder(session, scope, { ...state, parts, state: state.studio });
-	session.parts.attach(createPartAdder(session, parts, addStudio));
+	session.parts.attach({
+		add: createPartAdder(session, parts, addStudio),
+		stop: createPartStopper(session, scope, { ...state, parts, state: state.studio }),
+	});
 	session.status.started();
 	const isServing = rojo !== undefined && (await waitForRojoAsync(session, scope, parts, rojo));
 	if (hasEnded(scope)) {

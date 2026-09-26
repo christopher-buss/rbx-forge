@@ -1,19 +1,18 @@
 import assert from "node:assert/strict";
 
-import { ForgeError, toForgeError } from "../errors.ts";
+import type { AutoRecoveryMode } from "../config/schema.ts";
+import { ForgeError } from "../errors.ts";
 import { callSessionAsync } from "../ipc/client.ts";
 import type { CleanupReport, PinnedProcess } from "../native/addon.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import type { Seams } from "../seams/seams.ts";
-import type { RecoveryReport } from "../studio/auto-recovery.ts";
-import type { RecoveryOptions, StudioEnd, StudioStop } from "../studio/close-studio.ts";
-import { closeStudioAsync } from "../studio/close-studio.ts";
 import type { Barrier } from "../supervisor/barrier.ts";
 import { SETTLE_MS, targetOf, waitForBarrierAsync } from "../supervisor/barrier.ts";
 import type { ForgeFiles, SessionFiles } from "../supervisor/session-files.ts";
 import { removeSession } from "../supervisor/session-files.ts";
+import type { DownParts, DownStudio } from "./down-parts.ts";
+import { askPartStopsAsync, downStudio } from "./down-parts.ts";
 import type { KnownSession } from "./session.ts";
-import { sessionStudioTarget, waitForSessionStudioAsync, waitForStudioEndAsync } from "./studio.ts";
 
 /** How long `down` waits after its first shutdown request. */
 export const DOWN_TIMEOUT_MS = 15_000;
@@ -46,7 +45,7 @@ export interface DownOptions {
 	/** Test only: waits at each point. */
 	pause?: ((point: DownPoint) => Promise<void>) | undefined;
 	/** What to do with the auto-recovery files of a Studio `down` ends. */
-	recovery: RecoveryOptions;
+	recovery: AutoRecoveryMode;
 	/** How long to wait for the supervisor, and for the barrier. */
 	timeoutMs: number;
 }
@@ -58,45 +57,31 @@ export interface DownOptions {
  * - `shutdown`: it stopped on the shutdown request.
  * - `forced_shutdown`: it stopped on the forced shutdown request.
  * - `killed`: `--force` killed it.
- * - `studio_closed`: it stopped by itself once `down` closed its Studio.
  */
-export type StoppedBy = "forced_shutdown" | "gone" | "killed" | "shutdown" | "studio_closed";
+export type StoppedBy = "forced_shutdown" | "gone" | "killed" | "shutdown";
 
 /**
- * What `down` did with the session's Studio:
- *
- * - `closed`: Studio is gone. `end`: how (see `StudioEnd`). `forced`:
- *   forge ended it with the place open, without a save. `recovery`: what
- *   forge did with its auto-recovery files; `null` when it ended none.
- * - `failed`: forge could not verify or end it (the error's `code` and
- *   `message`); Studio may still be open.
- * - `kept`: `--keep-studio` left it as it is.
- * - `none`: the session has no Studio open.
- * - `unknown`: the supervisor did not answer, so forge cannot tell which
- *   Studio is the session's; it touched none.
+ * What `down` did: `stopped` once the session is gone, or `running` when
+ * parts with an owner keep it.
  */
-export type DownStudio =
-	| { code: string; message: string; place: string; status: "failed" }
+export type DownReport =
 	| {
-			end: StudioEnd;
-			forced: boolean;
-			pid: number;
-			place: string;
-			recovery: null | RecoveryReport;
-			status: "closed";
+			/** The forced cleanup of processes that outlived the barrier. */
+			cleanup?: CleanupReport;
+			parts: DownParts;
+			/** `down` deleted the session's files; else its supervisor had. */
+			removed: boolean;
+			sessionId: string;
+			status: "stopped";
+			stoppedBy: StoppedBy;
+			studio: DownStudio;
 	  }
-	| { status: "kept" | "none" | "unknown" };
-
-/** What `down` did. */
-export interface DownReport {
-	/** The forced cleanup of processes that outlived the barrier. */
-	cleanup?: CleanupReport;
-	/** `down` deleted the session's files; else its supervisor had. */
-	removed: boolean;
-	sessionId: string;
-	stoppedBy: StoppedBy;
-	studio: DownStudio;
-}
+	| {
+			parts: NonNullable<DownParts>;
+			sessionId: string;
+			status: "running";
+			studio: DownStudio;
+	  };
 
 /** The target's supervisor, pinned when it still runs. */
 interface Target {
@@ -107,16 +92,16 @@ interface Target {
 }
 
 /**
- * Stop one session and prove it gone. It acts on this
- * session only: requests carry its id, pins its recorded supervisor, and
- * cleans up and deletes only its files.
+ * Stop the parts of one session that have no owner and, once none is left,
+ * prove the session gone. It acts on this session only: requests carry its
+ * id, pins its recorded supervisor, and cleans up and deletes only its
+ * files.
  *
- * First it closes the session's Studio (unless `keepStudio`): the one the
- * session reports, once past `opening` (`waitForSessionStudioAsync`), through
- * `closeStudioAsync` (a close request, then a kill). A session whose own
- * Studio closed then ends by itself once syncback of a last save is done;
- * `down` waits for that before it asks (`waitForStudioEndAsync`). `stopped`
- * needs both:
+ * First it asks the session to stop its parts (IPC `stopParts`, scope
+ * `down`): the session closes its Studio (unless `keepStudio`), stops Rojo
+ * and the compiler, and ends once no part is left. Parts with an owner stay;
+ * then the session goes on, and `down` reports it `running`. A session that
+ * does not answer, or still starts, is stopped whole. `stopped` needs both:
  *
  * 1. Its supervisor has exited: its pinned process (PID plus start time)
  *    is gone. A supervisor lets go of the singleton lock before it writes
@@ -149,15 +134,24 @@ export async function stopSessionAsync(
 	options: DownOptions,
 ): Promise<DownReport> {
 	const target: Target = { forge, pin: pinSupervisor(seams, session), session };
-	const studio = await closeSessionStudioAsync(seams, target, options);
-	const stoppedBy = await stopSupervisorAsync(seams, target, { ...options, studio });
+	const stops = isGone(target) ? undefined : await askPartStopsAsync(seams.ipc, session, options);
+	const parts = stops === undefined ? null : { kept: stops.kept, stopped: stops.stopped };
+	const studio = downStudio(stops, options.keepStudio);
+	const { sessionId } = session.identity;
+	if (parts !== null && stops?.ending === false) {
+		return { parts, sessionId, status: "running", studio };
+	}
+
+	const stoppedBy = await stopSupervisorAsync(seams, target, options);
 	await options.pause?.("barrier");
 	const cleanup = await clearBarrierAsync(seams, session.files, options);
 	await options.pause?.("delete");
 	return {
 		...(cleanup === undefined ? {} : { cleanup }),
+		parts,
 		removed: removeUnderLock(seams, forge, session.files),
-		sessionId: session.identity.sessionId,
+		sessionId,
+		status: "stopped",
 		stoppedBy,
 		studio,
 	};
@@ -173,70 +167,6 @@ export async function stopSessionAsync(
  */
 function isGone({ pin }: Target): boolean {
 	return pin?.isAlive() !== true;
-}
-
-/**
- * What `down` reports for a Studio it closed.
- *
- * @param stop - What closing it did.
- * @param place - Its place.
- * @returns `closed`, or `none` when it was not open.
- */
-function downStudio(stop: StudioStop, place: string): DownStudio {
-	if (stop.status !== "stopped") {
-		return { status: "none" };
-	}
-
-	return {
-		end: stop.end,
-		forced: stop.forced,
-		pid: stop.pid,
-		place,
-		recovery: stop.recovery,
-		status: "closed",
-	};
-}
-
-/**
- * Close the Studio that has the session's place open, unless `keepStudio`.
- * A failure is reported, not thrown: the session still stops.
- *
- * @param seams - The clock, transport, file system, OS, and native addon.
- * @param target - The session and its pinned supervisor.
- * @param options - `keepStudio` and the auto-recovery options.
- * @returns What it did.
- */
-async function closeSessionStudioAsync(
-	seams: DownSeams,
-	target: Target,
-	{ keepStudio, recovery }: Pick<DownOptions, "keepStudio" | "recovery">,
-): Promise<DownStudio> {
-	if (keepStudio) {
-		return { status: "kept" };
-	}
-
-	// Gone, silent, or replaced: which Studio is the session's is unknown.
-	const studio = isGone(target)
-		? undefined
-		: await waitForSessionStudioAsync(seams, target.session);
-	if (studio === undefined) {
-		return { status: "unknown" };
-	}
-
-	const studioTarget = sessionStudioTarget(studio);
-	if (studioTarget === undefined) {
-		return { status: "none" };
-	}
-
-	try {
-		return downStudio(
-			await closeStudioAsync(seams, studioTarget, recovery),
-			studioTarget.place,
-		);
-	} catch (err) {
-		const { code, message } = toForgeError(err);
-		return { code, message, place: studioTarget.place, status: "failed" };
-	}
 }
 
 /**
@@ -366,28 +296,21 @@ function unresponsive({ session }: Target, force: boolean): ForgeError {
 
 /**
  * Condition 1 of {@link stopSessionAsync}, with its escalation. A session
- * whose own Studio `down` closed gets time to end by itself first.
+ * that ends by itself once its parts stopped accepts the request too.
  *
  * @param seams - The clock, transport, and native addon.
  * @param target - The session and its pinned supervisor.
- * @param options - `--force`, the wait, and what `down` did with Studio.
+ * @param options - `--force` and the wait.
  * @returns How the supervisor went.
  * @rejects {ForgeError} `supervisor_unresponsive`; `session_replaced`.
  */
 async function stopSupervisorAsync(
 	seams: DownSeams,
 	target: Target,
-	options: DownOptions & { studio: DownStudio },
+	options: DownOptions,
 ): Promise<StoppedBy> {
 	if (isGone(target)) {
 		return "gone";
-	}
-
-	if (
-		options.studio.status === "closed" &&
-		(await waitForStudioEndAsync(seams, target.session, () => isGone(target)))
-	) {
-		return "studio_closed";
 	}
 
 	if (await requestStopAsync(seams, target, false, options.timeoutMs)) {

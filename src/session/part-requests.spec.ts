@@ -3,8 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { ForgeError } from "../errors.ts";
 import type { PartAdder, PartRequest } from "./part-requests.ts";
 import { createPartRequests, parsePartRequest } from "./part-requests.ts";
+import type { PartStopper, StopPartsRequest } from "./part-stops.ts";
 
 const COMPILER = { parts: ["compiler"] } satisfies PartRequest;
+const DOWN: StopPartsRequest = { force: false, keepStudio: false, scope: "down" };
+const noStop = vi.fn<PartStopper>();
 
 async function flushAsync(): Promise<void> {
 	await new Promise((resolve) => {
@@ -21,7 +24,7 @@ describe(createPartRequests, () => {
 		const added = requests.addAsync(COMPILER);
 		await flushAsync();
 		const calledEarly = add.mock.calls.length;
-		requests.attach(add);
+		requests.attach({ add, stop: noStop });
 
 		await expect(added).resolves.toStrictEqual(["compiler"]);
 		expect(calledEarly).toBe(0);
@@ -38,7 +41,7 @@ describe(createPartRequests, () => {
 			.mockReturnValueOnce(first.promise)
 			.mockRejectedValueOnce(new ForgeError("compiler_missing", "gone"))
 			.mockResolvedValue([]);
-		requests.attach(add);
+		requests.attach({ add, stop: noStop });
 		const one = requests.addAsync(COMPILER);
 		const two = requests.addAsync(COMPILER);
 		const three = requests.addAsync({ parts: [] });
@@ -61,12 +64,12 @@ describe(createPartRequests, () => {
 		const requests = createPartRequests();
 		const waiting = requests.addAsync(COMPILER);
 		requests.close();
-		requests.attach(vi.fn<PartAdder>());
+		requests.attach({ add: vi.fn<PartAdder>(), stop: noStop });
 
 		await expect(waiting).rejects.toMatchObject({
 			code: "not_running",
 			hint: 'Start a session with "forge up".',
-			message: "The session is stopping; it adds no parts.",
+			message: "The session is stopping; it adds and stops no parts.",
 		});
 		await expect(requests.addAsync(COMPILER)).rejects.toMatchObject({
 			code: "not_running",
@@ -78,11 +81,66 @@ describe(createPartRequests, () => {
 
 		const requests = createPartRequests();
 		const add = vi.fn<PartAdder>();
-		requests.attach(add);
+		requests.attach({ add, stop: noStop });
 		requests.close();
 
 		await expect(requests.addAsync(COMPILER)).rejects.toMatchObject({
 			code: "not_running",
+		});
+	});
+});
+
+describe("createPartRequests stops", () => {
+	it("should fail a stop at once while the session starts", async () => {
+		expect.assertions(1);
+
+		const requests = createPartRequests();
+
+		await expect(requests.stopAsync(DOWN)).rejects.toMatchObject({
+			code: "not_running",
+			hint: "Stop the whole session.",
+			message: "The session is starting; it stops no part yet.",
+		});
+	});
+
+	it("should stop through the body's stopper, after the add that runs", async () => {
+		expect.assertions(2);
+
+		const requests = createPartRequests();
+		const adding = Promise.withResolvers<Array<"compiler">>();
+		const order: Array<string> = [];
+		const add = vi.fn<PartAdder>(async () => {
+			const added = await adding.promise;
+			order.push("add");
+			return added;
+		});
+		const stop = vi.fn<PartStopper>(async () => {
+			order.push("stop");
+			return { ending: true, kept: [], stopped: ["compiler"] };
+		});
+		requests.attach({ add, stop });
+		const added = requests.addAsync(COMPILER);
+		const stopped = requests.stopAsync(DOWN);
+		await flushAsync();
+		adding.resolve(["compiler"]);
+
+		await expect(Promise.all([added, stopped])).resolves.toStrictEqual([
+			["compiler"],
+			{ ending: true, kept: [], stopped: ["compiler"] },
+		]);
+		expect(order).toStrictEqual(["add", "stop"]);
+	});
+
+	it("should fail a stop with not_running once closed", async () => {
+		expect.assertions(1);
+
+		const requests = createPartRequests();
+		requests.attach({ add: vi.fn<PartAdder>(), stop: noStop });
+		requests.close();
+
+		await expect(requests.stopAsync(DOWN)).rejects.toMatchObject({
+			code: "not_running",
+			message: "The session is stopping; it adds and stops no parts.",
 		});
 	});
 });

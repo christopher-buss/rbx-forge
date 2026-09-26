@@ -59,7 +59,8 @@ Error codes are stable: a code is never renamed or reused. The full list is in
 5. `forge sync --json`: pull Studio edits into the project, with the syncback
    hooks. It waits for a running save-triggered run, then runs once more.
    Failures keep their code, with hook results in `error.details.hooks`.
-6. `forge down --json`: stop the session. See below for its result.
+6. `forge down --json`: stop the parts with no owner, and the session once none
+   is left. See below for its result.
 
 Exit 6 means processes still live or the supervisor does not answer: retry with
 `--force`. Exit 5 means forge could not verify a process, so it killed nothing.
@@ -122,13 +123,21 @@ build with errors fails with `compile_failed` and the same fields in
 
 ## The `down` and `stop` result
 
-`data.stoppedBy` is `shutdown`, `forced_shutdown`, `killed`, `gone`, or
-`studio_closed` (the session ended by itself once `down` closed its Studio).
+`down` and `stop` act only on parts with no owner. `data.parts` names what they
+did: `stopped` (the parts, Studio first) and `kept` (each part with its `owner`,
+left because a `forge start` terminal owns it). It is `null` when no session
+said: for `down`, the session did not answer or was still starting, and `down`
+stopped it whole; for `stop`, no session runs.
+
+`down` never fails because of an owner. `data.status` is `stopped` once the
+session is gone (an `up` session with no part left ends), or `running` when
+owned parts keep it. `data.stoppedBy` (only with `stopped`) is `shutdown`,
+`forced_shutdown`, `killed`, or `gone`.
 
 `data.studio.status` is one of:
 
 - `closed`
-- `kept` (`--keep-studio`)
+- `kept` (`--keep-studio`, or Studio has an owner)
 - `none` (no Studio open)
 - `unknown` (the supervisor did not answer, so forge touched no Studio)
 - `failed`, with the error's `code` and `message`. Studio may still be open; the
@@ -144,4 +153,9 @@ A `closed` Studio also has:
   `warnings`. forge handles the auto-recovery files after every kill, also after
   `lock_released`. See [Auto-recovery](./studio.md#auto-recovery).
 
-`forge stop` reports the same fields in `data`, with `stopped`.
+`forge stop` reports the same Studio fields in `data`, with `stopped` and
+`parts`. It closes the session's Studio with its Rojo; the compiler keeps
+running. A Studio that a `forge start` terminal owns fails with `studio_owned`
+(exit 1, `details.owner`, `details.sessionId`, and `details.pid` and
+`details.place` when known); `stop --force` closes it. `--place <path>` selects
+the Studio of another place, such as one `forge open` opened.

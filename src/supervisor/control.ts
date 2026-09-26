@@ -4,6 +4,7 @@ import type { BuildWatch } from "../session/build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { PartRequests } from "../session/part-requests.ts";
 import { parsePartRequest } from "../session/part-requests.ts";
+import { parseStopRequest } from "../session/part-stop-schema.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { StatusStore } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
@@ -11,7 +12,7 @@ import type { StopSource } from "../session/stop-source.ts";
 /** What the control channel of one session reaches. */
 export interface ControlTarget {
 	builds: Pick<BuildWatch, "tick" | "waitAsync">;
-	parts: Pick<PartRequests, "addAsync">;
+	parts: Pick<PartRequests, "addAsync" | "stopAsync">;
 	sessionId: string;
 	status: Pick<StatusStore, "snapshot">;
 	stop: Pick<StopSource, "request">;
@@ -37,6 +38,14 @@ export interface ControlTarget {
  *   `session_replaced`. With `force: true`, the workers get no more grace,
  *   also when the session is already stopping (`forge down`, step 2).
  *
+ * - `stopParts`: stop the running parts the `scope` param reaches (`down`,
+ *   `stop`, `restart`) that have no owner; with `force: true` the owned
+ *   ones too. `stop` reaches the Studio of the `place` param (any when
+ *   unset) and its Rojo; `keepStudio: true` leaves Studio open for `down`.
+ *   A closed Studio's auto-recovery files go as the `recovery` param says.
+ *   Answers once they are gone, with `stopped`, `kept` (with each owner),
+ *   `studio` (what closing Studio did), and `ending`: no part is left, so
+ *   the session ends. A `sessionId` param works as for `shutdown`.
  * - `sync`: run syncback with its hooks in the session, one run at a time
  *   with the save watch. Answers once the run ended,
  *   with what was synced and each hook result, or with the run's failure.
@@ -57,15 +66,7 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 			return snapshot(target);
 		},
 		shutdown: (parameters) => {
-			const wanted = parameters["sessionId"];
-			if (typeof wanted === "string" && wanted !== target.sessionId) {
-				throw new ForgeError(
-					"session_replaced",
-					`Session ${wanted} is gone; session ${target.sessionId} runs in its place.`,
-					{ details: { sessionId: target.sessionId } },
-				);
-			}
-
+			requireSession(target, parameters);
 			const isForced = parameters["force"] === true;
 			target.stop.request(
 				isForced ? { force: true, type: "shutdown" } : { type: "shutdown" },
@@ -73,8 +74,30 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 			return { accepted: true, sessionId: target.sessionId };
 		},
 		status: () => snapshot(target),
+		stopParts: async (parameters) => {
+			requireSession(target, parameters);
+			return { ...(await target.parts.stopAsync(parseStopRequest(parameters))) };
+		},
 		sync: async () => target.sync.runAsync(),
 	};
+}
+
+/**
+ * Check that a request is for this session.
+ *
+ * @param target - Holds this session's id.
+ * @param parameters - The request's params, with an optional `sessionId`.
+ * @throws {ForgeError} `session_replaced` when it names another session.
+ */
+function requireSession(target: ControlTarget, parameters: Record<string, unknown>): void {
+	const wanted = parameters["sessionId"];
+	if (typeof wanted === "string" && wanted !== target.sessionId) {
+		throw new ForgeError(
+			"session_replaced",
+			`Session ${wanted} is gone; session ${target.sessionId} runs in its place.`,
+			{ details: { sessionId: target.sessionId } },
+		);
+	}
 }
 
 async function addPartsAsync(

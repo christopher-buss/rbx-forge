@@ -1,14 +1,17 @@
 import type { FlagDefinition, FlagValues } from "../cli/flags.ts";
 import { readCountFlag } from "../cli/flags.ts";
-import type { DownStudio, StoppedBy } from "../client/down.ts";
+import type { DownStudio } from "../client/down-parts.ts";
+import type { DownReport, StoppedBy } from "../client/down.ts";
 import { DOWN_TIMEOUT_MS, stopSessionAsync } from "../client/down.ts";
 import { findSession } from "../client/session.ts";
-import { RECOVERY_FLAG, recoveryOptions } from "../client/studio.ts";
+import { RECOVERY_FLAG } from "../client/studio.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { DEFAULT_CONFIG } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import type { KeptPart } from "../session/part-stops.ts";
+import type { PartId } from "../session/status.ts";
 import type { StudioEnd } from "../studio/close-studio.ts";
 import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
@@ -50,13 +53,22 @@ const HOW: Readonly<Record<StoppedBy, string>> = {
 	gone: "Cleaned up after session",
 	killed: "Killed the supervisor of session",
 	shutdown: STOPPED,
-	studio_closed: STOPPED,
+};
+
+/** How the summary names each part. */
+const PART_NAMES: Readonly<Record<PartId, string>> = {
+	compiler: "the compiler",
+	rojo: "Rojo",
+	studio: "Studio",
 };
 
 /**
- * `forge down`: stop the project's session and prove it gone. First it
- * closes the session's Studio, unless `--keep-studio`; a Studio forge cannot
- * close is reported in `studio`, and the session still stops. It reports
+ * `forge down`: stop the parts of the project's session that have no owner
+ * and, once none is left, prove the session gone. The session closes its
+ * Studio first, unless `--keep-studio`; a Studio forge cannot close is
+ * reported in `studio`, and the session still stops. Parts with an owner
+ * (a `forge start` terminal) keep running, and so does the session: `down`
+ * reports them in `parts.kept` and never fails because of them. It reports
  * `stopped` only once the session's supervisor has exited and none of its
  * processes is left. It escalates from a shutdown request to a forced one;
  * with `--force`, it then kills the supervisor through a pinned,
@@ -65,8 +77,9 @@ const HOW: Readonly<Record<StoppedBy, string>> = {
  *
  * @param context - The run: project root, seams, and reporter.
  * @param input - `--force`, `--keep-studio`, `--recovery`, and `--timeout`.
- * @returns The stopped session's id, how it stopped, what happened to its
- *   Studio, and any cleanup.
+ * @returns The session's id, whether it stopped, the parts it stopped and
+ *   kept, how the session stopped, what happened to its Studio, and any
+ *   cleanup.
  * @rejects {ForgeError} `not_running` when no session is named;
  *   `session_replaced`; `supervisor_unresponsive`; `cleanup_in_progress`;
  *   `cleanup_unverifiable`; `usage` for a bad `--timeout`.
@@ -84,16 +97,46 @@ export async function runDownAsync(
 		});
 	}
 
+	const { studio } = await studioConfigAsync(context, input);
 	const report = await stopSessionAsync(context.seams, forge, session, {
 		force: input.flags["force"] === true,
 		keepStudio: input.flags["keep-studio"] === true,
-		recovery: recoveryOptions(context.env, forge, await studioConfigAsync(context, input)),
+		recovery: studio.autoRecovery,
 		timeoutMs,
 	});
-	return {
-		data: { ...report, status: "stopped" },
-		summary: `${HOW[report.stoppedBy]} ${report.sessionId}; every process of it is gone.${studioSentence(report.studio)}`,
-	};
+	return { data: { ...report }, summary: downSummary(report) };
+}
+
+/**
+ * Name parts in a list, such as `Studio, Rojo, and the compiler`.
+ *
+ * @param parts - The parts, in order.
+ * @returns Their names, joined for a sentence.
+ */
+function listParts(parts: ReadonlyArray<PartId>): string {
+	const names = parts.map((part) => PART_NAMES[part]);
+	const last = names.pop();
+	if (names.length === 0) {
+		return String(last);
+	}
+
+	return `${names.join(", ")}${names.length > 1 ? "," : ""} and ${last}`;
+}
+
+/**
+ * Say which parts stay, and who owns them.
+ *
+ * @param kept - The parts with an owner.
+ * @returns The end of the sentence that says the session goes on.
+ */
+function keptSentence(kept: ReadonlyArray<KeptPart>): string {
+	if (kept.length === 0) {
+		return ".";
+	}
+
+	const verb = kept.length === 1 ? "has" : "have";
+	const names = listParts(kept.map(({ part }) => part));
+	return `: ${names} ${verb} an owner, the forge start terminal.`;
 }
 
 /**
@@ -121,6 +164,24 @@ function studioSentence(studio: DownStudio): string {
 			return "";
 		}
 	}
+}
+
+/**
+ * The summary line of a `down` result.
+ *
+ * @param report - The session, its parts, and how it stopped.
+ * @returns How the session went, then its Studio.
+ */
+function downSummary(report: DownReport): string {
+	const { sessionId } = report;
+	if (report.status === "stopped") {
+		const empty = report.parts?.stopped.length === 0 ? " It had no part to stop." : "";
+		return `${HOW[report.stoppedBy]} ${sessionId}; every process of it is gone.${empty}${studioSentence(report.studio)}`;
+	}
+
+	const { parts } = report;
+	const stopped = parts.stopped.length === 0 ? "no part" : listParts(parts.stopped);
+	return `Stopped ${stopped} of session ${sessionId}. It goes on${keptSentence(parts.kept)}${studioSentence(report.studio)}`;
 }
 
 /**
