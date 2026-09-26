@@ -104,13 +104,17 @@ export async function askPartStopsAsync(
 }
 
 /**
- * What `down` reports for the session's Studio.
+ * What `down` (or `restart`) reports for the session's Studio.
  *
- * @param stops - What the session stopped; `undefined` when it did not say.
+ * @param stops - What the session stopped and kept, and did with its
+ *   Studio; `undefined` when it did not say.
  * @param keepStudio - Whether `--keep-studio` left it open.
  * @returns What happened to Studio.
  */
-export function downStudio(stops: PartStops | undefined, keepStudio: boolean): DownStudio {
+export function downStudio(
+	stops: Pick<PartStops, "kept" | "studio"> | undefined,
+	keepStudio: boolean,
+): DownStudio {
 	if (stops === undefined) {
 		return { status: "unknown" };
 	}

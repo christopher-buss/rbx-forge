@@ -202,6 +202,9 @@ with:
 - `kept`: each running part with its `owner`, left because a `forge start`
   terminal owns it. With `--force` it is empty, and the restarted parts keep
   their owner.
+- `studio`: what closing the old Studio did, as `data.studio` of `down`:
+  `closed` (with `end`, `forced`, `pid`, `place`, `recovery`), `kept`, or
+  `none`. `data.services.studio` is the new Studio.
 
 It restarts only the parts that run with no owner (all with `--force`), and a
 `failed` compiler with no owner. Studio closes as for `stop`, and a new Studio

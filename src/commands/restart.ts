@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import type { FlagDefinition } from "../cli/flags.ts";
+import { downStudio } from "../client/down-parts.ts";
 import type { KnownSession } from "../client/session.ts";
 import { fetchStatusAsync, findSession, restartPartsAsync } from "../client/session.ts";
 import { RECOVERY_FLAG } from "../client/studio.ts";
@@ -44,8 +45,8 @@ export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
  * @param context - The run: project root, seams, and reporter.
  * @param input - `--force`, `--studio-path`, and the config values flags
  *   set (`--recovery`).
- * @returns The session's status, and the parts it stopped, kept, and
- *   started again.
+ * @returns The session's status, the parts it stopped, kept, and started
+ *   again, and what closing the old Studio did (`studio`, as for `down`).
  * @rejects {ForgeError} `not_running` when no session runs or it stops
  *   meanwhile; `cleanup_in_progress` when an old tree is not proven gone
  *   (nothing started again); Studio's close failure, such as
@@ -84,7 +85,7 @@ export async function runRestartAsync(
 	const status = await waitReadyAsync(context, session);
 	const { added, kept, stopped } = restarts;
 	return {
-		data: { ...status, added, kept, stopped },
+		data: { ...status, added, kept, stopped, studio: downStudio(restarts, false) },
 		summary: restartSummary(status, restarts),
 	};
 }

@@ -148,6 +148,14 @@ describe(runRestartAsync, () => {
 				added: ["compiler", "studio", "rojo"],
 				kept: [],
 				stopped: ["studio", "rojo", "compiler"],
+				studio: {
+					end: "exited",
+					forced: false,
+					pid: 900,
+					place: PLACE,
+					recovery: null,
+					status: "closed",
+				},
 			},
 			summary: `Restarted the compiler, Studio, and Rojo of session s1: the compiler is ready, Rojo serves on port 34872, Studio has ${PLACE} open.`,
 		});
