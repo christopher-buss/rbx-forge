@@ -1,184 +1,169 @@
-# rbx-forge
+<h1 align="center">rbx-forge</h1>
 
-[![npm version][npm-version-src]][npm-version-href]
-[![npm downloads][npm-downloads-src]][npm-downloads-href]
-[![CI][ci-src]][ci-href] [![bundle][bundle-src]][bundle-href]
-[![JSDocs][jsdocs-src]][jsdocs-href] [![License][license-src]][license-href]
+<div align="center">
 
-> A roblox-ts and Luau project workflow tool for fully-managed Rojo projects
+[![npm](https://raw.githubusercontent.com/maneetoo/Roblox-OSS-Badges/5959dc76990e4dc70d697f8b39db48da5a282837/Badges/Community/Package/link-npm.svg)](https://npmx.dev/package/rbx-forge)
+[![Sponsor me](https://raw.githubusercontent.com/maneetoo/Roblox-OSS-Badges/b880ff3b8ca27e95914b12adcb784e29ef5c7222/Badges/Roblox-Styled/Original/sponsor-me-var2.svg)](https://github.com/sponsors/christopher-buss)
 
-rbx-forge gives you simple commands (`init`, `watch`, `build`, `open`) that
-handle the full workflow: TypeScript compilation → Rojo builds → Studio
-integration -> sync changes back to the filesystem. No script boilerplate
-needed.
+[![CI](https://github.com/christopher-buss/rbx-forge/actions/workflows/ci.yaml/badge.svg)](https://github.com/christopher-buss/rbx-forge/actions/workflows/ci.yaml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-## Requirements
+</div>
 
-- **Node.js** >= 22.16.0
-- **Rojo** - Install from [rojo.space](https://rojo.space) or optionally via
-  [uplift-games/rojo](https://github.com/UpliftGames/rojo/releases/)
-- **Task Runner** (optional) - npm, pnpm, or mise for script generation
+forge runs the dev loop of a roblox-ts or Luau Rojo project: compile, build,
+open Studio, serve Rojo, watch, and sync Studio edits back. It owns every
+process it starts, so when the session stops, however it stops, every process
+stops with it. Every command has `--json` output, so an AI agent can drive it.
 
-## Installation
+## What forge does
 
-The recommended way to use rbx-forge is with `npx`, which automatically installs
-it to your project:
+One command, `forge start`, compiles the project, builds the place, opens it in
+Studio, serves Rojo, and starts the watch-mode compiler. With syncback on, each
+save in Studio syncs the place back into the project and runs your hooks, such
+as `eslint --fix`.
+
+A session runs in its own supervisor process. A native reaper process starts
+every worker (Rojo, the compiler, syncback, hooks) and owns it at OS level.
+Ctrl+C, a closed terminal, or a killed `forge start` stops every worker.
+
+`forge down` closes the session's Studio too. forge ends Studio when a "Save
+changes?" dialog blocks it, and moves the auto-recovery files out of Studio's
+AutoSaves folder, so the next launch does not offer to recover a place forge
+builds anyway. forge closes only a Studio that it can verify, never another one.
+See [docs/studio.md](./docs/studio.md).
+
+forge is a fork of [rbxts-build](https://github.com/roblox-ts/rbxts-build) by
+osyrisrblx, rewritten.
+
+## Install
+
+Requirements:
+
+- Node.js 24.12 or later.
+- Windows 10 1607 / Server 2016 or later, Linux (glibc or musl), or macOS; x64
+  or arm64. forge installs a prebuilt native package for your platform
+  (`@rbx-forge/native-<platform>`); a platform without one gets
+  `native_missing`.
+- [Rojo](https://rojo.space) on `PATH` or as a project dependency. Syncback
+  needs Rojo 7.7 or later.
+- For roblox-ts projects: `roblox-ts` as a project dependency, or
+  [sloptor](https://github.com/howmanyslop/sloptor) with
+  `rbxts: { args: ["build", "--json"], command: "sloptor" }` in the config (see
+  [`rbxts.command`](./docs/config.md#rbxtscommand)).
 
 ```bash
-npx rbx-forge init
+npm install --save-dev rbx-forge
+npx forge init --type rbxts   # writes rbx-forge.config.ts, and nothing else
+npx forge start               # compile, build, open Studio, serve Rojo, watch
 ```
 
-This runs you through a setup wizard that installs rbx-forge to your project,
-creates `rbx-forge.config.ts`, and generates task runner scripts.
+Add `.forge/` to your `.gitignore`. forge keeps its session files and logs
+there.
 
-### Alternative: Global Installation
-
-If you prefer to install globally:
-
-```bash
-pnpm add -g rbx-forge
-```
-
-Then run `rbx-forge init` in your project.
-
-## Quick Start
-
-```bash
-# Install and set up
-npx rbx-forge init
-
-# Start development server
-rbx-forge start  # Builds your place file and opens Studio
-
-# When you're done
-rbx-forge stop
-```
+The bins `forge` and `rbx-forge` are the same. Run forge from the project root.
 
 ## Commands
 
-| Command    | Description                                                   |
-| ---------- | ------------------------------------------------------------- |
-| `init`     | Initialize a new rbx-forge project                            |
-| `build`    | Build the Rojo project to an output file                      |
-| `compile`  | Compile TypeScript to Luau (roblox-ts projects only)          |
-| `serve`    | Start the Rojo development server                             |
-| `watch`    | Watch and rebuild on file changes                             |
-| `start`    | Full workflow: compile, build, open Studio, optional syncback |
-| `stop`     | Stop running Roblox Studio processes                          |
-| `open`     | Open place file in Roblox Studio                              |
-| `restart`  | Restart the current workflow                                  |
-| `syncback` | Sync changes from place file back to source                   |
-| `typegen`  | Generate TypeScript types from Rojo sourcemap                 |
+Session commands:
+
+| Command             | What it does                                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `forge start`       | Run the session in this terminal. Ctrl+C, a closed terminal, or a killed `start` stops every process of the session.                       |
+| `forge up`          | Start the same session in the background. Returns when Rojo listens and the first compile is done. Reports a running session if one runs.  |
+| `forge status`      | Each service's state, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below. |
+| `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                             |
+| `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.           |
+| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.            |
+
+`start` and `up` take the same flags:
+
+- `--no-compiler`: no compile, no build, no watch-mode compiler: only Rojo and
+  Studio. The open step still builds when `open.buildFirst` is on.
+- `--no-open`: do not open Studio. By default the session opens the place and
+  ends when Studio closes it.
+- `--syncback`: run syncback and its hooks each time the place file is saved
+  (config `syncback.runOnStart`).
+- `--force`: when a crashed earlier session still has processes after the wait,
+  kill them, each verified as that session's own.
+- `--studio-path <path>`: the Roblox Studio executable to start (see
+  [Opening Studio](./docs/studio.md#opening-studio)).
+
+`down` takes `--timeout <seconds>` (default 15), `--force` (kill a supervisor
+that does not stop, and what is left of its session, each verified),
+`--keep-studio` (leave the session's Studio open), and `--recovery <mode>` (see
+[Auto-recovery](./docs/studio.md#auto-recovery)).
+
+`status --wait` returns the status once the compiler's last build is fresh: no
+compile runs, and none started for a short quiet window. Run it after an edit.
+`--timeout <seconds>` bounds the wait (default 300), else it fails with
+`compile_timeout`. `--timeout 0` does not wait: it returns the status now. With
+no roblox-ts compiler in the session, it returns at once.
+
+One session runs per project (per worktree and build output). A second `start`
+fails with `session_running`; a second `up` joins the running session. A new
+session waits until every process of a crashed old one is gone.
+
+One-shot commands:
+
+| Command          | What it does                                                                                             |
+| ---------------- | -------------------------------------------------------------------------------------------------------- |
+| `forge init`     | Create `rbx-forge.config.ts`. `--type <rbxts\|luau>`, `--force` to replace.                              |
+| `forge config`   | Print the resolved config.                                                                               |
+| `forge build`    | Build the Rojo project. `-o, --output <path>`, or `--plugin <name>` for Studio's plugins folder.         |
+| `forge compile`  | Compile roblox-ts once and report errors (rbxts only).                                                   |
+| `forge open`     | Open the place in Studio. `--place <path>`, `--build` / `--no-build`, `--studio-path <path>`.            |
+| `forge stop`     | Close the Studio of the session or of this project's place, after it verifies it. `--recovery <mode>`.   |
+| `forge syncback` | Sync the place back into the project once. `--input <path>`, `--project <path>`.                         |
+| `forge typegen`  | Write service types from the Rojo sourcemap. `-o`, `--include`, `--exclude`, `--max-depth` (rbxts only). |
+
+`forge --help` and `forge <command> --help` show every flag.
 
 ## Configuration
 
-rbx-forge uses `rbx-forge.config.ts` (recommended), `rbx-forge.config.json`, or
-package.json for configuration. The `init` command creates a TypeScript config
-for you with full type safety.
+forge reads `rbx-forge.config.ts` from the project root. Hooks are shell
+commands that run before or after `build`, `compile`, `open`, `syncback`, and
+`typegen`:
 
-### Basic config
-
-```typescript
+```ts
 import { defineConfig } from "rbx-forge";
 
 export default defineConfig({
-	// Where Rojo builds to
-	buildOutputPath: "game.rbxl",
-
-	// Customize generated script names (optional)
-	commandNames: {
-		build: "forge:build",
-		serve: "forge:serve",
+	hooks: {
+		syncback: { post: ["pnpm eslint --fix src"] },
 	},
-
-	// "rbxts" or "luau"
 	projectType: "rbxts",
+	rojoPort: 34872,
+	syncback: { runOnStart: true },
 });
 ```
 
-### Advanced options
+See [docs/config.md](./docs/config.md) for every option.
 
-You can also configure:
+## For agents
 
-- roblox-ts compiler settings (`rbxts.args`, `rbxts.command`)
-- Syncback behavior (`syncback.runOnStart`, `syncbackInputPath`)
-- Type generation (`typegen.include`, `typegen.exclude`, `typegen.maxDepth`)
+With `--json`, or when stdout is not a terminal, forge writes NDJSON and ends
+with one `result` line. A run that cannot prompt never prompts. Error codes are
+stable, and each maps to one exit code. The loop:
 
-See [docs/configuration.md](docs/configuration.md) for all options.
+1. `forge up --json` starts the session, or finds the running one.
+2. Edit code.
+3. `forge status --json --wait` gives the compile errors with file, line, and
+   column. `--wait` waits for the compile of your edit, so the result is never
+   the build before it.
+4. Play and read the console with the Roblox Studio MCP.
+5. `forge sync --json` pulls Studio edits into the project.
+6. `forge down --json` closes Studio and stops the session.
 
-## Script Generation
-
-`rbx-forge init` creates scripts in your task runner:
-
-**package.json:**
-
-```json
-{
-	"scripts": {
-		"forge:build": "rbx-forge build",
-		"forge:serve": "rbx-forge serve"
-	}
-}
-```
-
-**mise (.mise.toml):**
-
-```toml
-[tasks."forge:build"]
-run = [ "rbx-forge build" ]
-```
-
-Customize these however you want - add pre/post hooks, chain commands, etc.:
-
-```json
-{
-	"scripts": {
-		"forge:build": "echo 'Building...' && rbx-forge build",
-		"forge:serve": "rbx-forge build && rbx-forge serve",
-		"preforge:serve": "echo 'Preparing to serve...'"
-	}
-}
-```
-
-rbx-forge respects your runner context when chaining commands, so your hooks
-will execute.
-
-Or skip scripts entirely and use the CLI: `rbx-forge build`
-
-## License
-
-[MIT](LICENSE) - Copyright for portions of rbx-forge are held by osyrisrblx
-2021, as part of rbxts-build. All other copyright for rbx-forge are held by
-Christopher Buss, 2025.
+See [docs/json-output.md](./docs/json-output.md) for the result fields and exit
+codes.
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for
-guidelines.
+Tools are pinned in `mise.toml`: `mise install`, then `pnpm install`. Read
+[CONTRIBUTING.md](./CONTRIBUTING.md) for the scripts and checks, and
+[AGENTS.md](./AGENTS.md) for the code layout and test rules.
 
-## Acknowledgments
+## License
 
-- **osyrisrblx** - Original author of
-  [rbxts-build](https://github.com/roblox-ts/rbxts-build)
-
-<!-- Badges -->
-
-[npm-version-src]:
-	https://img.shields.io/npm/v/rbx-forge?style=flat&colorA=080f12&colorB=1fa669
-[npm-version-href]: https://npmjs.com/package/rbx-forge
-[npm-downloads-src]:
-	https://img.shields.io/npm/dm/rbx-forge?style=flat&colorA=080f12&colorB=1fa669
-[npm-downloads-href]: https://npmjs.com/package/rbx-forge
-[ci-src]:
-	https://img.shields.io/github/actions/workflow/status/christopher-buss/rbx-forge/ci.yaml?style=flat&colorA=080f12&colorB=1fa669
-[ci-href]:
-	https://github.com/christopher-buss/rbx-forge/actions/workflows/ci.yaml
-[bundle-src]:
-	https://img.shields.io/bundlephobia/minzip/rbx-forge?style=flat&colorA=080f12&colorB=1fa669&label=minzip
-[bundle-href]: https://bundlephobia.com/result?p=rbx-forge
-[license-src]:
-	https://img.shields.io/github/license/christopher-buss/rbx-forge.svg?style=flat&colorA=080f12&colorB=1fa669
-[license-href]: https://github.com/christopher-buss/rbx-forge/blob/main/LICENSE
-[jsdocs-src]:
-	https://img.shields.io/badge/jsdocs-reference-080f12?style=flat&colorA=080f12&colorB=1fa669
-[jsdocs-href]: https://www.jsdocs.io/package/rbx-forge
+[MIT](./LICENSE) (c) Christopher Buss. Portions (c) osyrisrblx, from
+rbxts-build.

@@ -1,10 +1,22 @@
 .DS_Store
 node_modules
-out
 dist
+out-tsc
+coverage
+reports
+.stryker-tmp
+*.tsbuildinfo
+.env
 
-.eslintcache
-.tsconfig-cache.txt
+# isentinel-lint writes suffixed caches; a bare `.eslintcache` does not match.
+.eslintcache*
+
+# Rust crate
+reaper/target
+*.node
+
+# Scratch projects for manual runs
+.tmp/
 
 /.claude/state
 *.tgz

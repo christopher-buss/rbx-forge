@@ -1,64 +1,125 @@
-import { log } from "@clack/prompts";
+import path from "node:path";
 
-import ansis from "ansis";
-import { getStudioLockFilePath } from "src/utils/studio-lock-watcher";
+import type { FlagDefinition } from "../cli/flags.ts";
+import { findSession } from "../client/session.ts";
+import {
+	RECOVERY_FLAG,
+	recoveryOptions,
+	sessionStudioTarget,
+	waitForSessionStudioAsync,
+} from "../client/studio.ts";
+import { loadProjectConfigAsync } from "../config/load.ts";
+import type { CommandResult } from "../seams/reporter.ts";
+import type { StudioEnd, StudioStop, StudioTarget } from "../studio/close-studio.ts";
+import { closeStudioAsync, STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
+import { forgeFiles } from "../supervisor/session-files.ts";
+import type { CommandContext, CommandInput } from "./context.ts";
 
-import { loadProjectConfig } from "../config";
-import { cleanupLockfile, readLockfileRaw } from "../utils/lockfile";
-import { killProcess } from "../utils/process-utils";
-import { createSpinner } from "../utils/run";
+export const STOP_FLAGS: ReadonlyArray<FlagDefinition> = [RECOVERY_FLAG];
 
-export const COMMAND = "stop";
-export const DESCRIPTION = "Stop running Roblox Studio processes";
+/** How the summary tells how Studio went. */
+const HOW: Readonly<Record<StudioEnd, string>> = {
+	dialog: ": a dialog blocked it, so forge ended it without saving",
+	exited: "",
+	lock_released: "",
+	no_window: ": it had no window to close, so forge ended it without saving",
+	timeout: `: it did not close within ${STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving`,
+};
 
-export async function action(): Promise<void> {
-	const config = await loadProjectConfig();
-
-	const spinner = createSpinner("Stopping Roblox Studio...");
-
-	const didStopStudio = await tryStopStudioProcess(getStudioLockFilePath(config));
-
-	if (!didStopStudio) {
-		spinner.stop(ansis.dim("No running Roblox Studio found"));
-	} else {
-		spinner.stop(ansis.green("Stopped Roblox Studio"));
-	}
+/**
+ * `forge stop`: close the Roblox Studio that has this project's place open.
+ * When a session runs, it is the session's Studio (waiting while it is
+ * still opening); else the Studio the place's lock file names. Studio gets
+ * a close request; forge ends it once it closed the place, at once when a
+ * dialog blocks it, and else after {@link STUDIO_CLOSE_MS}, without a save
+ * (`closeStudioAsync`). It acts only on a Studio its identity check
+ * verifies. The auto-recovery files of a Studio it ended are moved,
+ * deleted, or kept (`studio.autoRecovery`, `--recovery`).
+ *
+ * @param context - The run: project directory, config loader, file system,
+ *   clock, transport, and native addon.
+ * @param input - The config values flags set.
+ * @returns Whether a Studio was stopped, its PID, the place, how it went,
+ *   and what forge did with its auto-recovery files.
+ * @rejects `identity_mismatch` when the lock file names no process or
+ *   another computer, or a process that is not Studio, started after the
+ *   lock file was written, is not the session's Studio, or cannot be
+ *   checked; `process_failed` when Studio does not exit in time; config
+ *   errors from `loadProjectConfigAsync`.
+ */
+export async function runStopAsync(
+	context: CommandContext,
+	input: CommandInput,
+): Promise<CommandResult> {
+	const { cwd, env, seams } = context;
+	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
+	const forge = forgeFiles(cwd);
+	const target = (await sessionTargetAsync(context)) ?? {
+		place: path.resolve(cwd, config.open.buildOutputPath ?? config.buildOutputPath),
+	};
+	const stop = await closeStudioAsync(seams, target, recoveryOptions(env, forge, config));
+	return stopResult(stop, target.place);
 }
 
 /**
- * Stops the Roblox Studio process using its lock file.
+ * The Studio of the project's running session.
  *
- * @param lockFilePath - Path to the Studio lock file.
- * @returns True if Studio was stopped, false otherwise.
+ * @param context - The file system, clock, and transport.
+ * @returns It, or `undefined` when no session answers or it has no Studio.
  */
-async function tryStopStudioProcess(lockFilePath: string): Promise<boolean> {
-	const lines = await readLockfileRaw(lockFilePath);
+async function sessionTargetAsync(context: CommandContext): Promise<StudioTarget | undefined> {
+	const session = findSession(context.seams.fileSystem, forgeFiles(context.cwd));
+	const studio =
+		session === undefined ? undefined : await waitForSessionStudioAsync(context.seams, session);
+	return studio === undefined ? undefined : sessionStudioTarget(studio);
+}
 
-	if (lines === null) {
-		return false;
-	}
+/**
+ * The result of `forge stop` once Studio is gone.
+ *
+ * @param stop - How Studio went.
+ * @param place - The absolute path of the place file.
+ * @returns Its data and summary.
+ */
+function stoppedResult(
+	{ end, forced: isForced, pid, recovery }: Extract<StudioStop, { status: "stopped" }>,
+	place: string,
+): CommandResult {
+	return {
+		data: { end, forced: isForced, pid, place, recovery, stopped: true },
+		summary: `Stopped Roblox Studio (PID ${pid}) for ${place}${HOW[end]}.`,
+	};
+}
 
-	const processIdStr = lines[0];
-
-	if (processIdStr === undefined || processIdStr === "") {
-		await cleanupLockfile(lockFilePath);
-		return false;
-	}
-
-	const processId = Number.parseInt(processIdStr, 10);
-	if (Number.isNaN(processId)) {
-		await cleanupLockfile(lockFilePath);
-		return false;
-	}
-
-	try {
-		await killProcess(processId);
-		return true;
-	} catch (err) {
-		const errorMessage = err instanceof Error ? err.message : String(err);
-		log.warn(`Failed to kill Studio process ${processId}: ${errorMessage}`);
-		return false;
-	} finally {
-		await cleanupLockfile(lockFilePath);
+/**
+ * The result of `forge stop`.
+ *
+ * @param stop - What closing Studio did.
+ * @param place - The absolute path of the place file.
+ * @returns Its data and summary.
+ */
+function stopResult(stop: StudioStop, place: string): CommandResult {
+	switch (stop.status) {
+		case "closed_first": {
+			return {
+				data: { pid: stop.pid, place, stopped: false },
+				summary: `Roblox Studio (PID ${stop.pid}) closed ${place} while forge checked it.`,
+			};
+		}
+		case "exited": {
+			return {
+				data: { pid: stop.pid, place, stopped: false },
+				summary: `Roblox Studio is not running: the lock file names PID ${stop.pid}, which has exited.`,
+			};
+		}
+		case "not_open": {
+			return {
+				data: { place, stopped: false },
+				summary: `Roblox Studio does not have ${place} open.`,
+			};
+		}
+		case "stopped": {
+			return stoppedResult(stop, place);
+		}
 	}
 }

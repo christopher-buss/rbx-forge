@@ -1,0 +1,226 @@
+import type { ExitCode } from "./exit-codes.ts";
+import {
+	EXIT_CLEANUP_PENDING,
+	EXIT_FAILURE,
+	EXIT_IDENTITY_UNVERIFIED,
+	EXIT_INTERRUPTED,
+	EXIT_NEEDS_CONFIRMATION,
+	EXIT_NOT_RUNNING,
+	EXIT_USAGE,
+} from "./exit-codes.ts";
+
+/**
+ * Stable error codes. They appear in `--json` results, so a code is never
+ * renamed or reused; add a new one instead. Written out by hand because
+ * `isolatedDeclarations` cannot export a type derived from a `satisfies`
+ * constant.
+ */
+export type ForgeErrorCode =
+	| "cleanup_in_progress"
+	| "cleanup_unverifiable"
+	| "command_unavailable"
+	| "compile_failed"
+	| "compile_timeout"
+	| "compiler_missing"
+	| "config_exists"
+	| "config_invalid"
+	| "config_load_failed"
+	| "config_not_found"
+	| "declined"
+	| "detach_unsupported"
+	| "endpoint_in_use"
+	| "hook_depth_exceeded"
+	| "hook_failed"
+	| "identity_mismatch"
+	| "internal_error"
+	| "interrupted"
+	| "native_missing"
+	| "needs_confirmation"
+	| "not_running"
+	| "place_not_found"
+	| "port_in_use"
+	| "previous_generation_alive"
+	| "process_failed"
+	| "reaper_unavailable"
+	| "rojo_missing"
+	| "service_failed"
+	| "session_replaced"
+	| "session_running"
+	| "sourcemap_invalid"
+	| "studio_launch_failed"
+	| "supervisor_unresponsive"
+	| "syncback_unsupported"
+	| "usage";
+
+/** What an error code means and the exit code it maps to. */
+export interface ErrorCodeInfo {
+	exitCode: ExitCode;
+	/** One line: when forge reports this code. */
+	text: string;
+}
+
+/**
+ * Every error code, its exit code, and its meaning. A new code does not compile
+ * until it has a row here.
+ */
+export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
+	cleanup_in_progress: {
+		exitCode: EXIT_CLEANUP_PENDING,
+		text: "Workers of the session are still alive after the wait bound.",
+	},
+	cleanup_unverifiable: {
+		exitCode: EXIT_IDENTITY_UNVERIFIED,
+		text: "Forced cleanup found processes it could not verify, so it did not kill them.",
+	},
+	command_unavailable: {
+		exitCode: EXIT_FAILURE,
+		text: "The command does not apply to this project type.",
+	},
+	compile_failed: { exitCode: EXIT_FAILURE, text: "The compiler reported errors or failed." },
+	compile_timeout: {
+		exitCode: EXIT_FAILURE,
+		text: "No fresh build came within the wait bound of `status --wait`.",
+	},
+	compiler_missing: { exitCode: EXIT_FAILURE, text: "The compiler is not installed." },
+	config_exists: {
+		exitCode: EXIT_FAILURE,
+		text: "`init` found a config file it will not replace.",
+	},
+	config_invalid: { exitCode: EXIT_FAILURE, text: "The config file failed validation." },
+	config_load_failed: {
+		exitCode: EXIT_FAILURE,
+		text: "The config file could not be read or evaluated.",
+	},
+	config_not_found: { exitCode: EXIT_FAILURE, text: "No config file exists in the project." },
+	declined: { exitCode: EXIT_FAILURE, text: "The user answered no to a confirmation." },
+	detach_unsupported: {
+		exitCode: EXIT_FAILURE,
+		text: "The host does not let a session outlive the terminal.",
+	},
+	endpoint_in_use: {
+		exitCode: EXIT_FAILURE,
+		text: "Another process holds the session's control endpoint, or its directory is not safe.",
+	},
+	hook_depth_exceeded: {
+		exitCode: EXIT_FAILURE,
+		text: "Hooks that call forge nested deeper than the limit.",
+	},
+	hook_failed: { exitCode: EXIT_FAILURE, text: "A hook failed or timed out." },
+	identity_mismatch: {
+		exitCode: EXIT_IDENTITY_UNVERIFIED,
+		text: "A process does not match its identity record, so it was not killed.",
+	},
+	internal_error: { exitCode: EXIT_FAILURE, text: "An unexpected error; a bug in forge." },
+	interrupted: { exitCode: EXIT_INTERRUPTED, text: "Stopped by a signal." },
+	native_missing: {
+		exitCode: EXIT_FAILURE,
+		text: "The native addon for this OS is not installed or does not load.",
+	},
+	needs_confirmation: {
+		exitCode: EXIT_NEEDS_CONFIRMATION,
+		text: "A question has no safe default and the run cannot prompt.",
+	},
+	not_running: { exitCode: EXIT_NOT_RUNNING, text: "No session is running." },
+	place_not_found: {
+		exitCode: EXIT_FAILURE,
+		text: "The place file to open does not exist, and it was not built.",
+	},
+	port_in_use: { exitCode: EXIT_FAILURE, text: "The fixed Rojo port is busy." },
+	previous_generation_alive: {
+		exitCode: EXIT_CLEANUP_PENDING,
+		text: "Workers of an old session are still alive after the wait bound.",
+	},
+	process_failed: { exitCode: EXIT_FAILURE, text: "A tool that forge ran failed." },
+	reaper_unavailable: {
+		exitCode: EXIT_FAILURE,
+		text: "The native reaper is missing or the OS is not supported.",
+	},
+	rojo_missing: { exitCode: EXIT_FAILURE, text: "Rojo is not installed." },
+	service_failed: {
+		exitCode: EXIT_FAILURE,
+		text: "A session service exited, so the session stopped.",
+	},
+	session_replaced: {
+		exitCode: EXIT_NOT_RUNNING,
+		text: "The target session is gone and a new session runs in its place.",
+	},
+	session_running: {
+		exitCode: EXIT_FAILURE,
+		text: "A session already runs for this project.",
+	},
+	sourcemap_invalid: {
+		exitCode: EXIT_FAILURE,
+		text: "Rojo's sourcemap is missing, or is not the sourcemap of a place.",
+	},
+	studio_launch_failed: {
+		exitCode: EXIT_FAILURE,
+		text: "The platform launcher could not open the place in Roblox Studio.",
+	},
+	supervisor_unresponsive: {
+		exitCode: EXIT_CLEANUP_PENDING,
+		text: "The session supervisor did not exit within the wait bound.",
+	},
+	syncback_unsupported: {
+		exitCode: EXIT_FAILURE,
+		text: "The Rojo command has no syncback support.",
+	},
+	usage: { exitCode: EXIT_USAGE, text: "The command line could not be read." },
+};
+
+/** Options that {@link ForgeError} takes beyond its code and message. */
+export interface ForgeErrorOptions {
+	cause?: unknown;
+	/**
+	 * Machine-readable facts about the failure, such as hook results. The
+	 * `--json` result carries them as `error.details`.
+	 */
+	details?: Readonly<Record<string, unknown>> | undefined;
+	/** One line that tells the user what to do next. */
+	hint?: string | undefined;
+}
+
+/**
+ * An expected failure: bad input or an external failure that forge reports
+ * with a stable code. Invariants use `assert` instead.
+ */
+export class ForgeError extends Error {
+	public readonly code: ForgeErrorCode;
+	public readonly details: Readonly<Record<string, unknown>> | undefined;
+	public readonly hint: string | undefined;
+	public override readonly name = "ForgeError";
+
+	constructor(code: ForgeErrorCode, message: string, options: ForgeErrorOptions = {}) {
+		super(message, { cause: options.cause });
+		this.code = code;
+		this.details = options.details;
+		this.hint = options.hint;
+	}
+
+	/**
+	 * The exit code the process ends with for this error.
+	 *
+	 * @returns The code from {@link ERROR_CODES}.
+	 */
+	public get exitCode(): ExitCode {
+		return ERROR_CODES[this.code].exitCode;
+	}
+}
+
+/**
+ * The error to report for anything a command threw: a `ForgeError` as it
+ * is, anything else as an `internal_error` (a bug in forge).
+ *
+ * @param err - What was thrown.
+ * @returns The error to report.
+ */
+export function toForgeError(err: unknown): ForgeError {
+	if (err instanceof ForgeError) {
+		return err;
+	}
+
+	const message = err instanceof Error ? err.message : String(err);
+	return new ForgeError("internal_error", message, {
+		cause: err,
+		hint: "This is a bug in forge. Please report it.",
+	});
+}

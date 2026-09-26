@@ -1,205 +1,71 @@
-import { log, outro } from "@clack/prompts";
+import type { FlagDefinition } from "../cli/flags.ts";
+import type { CommandResult } from "../seams/reporter.ts";
+import { STUDIO_PATH_FLAG, withStudioPath } from "../studio/discover.ts";
+import type { CommandContext, CommandInput } from "./context.ts";
 
-import ansis from "ansis";
-import process from "node:process";
-import {
-	processManager,
-	setupSignalHandlers as setupProcessManagerHandlers,
-} from "src/utils/process-manager";
-import { runScript } from "src/utils/run";
-import { getStudioLockFilePath, watchStudioLockFile } from "src/utils/studio-lock-watcher";
+export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
+	{
+		name: "compiler",
+		kind: "boolean",
+		text: "Compile, build, and run the compiler in watch mode (the default); --no-compiler runs none of them.",
+	},
+	{
+		name: "force",
+		kind: "boolean",
+		text: "Kill what is left of an earlier session when it outlives the wait, verified as the session's own.",
+	},
+	{
+		name: "open",
+		kind: "boolean",
+		text: "Open the place in Studio and stop when Studio closes it (the default); --no-open leaves Studio alone.",
+	},
+	STUDIO_PATH_FLAG,
+	{
+		name: "syncback",
+		config: "syncback.runOnStart",
+		kind: "boolean",
+		text: "Run syncback and its hooks each time Studio saves the place.",
+	},
+];
 
-import { loadProjectConfig } from "../config";
-import { cleanupLockfile } from "../utils/lockfile";
-
-export const COMMAND = "start";
-export const DESCRIPTION = "Compile, build, and open in Roblox Studio with optional syncback";
-
-let signalHandler: (() => void) | undefined;
-
-export async function action(): Promise<void> {
-	setupProcessManagerHandlers();
-
-	const config = await loadProjectConfig();
-
-	log.info(ansis.bold("→ Starting full build workflow"));
-
-	await runScript("compile");
-	await runScript("build");
-
-	const abortController = new AbortController();
-	setupSignalHandlers(abortController);
-
+/**
+ * `forge start`: run the dev session in this terminal: compile and
+ * build, open Studio, serve Rojo, run the compiler in watch mode, and, with
+ * `--syncback`, sync Studio's saves back.
+ *
+ * The session runs in a separate supervisor process
+ * (`supervisor/run-supervisor.ts`), bound to this one by the owner pipe: when
+ * this process dies, however it dies, the supervisor stops the session.
+ * Stop signals this process gets are passed on, and the supervisor's
+ * progress is reported here.
+ *
+ * @param context - The run: project root, environment, seams, and reporter.
+ * @param input - The parsed flags.
+ * @returns The stop reason and every worker's report, once all are gone.
+ * @rejects The session's failure (see `runSupervisorAsync`),
+ *   such as `session_running` when a session already runs for the project.
+ */
+export async function runStartAsync(
+	{ cwd, env, reporter, seams }: CommandContext,
+	input: CommandInput,
+): Promise<CommandResult> {
+	const run = seams.supervisor({
+		cwd,
+		env: withStudioPath(env, cwd, seams.host.platform, input.flags),
+		onEvent: (event) => {
+			reporter.emit(event);
+		},
+		request: {
+			compiler: input.flags["compiler"] !== false,
+			config: input.config,
+			open: input.flags["open"] !== false,
+			...(input.flags["force"] === true ? { force: true } : {}),
+		},
+	});
+	const dispose = seams.signals.onStop(run.stop);
 	try {
-		await runWorkflow(config, abortController);
-
-		// Workflow completed and cleanup already ran inside runWorkflow
-		outro(ansis.green("✨ Start workflow complete, successfully exited!"));
-		process.exit(0);
-	} catch (err) {
-		if (!isCancellationError(err) && !isShutdownError(err)) {
-			throw err;
-		}
-
-		// Ctrl+C or expected shutdown - cleanup already ran in runWorkflow
-		outro(ansis.green("✨ Start workflow complete, successfully exited!"));
-		process.exit(0);
+		return await run.result;
 	} finally {
-		cleanupSignalHandlers();
+		dispose();
 	}
-}
-
-/** Remove SIGINT/SIGTERM signal handlers from process. */
-function cleanupSignalHandlers(): void {
-	if (signalHandler === undefined) {
-		return;
-	}
-
-	process.off("SIGINT", signalHandler);
-	process.off("SIGTERM", signalHandler);
-	signalHandler = undefined;
-}
-
-/**
- * Check if error is from expected cancellation (abort signal).
- *
- * @param err - The error to check.
- * @returns True if error is from cancellation.
- */
-function isCancellationError(err: unknown): boolean {
-	return (
-		err instanceof Error &&
-		(err.name === "AbortError" ||
-			err.message.includes("cancel") ||
-			err.message.includes("abort") ||
-			("signal" in err && err.signal === "SIGTERM") ||
-			("signal" in err && err.signal === "SIGINT"))
-	);
-}
-
-/**
- * Check if error is from shutdown signal.
- *
- * @param err - The error to check.
- * @returns True if error is from shutdown.
- */
-function isShutdownError(err: unknown): boolean {
-	return err instanceof Error && err.message.includes("Shutdown");
-}
-
-/**
- * Cleanup handler for when Studio closes.
- *
- * @param config - Project configuration.
- * @param abortController - AbortController to abort running processes.
- */
-async function handleStudioClose(
-	config: Awaited<ReturnType<typeof loadProjectConfig>>,
-	abortController: AbortController,
-): Promise<void> {
-	log.info("Studio closed - stopping workflow...");
-
-	abortController.abort();
-
-	await processManager.cleanup();
-
-	// Clean up Studio lockfile
-	await cleanupLockfile(getStudioLockFilePath(config));
-}
-
-/**
- * Start background processes for the workflow.
- *
- * @param config - Project configuration.
- * @param abortController - AbortController for canceling processes.
- */
-function startBackgroundProcesses(
-	config: Awaited<ReturnType<typeof loadProjectConfig>>,
-	abortController: AbortController,
-): void {
-	// Start child processes in background (will be killed when Studio closes)
-	// Catch their rejections to prevent unhandled promise rejections
-
-	runScript("open", [], { shouldRegisterProcess: true }).catch((err) => {
-		if (!isCancellationError(err)) {
-			log.warn(`Open script failed: ${err instanceof Error ? err.message : String(err)}`);
-		}
-	});
-	runScript("watch", [], { shouldRegisterProcess: true }).catch((err) => {
-		if (!isCancellationError(err)) {
-			log.warn(`Watch script failed: ${err instanceof Error ? err.message : String(err)}`);
-		}
-	});
-
-	if (config.syncback.runOnStart) {
-		runScript("syncback", ["--watch"], {
-			cancelSignal: abortController.signal,
-			shouldRegisterProcess: true,
-		}).catch((err) => {
-			if (!isCancellationError(err) && !isShutdownError(err)) {
-				log.warn(
-					`Syncback script failed: ${err instanceof Error ? err.message : String(err)}`,
-				);
-			}
-		});
-	}
-}
-
-/**
- * Run the full workflow: open Studio, watch for changes, and optionally run
- * syncback.
- *
- * Exits when either:
- *
- * - Studio closes (detected via lock file removal).
- * - User presses Ctrl+C (handled by ProcessManager).
- *
- * @param config - The project configuration.
- * @param abortController - AbortController to cancel syncback when Studio
- *   closes.
- * @rejects When workflow encounters an unrecoverable error.
- */
-async function runWorkflow(
-	config: Awaited<ReturnType<typeof loadProjectConfig>>,
-	abortController: AbortController,
-): Promise<void> {
-	startBackgroundProcesses(config, abortController);
-
-	const studioWatcher = watchStudioLockFile(getStudioLockFilePath(config), {
-		onStudioClose: async () => handleStudioClose(config, abortController),
-	});
-
-	try {
-		await studioWatcher;
-		await processManager.cleanup();
-	} catch (err) {
-		if (isShutdownError(err) || isCancellationError(err)) {
-			return;
-		}
-
-		throw err;
-	}
-}
-
-/**
- * Create signal handler that aborts the controller.
- *
- * @param abortController - AbortController to abort on signal.
- * @returns Signal handler function.
- */
-function createSignalHandler(abortController: AbortController): () => void {
-	return () => {
-		abortController.abort();
-	};
-}
-
-/**
- * Setup signal handlers for graceful shutdown on Ctrl+C.
- *
- * @param abortController - AbortController to trigger on signal.
- */
-function setupSignalHandlers(abortController: AbortController): void {
-	signalHandler = createSignalHandler(abortController);
-	process.on("SIGINT", signalHandler);
-	process.on("SIGTERM", signalHandler);
 }

@@ -1,0 +1,268 @@
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+	createCommandContext,
+	createMemoryFileSystem,
+	createRecordingReporter,
+	createTestSeams,
+	PROJECT,
+} from "../../test/helpers/seams.ts";
+import type { RecordingReporter } from "../../test/helpers/seams.ts";
+import type { CommandContext } from "../commands/context.ts";
+import type { ForgeError } from "../errors.ts";
+import type { ProcessOutcome, ProcessRunner } from "./process-runner.ts";
+import type { ToolCall } from "./run-tool.ts";
+import { probeToolAsync, runToolAsync, spawnToolAsync } from "./run-tool.ts";
+
+const TOOLS = path.join(PROJECT, "tools");
+const INSTALLED: Record<string, string> = { "tools/rbxtsc": "" };
+
+const CALL: ToolCall = {
+	args: ["-p", "."],
+	command: "rbxtsc",
+	label: "The compiler",
+	missing: "compiler_missing",
+	missingHint: "Install roblox-ts.",
+	step: "rbxtsc",
+};
+
+interface ToolRun {
+	context: CommandContext;
+	processRunner: ReturnType<typeof vi.fn<ProcessRunner>>;
+	reporter: RecordingReporter;
+}
+
+function makeToolRun(outcome: ProcessOutcome, files = INSTALLED): ToolRun {
+	const reporter = createRecordingReporter();
+	const processRunner = vi.fn<ProcessRunner>().mockResolvedValue(outcome);
+
+	return {
+		context: createCommandContext({
+			env: { PATH: TOOLS },
+			reporter,
+			seams: createTestSeams({
+				fileSystem: createMemoryFileSystem(files).fileSystem,
+				processRunner,
+			}),
+		}),
+		processRunner,
+		reporter,
+	};
+}
+
+function exited(exitCode: null | number, outputTail: Array<string> = []): ProcessOutcome {
+	return { durationMs: 900, exitCode, outputTail, signal: null, type: "exited" };
+}
+
+describe(runToolAsync, () => {
+	it("should run the resolved tool in the project with the run's environment", async () => {
+		expect.assertions(2);
+
+		const { context, processRunner } = makeToolRun(exited(0, ["done"]));
+
+		await expect(runToolAsync(context, CALL)).resolves.toStrictEqual({
+			durationMs: 900,
+			outputTail: ["done"],
+		});
+		expect(processRunner).toHaveBeenCalledExactlyOnceWith({
+			args: ["-p", "."],
+			cwd: PROJECT,
+			env: { PATH: TOOLS },
+			file: path.join(TOOLS, "rbxtsc"),
+		});
+	});
+
+	it("should report the run as a step", async () => {
+		expect.assertions(1);
+
+		const { context, reporter } = makeToolRun(exited(0));
+		await runToolAsync(context, CALL);
+
+		expect(reporter.events).toStrictEqual([
+			{ name: "rbxtsc", status: "started", type: "step" },
+			{ name: "rbxtsc", status: "succeeded", type: "step" },
+		]);
+	});
+
+	it("should fail with the missing code when the tool is not installed", async () => {
+		expect.assertions(2);
+
+		const { context, processRunner } = makeToolRun(exited(0), {});
+
+		await expect(runToolAsync(context, CALL)).rejects.toMatchObject({
+			code: "compiler_missing",
+			hint: "Install roblox-ts.",
+			message:
+				'The compiler ("rbxtsc") is not installed: it is not a bin of a project dependency or on PATH.',
+		} satisfies Partial<ForgeError>);
+		expect(processRunner).not.toHaveBeenCalled();
+	});
+
+	it("should fail with the missing code when the file vanished before the spawn", async () => {
+		expect.assertions(1);
+
+		const { context } = makeToolRun({
+			errorCode: "ENOENT",
+			message: "spawn rbxtsc ENOENT",
+			type: "spawn_failed",
+		});
+
+		await expect(runToolAsync(context, CALL)).rejects.toMatchObject({
+			code: "compiler_missing",
+		});
+	});
+
+	it("should fail as process_failed when the tool cannot start for another reason", async () => {
+		expect.assertions(1);
+
+		const { context } = makeToolRun({
+			errorCode: "EACCES",
+			message: "spawn rbxtsc EACCES",
+			type: "spawn_failed",
+		});
+
+		await expect(runToolAsync(context, CALL)).rejects.toMatchObject({
+			code: "process_failed",
+			message: "The compiler could not start: spawn rbxtsc EACCES",
+		});
+	});
+
+	it("should fail with the exit code and the last output lines", async () => {
+		expect.assertions(2);
+
+		const output = Array.from({ length: 25 }, (_, index) => `line ${index}`);
+		const { context, reporter } = makeToolRun(exited(2, output));
+
+		await expect(runToolAsync(context, CALL)).rejects.toMatchObject({
+			code: "process_failed",
+			details: { outputTail: output },
+			message: [
+				"rbxtsc failed (exit code 2).",
+				...output.slice(5).map((line) => `  ${line}`),
+			].join("\n"),
+		});
+		expect(reporter.events.at(-1)).toStrictEqual({
+			name: "rbxtsc",
+			status: "failed",
+			type: "step",
+		});
+	});
+
+	it("should fail a tool that a signal ended", async () => {
+		expect.assertions(1);
+
+		const { context } = makeToolRun(exited(null));
+
+		await expect(runToolAsync(context, CALL)).rejects.toMatchObject({
+			message: "rbxtsc failed (exit code null).",
+		});
+	});
+
+	it("should fail a tool that timed out", async () => {
+		expect.assertions(1);
+
+		const { context } = makeToolRun({ durationMs: 10, outputTail: [], type: "timed_out" });
+
+		await expect(runToolAsync(context, CALL)).rejects.toMatchObject({
+			message: "rbxtsc failed (timed out and was killed).",
+		});
+	});
+});
+
+describe(probeToolAsync, () => {
+	it("should run the tool quietly and pass when it exits with code 0", async () => {
+		expect.assertions(3);
+
+		const { context, processRunner, reporter } = makeToolRun(exited(0));
+
+		await expect(probeToolAsync(context, CALL)).resolves.toBeTrue();
+		expect(processRunner).toHaveBeenCalledExactlyOnceWith({
+			args: ["-p", "."],
+			cwd: PROJECT,
+			env: { PATH: TOOLS },
+			file: path.join(TOOLS, "rbxtsc"),
+		});
+		expect(reporter.events).toStrictEqual([]);
+	});
+
+	it.for([
+		["a non-zero exit code", exited(2)],
+		["a timeout", { durationMs: 10, outputTail: [], type: "timed_out" }],
+	] satisfies Array<[string, ProcessOutcome]>)(
+		"should fail the probe on %s",
+		async ([, outcome]) => {
+			expect.assertions(1);
+
+			const { context } = makeToolRun(outcome);
+
+			await expect(probeToolAsync(context, CALL)).resolves.toBeFalse();
+		},
+	);
+
+	it("should fail with the missing code when the tool is not installed", async () => {
+		expect.assertions(2);
+
+		const { context, processRunner } = makeToolRun(exited(0), {});
+
+		await expect(probeToolAsync(context, CALL)).rejects.toMatchObject({
+			code: "compiler_missing",
+			hint: "Install roblox-ts.",
+		});
+		expect(processRunner).not.toHaveBeenCalled();
+	});
+
+	it("should fail with the missing code when the file vanished before the spawn", async () => {
+		expect.assertions(1);
+
+		const { context } = makeToolRun({
+			errorCode: "ENOENT",
+			message: "spawn rbxtsc ENOENT",
+			type: "spawn_failed",
+		});
+
+		await expect(probeToolAsync(context, CALL)).rejects.toMatchObject({
+			code: "compiler_missing",
+		});
+	});
+
+	it("should fail as process_failed when the tool cannot start for another reason", async () => {
+		expect.assertions(1);
+
+		const { context } = makeToolRun({
+			errorCode: "EACCES",
+			message: "spawn rbxtsc EACCES",
+			type: "spawn_failed",
+		});
+
+		await expect(probeToolAsync(context, CALL)).rejects.toMatchObject({
+			code: "process_failed",
+			message: "The compiler could not start: spawn rbxtsc EACCES",
+		});
+	});
+});
+
+describe(spawnToolAsync, () => {
+	it("should return how a failing tool ended instead of throwing", async () => {
+		expect.assertions(2);
+
+		const { context, reporter } = makeToolRun(exited(1, ["error"]));
+
+		await expect(spawnToolAsync(context, CALL)).resolves.toStrictEqual(exited(1, ["error"]));
+		expect(reporter.events.at(-1)).toStrictEqual({
+			name: "rbxtsc",
+			status: "failed",
+			type: "step",
+		});
+	});
+
+	it("should hand the tool's output lines to onLine", async () => {
+		expect.assertions(1);
+
+		const { context, processRunner } = makeToolRun(exited(0));
+		const onLine = vi.fn<(line: string) => void>();
+		await spawnToolAsync(context, { ...CALL, onLine });
+
+		expect(processRunner).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ onLine }));
+	});
+});

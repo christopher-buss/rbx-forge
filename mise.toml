@@ -1,0 +1,14 @@
+[env]
+_.path = [ '{{config_root}}/node_modules/.bin' ]
+
+[settings]
+experimental = true
+http_retries = 3
+
+[tools]
+"github:rojo-rbx/rojo" = "7.7.0"
+hk = "2.2.0"
+node = "26.5.0"
+pkl = "0.31.1"
+pnpm = "12.6.0"
+rust = { version = "1.98.1", components = "clippy,rustfmt" }

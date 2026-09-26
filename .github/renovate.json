@@ -1,0 +1,31 @@
+{
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": [
+		"config:recommended",
+		":pinAllExceptPeerDependencies",
+		"helpers:pinGitHubActionDigests",
+		"security:minimumReleaseAgeNpm"
+	],
+	"schedule": ["* 0-23 * * 1,4,6"],
+	"packageRules": [
+		{
+			"matchUpdateTypes": ["minor", "patch"],
+			"matchCurrentVersion": "!/^0/",
+			"automerge": true
+		},
+		{
+			"description": "typescript-eslint peers typescript <6.1; the TS 7 alias @typescript/native moves freely.",
+			"matchDepNames": ["typescript"],
+			"allowedVersions": "<6.1.0"
+		},
+		{
+			"matchPackageNames": ["/^@typescript-eslint\\//", "typescript-eslint"],
+			"groupName": "typescript-eslint"
+		},
+		{
+			"matchManagers": ["cargo"],
+			"matchPackageNames": ["napi", "napi-derive", "napi-build"],
+			"groupName": "napi-rs crates"
+		}
+	]
+}

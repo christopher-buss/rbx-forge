@@ -2,15 +2,43 @@
 # $schema=https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json
 version: "0.2"
 language: en
+
 words:
+  - DACL
+  - FILETIME
+  - HKCU
+  - LOCALAPPDATA
+  - NETBIOS
+  - arktype
+  - autorecovery
+  - catchable
+  - codegen
   - darklua
+  - defu
+  - forgerc
+  - glibc
+  - libc
+  - napi
+  - pathext
+  - pidfd
   - pids
+  - quenty
   - rbxl
   - rbxlx
   - rbxm
   - rbxmx
+  - rbxts
   - rbxtsc
+  - robloxstudio
+  - robloxstudiobeta
   - rojo
+  - rokit
   - scriptable
+  - setsid
+  - sloptor
+  - subreaper
   - syncback
+  - systemroot
   - taskkill
+  - tsgolint
+  - unstub

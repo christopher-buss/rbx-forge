@@ -1,0 +1,124 @@
+amends "package://github.com/jdx/hk/releases/download/v2.2.0/hk@2.2.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.2.0/hk@2.2.0#/Builtins.pkl"
+
+profiles = if (
+       read?("env:AI_AGENT") != null
+    || read?("env:CLAUDECODE") != null
+    || read?("env:CLAUDE_CODE") != null
+    || read?("env:CODEX_SANDBOX") != null
+    || read?("env:CODEX_THREAD_ID") != null
+    || read?("env:OPENCODE") != null
+) List("agent") else List()
+
+min_hk_version = "2.2.0"
+
+local guards = new Mapping<String, Step> {
+    // `batch = true` keeps each cmd.exe invocation under the 8191-char Windows
+    // command-line limit; hk's auto-batch only accounts for Unix ARG_MAX. See
+    // https://github.com/jdx/hk/discussions/971.
+    ["check-merge-conflict"] = (Builtins.check_merge_conflict) {
+        batch = true
+    }
+    ["detect-private-key"] = (Builtins.detect_private_key) {
+        batch = true
+    }
+    ["check-added-large-files"] = (Builtins.check_added_large_files) {
+        batch = true
+        exclude = List("pnpm-lock.yaml", "reaper/Cargo.lock")
+    }
+}
+
+local lint = new Step {
+    glob = List("*.ts", "*.js", "*.mjs", "*.json", "*.jsonc", "*.md", "*.toml", "*.yaml", "*.yml")
+    check = "pnpm lint"
+    fix = "pnpm lint:fix"
+    exclusive = true
+}
+
+local typecheck = new Step {
+    glob = List("*.ts")
+    check = "pnpm typecheck"
+}
+
+local build = new Step {
+    glob = List("*.ts", "*.json")
+    check = "pnpm build"
+}
+
+// Vitest's type tests run `tsc --build` too; running after typecheck avoids two
+// concurrent builds writing the same tsbuildinfo (TS6305 on Windows).
+local test = new Step {
+    glob = List("*.ts", "*.json")
+    check = "pnpm test"
+    depends = List("typecheck")
+}
+
+local e2e = new Step {
+    glob = List("*.ts", "*.json")
+    check = "pnpm test:e2e"
+    depends = List("build")
+}
+
+local native = new Step {
+    glob = List("reaper/**")
+    check = "cargo build --manifest-path reaper/Cargo.toml"
+}
+
+local knip = new Step {
+    check = "pnpm knip"
+}
+
+steps {
+    ...guards
+    ["lint"] = lint
+    ["typecheck"] = typecheck
+}
+
+hooks {
+    ["pre-commit"] {
+        fix = true
+        stash = "none"
+        steps {
+            ["build"] = (build) { profiles = List("agent") }
+            ["test"] = (test) { profiles = List("agent") }
+            ["e2e"] = (e2e) { profiles = List("agent") }
+            ["native"] = (native) { profiles = List("agent") }
+        }
+    }
+    ["pre-push"] {
+        steps {
+            ["knip"] = knip
+            ["mutation"] {
+                glob = List("src/**/*.ts")
+                check = "pnpm mutation"
+                profiles = List("agent")
+            }
+        }
+    }
+    ["commit-msg"] {
+        steps {
+            ["conventional-commit"] = Builtins.check_conventional_commit
+        }
+    }
+    ["post-merge"] {
+        steps {
+            ["install-deps"] {
+                glob = List("pnpm-lock.yaml")
+                check = "pnpm install"
+            }
+            ["mise-install"] {
+                glob = List("mise.toml")
+                check = "mise install"
+            }
+        }
+    }
+    ["check"] {
+        steps {
+            ["knip"] = knip
+            ["build"] = build
+            ["test"] = test
+            ["e2e"] = e2e
+            ["native"] = native
+        }
+    }
+}

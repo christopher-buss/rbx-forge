@@ -1,258 +1,150 @@
-import {
-	cancel,
-	confirm,
-	intro,
-	isCancel,
-	log,
-	multiselect,
-	note,
-	outro,
-	select,
-	tasks,
-} from "@clack/prompts";
+import assert from "node:assert/strict";
+import path from "node:path";
 
-import ansis from "ansis";
-import process from "node:process";
-import { detect } from "package-manager-detector";
-import type { ResolvedConfig } from "src/config/schema";
-import { updateMiseToml } from "src/utils/mise";
-import {
-	getPackageJsonPath,
-	readPackageJson,
-	updatePackageJson,
-	writePackageJson,
-} from "src/utils/package-json";
-import { checkRojoInstallation } from "src/utils/rojo";
+import type { FlagDefinition } from "../cli/flags.ts";
+import type { ProjectType } from "../config/schema.ts";
+import { ForgeError } from "../errors.ts";
+import type { CommandResult } from "../seams/reporter.ts";
+import { askAsync } from "./ask.ts";
+import type { CommandContext, CommandInput } from "./context.ts";
 
-import { name as packageName, version as packageVersion } from "../../package.json";
-import { loadProjectConfig, updateProjectConfig } from "../config";
-import { getCommandName } from "../utils/command-names";
-import { findCommandForPackageManager, run } from "../utils/run";
+/** The file `forge init` writes. */
+export const CONFIG_FILE_NAME = "rbx-forge.config.ts";
 
-export const COMMAND = "init";
-export const DESCRIPTION = `Initialize a new ${packageName} project`;
+const PROJECT_TYPES: ReadonlyArray<ProjectType> = ["rbxts", "luau"];
+const DEFAULT_PROJECT_TYPE: ProjectType = "rbxts";
+const ANY_CONFIG_FILE = /^rbx-forge\.config\.\w+$/;
 
-const OPERATION_CANCELLED = "Operation cancelled";
+export const INIT_FLAGS: ReadonlyArray<FlagDefinition> = [
+	{
+		name: "type",
+		kind: "string",
+		text: `Project type. Asks when omitted, or uses ${DEFAULT_PROJECT_TYPE} when it cannot ask.`,
+		value: "<rbxts|luau>",
+	},
+	{ name: "force", kind: "boolean", text: `Replace an existing ${CONFIG_FILE_NAME}.` },
+];
 
-type TaskRunner = "lune" | "mise" | "npm";
-
-export async function action(): Promise<void> {
-	intro(ansis.bold(`🔨 ${packageName} init`));
-
-	const { projectType, taskRunners } = await getUserInput();
-
-	await runInitializationTasks(projectType, taskRunners);
-	await showNextSteps(taskRunners);
-	outro(ansis.green("✨ You're all set!"));
+/**
+ * The content `forge init` writes.
+ *
+ * @param projectType - The project type to set.
+ * @returns A typed `rbx-forge.config.ts`.
+ */
+export function renderConfigFile(projectType: ProjectType): string {
+	return [
+		'import { defineConfig } from "rbx-forge";',
+		"",
+		"export default defineConfig({",
+		`\tprojectType: "${projectType}",`,
+		"});",
+		"",
+	].join("\n");
 }
 
-async function selectProjectType(): Promise<ResolvedConfig["projectType"]> {
-	const projectType = await select({
-		message: "Pick a project type.",
-		options: [
-			{ label: "TypeScript", value: "rbxts" },
-			{ label: "Luau", value: "luau" },
-		],
-	});
+/**
+ * `forge init`: write `rbx-forge.config.ts` and nothing else.
+ *
+ * @param context - The run: project directory, seams, and prompting.
+ * @param input - The parsed `--type` and `--force` flags.
+ * @returns The written path and project type.
+ * @rejects {ForgeError} `config_exists` when another config file exists,
+ *   `needs_confirmation` or `declined` for an existing file, and `usage` for
+ *   a bad `--type`.
+ */
+export async function runInitAsync(
+	context: CommandContext,
+	{ flags }: CommandInput,
+): Promise<CommandResult> {
+	const target = path.join(context.cwd, CONFIG_FILE_NAME);
+	const isReplacing = await confirmReplaceAsync(context, flags["force"] === true);
+	const projectType =
+		flags["type"] === undefined
+			? await askProjectTypeAsync(context)
+			: projectTypeFromFlag(flags["type"]);
 
-	if (isCancel(projectType)) {
-		cancel(OPERATION_CANCELLED);
-		process.exit(0);
-	}
+	context.seams.fileSystem.writeFileSync(target, renderConfigFile(projectType));
 
-	return projectType;
+	return {
+		data: { path: target, projectType, replaced: isReplacing },
+		summary: `${isReplacing ? "Replaced" : "Created"} ${CONFIG_FILE_NAME} (${projectType}).`,
+	};
 }
 
-async function selectTaskRunners(): Promise<Array<TaskRunner>> {
-	const { agent } = (await detect()) ?? { agent: "npm" };
-
-	const taskRunners = await multiselect({
-		message: "Pick task runner(s) (optional).",
-		options: [
-			{ hint: "default", label: agent, value: "npm" },
-			{ label: "mise", value: "mise" },
-			{ disabled: true, hint: "coming soon", label: "lune", value: "lune" },
-		],
-		required: false,
-	});
-
-	if (isCancel(taskRunners)) {
-		cancel(OPERATION_CANCELLED);
-		process.exit(0);
-	}
-
-	return taskRunners;
-}
-
-async function getUserInput(): Promise<{
-	projectType: ResolvedConfig["projectType"];
-	taskRunners: Array<TaskRunner>;
-}> {
-	const projectType = await selectProjectType();
-
-	const taskRunners = await selectTaskRunners();
-
-	return { projectType, taskRunners };
-}
-
-async function addRbxForgeToPackageJson(): Promise<void> {
-	const packageJsonPath = getPackageJsonPath();
-	const packageJson = await readPackageJson(packageJsonPath);
-
-	if (!packageJson) {
-		return;
-	}
-
-	// Check if already installed
-	const hasInDeps = packageJson.dependencies?.[packageName] !== undefined;
-	const hasInDevelopmentDeps = packageJson.devDependencies?.[packageName] !== undefined;
-
-	if (hasInDeps || hasInDevelopmentDeps) {
-		return;
-	}
-
-	const shouldAddRbxForge = await confirm({
-		initialValue: true,
-		message: `Add ${packageName} to devDependencies? (recommended)`,
-	});
-
-	if (isCancel(shouldAddRbxForge)) {
-		cancel(OPERATION_CANCELLED);
-		process.exit(0);
-	}
-
-	if (shouldAddRbxForge) {
-		packageJson.devDependencies ??= {};
-		packageJson.devDependencies[packageName] = `^${packageVersion}`;
-		await writePackageJson(packageJsonPath, packageJson);
-		log.success(
-			`Added ${packageName}@^${packageVersion} to ${ansis.magenta("devDependencies")}`,
+/**
+ * Check for existing config files, asking before replacing one.
+ *
+ * @param context - The run.
+ * @param isForced - `--force` was passed.
+ * @returns Whether the run replaces an existing `rbx-forge.config.ts`.
+ * @rejects {ForgeError} `config_exists`, `needs_confirmation`, or `declined`.
+ */
+async function confirmReplaceAsync(context: CommandContext, isForced: boolean): Promise<boolean> {
+	const existing = context.seams.fileSystem
+		.readdirSync(context.cwd)
+		.filter((name) => ANY_CONFIG_FILE.test(name));
+	const others = existing.filter((name) => name !== CONFIG_FILE_NAME);
+	if (others.length > 0) {
+		throw new ForgeError(
+			"config_exists",
+			`${others.join(", ")} already configures this project.`,
+			{ hint: `Remove it to let forge init write ${CONFIG_FILE_NAME}.` },
 		);
 	}
-}
 
-async function createForgeConfig(projectType: "luau" | "rbxts"): Promise<string> {
-	await updateProjectConfig(projectType);
-	const configFileName = `${packageName}.config.ts`;
-	return `Config file created at ${ansis.magenta(configFileName)}`;
-}
-
-async function createRojoProject(): Promise<string> {
-	try {
-		await run("rojo", ["init"], {
-			shouldShowCommand: false,
-			shouldStreamOutput: false,
-		});
-	} catch {
-		log.message(ansis.gray("Rojo project structure already exists, skipping"));
-		return "";
+	if (isForced || existing.length === 0) {
+		return existing.length > 0;
 	}
 
-	return "Project structure created";
-}
-
-async function runInitializationTasks(
-	projectType: "luau" | "rbxts",
-	taskRunners: Array<TaskRunner>,
-): Promise<void> {
-	const initTasks = [
-		{ task: checkRojoInstallation, title: "Checking Rojo installation" },
-		{ task: createRojoProject, title: "Creating Rojo project structure" },
-		{
-			task: async () => createForgeConfig(projectType),
-			title: `Creating ${packageName} config`,
+	const shouldReplace = await askAsync(context, {
+		ask: async (prompter) => prompter.confirm(`${CONFIG_FILE_NAME} exists. Replace it?`, false),
+		unattended: {
+			hint: "Pass --force to replace it.",
+			text: `${CONFIG_FILE_NAME} already exists.`,
 		},
-	];
+	});
+	if (!shouldReplace) {
+		throw new ForgeError("declined", `Kept the existing ${CONFIG_FILE_NAME}.`);
+	}
 
-	if (taskRunners.includes("npm")) {
-		// Add package to package.json if not already present
-		await addRbxForgeToPackageJson();
+	return true;
+}
 
-		initTasks.push({
-			task: async () => updatePackageJson(),
-			title: "Adding npm scripts to package.json",
+function toProjectType(value: unknown): ProjectType | undefined {
+	return PROJECT_TYPES.find((projectType) => projectType === value);
+}
+
+function projectTypeFromFlag(flag: CommandInput["flags"][string]): ProjectType {
+	const chosen = toProjectType(flag);
+	if (chosen === undefined) {
+		throw new ForgeError("usage", `--type must be rbxts or luau, got "${String(flag)}".`, {
+			hint: 'Run "forge init --help" for usage.',
 		});
 	}
 
-	// Add mise tasks if mise is selected
-	if (taskRunners.includes("mise")) {
-		initTasks.push({
-			task: async () => updateMiseToml(),
-			title: "Adding mise tasks to .mise.toml",
+	return chosen;
+}
+
+async function askProjectTypeAsync(context: CommandContext): Promise<ProjectType> {
+	if (!context.interactive) {
+		context.reporter.emit({
+			message: `No --type given; using ${DEFAULT_PROJECT_TYPE}.`,
+			type: "info",
 		});
 	}
 
-	await tasks(initTasks);
-}
-
-async function getInstallCommand(shouldUseMise: boolean, shouldUseNpm: boolean): Promise<string> {
-	if (shouldUseMise) {
-		return "mise install";
-	}
-
-	if (shouldUseNpm) {
-		const { name } = (await detect()) ?? { agent: "npm" };
-		try {
-			const { args, command } = await findCommandForPackageManager("install", [], name);
-			return `${command} ${args.join(" ")}`;
-		} catch {
-			return "npm install";
-		}
-	}
-
-	throw new Error("This should not be called if no task runner is used.");
-}
-
-async function getTaskRunnerCommand(
-	scriptName: string,
-	shouldUseMise: boolean,
-	shouldUseNpm: boolean,
-): Promise<string> {
-	if (shouldUseMise) {
-		return `mise run ${scriptName}`;
-	}
-
-	if (shouldUseNpm) {
-		const { name } = (await detect()) ?? { agent: "npm" };
-		try {
-			const { args, command } = await findCommandForPackageManager("run", [scriptName], name);
-			return `${command} ${args.join(" ")}`;
-		} catch {
-			return `npm run ${scriptName}`;
-		}
-	}
-
-	// Extract base command name (e.g., "forge:build" -> "build")
-	const baseCommand = scriptName.replace(/^forge:/, "");
-	return `${packageName} ${baseCommand}`;
-}
-
-async function showNextSteps(taskRunners: Array<TaskRunner>): Promise<void> {
-	const shouldUseMise = taskRunners.includes("mise");
-	const shouldUseNpm = taskRunners.includes("npm");
-
-	const config = await loadProjectConfig();
-	const buildScriptName = getCommandName("build", config);
-	const serveScriptName = getCommandName("serve", config);
-
-	const buildCommand = await getTaskRunnerCommand(buildScriptName, shouldUseMise, shouldUseNpm);
-	const serveCommand = await getTaskRunnerCommand(serveScriptName, shouldUseMise, shouldUseNpm);
-
-	const steps: Array<string> = [];
-	let step = 1;
-
-	function addStep(stepDescription: string): void {
-		steps.push(`  ${step}. ${stepDescription}`);
-		step++;
-	}
-
-	if (shouldUseMise || shouldUseNpm) {
-		const installCommand = await getInstallCommand(shouldUseMise, shouldUseNpm);
-		addStep(`Run ${ansis.cyan(installCommand)} to install dependencies`);
-	}
-
-	addStep(`Run ${ansis.cyan(buildCommand)} to build your project`);
-	addStep(`Run ${ansis.cyan(serveCommand)} to start development`);
-
-	note(`Next steps:\n\n${steps.join("\n")}`, "Next Steps");
+	return askAsync(context, {
+		ask: async (prompter) => {
+			const typed = await prompter.choose(
+				"Project type?",
+				PROJECT_TYPES,
+				DEFAULT_PROJECT_TYPE,
+			);
+			const chosen = toProjectType(typed);
+			// The prompter answers with one of the choices.
+			assert(chosen !== undefined);
+			return chosen;
+		},
+		unattended: { answer: DEFAULT_PROJECT_TYPE },
+	});
 }

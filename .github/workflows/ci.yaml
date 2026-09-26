@@ -2,67 +2,245 @@ name: CI
 
 on:
   pull_request:
-    branches:
-      - main
-
   push:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CI: true
+  # Loads the addon given as the first argument and calls every export.
+  LOAD_ADDON: >-
+    const addon = require(require("node:path").resolve(process.argv[1]));
+    const pinned = addon.pinProcess(process.pid);
+    if (pinned.startTime !== addon.processStartTime(process.pid)) throw new Error("start time");
+    const lock = addon.tryLockFile(require("node:os").tmpdir() + "/forge-load.lock", "exclusive");
+    lock.release();
+    console.log("forge-native", addon.nativeVersion(), process.platform, process.arch, pinned.executablePath());
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-
+  check:
+    name: Check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-
-      - name: Set node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: ./.github/actions/setup
         with:
-          node-version: lts/*
+          tools: node rust
 
-      - name: Setup
-        run: npm i -g @antfu/ni
-
-      - name: Install
-        run: nci
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-check-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('reaper/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            reaper/target
+          restore-keys: cargo-check-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build
-        run: nr build
+        run: pnpm build
 
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      # Integration and e2e tests load the addon from `reaper/target/napi`.
+      - name: Build native addon
+        run: pnpm build:native
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
+      # Next to the addon: integration and e2e tests run the real reaper.
+      - name: Build reaper
+        run: pnpm build:reaper
 
-      - name: Set node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: lts/*
-
-      - name: Setup
-        run: npm i -g @antfu/ni
-
-      - name: Install
-        run: nci
-
-      - name: Cache ESLint
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
-        with:
-          key: eslint-cache-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml', 'eslint.config.*', '.eslintignore') }}-${{ github.run_id }}
-          path: .eslintcache
-          restore-keys: |
-            eslint-cache-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml', 'eslint.config.*', '.eslintignore') }}-
-            eslint-cache-${{ runner.os }}-
-
-      - name: Lint
-        run: nr lint:ci
+      - name: Native tests
+        run: cargo test --manifest-path reaper/Cargo.toml
 
       - name: Typecheck
-        run: nr typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Knip
+        run: pnpm knip
+
+      - name: Unit
+        run: pnpm test:unit
+
+      - name: Integration
+        run: pnpm test:integration
+
+      - name: E2E
+        run: pnpm test:e2e
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+      fail-fast: false
+
+  native:
+    name: Native (${{ matrix.target }})
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup
+        with:
+          tools: node rust
+
+      - if: ${{ !matrix.musl }}
+        name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+        shell: bash
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ matrix.target }}-${{ hashFiles('reaper/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            reaper/target
+          restore-keys: cargo-${{ matrix.target }}-
+
+      - if: ${{ matrix.checks }}
+        name: Format
+        run: cargo fmt --manifest-path reaper/Cargo.toml --check
+        shell: bash
+
+      - if: ${{ matrix.checks }}
+        name: Clippy
+        run: cargo clippy --manifest-path reaper/Cargo.toml --target ${{ matrix.target }} -- -D warnings
+        shell: bash
+
+      - if: ${{ !matrix.musl }}
+        name: Build addon
+        run: pnpm build:native --target ${{ matrix.target }}
+        shell: bash
+
+      - if: ${{ !matrix.musl }}
+        name: Build reaper
+        run: cargo build --manifest-path reaper/Cargo.toml --release --bin forge-reaper --target ${{ matrix.target }}
+        shell: bash
+
+      # musl targets build in Alpine, where the C toolchain is musl's own: a
+      # glibc host links the glibc loader into the addon, and Ubuntu's
+      # musl-gcc has no `libgcc_s`. A Node addon must link the C runtime
+      # dynamically, so the addon build turns `crt-static` off; the reaper
+      # stays static. The napi CLI picks the cross linker
+      # `aarch64-linux-musl-gcc` for aarch64 musl; Alpine's `cc` already links
+      # for musl. The container runs as root, so give the files back.
+      - if: ${{ matrix.musl }}
+        name: Build addon and reaper (Alpine)
+        run: |
+          mkdir -p ~/.cargo/registry
+          docker run --rm -v "$PWD:/w" -v "$HOME/.cargo/registry:/usr/local/cargo/registry" -w /w -e TARGET -e CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER rust:1.98.1-alpine sh -euc '
+              apk add --no-cache musl-dev nodejs npm
+              RUSTFLAGS="-C target-feature=-crt-static" npm run build:native -- --target "$TARGET"
+              cargo build --manifest-path reaper/Cargo.toml --release --bin forge-reaper --target "$TARGET"
+            '
+          sudo chown -R "$(id -u):$(id -g)" reaper/target ~/.cargo/registry
+        shell: bash
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: cc
+          TARGET: ${{ matrix.target }}
+
+      # Load the addon in a Node of the target's platform and call it. musl
+      # builds load in an Alpine container; x86_64-apple-darwin loads on the
+      # Intel macOS runner.
+      - if: ${{ matrix.load }}
+        name: Load addon
+        run: node -e "$LOAD" reaper/target/napi/*.node
+        shell: bash
+        env:
+          LOAD: ${{ env.LOAD_ADDON }}
+
+      - if: ${{ matrix.musl }}
+        name: Load addon (Alpine)
+        run: docker run --rm -v "$PWD/reaper/target/napi:/napi" -e LOAD node:24-alpine sh -c 'node -e "$LOAD" /napi/*.node'
+        shell: bash
+        env:
+          LOAD: ${{ env.LOAD_ADDON }}
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-${{ matrix.target }}
+          path: |
+            reaper/target/napi/*.node
+            reaper/target/${{ matrix.target }}/release/forge-reaper
+            reaper/target/${{ matrix.target }}/release/forge-reaper.exe
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - { host: windows-latest, load: true, target: x86_64-pc-windows-msvc }
+          - { host: windows-11-arm, load: true, target: aarch64-pc-windows-msvc }
+          - { host: macos-latest, load: true, target: aarch64-apple-darwin }
+          - { host: macos-15-intel, load: true, target: x86_64-apple-darwin }
+          - { checks: true, host: ubuntu-latest, load: true, target: x86_64-unknown-linux-gnu }
+          - { host: ubuntu-24.04-arm, load: true, target: aarch64-unknown-linux-gnu }
+          - { host: ubuntu-latest, musl: true, target: x86_64-unknown-linux-musl }
+          - { host: ubuntu-24.04-arm, musl: true, target: aarch64-unknown-linux-musl }
+      fail-fast: false
+
+  # IPC security: another local user is denied the control
+  # channel. Needs a second local user, so it runs only here, never on a
+  # developer machine.
+  other-user:
+    name: Other user (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup
+        with:
+          tools: node rust
+
+      - name: Cache cargo
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-check-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('reaper/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            reaper/target
+          restore-keys: cargo-check-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build native addon
+        run: pnpm build:native
+
+      - if: runner.os == 'Linux'
+        name: Create a second local user (Linux)
+        run: sudo useradd --no-create-home forge-other
+        shell: bash
+
+      - if: runner.os == 'macOS'
+        name: Create a second local user (macOS)
+        run: sudo sysadminctl -addUser forge-other -password "$(openssl rand -hex 16)"
+        shell: bash
+
+      - if: runner.os == 'Windows'
+        name: Create a second local user (Windows)
+        run: |
+          # At most 14 characters: net user asks before it takes a longer one.
+          $password = "Fo!" + [guid]::NewGuid().ToString("N").Substring(0, 8) + "aZ9"
+          Write-Output "::add-mask::$password"
+          net user forge-other $password /add
+          "RBX_FORGE_OTHER_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        shell: pwsh
+
+      - env:
+          RBX_FORGE_OTHER_USER: forge-other
+        name: Other user
+        run: pnpm test:other-user
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    timeout-minutes: 20

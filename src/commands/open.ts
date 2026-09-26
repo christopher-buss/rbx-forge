@@ -1,204 +1,231 @@
-import { cancel, confirm, isCancel, log, outro } from "@clack/prompts";
-
-import ansis from "ansis";
-import { access } from "node:fs/promises";
 import path from "node:path";
-import process from "node:process";
-import type { ResolvedConfig } from "src/config/schema";
 
-import { loadProjectConfig } from "../config";
-import { CLI_COMMAND } from "../constants";
-import { getWindowsPath } from "../utils/get-windows-path";
-import { isWsl } from "../utils/is-wsl";
-import { cleanupLockfile } from "../utils/lockfile";
-import { processManager, setupSignalHandlers } from "../utils/process-manager";
-import { run, runScript } from "../utils/run";
-import { runPlatform } from "../utils/run-platform";
-import { getStudioLockFilePath, watchStudioLockFile } from "../utils/studio-lock-watcher";
+import type { FlagDefinition } from "../cli/flags.ts";
+import { loadProjectConfigAsync } from "../config/load.ts";
+import type { ResolvedConfig } from "../config/resolve.ts";
+import { ForgeError } from "../errors.ts";
+import type { HookResult } from "../hooks/run-hooks.ts";
+import { runWithHooksAsync } from "../hooks/run-hooks.ts";
+import type { CommandResult } from "../seams/reporter.ts";
+import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
+import type { StudioProcess } from "../studio/launcher.ts";
+import { askAsync } from "./ask.ts";
+import type { BuildOutcome } from "./build.ts";
+import { buildAsync } from "./build.ts";
+import type { CommandContext, CommandInput } from "./context.ts";
 
-export const COMMAND = "open";
-export const DESCRIPTION = "Open place file in Roblox Studio";
-
-export const options = [
+export const OPEN_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
-		description: "Build before opening",
-		flags: "-b, --build",
+		name: "place",
+		config: "open.buildOutputPath",
+		kind: "string",
+		text: "The place file to open (and to build, when building first).",
+		value: "<path>",
 	},
 	{
-		description: "Skip building before opening",
-		flags: "-B, --no-build",
+		name: "build",
+		config: "open.buildFirst",
+		kind: "boolean",
+		text: "Build the place before opening it; --no-build opens it as it is.",
 	},
-	{
-		description: "Path to the place file to open (overrides config)",
-		flags: "-p, --place <path>",
-	},
-] as const;
+	STUDIO_PATH_FLAG,
+];
 
+/** A build that ran before the place opened, with its `build` hooks. */
+export interface OpenBuild extends BuildOutcome {
+	hooks: Array<HookResult>;
+}
+
+/** What the open step did. */
+export interface OpenedPlace {
+	/** The build that ran first, or `null`. */
+	build: null | OpenBuild;
+	/** The `open` hook results. */
+	hooks: Array<HookResult>;
+	/** The absolute path of the place. */
+	place: string;
+	/** The Studio forge started directly; `null` for the platform launcher. */
+	studio: null | StudioProcess;
+}
+
+/** How the open step runs. */
 export interface OpenOptions {
-	build?: boolean;
-	place?: string;
+	/** The caller already built this place, so it is opened as it is. */
+	isBuilt: boolean;
+	/** The `--studio-path` flag, resolved. */
+	studioPath?: string | undefined;
 }
 
-export async function action(commandOptions: OpenOptions = {}): Promise<void> {
-	const config = await loadProjectConfig();
-	const isDirectInvocation = process.env["RBX_FORGE_CMD"] === "open";
-	const placeFile =
-		commandOptions.place ??
-		(isDirectInvocation ? config.open.buildOutputPath : undefined) ??
-		config.buildOutputPath;
-	const isCustomPlace = commandOptions.place !== undefined;
-
-	const shouldBuild =
-		commandOptions.build ?? (isDirectInvocation ? config.open.buildFirst : false);
-
-	const isBuildExplicitlyDisabled = commandOptions.build === false;
-
-	await (shouldBuild
-		? runOpenBuild(config, placeFile)
-		: ensurePlaceFileExists(placeFile, isCustomPlace, config, isBuildExplicitlyDisabled));
-
-	await openInStudio(placeFile);
-
-	if (config.rbxts.watchOnOpen && process.env["RBX_FORGE_CMD"] === "open") {
-		await startWatchOnStudioClose(config);
-	}
+/** The place, as the config names it and as an absolute path. */
+interface Place {
+	/** Relative to the project root, as Rojo gets it. */
+	output: string;
+	place: string;
 }
 
-function getOpenBuildArgs(config: ResolvedConfig): Array<string> {
-	const args: Array<string> = [];
-	if (config.open.buildOutputPath !== undefined) {
-		args.push("--output", config.open.buildOutputPath);
-	}
+const STEP = "open Roblox Studio";
 
-	if (config.open.projectPath !== undefined) {
-		args.push("--project", config.open.projectPath);
-	}
+/**
+ * The open step with its `open` hooks: build the place when configured or
+ * missing (unless the caller built it), then open it in Studio. `forge open`
+ * runs it, and so does `forge start`.
+ *
+ * @param context - The run: project root, seams, and reporter.
+ * @param config - The resolved config: the place, the build, and the hooks.
+ * @param options - Whether it is built, and the Studio executable flag.
+ * @returns The place, the build (or `null`), the Studio forge started, and
+ *   the `open` hook results.
+ * @rejects {ForgeError} `place_not_found`, `declined`, `studio_launch_failed`, a build
+ *   failure from `buildAsync`, or a hook failure.
+ */
+export async function openPlaceAsync(
+	context: CommandContext,
+	config: ResolvedConfig,
+	options: OpenOptions,
+): Promise<OpenedPlace> {
+	const output = openPlacePath(config);
+	const place = path.resolve(context.cwd, output);
 
-	return args;
+	const { hooks, value } = await runWithHooksAsync(context, config, "open", async () => {
+		const built = options.isBuilt
+			? null
+			: await prepareAsync(context, config, { output, place });
+		const studio = await launchAsync(context, place, options.studioPath);
+		return { built, studio };
+	});
+
+	return { build: value.built, hooks, place, studio: value.studio };
 }
 
-async function runOpenBuild(config: ResolvedConfig, placeFile: string): Promise<void> {
-	if (config.projectType === "rbxts") {
-		await runScript("compile");
-	}
+/**
+ * `forge open`: open the place file in Roblox Studio, building it first when
+ * `open.buildFirst` or `--build` asks. Studio starts detached
+ * (`seams.studioLauncher`), so it is never a child of forge and outlives it. A
+ * missing place is built when the user agrees; a run that cannot ask fails.
+ *
+ * @param context - The run: project root, seams, and reporter.
+ * @param input - The config values the flags set.
+ * @returns The place, the build (or `null`), and the `open` hook results.
+ * @rejects {ForgeError} `place_not_found`, `declined`, `studio_launch_failed`, a build
+ *   failure from `buildAsync`, a hook failure, or a config error.
+ */
+export async function runOpenAsync(
+	context: CommandContext,
+	input: CommandInput,
+): Promise<CommandResult> {
+	const { config } = await loadProjectConfigAsync(
+		context.cwd,
+		context.seams.configLoader,
+		input.config,
+	);
+	const studioPath = input.flags["studio-path"];
+	const opened = await openPlaceAsync(context, config, {
+		isBuilt: false,
+		studioPath:
+			typeof studioPath === "string" ? path.resolve(context.cwd, studioPath) : undefined,
+	});
 
-	const isDirectInvocation = process.env["RBX_FORGE_CMD"] === "open";
-	const openArgs = isDirectInvocation ? getOpenBuildArgs(config) : [];
-
-	// Ensure build outputs to the same file Studio will open
-	if (!openArgs.includes("--output") && placeFile !== config.buildOutputPath) {
-		openArgs.push("--output", placeFile);
-	}
-
-	// Bypass task runner when using open-specific args to avoid conflicting
-	// with args baked into the user's build script
-	if (openArgs.length > 0) {
-		await run(CLI_COMMAND, ["build", ...openArgs], { shouldShowCommand: false });
-		return;
-	}
-
-	await runScript("build");
+	return {
+		data: { ...opened },
+		summary: `Opened ${opened.place} in Roblox Studio.`,
+	};
 }
 
-async function openInStudio(placeFile: string): Promise<void> {
-	log.info(ansis.bold("→ Opening in Roblox Studio"));
-	log.step(`File: ${ansis.cyan(placeFile)}`);
+/**
+ * The place `forge open` opens, as the config names it.
+ *
+ * @param config - The resolved config.
+ * @returns `open.buildOutputPath`, else `buildOutputPath`.
+ */
+function openPlacePath(config: Pick<ResolvedConfig, "buildOutputPath" | "open">): string {
+	return config.open.buildOutputPath ?? config.buildOutputPath;
+}
 
-	await runPlatform({
-		darwin: async () => run("open", [placeFile], { shouldShowCommand: false }),
-		linux: async () => {
-			if (isWsl()) {
-				const windowsPath = await getWindowsPath(path.resolve(placeFile));
-				return run("powershell.exe", ["/c", `start ${windowsPath}`], {
-					shouldShowCommand: false,
-				});
-			}
+async function shouldBuildAsync(
+	context: CommandContext,
+	config: ResolvedConfig,
+	place: string,
+): Promise<boolean> {
+	if (config.open.buildFirst) {
+		return true;
+	}
 
-			return run("xdg-open", [placeFile], { shouldShowCommand: false });
+	if (context.seams.fileSystem.existsSync(place)) {
+		return false;
+	}
+
+	const answer = await askAsync<"build" | "declined" | "unasked">(context, {
+		ask: async (prompter) => {
+			const shouldBuild = await prompter.confirm(
+				`${place} does not exist. Build it now?`,
+				true,
+			);
+			return shouldBuild ? "build" : "declined";
 		},
-		win32: async () => run("cmd.exe", ["/c", "start", placeFile], { shouldShowCommand: false }),
+		unattended: { answer: "unasked" },
+	});
+	const hint = 'Build it first: run "forge open --build" or "forge build".';
+	if (answer === "declined") {
+		throw new ForgeError("declined", `${place} does not exist, and it was not built.`, {
+			hint,
+		});
+	}
+
+	if (answer === "unasked") {
+		throw new ForgeError("place_not_found", `${place} does not exist.`, { hint });
+	}
+
+	return true;
+}
+
+/**
+ * Build the place when asked to, or when it is missing and the user agrees.
+ *
+ * @param context - The run.
+ * @param config - The resolved config.
+ * @param target - The place to build.
+ * @returns The build, or `null` when none ran.
+ * @rejects {ForgeError} `place_not_found`, `declined`, or a build failure.
+ */
+async function prepareAsync(
+	context: CommandContext,
+	config: ResolvedConfig,
+	{ output, place }: Place,
+): Promise<null | OpenBuild> {
+	if (!(await shouldBuildAsync(context, config, place))) {
+		return null;
+	}
+
+	const { hooks, value } = await buildAsync(context, config, {
+		project: config.open.projectPath ?? config.rojoProjectPath,
+		target: { output, type: "output" },
+	});
+	return { ...value, hooks };
+}
+
+async function launchAsync(
+	{ cwd, env, reporter, seams }: CommandContext,
+	place: string,
+	studioPath: string | undefined,
+): Promise<null | StudioProcess> {
+	reporter.emit({ name: STEP, status: "started", type: "step" });
+	const outcome = await seams.studioLauncher({ cwd, env, place, studioPath });
+	reporter.emit({
+		name: STEP,
+		status: outcome.type === "launched" ? "succeeded" : "failed",
+		type: "step",
 	});
 
-	log.success("Opened in Roblox Studio");
-}
-
-async function handleMissingPlaceFile(
-	placeFile: string,
-	isCustomPlace: boolean,
-	config: ResolvedConfig,
-	noBuild: boolean,
-): Promise<void> {
-	log.error(`Place file not found: ${ansis.cyan(placeFile)}`);
-
-	// Don't offer to build custom place files or when --no-build was passed
-	if (isCustomPlace || noBuild) {
-		process.exit(1);
+	if (outcome.type === "failed") {
+		throw new ForgeError(
+			"studio_launch_failed",
+			`Could not open ${place} in Roblox Studio: ${outcome.message}`,
+			{
+				hint:
+					outcome.hint ?? "Check that Roblox Studio is installed and opens .rbxl files.",
+			},
+		);
 	}
 
-	const shouldBuild = await confirm({
-		initialValue: true,
-		message: "Would you like to build the place file now?",
-	});
-
-	if (isCancel(shouldBuild)) {
-		cancel("Operation cancelled");
-		process.exit(0);
-	}
-
-	if (!shouldBuild) {
-		process.exit(1);
-	}
-
-	await runOpenBuild(config, placeFile);
-
-	try {
-		await access(placeFile);
-	} catch {
-		log.error("Build completed but place file was not created");
-		process.exit(1);
-	}
-}
-
-async function ensurePlaceFileExists(
-	placeFile: string,
-	isCustomPlace: boolean,
-	config: ResolvedConfig,
-	noBuild: boolean,
-): Promise<void> {
-	try {
-		await access(placeFile);
-	} catch {
-		await handleMissingPlaceFile(placeFile, isCustomPlace, config, noBuild);
-	}
-}
-
-async function startWatchOnStudioClose(config: ResolvedConfig): Promise<void> {
-	setupSignalHandlers();
-
-	const studioLockFilePath = getStudioLockFilePath(config);
-	const abortController = new AbortController();
-
-	try {
-		await Promise.race([
-			runScript("watch", [], {
-				cancelSignal: abortController.signal,
-				shouldRegisterProcess: true,
-			}),
-			watchStudioLockFile(studioLockFilePath, {
-				onStudioClose: async () => {
-					if (process.env["RBX_FORGE_CMD"] === "open") {
-						outro(ansis.green("Roblox Studio closed, stopping watch mode"));
-					} else {
-						log.info("Roblox Studio closed, stopping watch mode");
-					}
-
-					await processManager.cleanup();
-					await cleanupLockfile(studioLockFilePath);
-					abortController.abort();
-				},
-			}),
-		]);
-	} finally {
-		// Cleanup complete
-	}
+	return outcome.studio ?? null;
 }
