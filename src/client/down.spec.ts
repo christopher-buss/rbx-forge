@@ -14,7 +14,7 @@ import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { PartStops } from "../session/part-stops.ts";
 import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
-import type { SessionStatus } from "../session/status.ts";
+import type { PartId, SessionStatus } from "../session/status.ts";
 import type { IdentityRecord } from "../supervisor/session-files.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
 import type { DownStudio } from "./down-parts.ts";
@@ -235,20 +235,25 @@ function silent(): never {
 }
 
 /**
- * The status of a session whose `start` owns its compiler.
+ * The status of a session whose `start` owns one part.
  *
  * @param phase - Where the session is.
+ * @param owned - The part it owns.
  * @returns The `status` answer.
  */
-function ownedStatus(phase: SessionStatus["phase"]): IpcHandler {
+function ownedStatus(phase: SessionStatus["phase"], owned: PartId = "compiler"): IpcHandler {
 	const status: SessionStatus = {
 		phase,
 		pid: SUPERVISOR,
 		running: true,
 		services: {
-			compiler: { building: false, owner: "start", status: "ready" },
-			rojo: { owner: null, status: "off" },
-			studio: { owner: null, status: "off" },
+			compiler: {
+				building: false,
+				owner: owned === "compiler" ? "start" : null,
+				status: "ready",
+			},
+			rojo: { owner: owned === "rojo" ? "start" : null, status: "ready" },
+			studio: { owner: owned === "studio" ? "start" : null, status: "off" },
 			syncback: { status: "off" },
 		},
 		sessionId: "s1",
@@ -534,15 +539,20 @@ describe(stopSessionAsync, () => {
 		},
 	);
 
-	it("should never stop a session whole that has an owner and does not answer stopParts", async () => {
-		expect.assertions(2);
+	it.for(["compiler", "rojo", "studio"] as const)(
+		"should never stop a session whole whose %s has an owner and that does not answer stopParts",
+		async (part) => {
+			expect.assertions(2);
 
-		const world = makeWorld();
-		await serveAsync(world, exitOnShutdown, ownedStatus("ready"), silent);
+			const world = makeWorld();
+			await serveAsync(world, exitOnShutdown, ownedStatus("ready", part), silent);
 
-		await expect(downAsync(world)).rejects.toMatchObject({ code: "supervisor_unresponsive" });
-		expect(world.asked).toStrictEqual([]);
-	});
+			await expect(downAsync(world)).rejects.toMatchObject({
+				code: "supervisor_unresponsive",
+			});
+			expect(world.asked).toStrictEqual([]);
+		},
+	);
 
 	it("should stop a session whole that has an owner and does not answer stopParts with --force", async () => {
 		expect.assertions(2);

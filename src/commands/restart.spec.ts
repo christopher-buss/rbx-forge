@@ -190,6 +190,7 @@ describe(runRestartAsync, () => {
 			["studio", "rojo"],
 			"Restarted Studio and Rojo of session s1",
 			" It left the compiler alone: it has an owner, the forge start terminal.",
+			"none",
 		],
 		[
 			[
@@ -200,10 +201,11 @@ describe(runRestartAsync, () => {
 			[],
 			"Restarted no part of session s1",
 			" It left Studio, Rojo, and the compiler alone: they have an owner, the forge start terminal.",
+			"kept",
 		],
 	] as const)(
 		"should name the owned parts it left alone: %j",
-		async ([kept, added, start, end]) => {
+		async ([kept, added, start, end, studio]) => {
 			expect.assertions(1);
 
 			const run = makeRestart();
@@ -211,7 +213,7 @@ describe(runRestartAsync, () => {
 			const result = await restartAsync(run);
 
 			expect(result).toMatchObject({
-				data: { added, kept },
+				data: { added, kept, studio: { status: studio } },
 				summary: `${start}: the compiler is ready, Rojo serves on port 34872, Studio has ${PLACE} open.${end}`,
 			});
 		},
