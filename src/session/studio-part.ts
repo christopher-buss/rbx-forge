@@ -333,8 +333,8 @@ async function waitForOpenAsync(
 
 /**
  * Whether an attach request has anything to do: Studio when it asks for it
- * and none is attached, Rojo when a Studio is attached and Rojo does not
- * run.
+ * and none is attached, Rojo when a Studio is attached (or it asks for
+ * Rojo) and Rojo does not run.
  *
  * @param request - The parts it asks for.
  * @param attach - The parts and the Studio state.
@@ -345,8 +345,9 @@ function planAttach(
 	{ parts, state }: Pick<AttachParts, "parts" | "state">,
 ): { hasWork: boolean; isStudioWanted: boolean } {
 	const isStudioWanted = request.parts.includes("studio") && !state.isAttached;
+	const isRojoWanted = state.isAttached || request.parts.includes("rojo");
 	return {
-		hasWork: isStudioWanted || (state.isAttached && !parts.isRunning("rojo")),
+		hasWork: isStudioWanted || (isRojoWanted && !parts.isRunning("rojo")),
 		isStudioWanted,
 	};
 }

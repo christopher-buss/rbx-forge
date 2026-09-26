@@ -3527,6 +3527,31 @@ describe("forge restart control channel", () => {
 		});
 	});
 
+	it("should serve Rojo again that ran with no Studio, on its port and with its owner", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ owned: true });
+		await flushAsync();
+		const answer = askRestartAsync(run, { force: true });
+		await exitOnStopAsync(run, "rojo");
+		const state = stateOf(run);
+		run.owner.request({ signal: "SIGINT", type: "signal" });
+		await run.result;
+
+		await expect(answer).resolves.toStrictEqual({
+			added: ["rojo"],
+			kept: [],
+			stopped: ["rojo"],
+		});
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"rojo: serve default.project.json --port 4000",
+			"rojo: serve default.project.json --port 4000",
+		]);
+		expect(state).toMatchObject({
+			services: { rojo: { owner: "start", port: 4000, status: "ready" } },
+		});
+	});
+
 	it("should close Studio, then start the compiler, and build, open, and serve only after its first build", async () => {
 		expect.assertions(4);
 

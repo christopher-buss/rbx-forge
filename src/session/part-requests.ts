@@ -7,10 +7,11 @@ import type { PartStopper } from "./part-stops.ts";
 import type { PartId } from "./status.ts";
 
 /**
- * A part a client can ask a running session to add: `studio` attaches
- * Studio with its Rojo.
+ * A part a running session can add: `studio` attaches Studio with its
+ * Rojo. `rojo` alone serves Rojo with no Studio again, for a restart; no
+ * client asks for it (`parsePartRequest`).
  */
-export type AddablePart = "compiler" | "studio";
+export type AddablePart = "compiler" | "rojo" | "studio";
 
 /** What one `addParts` request asks for. */
 export interface PartRequest {
