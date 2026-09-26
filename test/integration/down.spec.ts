@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import nodeFs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, expect, it, onTestFinished } from "vitest";
 
 import type { DownOptions, DownReport } from "../../src/client/down.ts";
@@ -406,6 +407,28 @@ describe("forge down", () => {
 			waitForDeathAsync([a.pid, ...pidsOf(project, a.sessionId)]),
 		).resolves.toStrictEqual([]);
 	}, 90_000);
+
+	it("should wait for a start session's parts while it starts, and keep them", async () => {
+		expect.assertions(2);
+
+		const project = await makeProjectAsync();
+		launch(project, COMPILER_ONLY, { RBX_FORGE_TEST_PAUSE: "admitted" });
+		const pause = path.join(project.pauses, "admitted.paused");
+		const pid = await pausedPidAsync(pause);
+		const down = downAsync(project);
+		// The session answers its status, but has no parts to stop yet.
+		await sleep(1000);
+		rmSync(pause, { force: true });
+
+		await expect(down).resolves.toMatchObject({
+			ok: true,
+			report: {
+				parts: { kept: [{ owner: "start", part: "compiler" }], stopped: [] },
+				status: "running",
+			},
+		});
+		expect(isProcessAlive(pid)).toBeTrue();
+	}, 60_000);
 
 	it("should never report stopped for a stalled startup, and kill it before any worker with --force", async () => {
 		expect.assertions(4);

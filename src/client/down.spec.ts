@@ -226,8 +226,35 @@ function statusOf(sessionId: string): IpcHandler {
 	return statusWith({ status: "off" }, sessionId);
 }
 
-function starting(): never {
-	throw new ForgeError("not_running", "The session is starting; it stops no part yet.");
+function stopping(): never {
+	throw new ForgeError("not_running", "The session is stopping; it adds and stops no parts.");
+}
+
+function silent(): never {
+	throw new ForgeError("supervisor_unresponsive", "The session did not answer.");
+}
+
+/**
+ * The status of a session whose `start` owns its compiler.
+ *
+ * @param phase - Where the session is.
+ * @returns The `status` answer.
+ */
+function ownedStatus(phase: SessionStatus["phase"]): IpcHandler {
+	const status: SessionStatus = {
+		phase,
+		pid: SUPERVISOR,
+		running: true,
+		services: {
+			compiler: { building: false, owner: "start", status: "ready" },
+			rojo: { owner: null, status: "off" },
+			studio: { owner: null, status: "off" },
+			syncback: { status: "off" },
+		},
+		sessionId: "s1",
+		startedAt: IDENTITY.startedAt,
+	};
+	return () => ({ ...status });
 }
 
 /**
@@ -482,7 +509,10 @@ describe(stopSessionAsync, () => {
 		["does not answer its status", undefined, () => ({ ...CLOSED_STOPS })],
 		["answers its status with something else", () => ({ phase: "ready" }), undefined],
 		["is another session", statusOf("s2"), () => ({ ...CLOSED_STOPS })],
-		["still starts", READY_STATUS, starting],
+		["is stopping", READY_STATUS, stopping],
+		["is silent and nothing has an owner", READY_STATUS, silent],
+		["is stopping while a part has an owner", ownedStatus("ready"), stopping],
+		["is silent while stopping with a part that has an owner", ownedStatus("stopping"), silent],
 		["answers stopParts with something else", READY_STATUS, () => ({ ending: "yes" })],
 	])(
 		"should stop the session whole, touching no Studio, when it %s",
@@ -503,6 +533,30 @@ describe(stopSessionAsync, () => {
 			expect(world.asked).toStrictEqual([{ sessionId: "s1" }]);
 		},
 	);
+
+	it("should never stop a session whole that has an owner and does not answer stopParts", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		await serveAsync(world, exitOnShutdown, ownedStatus("ready"), silent);
+
+		await expect(downAsync(world)).rejects.toMatchObject({ code: "supervisor_unresponsive" });
+		expect(world.asked).toStrictEqual([]);
+	});
+
+	it("should stop a session whole that has an owner and does not answer stopParts with --force", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		await serveAsync(world, exitOnShutdown, ownedStatus("ready"), silent);
+
+		await expect(downAsync(world, { force: true })).resolves.toMatchObject({
+			parts: null,
+			status: "stopped",
+			stoppedBy: "shutdown",
+		});
+		expect(world.asked).toStrictEqual([{ sessionId: "s1" }]);
+	});
 
 	it("should report session_replaced when another session answers stopParts", async () => {
 		expect.assertions(2);

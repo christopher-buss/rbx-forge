@@ -33,8 +33,8 @@ export interface PartHandlers extends OwnerHandlers {
  * `forge up`, `down`, `stop`, `restart`, and `start` on a running session:
  * the control channel (or the owner pipe) asks, the session body adds,
  * stops, restarts, or hands over parts. The channel opens before the body
- * has started its parts, so an add, a restart, or a join waits until the
- * body hands its handlers over; a stop or an owner's end before that fails
+ * has started its parts, so an add, a stop, a restart, or a join waits
+ * until the body hands its handlers over; an owner's end before that fails
  * at once, and the whole session stops.
  * Requests run one at a time.
  */
@@ -80,8 +80,7 @@ export interface PartRequests {
 	 * Stop the parts a request may stop.
 	 *
 	 * @returns What it stopped and kept.
-	 * @rejects {ForgeError} `not_running` while the session starts, or once it
-	 *   is stopping.
+	 * @rejects {ForgeError} `not_running` once the session is stopping.
 	 */
 	stopAsync: PartStopper;
 }
@@ -141,7 +140,7 @@ export function createPartRequests(): PartRequests {
 		restartAsync: async (request) => {
 			return whenAttachedAsync(link, async ({ restart }) => restart(request));
 		},
-		stopAsync: async (request) => nowAsync(link, async ({ stop }) => stop(request)),
+		stopAsync: async (request) => whenAttachedAsync(link, async ({ stop }) => stop(request)),
 	};
 }
 
@@ -212,7 +211,7 @@ async function whenAttachedAsync<T>(
 }
 
 function starting(): ForgeError {
-	return new ForgeError("not_running", "The session is starting; it stops no part yet.", {
+	return new ForgeError("not_running", "The session is starting; it lets go of no owner yet.", {
 		hint: "Stop the whole session.",
 	});
 }

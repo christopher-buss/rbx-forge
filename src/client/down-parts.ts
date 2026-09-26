@@ -1,10 +1,11 @@
 import type { AutoRecoveryMode } from "../config/schema.ts";
+import type { ForgeErrorCode } from "../errors.ts";
 import { ForgeError } from "../errors.ts";
 import { callSessionAsync } from "../ipc/client.ts";
 import type { IpcTransport } from "../ipc/transport.ts";
 import type { KeptPart, PartStops } from "../session/part-stops.ts";
 import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
-import type { PartId } from "../session/status.ts";
+import type { PartId, SessionStatus } from "../session/status.ts";
 import { parseStatus } from "../session/status.ts";
 import type { RecoveryReport } from "../studio/auto-recovery.ts";
 import type { StudioEnd, StudioStop } from "../studio/close-studio.ts";
@@ -21,8 +22,8 @@ import { stopPartsAsync } from "./session.ts";
  *   `message`); Studio may still be open.
  * - `kept`: `--keep-studio` left it as it is, or it has an owner.
  * - `none`: the session has no Studio open.
- * - `unknown`: the supervisor did not answer, or was still starting, so
- *   forge cannot tell which Studio is the session's; it touched none.
+ * - `unknown`: the supervisor did not answer, or was stopping, so forge
+ *   cannot tell which Studio is the session's; it touched none.
  */
 export type DownStudio =
 	| { code: string; message: string; place: string; status: "failed" }
@@ -38,13 +39,18 @@ export type DownStudio =
 
 /**
  * The parts `down` stopped, and those it kept because they have an owner;
- * `null` when the session did not say (it did not answer, or was still
- * starting), and `down` stopped it whole.
+ * `null` when the session did not say (it did not answer, or was
+ * stopping), and `down` stopped it whole.
  */
 export type DownParts = null | { kept: Array<KeptPart>; stopped: Array<PartId> };
 
 /** How `down` asks a session to stop its parts. */
 export interface PartStopOptions {
+	/**
+	 * `--force`: a session with an owner that does not say is stopped whole
+	 * too.
+	 */
+	force: boolean;
 	/** `--keep-studio`: leave the session's Studio open. */
 	keepStudio: boolean;
 	/** What to do with the auto-recovery files of a Studio the session ends. */
@@ -56,20 +62,24 @@ export interface PartStopOptions {
 /**
  * Ask the session to stop its parts with no owner, once. A session that
  * does not answer its status first is not asked: a hung one would hold
- * `down` up for the whole stop wait.
+ * `down` up for the whole stop wait. A session that still starts answers
+ * once it started its parts.
  *
  * @param ipc - Reaches the session.
  * @param session - Its endpoint, token, and id.
- * @param options - `keepStudio`, the recovery mode, and the wait.
+ * @param options - `--force`, `keepStudio`, the recovery mode, and the wait.
  * @returns What it stopped; `undefined` when it did not say.
- * @rejects {ForgeError} `session_replaced`.
+ * @rejects {ForgeError} `session_replaced`; the stop's failure, such as
+ *   `supervisor_unresponsive`, when a part has an owner (without
+ *   `--force`): `down` never stops such a session whole.
  */
 export async function askPartStopsAsync(
 	ipc: IpcTransport,
 	session: KnownSession,
-	{ keepStudio, recovery, timeoutMs }: PartStopOptions,
+	{ force, keepStudio, recovery, timeoutMs }: PartStopOptions,
 ): Promise<PartStops | undefined> {
-	if (!(await isAnsweringAsync(ipc, session))) {
+	const status = await answeredStatusAsync(ipc, session);
+	if (status === undefined) {
 		return undefined;
 	}
 
@@ -81,11 +91,14 @@ export async function askPartStopsAsync(
 			STOP_PARTS_WAIT_MS + timeoutMs,
 		);
 	} catch (err) {
-		if (err instanceof ForgeError && err.code === "session_replaced") {
+		if (
+			hasCode(err, "session_replaced") ||
+			(!force && !hasCode(err, "not_running") && isOwned(status))
+		) {
 			throw err;
 		}
 
-		// Starting, stopping, silent, or older: stop it whole.
+		// Stopping; or silent or older, with no owner: stop it whole.
 		return undefined;
 	}
 }
@@ -121,20 +134,39 @@ export function downStudio(stops: PartStops | undefined, keepStudio: boolean): D
  *
  * @param ipc - Reaches the session.
  * @param session - Its endpoint, token, and id.
- * @returns Whether it answered as this session.
+ * @returns Its status, when it answered as this session.
  */
-async function isAnsweringAsync(
+async function answeredStatusAsync(
 	ipc: IpcTransport,
 	{ identity, token }: KnownSession,
-): Promise<boolean> {
+): Promise<SessionStatus | undefined> {
 	try {
 		const status = parseStatus(
 			await callSessionAsync(ipc, { endpoint: identity.endpoint, token }, "status"),
 		);
-		return status?.sessionId === identity.sessionId;
+		return status?.sessionId === identity.sessionId ? status : undefined;
 	} catch {
-		return false;
+		return undefined;
 	}
+}
+
+function hasCode(err: unknown, code: ForgeErrorCode): boolean {
+	return err instanceof ForgeError && err.code === code;
+}
+
+/**
+ * Whether a `start` owns a part of a session that is not stopping.
+ *
+ * @param status - The session's status.
+ * @returns Whether it does.
+ */
+function isOwned({ phase, services }: SessionStatus): boolean {
+	return (
+		phase !== "stopping" &&
+		(services.compiler.owner !== null ||
+			services.rojo.owner !== null ||
+			services.studio.owner !== null)
+	);
 }
 
 /**

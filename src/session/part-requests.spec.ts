@@ -105,16 +105,20 @@ describe(createPartRequests, () => {
 });
 
 describe("createPartRequests stops", () => {
-	it("should fail a stop at once while the session starts", async () => {
-		expect.assertions(1);
+	it("should wait for the body's stopper while the session starts, then stop through it", async () => {
+		expect.assertions(2);
 
 		const requests = createPartRequests();
+		const stop = vi
+			.fn<PartStopper>()
+			.mockResolvedValue({ ending: false, kept: [], stopped: [] });
+		const stopped = requests.stopAsync(DOWN);
+		await flushAsync();
+		const calledEarly = stop.mock.calls.length;
+		requests.attach({ add: vi.fn<PartAdder>(), restart: noRestart, stop, ...NO_OWNER });
 
-		await expect(requests.stopAsync(DOWN)).rejects.toMatchObject({
-			code: "not_running",
-			hint: "Stop the whole session.",
-			message: "The session is starting; it stops no part yet.",
-		});
+		await expect(stopped).resolves.toStrictEqual({ ending: false, kept: [], stopped: [] });
+		expect([calledEarly, stop.mock.calls]).toStrictEqual([0, [[DOWN]]]);
 	});
 
 	it("should stop through the body's stopper, after the add that runs", async () => {
@@ -207,7 +211,11 @@ describe("createPartRequests owners", () => {
 			stop: noStop,
 		});
 
-		await expect(early).resolves.toMatchObject({ code: "not_running" });
+		await expect(early).resolves.toMatchObject({
+			code: "not_running",
+			hint: "Stop the whole session.",
+			message: "The session is starting; it lets go of no owner yet.",
+		});
 		await expect(joined).resolves.toStrictEqual({ added: [], taken: [] });
 		await expect(requests.releaseAsync({ type: "owner_gone" })).resolves.toStrictEqual(
 			RELEASED,

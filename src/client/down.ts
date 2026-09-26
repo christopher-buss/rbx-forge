@@ -100,8 +100,10 @@ interface Target {
  * First it asks the session to stop its parts (IPC `stopParts`, scope
  * `down`): the session closes its Studio (unless `keepStudio`), stops Rojo
  * and the compiler, and ends once no part is left. Parts with an owner stay;
- * then the session goes on, and `down` reports it `running`. A session that
- * does not answer, or still starts, is stopped whole. `stopped` needs both:
+ * then the session goes on, and `down` reports it `running`. A session
+ * that is still starting answers once it started its parts. A session that does
+ * not answer, or is stopping, is stopped whole; one with an owned part is
+ * not, unless `force`. `stopped` needs both:
  *
  * 1. Its supervisor has exited: its pinned process (PID plus start time)
  *    is gone. A supervisor lets go of the singleton lock before it writes
