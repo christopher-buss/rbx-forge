@@ -3,25 +3,19 @@ import assert from "node:assert/strict";
 import type { CommandContext } from "../commands/context.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
-import { resolveInvocation } from "../process/run-tool.ts";
 import type { ReaperEnd } from "../reaper/reaper-client.ts";
 import type { RojoPort } from "../rojo/rojo-port.ts";
-import { createRojoPort, DEFAULT_ROJO_PORT } from "../rojo/rojo-port.ts";
-import { rojoInvocation, rojoServeArgs } from "../rojo/rojo.ts";
+import { createRojoPort } from "../rojo/rojo-port.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
-import type { CompilerService } from "../session/compiler-part.ts";
 import type { IdleTracker } from "../session/idle.ts";
 import type { PartRequests } from "../session/part-requests.ts";
 import { createPartRequests } from "../session/part-requests.ts";
 import type { Pause } from "../session/pause.ts";
-import type { SessionPlan } from "../session/plan.ts";
-import { compilerWatch, planSession } from "../session/plan.ts";
+import { planSession } from "../session/plan.ts";
 import type { SessionOutcome } from "../session/run-session.ts";
 import { runSessionAsync } from "../session/run-session.ts";
-import type { ServiceInvocation } from "../session/service-parts.ts";
-import type { SessionSetup } from "../session/session-body.ts";
 import { createSessionBody } from "../session/session-body.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import { createSessionSync } from "../session/session-sync.ts";
@@ -33,6 +27,10 @@ import type { SessionRequest } from "./channel.ts";
 import { endedResult } from "./end-result.ts";
 import { endpointFor } from "./endpoint.ts";
 import { acquireSingleton } from "./locks.ts";
+import type { SupervisorOwner } from "./owner-end.ts";
+import { watchOwnerEnd } from "./owner-end.ts";
+import type { SessionServices } from "./services.ts";
+import { resolveServices } from "./services.ts";
 import type { ControlSetup } from "./session-control.ts";
 import { openSessionAsync } from "./session-control.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "./session-files.ts";
@@ -53,6 +51,11 @@ export interface SupervisorOptions {
 	 * compiler finished its first compile. `forge up` returns then.
 	 */
 	onReady?: (() => void) | undefined;
+	/**
+	 * The `forge start` that started this session, over its owner pipe. It
+	 * owns every part the session starts with.
+	 */
+	owner?: SupervisorOwner | undefined;
 	/** The test pause points; `neverPauseAsync` in production. */
 	pause: Pause;
 	/**
@@ -63,12 +66,6 @@ export interface SupervisorOptions {
 	/** The forge version, for the identity record. */
 	version: string;
 }
-
-/** The services of a session, resolved before it starts. */
-type SessionServices = Pick<
-	SessionSetup,
-	"compiler" | "config" | "context" | "plan" | "resolveCompiler" | "resolveRojo"
->;
 
 /** One session's config, files, and resolved services. */
 interface OwnSession {
@@ -106,8 +103,8 @@ interface OwnSession {
  * 4. Choose Rojo's port, when the session serves Rojo (`rojo/rojo-port.ts`).
  * 5. Create the session directory: write-once identity record, token,
  *    `current`. Open the control endpoint (`status`, `freshStatus`,
- *    `addParts`, `stopParts`, `sync`, `shutdown`), and keep `state.json` up
- *    to date.
+ *    `addParts`, `stopParts`, `own`, `sync`, `shutdown`), and keep
+ *    `state.json` up to date.
  * 6. Run the session (`runSessionAsync`): launch the reaper, admit it only
  *    while no stop request came, and run the body.
  * 7. Final barrier: no process of the session is left once the reaper and
@@ -135,10 +132,12 @@ export async function runSupervisorAsync(
 ): Promise<CommandResult> {
 	const { cwd, seams } = context;
 	const { pause, stop } = options;
+	const parts = watchOwnerEnd(options.owner, stop, createPartRequests());
 	await pause("created", stop.signal);
 	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, request.config);
 	const plan = planSession(config, request);
-	const services = resolveServices(context, config, plan);
+	const owner = options.owner === undefined ? null : "start";
+	const services = resolveServices(context, config, { owner, plan });
 	await pause("lock", stop.signal);
 	const before = stopped(stop);
 	if (before !== undefined) {
@@ -152,6 +151,7 @@ export async function runSupervisorAsync(
 			config,
 			force: request.force === true,
 			forge,
+			parts,
 			services,
 		});
 	} finally {
@@ -341,17 +341,18 @@ async function runOpenSessionAsync(
  * What the control channel knows of the session's services, and its idle
  * timeout.
  *
- * @param services - The config, plan, and resolved compiler.
+ * @param services - The config, plan, resolved compiler, and owner.
  * @returns What the session runs, whether it reads builds, and the timeout.
  */
 function controlPlan({
 	compiler,
 	config,
+	owner,
 	plan,
 }: SessionServices): Pick<ControlSetup, "idleTimeout" | "plan" | "readsBuilds"> {
 	return {
 		idleTimeout: config.session.idleTimeout,
-		plan: { ...plan, compiler: compiler !== undefined },
+		plan: { ...plan, compiler: compiler !== undefined, owner },
 		readsBuilds: compiler?.parsesDiagnostics === true,
 	};
 }
@@ -372,8 +373,9 @@ async function runLockedAsync(
 		config,
 		force,
 		forge,
+		parts,
 		services,
-	}: Pick<OwnSession, "config" | "forge" | "services"> & { force: boolean },
+	}: Pick<OwnSession, "config" | "forge" | "parts" | "services"> & { force: boolean },
 ): Promise<CommandResult> {
 	const cleanups = await clearOldAsync(context, config, forge, {
 		force,
@@ -385,7 +387,7 @@ async function runLockedAsync(
 		return late;
 	}
 
-	const links = { parts: createPartRequests(), sync: createSessionSync() };
+	const links = { parts, sync: createSessionSync() };
 	const { closeAsync, files, ...state } = await openSessionAsync(context.seams, {
 		...controlPlan(services),
 		...links,
@@ -406,73 +408,4 @@ async function runLockedAsync(
 		links.sync.close();
 		await closeAsync();
 	}
-}
-
-/**
- * Resolve the project's watch-mode compiler.
- *
- * @param context - The project root, environment, and seams.
- * @param config - The resolved config.
- * @returns The compiler service, or `undefined` when the project has none.
- * @throws `compiler_missing`.
- */
-function resolveCompiler(
-	context: CommandContext,
-	config: ResolvedConfig,
-): CompilerService | undefined {
-	const compiler = compilerWatch(config);
-	if (compiler === undefined) {
-		return undefined;
-	}
-
-	return {
-		parsesDiagnostics: compiler.parsesDiagnostics,
-		service: {
-			...resolveInvocation(context, compiler.call),
-			id: "compiler",
-			step: `${compiler.call.command} watch`,
-		},
-	};
-}
-
-/**
- * Find Rojo and the compiler the session starts with before anything starts,
- * so a missing tool fails first. Rojo is resolved again on its port once
- * the session chose it.
- *
- * @param context - The project root, environment, and seams.
- * @param config - The resolved config.
- * @param plan - What the session runs.
- * @returns The session, without its directory.
- * @throws `rojo_missing` or `compiler_missing`.
- */
-function resolveServices(
-	context: CommandContext,
-	config: ResolvedConfig,
-	plan: SessionPlan,
-): SessionServices {
-	/**
-	 * `rojo serve` on a port.
-	 *
-	 * @param port - Where Rojo serves.
-	 * @returns Its service.
-	 * @throws `rojo_missing`.
-	 */
-	function resolveRojo(port: number): ServiceInvocation {
-		const rojo = rojoInvocation(context, config, rojoServeArgs(config.rojoProjectPath, port));
-		return { ...rojo, id: "rojo", step: "rojo serve" };
-	}
-
-	if (plan.rojo) {
-		resolveRojo(config.rojoPort ?? DEFAULT_ROJO_PORT);
-	}
-
-	return {
-		compiler: plan.compiler === undefined ? undefined : resolveCompiler(context, config),
-		config,
-		context,
-		plan,
-		resolveCompiler: () => resolveCompiler(context, config),
-		resolveRojo,
-	};
 }

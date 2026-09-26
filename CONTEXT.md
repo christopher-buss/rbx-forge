@@ -51,8 +51,9 @@ syncback), with its own hooks.\
 _Avoid_: task, stage
 
 **Owner pipe**:\
-The pipe that ties a `start` process to the parts it owns. Its end of file stops
-those parts, and never closes Studio.\
+The pipe (or, for a `start` that joined, the endpoint connection) that ties a
+`start` process to the parts it owns. Its end stops the parts `start` started,
+gives back the parts it took, and never closes Studio.\
 _Avoid_: heartbeat, parent watch
 
 ## Builds

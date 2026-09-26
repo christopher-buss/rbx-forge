@@ -8,6 +8,7 @@ const AT = "2026-01-01T00:00:00.000Z";
 const START: StatusStart = {
 	compiler: true,
 	open: true,
+	owner: null,
 	pid: 42,
 	port: 34_872,
 	rojo: true,
@@ -63,6 +64,47 @@ describe(createStatusStore, () => {
 			studio: { owner: null, status: "off" },
 			syncback: { status: "off" },
 		});
+	});
+
+	it("should give the planned parts the session's owner, and none to the rest", () => {
+		expect.assertions(2);
+
+		const { store } = makeStore({ ...START, owner: "start" });
+		const { store: bare } = makeStore({ ...START, compiler: false, owner: "start" });
+
+		expect(store.snapshot().services).toMatchObject({
+			compiler: { owner: "start" },
+			rojo: { owner: "start" },
+			studio: { owner: "start" },
+		});
+		expect(bare.snapshot().services.compiler.owner).toBeNull();
+	});
+
+	it("should give a part an owner and take it back, keeping it through later changes", () => {
+		expect.assertions(3);
+
+		const { onChange, store } = makeStore();
+		store.owner("compiler", "start");
+		store.owner("studio", "start");
+		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, false);
+		store.studio("open", "/p/game.rbxl", null);
+		const owned = store.snapshot().services;
+		store.owner("compiler", null);
+
+		expect(owned).toMatchObject({ compiler: { owner: "start" }, studio: { owner: "start" } });
+		expect(store.snapshot().services.compiler.owner).toBeNull();
+		expect(onChange).toHaveBeenCalledTimes(5);
+	});
+
+	it("should show a Studio the session let go of as off, with no owner or place", () => {
+		expect.assertions(2);
+
+		const { onChange, store } = makeStore({ ...START, owner: "start" });
+		store.studio("open", "/p/game.rbxl", { pid: 7, startTime: "70" });
+		store.studioLeft();
+
+		expect(store.snapshot().services.studio).toStrictEqual({ owner: null, status: "off" });
+		expect(onChange).toHaveBeenCalledTimes(2);
 	});
 
 	it("should stay starting until the session started its parts, then be ready with none", () => {

@@ -1,28 +1,29 @@
 import { compileAsync } from "../commands/compile.ts";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
-import type { Clock } from "../seams/clock.ts";
-import { settlesWithinAsync } from "../seams/clock.ts";
 import type { OpenedStudio } from "./attach.ts";
 import type { AdderSetup, CompilerService } from "./compiler-part.ts";
 import { createPartAdder, startCompilerAsync } from "./compiler-part.ts";
 import type { IdleTracker } from "./idle.ts";
 import { stopWhenIdleAsync } from "./idle.ts";
-import type { PartRequests } from "./part-requests.ts";
-import { createPartStopper, STUDIO_CLOSED_SYNCBACK_MS } from "./part-stops.ts";
+import type { Ownership } from "./ownership.ts";
+import { createOwnerHandlers } from "./ownership.ts";
+import type { PartAdder, PartRequests } from "./part-requests.ts";
+import { createPartStopper } from "./part-stops.ts";
 import type { SessionPlan } from "./plan.ts";
 import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./rojo-part.ts";
 import type { SessionScope } from "./run-session.ts";
+import type { ServiceParts } from "./service-parts.ts";
 import { createServiceParts } from "./service-parts.ts";
 import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
 import { checkSyncbackOnce, startSyncback, watchSavesForSyncback } from "./session-syncback.ts";
-import type { StatusRecorder, StatusStore } from "./status.ts";
+import type { PartOwner, StatusRecorder, StatusStore } from "./status.ts";
 import type { StudioSetup, StudioState } from "./studio-part.ts";
 import {
 	buildPlaceAsync,
 	createStudioAdder,
-	followStudioAsync,
+	followSessionStudio,
 	openStudioAsync,
 } from "./studio-part.ts";
 import type { SaveWatch } from "./watch.ts";
@@ -38,9 +39,11 @@ export interface SessionSetup extends AdderSetup, StudioSetup {
 	directory: string;
 	/** When the session is idle; its Studio's saves are activity. */
 	idle: IdleTracker;
+	/** The owner of the parts the session starts with: `start`, or none. */
+	owner: null | PartOwner;
 	/**
-	 * Gets the session's part adder and stopper, and queues the idle stop
-	 * with the requests.
+	 * Gets the session's part handlers, for `up`, `down`, `stop`, `start`,
+	 * and queues the idle stop with the requests.
 	 */
 	parts: Pick<PartRequests, "attach" | "stopAsync">;
 	plan: SessionPlan;
@@ -54,10 +57,15 @@ export interface SessionSetup extends AdderSetup, StudioSetup {
 interface BodyState {
 	/** Looks at the place once more and waits for the syncback runs. */
 	flushSyncbackAsync: () => Promise<void>;
+	/** The session's service parts. */
+	parts: ServiceParts;
 	/** The steps context: steps and hooks run as its workers. */
 	steps: CommandContext;
 	studio: StudioState;
 }
+
+/** Every part: what a `start` that started the session added. */
+const ALL_PARTS = ["studio", "rojo", "compiler"] as const;
 
 /**
  * The body of a dev session, for
@@ -67,14 +75,16 @@ interface BodyState {
  * 2. Compile (roblox-ts) and build once, when the plan asks: a session with
  *    a compiler and Rojo or Studio.
  * 3. Open the place in Studio (or attach a verified Studio that has it
- *    open), and end the session when Studio closes it, once a save just
- *    before the close has synced back.
+ *    open), and follow it: the close of an owned Studio stops nothing, of
+ *    one with no owner only its Rojo.
  * 4. Start Rojo and the watch-mode compiler, as the plan asks. Each is a
  *    service with its part: its exit stops only that part, which is then
  *    `failed`. From then on, `forge up` can add the parts that are missing
  *    or failed, and attach Studio with its Rojo (`studio-part.ts`); `down`
  *    and `stop` can stop the parts with no owner (`part-stops.ts`), and
- *    so does the idle timeout (`idle.ts`).
+ *    so does the idle timeout (`idle.ts`); a `start` can join as the
+ *    owner, and its end stops what it started and gives back what it took
+ *    (`ownership.ts`).
  * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
  *    on each place save: one run at a time, with requests during a run
  *    folded into one more run. Rojo's syncback support is checked once per
@@ -100,11 +110,12 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 		);
 		const state: BodyState = {
 			flushSyncbackAsync,
+			parts: createServiceParts(session, scope),
 			steps,
-			studio: { isAttached: opened !== undefined },
+			studio: { isAttached: false },
 		};
 		if (opened !== undefined) {
-			scope.track(watchStudioAsync(session, scope, { ...opened, flushSyncbackAsync }));
+			followSessionStudio(session, scope, { ...state, state: state.studio }, opened);
 		}
 
 		const served = await runServicesAsync(session, scope, state);
@@ -178,6 +189,25 @@ function watchSaves(
 }
 
 /**
+ * The adder for `forge up`: the parts it starts have no owner, also a part
+ * that failed while a `start` owned it.
+ *
+ * @param session - The status.
+ * @param add - Starts the parts.
+ * @returns The adder the control channel calls.
+ */
+function withNoOwner(session: SessionSetup, add: PartAdder): PartAdder {
+	return async (request) => {
+		const added = await add(request);
+		for (const part of added) {
+			session.status.owner(part, null);
+		}
+
+		return added;
+	};
+}
+
+/**
  * Stop the parts with no owner each time the session is idle, through the
  * request queue, until the session ends.
  *
@@ -214,7 +244,7 @@ async function runServicesAsync(
 	scope: SessionScope,
 	state: BodyState,
 ): Promise<undefined | { port: number | undefined }> {
-	const parts = createServiceParts(session, scope);
+	const { parts } = state;
 	const rojo = session.plan.rojo
 		? await startRojoAsync(session, parts, await resolveRojoAsync(session))
 		: undefined;
@@ -222,10 +252,16 @@ async function runServicesAsync(
 		await startCompilerAsync(session, parts, session.compiler);
 	}
 
-	const addStudio = createStudioAdder(session, scope, { ...state, parts, state: state.studio });
+	const addStudio = createStudioAdder(session, scope, { ...state, state: state.studio });
+	const add = createPartAdder(session, parts, addStudio);
+	const ownership: Ownership = {
+		added: new Set(session.owner === null ? [] : ALL_PARTS),
+		isOwned: session.owner !== null,
+	};
 	session.parts.attach({
-		add: createPartAdder(session, parts, addStudio),
-		stop: createPartStopper(session, scope, { ...state, parts, state: state.studio }),
+		add: withNoOwner(session, add),
+		stop: createPartStopper(session, scope, { ...state, ownership, state: state.studio }),
+		...createOwnerHandlers(session, scope, { add, ownership, parts, studio: state.studio }),
 	});
 	session.status.started();
 	watchIdle(session, scope);
@@ -276,55 +312,6 @@ async function runStepsAsync(
 	}
 
 	return undefined;
-}
-
-/**
- * Wait for syncback before a session whose Studio closed ends: look at the
- * place once more, then wait for the runs going, for at most
- * {@link STUDIO_CLOSED_SYNCBACK_MS}. A stop meanwhile ends the runs.
- *
- * @param clock - Runs the bound.
- * @param flushSyncbackAsync - Looks at the place and waits for the runs.
- */
-async function settleSyncbackAsync(
-	clock: Clock,
-	flushSyncbackAsync: () => Promise<void>,
-): Promise<void> {
-	await settlesWithinAsync(clock, flushSyncbackAsync(), STUDIO_CLOSED_SYNCBACK_MS);
-}
-
-/**
- * Follow the session's own Studio from `opening` on, and end the session
- * with `studio_closed` once Studio closes the place, after the syncback of a
- * save just before the close.
- *
- * @param session - The clock, file system, and reporter.
- * @param scope - Where the end goes.
- * @param opened - The place the session opened, its Studio, and the
- *   syncback flush.
- * @param opened.flushSyncbackAsync - Looks at the place and waits for the
- *   runs.
- */
-async function watchStudioAsync(
-	session: SessionSetup,
-	scope: SessionScope,
-	opened: OpenedStudio & { flushSyncbackAsync: () => Promise<void> },
-): Promise<void> {
-	session.status.studio("opening", opened.place, opened.studio);
-	const isClosed = await followStudioAsync(session, scope, opened, {
-		whenClosed: "The session ends when Studio closes it.",
-	});
-	// A watch that ended first ended with the session: Studio stays open.
-	if (!isClosed) {
-		return;
-	}
-
-	// Stopping before closed: `down` tells this session from one that goes
-	// on without its Studio.
-	session.status.phase("stopping");
-	session.status.studio("closed", opened.place, opened.studio);
-	await settleSyncbackAsync(session.context.seams.clock, opened.flushSyncbackAsync);
-	scope.end({ type: "studio_closed" });
 }
 
 function announceReady({ config, context, plan }: SessionSetup, port: number | undefined): void {

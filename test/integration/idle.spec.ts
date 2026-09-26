@@ -10,6 +10,8 @@ import { assert, describe, expect, it } from "vitest";
 import { findSession } from "../../src/client/session.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { ReporterEvent } from "../../src/seams/reporter.ts";
+import type { SessionStatus } from "../../src/session/status.ts";
+import { parseStatus } from "../../src/session/status.ts";
 import type { SessionRequest } from "../../src/supervisor/channel.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
@@ -18,7 +20,15 @@ import { makeStudioExecutable, studioVariables } from "../helpers/real-native.ts
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
 import type { Launched, Project } from "./session-harness.ts";
-import { launch, makeProjectAsync, settledWithinAsync, waitForAsync } from "./session-harness.ts";
+import {
+	launch,
+	launchUnowned,
+	makeProjectAsync,
+	ROJO_ONLY,
+	settledWithinAsync,
+	waitForAsync,
+	workersOf,
+} from "./session-harness.ts";
 
 /** What `forge up` asks for: the compiler alone. */
 const UP: SessionRequest = { compiler: true, config: {}, open: false, rojo: false };
@@ -48,7 +58,7 @@ async function startUpAsync(
 	const watched = path.join(project.project, "src", "main.ts");
 	mkdirSync(path.dirname(watched), { recursive: true });
 	writeFileSync(watched, "export {};\n");
-	const run = launch(project, UP, { FIXTURE_COMPILER_WATCH: watched });
+	const run = launchUnowned(project, UP, { FIXTURE_COMPILER_WATCH: watched });
 	return { project, run, watched };
 }
 
@@ -72,8 +82,32 @@ function studioEnvironment(): Record<string, string> {
 	};
 }
 
-function isStudioOpen(event: ReporterEvent): boolean {
-	return event.type === "info" && event.message.startsWith("Roblox Studio has");
+function isIdleStop(event: ReporterEvent): boolean {
+	return event.type === "info" && event.message.startsWith("No activity for");
+}
+
+/**
+ * Ask the project's session for its status until `isDone` holds.
+ *
+ * @param project - Where it runs.
+ * @param isDone - The condition.
+ * @returns That status.
+ */
+async function waitForStatusAsync(
+	project: Project,
+	isDone: (status: SessionStatus) => boolean,
+): Promise<SessionStatus> {
+	const session = await waitForAsync(() => findSession(nodeFs, forgeFiles(project.project)));
+	const target = { endpoint: session.identity.endpoint, token: session.token };
+	const transport = realTransport();
+	for (;;) {
+		const status = parseStatus(await callSessionAsync(transport, target, "status"));
+		if (status !== undefined && isDone(status)) {
+			return status;
+		}
+
+		await sleep(100);
+	}
 }
 
 /**
@@ -164,8 +198,8 @@ describe("idle timeout", () => {
 				studio: { autoRecovery: "keep" },
 			});
 			const place = path.join(project.project, "game.rbxl");
-			const run = launch(project, START_STUDIO, studioEnvironment());
-			await waitForAsync(() => run.events.find(isStudioOpen));
+			const run = launchUnowned(project, START_STUDIO, studioEnvironment());
+			await waitForStatusAsync(project, ({ services }) => services.studio.status === "open");
 			const opened = Date.now();
 			await keepActiveAsync(run, () => {
 				const now = new Date();
@@ -173,10 +207,50 @@ describe("idle timeout", () => {
 			});
 			const reason = await idleEndAsync(run);
 
-			// The idle stop closes Studio, whose close ends the session too.
-			expect(["shutdown", "studio_closed"]).toContain(reason);
+			expect(reason).toBe("shutdown");
 			expect(Date.now() - opened).toBeGreaterThan(ACTIVE_MS + TIMEOUT_MS - ACTIVITY_EVERY_MS);
 			expect(existsSync(`${place}.lock`)).toBeFalse();
 		},
 	);
+
+	it("should never stop a part a start owns, nor end its session", async () => {
+		expect.assertions(3);
+
+		const project = await makeProjectAsync({
+			luau: { watch: { args: ["-w"], command: "rbxtsc" } },
+			session: { idleTimeout: SHORT_TIMEOUT },
+		});
+		const run = launch(project, ROJO_ONLY);
+		let isSettled = false;
+		void run.settled.finally(() => {
+			isSettled = true;
+		});
+		const session = await waitForAsync(() => findSession(nodeFs, forgeFiles(project.project)));
+		const target = { endpoint: session.identity.endpoint, token: session.token };
+		await callSessionAsync(realTransport(), target, "addParts", {
+			params: { parts: ["compiler"] },
+			responseTimeoutMs: SETTLE_MS,
+		});
+		// Status requests are activity: wait for the stop's report instead.
+		await waitForAsync(() => run.events.find(isIdleStop));
+		// Longer than two more timeouts.
+		await sleep(3000);
+		const idle = await waitForStatusAsync(project, () => true);
+		const rojo = workersOf(project, session.identity.sessionId).find(({ role }) => {
+			return role === "rojo";
+		});
+
+		expect(idle.services).toMatchObject({
+			compiler: { owner: null, status: "off" },
+			rojo: { owner: "start", status: "ready" },
+		});
+		expect(run.events).toContainEqual({
+			message: `No activity for ${SHORT_TIMEOUT} min: stopped compiler.`,
+			type: "info",
+		});
+		expect({ running: isProcessAlive(rojo!.pid), settled: isSettled }).toStrictEqual({
+			running: true,
+			settled: false,
+		});
+	});
 });

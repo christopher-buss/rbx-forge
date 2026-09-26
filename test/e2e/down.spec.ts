@@ -34,17 +34,10 @@ const UP_STUDIO = ["up", "--no-compiler", "--studio", "--json"];
 /** How long a dead process may stay a zombie before its parent reaps it. */
 const REAP_MS = 2000;
 /**
- * How a Studio that closes on the request goes: it exits right after it
- * removes its lock file, and forge may see the gap and end it at once.
- */
-const CLOSED_END: unknown = expect.toBeOneOf(["exited", "lock_released"]);
-/**
  * How forge ends a Studio behind a dialog: POSIX sees no dialog, so the time
  * limit.
  */
 const BLOCKED_END = IS_WINDOWS ? "dialog" : "timeout";
-/** The parts `down` stopped: Studio first, then the services that ran. */
-const WITH_STUDIO: unknown = expect.arrayContaining(["studio"]);
 
 /**
  * The AutoSaves folder the stand-in writes to, under a scratch home.
@@ -163,20 +156,27 @@ describe("forge down", () => {
 		await expect(waitForDeathAsync([studio], REAP_MS)).resolves.toStrictEqual([]);
 	});
 
-	it("should wait for a Studio that is still opening its place, then close it", async () => {
+	it("should keep the parts of a start session, its opening Studio too, and end nothing", async () => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
-		await startReadyAsync(fixture, START_STUDIO, { FIXTURE_STUDIO_LOCK_DELAY_MS: "3000" });
+		const { session } = await startReadyAsync(fixture, START_STUDIO, {
+			FIXTURE_STUDIO_LOCK_DELAY_MS: "3000",
+		});
 		const down = await runForgeAsync(fixture, DOWN);
-		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
 
 		expect(down.result.data).toMatchObject({
-			parts: { kept: [], stopped: WITH_STUDIO },
-			stoppedBy: "shutdown",
-			studio: { end: CLOSED_END, pid: studio!.pid, status: "closed" },
+			parts: {
+				kept: [
+					{ owner: "start", part: "studio" },
+					{ owner: "start", part: "rojo" },
+				],
+				stopped: [],
+			},
+			status: "running",
+			studio: { status: "kept" },
 		});
-		expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
+		expect(session.child.exitCode).toBeNull();
 	});
 
 	it.skipIf(!IS_WINDOWS && !IS_MACOS)(

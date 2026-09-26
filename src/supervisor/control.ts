@@ -1,5 +1,5 @@
 import { ForgeError } from "../errors.ts";
-import type { IpcServerOptions } from "../ipc/server.ts";
+import type { IpcOwner, IpcServerOptions } from "../ipc/server.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { PartRequests } from "../session/part-requests.ts";
@@ -12,7 +12,7 @@ import type { StopSource } from "../session/stop-source.ts";
 /** What the control channel of one session reaches. */
 export interface ControlTarget {
 	builds: Pick<BuildWatch, "tick" | "waitAsync">;
-	parts: Pick<PartRequests, "addAsync" | "stopAsync">;
+	parts: Pick<PartRequests, "addAsync" | "ownAsync" | "releaseAsync" | "stopAsync">;
 	sessionId: string;
 	status: Pick<StatusStore, "snapshot">;
 	stop: Pick<StopSource, "request">;
@@ -79,6 +79,28 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 			return { ...(await target.parts.stopAsync(parseStopRequest(parameters))) };
 		},
 		sync: async () => target.sync.runAsync(),
+	};
+}
+
+/**
+ * How a session serves `own`: a `forge start` joins as its owner and holds
+ * the connection. The join takes every running part, and starts the parts
+ * in the `parts` param (as `addParts`); it answers with `sessionId`,
+ * `taken`, and `added`, or `session_running` while another `start` owns the
+ * session. A release, or the connection's end, stops what it started and
+ * gives back what it took; a release is answered with `stopped`,
+ * `released`, `studioLeft`, and `ending`.
+ *
+ * @param target - The session's parts and id.
+ * @returns The owner handlers of the session.
+ */
+export function controlOwner(target: Pick<ControlTarget, "parts" | "sessionId">): IpcOwner {
+	return {
+		join: async (parameters) => {
+			const joined = await target.parts.ownAsync(parsePartRequest(parameters));
+			return { ...joined, sessionId: target.sessionId };
+		},
+		leave: async () => ({ ...(await target.parts.releaseAsync({ type: "owner_gone" })) }),
 	};
 }
 

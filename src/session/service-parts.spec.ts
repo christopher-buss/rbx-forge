@@ -76,6 +76,7 @@ async function makePartsAsync(isEnding = false): Promise<PartsRun> {
 		{
 			compiler: false,
 			open: false,
+			owner: null,
 			pid: 1,
 			port: 34_872,
 			rojo: true,

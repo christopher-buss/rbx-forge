@@ -1,14 +1,15 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
-import { makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
+import { LET_GO, makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import {
 	addPartsAsync,
 	fetchStatusAsync,
 	findSession,
+	joinSessionAsync,
 	probeSessionAsync,
 	readIdentity,
 } from "./session.ts";
@@ -141,6 +142,107 @@ describe(addPartsAsync, () => {
 			message: "The session answered addParts with something else.",
 		});
 	});
+});
+
+describe(joinSessionAsync, () => {
+	async function joinAsync(
+		{
+			join: joinAnswer = {},
+			leave: leaveAnswer = {},
+		}: { join?: Record<string, unknown>; leave?: Record<string, unknown> },
+		signal = openSignal(),
+	) {
+		const memory = createMemoryFileSystem();
+		const transport = createMemoryTransport();
+		const fake = await serveFakeSessionAsync(memory, transport);
+		const join = vi.spyOn(fake, "join");
+		const leave = vi.spyOn(fake, "leave");
+		join.mockReturnValue({ added: [], sessionId: "s1", taken: [], ...joinAnswer });
+		leave.mockResolvedValue({ ...LET_GO, ...leaveAnswer });
+		const asked = join.mock.calls;
+		const joined = joinSessionAsync(
+			transport,
+			findSession(memory.fileSystem, FORGE)!,
+			{ parts: ["compiler"] },
+			{ signal, waitMs: 1000 },
+		);
+		return { asked, fake, joined };
+	}
+
+	function openSignal(): AbortSignal {
+		const controller = new AbortController();
+		return controller.signal;
+	}
+
+	function released(): AbortSignal {
+		const release = new AbortController();
+		release.abort();
+		return release.signal;
+	}
+
+	it("should join with the parts it asks for, and read what letting go did", async () => {
+		expect.assertions(3);
+
+		const { asked, joined } = await joinAsync({
+			join: { added: ["compiler"], sessionId: "s1", taken: ["rojo"] },
+			leave: {
+				ending: true,
+				released: [],
+				sessionId: "s1",
+				stopped: ["compiler"],
+				studioLeft: false,
+			},
+		});
+		const session = await joined;
+
+		expect(session!.joined).toStrictEqual({
+			added: ["compiler"],
+			sessionId: "s1",
+			taken: ["rojo"],
+		});
+		await expect(session!.holdAsync(released(), 1000)).resolves.toStrictEqual({
+			ending: true,
+			released: [],
+			sessionId: "s1",
+			stopped: ["compiler"],
+			studioLeft: false,
+		});
+		expect(asked).toStrictEqual([[{ parts: ["compiler"] }]]);
+	});
+
+	it("should hold until the session ends, and give up when its signal aborts first", async () => {
+		expect.assertions(2);
+
+		const ended = await joinAsync({});
+		const session = await ended.joined;
+		const holding = session!.holdAsync(openSignal(), 1000);
+		await ended.fake.stop();
+		const stop = new AbortController();
+		stop.abort();
+		const given = await joinAsync({}, stop.signal);
+
+		await expect(holding).resolves.toBeUndefined();
+		await expect(given.joined).resolves.toBeUndefined();
+	});
+
+	it.for([
+		["own", { join: { added: ["syncback"], sessionId: "s1", taken: [] } }],
+		["release", { leave: { stopped: ["studio"] } }],
+	] as const)(
+		"should reject an answer to %s that it cannot read as internal_error",
+		async ([method, answers]) => {
+			expect.assertions(1);
+
+			const { joined } = await joinAsync(answers);
+			const outcome = joined.then(async (session) => session!.holdAsync(released(), 1000));
+
+			await expect(outcome).rejects.toMatchObject({
+				code: "internal_error",
+				hint: "The session may run another forge version. Stop it, then start it again.",
+				message: `The session answered ${method} with something else.`,
+			});
+		},
+	);
 });
 
 describe(probeSessionAsync, () => {

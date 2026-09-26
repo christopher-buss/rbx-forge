@@ -225,6 +225,7 @@ async function serveSessionAsync(
 		{ end: vi.fn<SessionScope["end"]>() },
 		{
 			flushSyncbackAsync: async () => {},
+			ownership: { isOwned: true },
 			// The compiler keeps the session, so it never ends here.
 			parts: { isRunning: (id) => id === "compiler", stopAsync: async () => {} },
 			state: { isAttached: true },

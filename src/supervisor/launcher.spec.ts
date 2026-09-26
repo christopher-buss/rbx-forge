@@ -68,6 +68,20 @@ describe(createSupervisorLauncher, () => {
 		expect(onEvent).toHaveBeenCalledExactlyOnceWith({ message: "hi", type: "info" });
 	});
 
+	it("should resolve at once once the supervisor let this start go, and ignore its later exit", async () => {
+		expect.assertions(1);
+
+		const { child, run } = launch();
+		child.stdout.write(
+			encodeMessage({ data: { stopped: ["rojo"] }, summary: "Let go.", type: "released" }),
+		);
+		const result = await run.result;
+		child.close(1);
+		await flushAsync();
+
+		expect(result).toStrictEqual({ data: { stopped: ["rojo"] }, summary: "Let go." });
+	});
+
 	it("should reject with the session's failure", async () => {
 		expect.assertions(1);
 

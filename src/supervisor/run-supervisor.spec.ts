@@ -20,13 +20,13 @@ import {
 import type { MemoryFileSystem, RecordingReporter } from "../../test/helpers/seams.ts";
 import type { FlagValues } from "../cli/flags.ts";
 import { ForgeError } from "../errors.ts";
-import { callSessionAsync } from "../ipc/client.ts";
+import { callSessionAsync, ownSessionAsync } from "../ipc/client.ts";
+import type { OwnedSession } from "../ipc/client.ts";
 import type { WorkerReport, WorkerSpec } from "../reaper/protocol.ts";
 import type { ReaperEnd } from "../reaper/reaper-client.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
-import { STUDIO_CLOSED_SYNCBACK_MS } from "../session/part-stops.ts";
 import type { Pause, PausePoint } from "../session/pause.ts";
 import { neverPauseAsync } from "../session/pause.ts";
 import { ROJO_LISTEN_BOUND_MS } from "../session/rojo-part.ts";
@@ -88,6 +88,8 @@ interface StartSetup {
 	oneShot?: (worker: WorkerSpec) => undefined | WorkerReport;
 	/** Gets the supervisor's ready call. */
 	onReady?: () => void;
+	/** A `start` owns the session over its owner pipe. */
+	owned?: boolean;
 	/** Makes the test pause points from the run's stop source. */
 	pause?: (stop: StopSource) => Pause;
 	/** The host OS; Linux by default. */
@@ -110,6 +112,10 @@ interface StartRun {
 	isPortFreeAsync: ReturnType<typeof vi.fn<Network["isPortFreeAsync"]>>;
 	memory: MemoryFileSystem;
 	native: FakeNative;
+	/** Gets the result of an owner's end that left the session running. */
+	onReleased: ReturnType<typeof vi.fn<(result: CommandResult) => void>>;
+	/** The owner pipe's ends. */
+	owner: StopSource;
 	reporter: RecordingReporter;
 	result: Promise<CommandResult>;
 	signals: FakeSignals;
@@ -186,6 +192,7 @@ function startCommand({
 	isPortFree = true,
 	oneShot = succeedOneShots,
 	onReady,
+	owned = false,
 	pause = () => neverPauseAsync,
 	platform = "linux",
 	processes = {},
@@ -200,6 +207,8 @@ function startCommand({
 	const signals = createFakeSignals();
 	const stop = createStopSource();
 	signals.onStop(stop.request);
+	const owner = createStopSource();
+	const onReleased = vi.fn<(result: CommandResult) => void>();
 	const ipc = makeTransport();
 	const seams = createTestSeams();
 	const native = createFakeNative({
@@ -245,9 +254,12 @@ function startCommand({
 		isPortFreeAsync,
 		memory,
 		native,
+		onReleased,
+		owner,
 		reporter,
 		result: runSupervisorAsync(context, requestFor(flags), {
 			onReady,
+			owner: owned ? { onEnd: owner.onStop, onReleased } : undefined,
 			pause: pause(stop),
 			stop,
 			version: "9.9.9",
@@ -561,8 +573,43 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should end with studio_closed once Studio closes the place it opened", async () => {
-		expect.assertions(3);
+	it("should stop nothing once the Studio its owner opened closes the place", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({ flags: { compiler: false }, owned: true });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, "1");
+		await passAsync(run, FILE_POLL_MS);
+		run.memory.fileSystem.rmSync(LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		const closed = stateOf(run);
+		run.owner.request({ signal: "SIGINT", type: "signal" });
+
+		expect(closed).toMatchObject({
+			phase: "ready",
+			services: {
+				rojo: { owner: "start", status: "ready" },
+				studio: { owner: "start", place: PLACE, status: "closed" },
+			},
+		});
+		await expect(run.result).resolves.toStrictEqual({
+			data: { port: 4000, reason: "SIGINT", reports: [] },
+			summary: "Stopped on SIGINT; every process of the session is gone.",
+		});
+		expect(run.reporter.events).toContainEqual({
+			message: `Roblox Studio has ${PLACE} open.`,
+			type: "info",
+		});
+		expect(run.fake.calls).toStrictEqual([
+			"go",
+			"spawn start-1",
+			"spawn rojo",
+			"terminate 3000",
+		]);
+	});
+
+	it("should stop only Rojo once the Studio it opened with no owner closes the place", async () => {
+		expect.assertions(2);
 
 		const run = startCommand({ flags: { compiler: false } });
 		await flushAsync();
@@ -570,16 +617,17 @@ describe(runSupervisorAsync, () => {
 		await passAsync(run, FILE_POLL_MS);
 		run.memory.fileSystem.rmSync(LOCK);
 		await passAsync(run, FILE_POLL_MS);
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const closed = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
 
-		await expect(run.result).resolves.toStrictEqual({
-			data: { port: 4000, reason: "studio_closed", reports: [] },
-			summary: "Studio closed the place; every process of the session is gone.",
+		expect(closed).toMatchObject({
+			phase: "ready",
+			services: { rojo: { status: "off" }, studio: { place: PLACE, status: "closed" } },
 		});
-		expect(run.reporter.events).toContainEqual({
-			message: `Roblox Studio has ${PLACE} open. The session ends when Studio closes it.`,
-			type: "info",
-		});
-		expect(run.fake.calls.at(-1)).toBe("terminate 3000");
+		expect(run.fake.calls).toContain("stop rojo 3000");
 	});
 
 	it("should attach the Studio that has the place open: no build, no launch", async () => {
@@ -593,10 +641,9 @@ describe(runSupervisorAsync, () => {
 		});
 		await passAsync(run, FILE_POLL_MS);
 		const open = stateOf(run);
-		run.memory.fileSystem.rmSync(LOCK);
-		await passAsync(run, FILE_POLL_MS);
+		run.signals.fire("SIGINT");
 
-		await expect(run.result).resolves.toMatchObject({ data: { reason: "studio_closed" } });
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: ",
 			"rojo: serve default.project.json --port 4000",
@@ -1209,124 +1256,6 @@ describe("forge start hooks and syncback", () => {
 		await passAsync(run, FILE_POLL_MS);
 		return run;
 	}
-
-	/**
-	 * A syncback session with Studio whose save watch looks at the place
-	 * 100 ms after the Studio watch looks at the lock file (Rojo listens on
-	 * the second look), and Studio has the place open.
-	 *
-	 * @param setup - More of the session.
-	 * @returns The session, at 500 ms.
-	 */
-	async function studioSyncbackAsync(setup: StartSetup = {}): Promise<StartRun> {
-		const run = startCommand({
-			...SYNCBACK,
-			files: { ...TOOL_FILES, "game.rbxl": "v1" },
-			flags: { compiler: false, syncback: true },
-			isListening: vi
-				.fn<Network["isListeningAsync"]>()
-				.mockResolvedValueOnce(false)
-				.mockResolvedValue(true),
-			...setup,
-		});
-		await flushAsync();
-		run.clock.advance(100);
-		await flushAsync();
-		run.memory.fileSystem.writeFileSync(LOCK, "1");
-		run.clock.advance(400);
-		await flushAsync();
-		return run;
-	}
-
-	/**
-	 * Studio saves the place and closes it between two looks of the save
-	 * watch, and the Studio watch sees the close first.
-	 *
-	 * @param run - A session from {@link studioSyncbackAsync}.
-	 */
-	async function saveAndCloseAsync(run: StartRun): Promise<void> {
-		run.clock.advance(100);
-		await flushAsync();
-		run.memory.setModifiedTime("game.rbxl", Date.UTC(2026, 0, 2));
-		run.memory.fileSystem.rmSync(LOCK);
-		run.clock.advance(400);
-		await flushAsync();
-	}
-
-	it("should sync back a save Studio made just before it closed, then end with studio_closed", async () => {
-		expect.assertions(4);
-
-		const run = await studioSyncbackAsync({ oneShot: oneShotsWith({ "syncback-1": "hold" }) });
-		await saveAndCloseAsync(run);
-		let isEnded = false;
-		void run.result.finally(() => {
-			isEnded = true;
-		});
-		await passAsync(run, FILE_POLL_MS);
-
-		expect(isEnded).toBeFalse();
-
-		run.fake.exit("syncback-1", OK);
-		await passAsync(run, FILE_POLL_MS);
-
-		await expect(run.result).resolves.toMatchObject({ data: { reason: "studio_closed" } });
-		// The syncback wait's timer is gone too.
-		expect(run.clock.pending()).toBe(0);
-		expect(spawnedIds(run.fake)).toStrictEqual([
-			"start-1: syncback --help",
-			"start-2: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
-			"syncback-1: syncback default.project.json --input game.rbxl --non-interactive",
-			"syncback-2: -c lint",
-		]);
-	});
-
-	it("should end with studio_closed once syncback outlasts its wait", async () => {
-		expect.assertions(2);
-
-		const run = await studioSyncbackAsync({ oneShot: oneShotsWith({ "syncback-1": "hold" }) });
-		await saveAndCloseAsync(run);
-		let isEnded = false;
-		void run.result.finally(() => {
-			isEnded = true;
-		});
-		await passAsync(run, STUDIO_CLOSED_SYNCBACK_MS - OUTPUT_POLL_MS);
-
-		expect(isEnded).toBeFalse();
-
-		await passAsync(run, OUTPUT_POLL_MS);
-
-		await expect(run.result).resolves.toMatchObject({ data: { reason: "studio_closed" } });
-	});
-
-	it("should show the session stopping with Studio closed while syncback settles", async () => {
-		expect.assertions(1);
-
-		const run = await studioSyncbackAsync({ oneShot: oneShotsWith({ "syncback-1": "hold" }) });
-		await saveAndCloseAsync(run);
-		const settling = stateOf(run);
-		await passAsync(run, STUDIO_CLOSED_SYNCBACK_MS);
-		await run.result;
-
-		expect(settling).toMatchObject({
-			phase: "stopping",
-			services: { studio: { status: "closed" } },
-		});
-	});
-
-	it("should end with studio_closed at once when no syncback runs", async () => {
-		expect.assertions(1);
-
-		const run = await studioSyncbackAsync();
-		run.clock.advance(100);
-		await flushAsync();
-		run.memory.fileSystem.rmSync(LOCK);
-		run.clock.advance(400);
-		await flushAsync();
-		await flushAsync();
-
-		await expect(run.result).resolves.toMatchObject({ data: { reason: "studio_closed" } });
-	});
 
 	it("should not run syncback on a save without --syncback", async () => {
 		expect.assertions(1);
@@ -2038,25 +1967,6 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should show Studio closed once it closes the place", async () => {
-		expect.assertions(1);
-
-		const run = startCommand({ flags: { compiler: false } });
-		await flushAsync();
-		run.memory.fileSystem.writeFileSync(LOCK, "1");
-		await passAsync(run, FILE_POLL_MS);
-		// Keep the session's files while its end runs.
-		run.native.addon.tryLockFile(path.join(SESSION, "workers.lock"), "shared");
-		run.memory.fileSystem.rmSync(LOCK);
-		const caught = run.result.catch((err: unknown) => err);
-		await passAsync(run, 5750);
-		await caught;
-
-		expect(stateOf(run)).toMatchObject({
-			services: { studio: { place: PLACE, status: "closed" } },
-		});
-	});
-
 	it("should show a stopping session, with Studio still open, while its workers go", async () => {
 		expect.assertions(2);
 
@@ -2568,7 +2478,7 @@ describe("forge up --studio", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 	});
 
-	it("should say that the attached Studio's close stops its Rojo", async () => {
+	it("should say that the attached Studio has the place open", async () => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: UP });
@@ -2578,7 +2488,7 @@ describe("forge up --studio", () => {
 		await run.result;
 
 		expect(run.reporter.events).toContainEqual({
-			message: `Roblox Studio has ${PLACE} open. Its Rojo stops when Studio closes it.`,
+			message: `Roblox Studio has ${PLACE} open.`,
 			type: "info",
 		});
 	});
@@ -2871,6 +2781,421 @@ describe("forge sync control channel", () => {
 	});
 });
 
+/** A Luau project whose watch command is ready once it runs. */
+const WATCH: StartSetup = {
+	file: { luau: { watch: { command: "darklua" } } },
+	files: { ...TOOL_FILES, "tools/darklua": "" },
+};
+const OWN_CALL = { params: { parts: ["compiler"] }, responseTimeoutMs: 600_000 };
+
+/**
+ * Join the session as a `start` does, and keep the connection.
+ *
+ * @param run - The session.
+ * @param parts - The parts the join asks for.
+ * @returns The held session, or the failure the join rejected with.
+ */
+async function joinAsync(
+	run: StartRun,
+	parts: ReadonlyArray<string> = ["compiler"],
+): Promise<OwnedSession> {
+	const staying = new AbortController();
+	const joined = ownSessionAsync(run.ipc, CONTROL_TARGET, {
+		params: { parts },
+		responseTimeoutMs: 600_000,
+		signal: staying.signal,
+	});
+	// A failed join rejects there; only a held one is waited for here.
+	joined.catch(ignoreFailure);
+	await passAsync(run, OUTPUT_POLL_MS);
+	const owned = await joined;
+	assert(owned !== undefined, "the join was not given up");
+	return owned;
+}
+
+/**
+ * A pause that ends the owner at one point, once the run exists.
+ *
+ * @param point - Where the owner goes.
+ * @param run - The run, once made.
+ * @returns The pause.
+ */
+function ownerGoneAt(point: PausePoint, run: () => StartRun): Pause {
+	return async (at) => {
+		// The run is made first.
+		await flushAsync();
+		if (at === point) {
+			run().owner.request({ type: "owner_gone" });
+		}
+	};
+}
+
+/**
+ * Let go of a held session, and wait for the answer.
+ *
+ * @param owned - The held session.
+ * @param run - The session, whose time passes meanwhile.
+ * @param exits - The services the release stops, which exit once asked.
+ * @returns The release's answer.
+ */
+async function letGoAsync(
+	owned: OwnedSession,
+	run: StartRun,
+	exits: ReadonlyArray<string> = [],
+): Promise<unknown> {
+	const release = new AbortController();
+	const held = owned.holdAsync(release.signal, 600_000);
+	release.abort();
+	for (const id of exits) {
+		await vi.waitFor(() => {
+			assert(run.fake.calls.includes(`stop ${id} 3000`), `${id} is asked to stop`);
+		});
+		run.fake.exit(id, OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+	}
+
+	return held;
+}
+
+describe("forge down control channel", () => {
+	it("should close the session's Studio, stop Rojo, and end once syncback settled", async () => {
+		expect.assertions(2);
+
+		const run: StartRun = startCommand({
+			flags: { compiler: false },
+			processes: {
+				[LAUNCHED_PID]: {
+					alive: true,
+					executablePath: "/opt/RobloxStudio",
+					onClose: () => {
+						run.memory.fileSystem.rmSync(LOCK);
+					},
+					startTime: "900",
+				},
+			},
+		});
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: LAUNCHED_PID, startTime: "900" },
+			type: "launched",
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		const answer = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await vi.waitFor(async () => {
+			await passAsync(run, OUTPUT_POLL_MS);
+			assert(run.fake.calls.includes("stop rojo 3000"), "Rojo is asked to stop");
+		});
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		await expect(answer).resolves.toMatchObject({ ending: true, stopped: ["studio", "rojo"] });
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
+	});
+});
+
+describe("forge down and syncback", () => {
+	it("should sync back a save Studio made just before a down closed it, then end", async () => {
+		expect.assertions(2);
+
+		const run: StartRun = startCommand({
+			...SYNCBACK,
+			files: { ...TOOL_FILES, "game.rbxl": "v1" },
+			flags: { compiler: false, syncback: true },
+			// Rojo listens on the second look: the save watch looks 100 ms
+			// after the Studio watch.
+			isListening: vi
+				.fn<Network["isListeningAsync"]>()
+				.mockResolvedValueOnce(false)
+				.mockResolvedValue(true),
+			processes: {
+				[LAUNCHED_PID]: {
+					alive: true,
+					executablePath: "/opt/RobloxStudio",
+					onClose: () => {
+						run.memory.fileSystem.rmSync(LOCK);
+					},
+					startTime: "900",
+				},
+			},
+		});
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: LAUNCHED_PID, startTime: "900" },
+			type: "launched",
+		});
+		await flushAsync();
+		run.clock.advance(100);
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+		run.clock.advance(400);
+		await flushAsync();
+		run.clock.advance(100);
+		await flushAsync();
+		// Studio saves the place, and a down closes it before the save watch
+		// looks.
+		run.memory.setModifiedTime("game.rbxl", Date.UTC(2026, 0, 2));
+		const answer = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await vi.waitFor(async () => {
+			run.clock.advance(10);
+			await flushAsync();
+			assert(run.fake.calls.includes("stop rojo 3000"), "Rojo is asked to stop");
+		});
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		await expect(answer).resolves.toMatchObject({ ending: true });
+		expect(spawnedIds(run.fake)).toContain(
+			"syncback-1: syncback default.project.json --input game.rbxl --non-interactive",
+		);
+	});
+});
+
+describe("forge start owners", () => {
+	it("should give its owner every part it starts with, and end as before once it goes", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ owned: true });
+		await flushAsync();
+		const owned = stateOf(run);
+		run.owner.request({ signal: "SIGINT", type: "signal" });
+
+		expect(owned).toMatchObject({
+			services: {
+				compiler: { owner: null, status: "off" },
+				rojo: { owner: "start", status: "ready" },
+				studio: { owner: null, status: "off" },
+			},
+		});
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
+		expect(run.onReleased).not.toHaveBeenCalled();
+	});
+
+	it("should stop the whole session when its owner goes before the parts started", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			flags: { open: false },
+			oneShot: oneShotsWith({ "start-1": "hold" }),
+			owned: true,
+			projectType: "rbxts",
+		});
+		await flushAsync();
+		run.owner.request({ type: "owner_gone" });
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "owner_gone" } });
+		expect(run.fake.calls).toStrictEqual(["go", "spawn start-1", "terminate 3000"]);
+	});
+
+	it("should start nothing when its owner goes before the session opened", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			owned: true,
+			pause: () => ownerGoneAt("created", () => run),
+		});
+
+		await expect(run.result).resolves.toStrictEqual({
+			data: { reason: "owner_gone", reports: [] },
+			summary: "Stopped on owner_gone before the session started; nothing ran.",
+		});
+	});
+
+	it("should stop what its owner started and run on with a part up added, once it goes", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...WATCH, owned: true });
+		await flushAsync();
+		await addCompilerAsync(run);
+		run.owner.request({ signal: "SIGINT", type: "signal" });
+		await passAsync(run, OUTPUT_POLL_MS);
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const released = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(released).toMatchObject({
+			phase: "ready",
+			services: {
+				compiler: { owner: null, status: "ready" },
+				rojo: { owner: null, status: "off" },
+			},
+		});
+		expect(run.onReleased).toHaveBeenCalledExactlyOnceWith({
+			data: {
+				ending: false,
+				released: [],
+				sessionId: "session-1",
+				stopped: ["rojo"],
+				studioLeft: false,
+			},
+			summary: "Let go of session session-1: stopped Rojo.",
+		});
+		expect(run.fake.calls).toContain("stop rojo 3000");
+	});
+
+	it("should give no owner to a part that up started again after it failed", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ ...WATCH, flags: { open: false }, owned: true });
+		await flushAsync();
+		run.fake.exit("compiler", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const failed = stateOf(run);
+		await addCompilerAsync(run);
+		const repaired = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(failed).toMatchObject({
+			services: { compiler: { owner: "start", status: "failed" } },
+		});
+		expect(repaired).toMatchObject({
+			services: {
+				compiler: { owner: null, status: "ready" },
+				rojo: { owner: "start", status: "ready" },
+			},
+		});
+	});
+
+	it("should refuse a start that joins while its own start owns it", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ owned: true });
+		await flushAsync();
+		const answer = await joinAsync(run).catch((err: unknown) => err);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toMatchObject({
+			code: "session_running",
+			hint: 'Stop that forge start first, or use "forge up".',
+			message: "Session session-1 already has an owner: a forge start terminal.",
+		});
+	});
+
+	it("should let a start join and take the running parts, and give them back once it lets go", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({ ...WATCH, flags: UP });
+		await flushAsync();
+		const owned = await joinAsync(run);
+		const taken = stateOf(run);
+		const second = await joinAsync(run).catch((err: unknown) => err);
+		const answer = await letGoAsync(owned, run);
+		const released = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(owned.joined).toStrictEqual({
+			added: [],
+			sessionId: "session-1",
+			taken: ["compiler"],
+		});
+		expect([taken, released]).toMatchObject([
+			{ services: { compiler: { owner: "start", status: "ready" } } },
+			{ phase: "ready", services: { compiler: { owner: null, status: "ready" } } },
+		]);
+		expect(second).toMatchObject({ code: "session_running" });
+		expect(answer).toStrictEqual({
+			ending: false,
+			released: ["compiler"],
+			sessionId: "session-1",
+			stopped: [],
+			studioLeft: false,
+		});
+	});
+
+	it("should stop what a joined start added once its connection ends, and end a session left with no part", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ ...WATCH, flags: { ...UP, compiler: false } });
+		await flushAsync();
+		const answer = await callSessionAsync(run.ipc, CONTROL_TARGET, "own", OWN_CALL);
+
+		expect(answer).toStrictEqual({ added: ["compiler"], sessionId: "session-1", taken: [] });
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "owner_gone" } });
+	});
+
+	it("should leave open the Studio a joined start opened, and stop the Rojo it started", async () => {
+		expect.assertions(5);
+
+		const run = startCommand({ ...WATCH, flags: UP });
+		await flushAsync();
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: LAUNCHED_PID, startTime: "900" },
+			type: "launched",
+		});
+		const joining = joinAsync(run, ["compiler", "studio"]);
+		await passAsync(run, FILE_POLL_MS);
+		run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		const owned = await joining;
+		const answer = await letGoAsync(owned, run, ["rojo"]);
+		const left = stateOf(run);
+		run.memory.fileSystem.rmSync(LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		const closed = stateOf(run);
+		// With no Studio left, a down that stops the compiler ends the session.
+		const down = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await vi.waitFor(async () => {
+			await passAsync(run, OUTPUT_POLL_MS);
+			assert(run.fake.calls.includes("stop compiler 3000"), "the compiler is asked to stop");
+		});
+		run.fake.exit("compiler", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		await expect(down).resolves.toMatchObject({ ending: true, stopped: ["compiler"] });
+		expect(owned.joined).toStrictEqual({
+			added: ["studio", "rojo"],
+			sessionId: "session-1",
+			taken: ["compiler"],
+		});
+		expect(answer).toStrictEqual({
+			ending: false,
+			released: ["compiler"],
+			sessionId: "session-1",
+			stopped: ["rojo"],
+			studioLeft: true,
+		});
+		expect(left).toMatchObject({
+			phase: "ready",
+			services: {
+				compiler: { owner: null, status: "ready" },
+				rojo: { owner: null, status: "off" },
+				studio: { owner: null, status: "off" },
+			},
+		});
+		// Its close later is no part of the session any more.
+		expect(closed).toStrictEqual(left);
+	});
+
+	it("should give back what a join took when its add fails, and let the next start join", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...WATCH, flags: UP, isPortFree: false });
+		await flushAsync();
+		const failed = await joinAsync(run, ["compiler", "studio"]).catch((err: unknown) => err);
+		const state = stateOf(run);
+		const next = await joinAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(failed).toMatchObject({ code: "port_in_use" });
+		expect(state).toMatchObject({ services: { compiler: { owner: null, status: "ready" } } });
+		expect(next.joined).toMatchObject({ taken: ["compiler"] });
+	});
+});
+
 function ignoreFailure(): void {
 	// The compile the stop cut short fails; only the sync answer matters.
 }
@@ -2934,6 +3259,21 @@ describe("idle timeout", () => {
 		await jumpAsync(run, MINUTE_MS);
 
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
+	});
+
+	it("should never stop the parts a start owns, nor end its session", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ ...IDLE_UP, owned: true, projectType: "rbxts" });
+		const isEnded = endedFlag(run);
+		await flushAsync();
+		await jumpAsync(run, 10 * MINUTE_MS);
+		const wasEnded = isEnded();
+		run.owner.request({ signal: "SIGINT", type: "signal" });
+		await run.result;
+
+		expect(wasEnded).toBeFalse();
+		expect(run.fake.calls).not.toContain("stop compiler 3000");
 	});
 
 	it("should wait 30 minutes by default", async () => {

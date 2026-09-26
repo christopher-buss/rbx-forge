@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeLine, parseHello, parseRequest, parseResponse } from "./protocol.ts";
+import { encodeLine, isRelease, parseHello, parseRequest, parseResponse } from "./protocol.ts";
 
 describe(encodeLine, () => {
 	it("should write one JSON object and a newline", () => {
@@ -34,9 +34,19 @@ describe(parseHello, () => {
 	});
 });
 
+describe(isRelease, () => {
+	it("should read a release line, and nothing else, as a release", () => {
+		expect.assertions(3);
+
+		expect(isRelease(encodeLine({ type: "release" }).trim())).toBeTrue();
+		expect(isRelease('{"type":"hello"}')).toBeFalse();
+		expect(isRelease("release")).toBeFalse();
+	});
+});
+
 describe(parseRequest, () => {
 	it("should read a request, with no params as empty params", () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		expect(parseRequest('{"method":"status","type":"request"}')).toStrictEqual({
 			method: "status",
@@ -46,6 +56,7 @@ describe(parseRequest, () => {
 		expect(
 			parseRequest('{"method":"shutdown","params":{"force":true},"type":"request"}'),
 		).toStrictEqual({ method: "shutdown", params: { force: true }, type: "request" });
+		expect(parseRequest('{"method":"own","type":"request"}')).toMatchObject({ method: "own" });
 	});
 
 	it.for([

@@ -99,10 +99,10 @@ describe("a service's exit", () => {
 			phase: "ready",
 			running: true,
 			services: {
-				compiler: { owner: null, status: "ready" },
+				compiler: { owner: "start", status: "ready" },
 				rojo: {
 					exitCode: 7,
-					owner: null,
+					owner: "start",
 					status: "failed",
 				},
 			},

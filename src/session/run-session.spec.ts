@@ -134,13 +134,13 @@ describe(runSessionAsync, () => {
 		expect.assertions(1);
 
 		const { outcome, signals } = startSession(async (scope) => {
-			scope.end({ type: "studio_closed" });
+			scope.end({ type: "shutdown" });
 			scope.end({ error: new Error("late"), type: "failed" });
 		});
 		await flushAsync();
 		signals.fire("SIGINT");
 
-		await expect(outcome).resolves.toMatchObject({ reason: { type: "studio_closed" } });
+		await expect(outcome).resolves.toMatchObject({ reason: { type: "shutdown" } });
 	});
 
 	it("should let a forced shutdown hurry the reaper's end", async () => {

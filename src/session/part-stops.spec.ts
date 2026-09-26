@@ -269,6 +269,7 @@ function makeWorld(services: Services, running: Array<ServiceId> = []): StopWorl
 			flushSyncbackAsync: async () => {
 				flushes += 1;
 			},
+			ownership: { isOwned: false },
 			parts: {
 				isRunning: (id) => world.running.has(id),
 				stopAsync: async (id) => {
@@ -381,6 +382,20 @@ describe(createPartStopper, () => {
 			ended: [{ type: "shutdown" }],
 			phase: [["stopping"]],
 		});
+	});
+
+	it("should never end a session a start holds, even with no part left", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(servicesWith({ compiler: READY }));
+		world.stopper.ownership.isOwned = true;
+
+		await expect(stopAsync(world, DOWN)).resolves.toStrictEqual({
+			ending: false,
+			kept: [],
+			stopped: ["compiler"],
+		});
+		expect(world.ended).toStrictEqual([]);
 	});
 
 	it("should end an up session with no part for down, and stop nothing", async () => {

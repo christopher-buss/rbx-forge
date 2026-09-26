@@ -24,7 +24,8 @@ as `eslint --fix`.
 
 A session runs in its own supervisor process. A native reaper process starts
 every worker (Rojo, the compiler, syncback, hooks) and owns it at OS level.
-Ctrl+C, a closed terminal, or a killed `forge start` stops every worker.
+Ctrl+C, a closed terminal, or a killed `forge start` stops every worker that
+`start` started. Studio stays open.
 
 `forge down` closes the session's Studio too. forge ends Studio when a "Save
 changes?" dialog blocks it, and moves the auto-recovery files out of Studio's
@@ -68,19 +69,24 @@ Session commands:
 
 | Command             | What it does                                                                                                                                                                                                                   |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `forge start`       | Run the session in this terminal. Ctrl+C, a closed terminal, or a killed `start` stops every process of the session.                                                                                                           |
+| `forge start`       | Run the session in this terminal, or join the running one, as the owner of its parts. Ctrl+C, a closed terminal, or a killed `start` stops the parts it started and gives back the rest. Studio stays open.                    |
 | `forge up`          | Start a session in the background with the watch-mode compiler. Returns when its first compile is done, or it failed. `--studio` also attaches Studio and Rojo. On a running session, starts only the missing or failed parts. |
 | `forge status`      | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                                                              |
 | `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                                                                                                                 |
 | `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                                                               |
 | `forge down`        | Stop the session's parts that have no owner (Studio first), and end the session when none is left. Reports `stopped` only when its supervisor and every process of it are gone.                                                |
 
-`start` runs the compiler, Rojo, and Studio. Its flags:
+`start` runs the compiler, Rojo, and Studio, and owns them: `down`, `stop`, and
+the idle timeout leave them alone. When a session runs (such as an agent's
+`up`), `start` joins it instead: it takes every running part, without a restart,
+and starts the missing ones. On Ctrl+C (or a closed terminal) it stops the parts
+it started and gives back the parts it took, which run on with no owner; the
+session ends when no part is left. It never closes Studio, and the close of its
+Studio stops nothing. Its flags:
 
 - `--no-compiler`: no compile, no build, no watch-mode compiler: only Rojo and
   Studio. The open step still builds when `open.buildFirst` is on.
-- `--no-open`: do not open Studio. By default the session opens the place and
-  ends when Studio closes it.
+- `--no-open`: do not open Studio. A `start` that joins adds only the compiler.
 - `--syncback`: run syncback and its hooks each time the place file is saved
   (config `syncback.runOnStart`).
 - `--force`: when a crashed earlier session still has processes after the wait,
@@ -116,12 +122,13 @@ compile runs, and none started for a short quiet window. Run it after an edit.
 `compile_timeout`. `--timeout 0` does not wait: it returns the status now. With
 no roblox-ts compiler in the session, it returns at once.
 
-One session runs per project (per worktree and build output). A second `start`
-fails with `session_running`; a second `up` joins the running session and adds
-its missing parts. A new session waits until every process of a crashed old one
-is gone. After 30 minutes with no activity (a command that talks to the session,
-a compile start, or a Studio save), a session stops its parts with no owner, as
-`down` does; set it with `session.idleTimeout`.
+One session runs per project (per worktree and build output). A second `up`
+joins the running session and adds its missing parts; a `start` joins it as its
+owner, and fails with `session_running` while another `start` owns it. A new
+session waits until every process of a crashed old one is gone. After 30 minutes
+with no activity (a command that talks to the session, a compile start, or a
+Studio save), a session stops its parts with no owner, as `down` does; set it
+with `session.idleTimeout`.
 
 One-shot commands:
 

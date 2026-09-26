@@ -1,15 +1,54 @@
 import { assert, describe, expect, it, vi } from "vitest";
 
+import type { ScriptedConnection } from "../../test/helpers/fake-ipc.ts";
 import { queueListener, scriptedConnection } from "../../test/helpers/fake-ipc.ts";
 import { ForgeError } from "../errors.ts";
-import type { IpcListener } from "./connection.ts";
-import { IPC_WAIT_MS } from "./protocol.ts";
-import type { IpcHandler, IpcServerOptions } from "./server.ts";
+import type { IpcListener, LineRead } from "./connection.ts";
+import { IPC_WAIT_MS, OWNER_POLL_MS } from "./protocol.ts";
+import type { IpcHandler, IpcOwner, IpcServerOptions } from "./server.ts";
 import { serveConnectionAsync, startIpcServer } from "./server.ts";
 
 const TOKEN = "secret-token";
 const HELLO = `{"protocol":1,"token":"${TOKEN}","type":"hello"}`;
 const STATUS = '{"method":"status","type":"request"}';
+const OWN = '{"method":"own","params":{"parts":[]},"type":"request"}';
+const RELEASE = '{"type":"release"}';
+
+function makeOwner(joined: IpcHandler = async () => ({ added: [] })) {
+	const join = vi.fn<IpcHandler>(joined);
+	const leave = vi.fn<IpcOwner["leave"]>().mockResolvedValue({ stopped: [] });
+	return { join, leave, owner: { join, leave } };
+}
+
+/**
+ * Make each read of a scripted connection wait a turn of the event loop, as
+ * a real read waits for its timeout: a held owner never starves timers.
+ *
+ * @param connection - The scripted connection.
+ * @returns The same connection, with slow reads.
+ */
+function slowReads(connection: ScriptedConnection): ScriptedConnection {
+	const { readLineAsync } = connection;
+	/**
+	 * Read after a turn of the event loop.
+	 *
+	 * @param timeoutMs - The read's bound.
+	 * @returns What the scripted read got.
+	 */
+	async function slowReadAsync(timeoutMs: number): Promise<LineRead> {
+		await new Promise((resolve) => {
+			setImmediate(resolve);
+		});
+		return readLineAsync(timeoutMs);
+	}
+
+	connection.readLineAsync = slowReadAsync;
+	return connection;
+}
+
+function lines(written: ReadonlyArray<string>): Array<unknown> {
+	return written.map((line) => JSON.parse(line));
+}
 
 function options(handlers: IpcServerOptions["handlers"] = {}): IpcServerOptions {
 	return { handlers, token: TOKEN };
@@ -190,7 +229,123 @@ describe(serveConnectionAsync, () => {
 	});
 });
 
+describe("serveConnectionAsync with an owner", () => {
+	it("should answer the join, then hold the connection until a release, and answer it", async () => {
+		expect.assertions(4);
+
+		const { join, leave, owner } = makeOwner();
+		const connection = scriptedConnection([
+			HELLO,
+			OWN,
+			{ type: "timed_out" },
+			'{"type":"other"}',
+			RELEASE,
+		]);
+		await serveConnectionAsync(connection, { ...options(), owner });
+
+		expect(lines(connection.written)).toStrictEqual([
+			{ ok: true, result: { added: [] }, type: "response" },
+			{ ok: true, result: { stopped: [] }, type: "response" },
+		]);
+		expect(join).toHaveBeenCalledExactlyOnceWith({ parts: [] });
+		expect(leave).toHaveBeenCalledExactlyOnceWith("release");
+		expect(connection.readTimeouts.slice(2)).toStrictEqual([
+			OWNER_POLL_MS,
+			OWNER_POLL_MS,
+			OWNER_POLL_MS,
+		]);
+	});
+
+	it.for([
+		["closes", { type: "closed" }],
+		["sends a line that is too long", { type: "too_long" }],
+	] as const)("should let go with no answer once the owner %s", async ([, end]) => {
+		expect.assertions(3);
+
+		const { leave, owner } = makeOwner();
+		const connection = scriptedConnection([HELLO, OWN, end]);
+		await serveConnectionAsync(connection, { ...options(), owner });
+
+		expect(connection.written).toHaveLength(1);
+		expect(leave).toHaveBeenCalledExactlyOnceWith("gone");
+		expect(connection.isClosed()).toBeTrue();
+	});
+
+	it("should let go at once when the owner never got the join's answer", async () => {
+		expect.assertions(2);
+
+		const { leave, owner } = makeOwner();
+		const connection = scriptedConnection([HELLO, OWN]);
+		connection.writeAsync = async () => false;
+		await serveConnectionAsync(connection, { ...options(), owner });
+
+		expect(leave).toHaveBeenCalledExactlyOnceWith("gone");
+		expect(connection.readTimeouts).toStrictEqual([IPC_WAIT_MS, IPC_WAIT_MS]);
+	});
+
+	it("should answer a failed join and hold nothing", async () => {
+		expect.assertions(2);
+
+		const { leave, owner } = makeOwner(async () => {
+			throw new ForgeError("session_running", "owned");
+		});
+		const connection = scriptedConnection([HELLO, OWN, RELEASE]);
+		await serveConnectionAsync(connection, { ...options(), owner });
+
+		expect(lines(connection.written)).toStrictEqual([
+			{ error: { code: "session_running", message: "owned" }, ok: false, type: "response" },
+		]);
+		expect(leave).not.toHaveBeenCalled();
+	});
+
+	it("should answer a failed release with its failure", async () => {
+		expect.assertions(1);
+
+		const { leave, owner } = makeOwner();
+		leave.mockRejectedValue(new ForgeError("not_running", "stopping"));
+		const connection = scriptedConnection([HELLO, OWN, RELEASE]);
+		await serveConnectionAsync(connection, { ...options(), owner });
+
+		expect(lines(connection.written)[1]).toStrictEqual({
+			error: { code: "not_running", message: "stopping" },
+			ok: false,
+			type: "response",
+		});
+	});
+
+	it("should answer own as unavailable with no owner", async () => {
+		expect.assertions(2);
+
+		const connection = scriptedConnection([HELLO, OWN]);
+		await serveConnectionAsync(connection, options());
+
+		expect(answered(connection.written)).toStrictEqual({
+			error: { code: "command_unavailable", message: "This session does not serve own." },
+			ok: false,
+			type: "response",
+		});
+	});
+});
+
 describe(startIpcServer, () => {
+	it("should end an owner's hold without a let go once it closes", async () => {
+		expect.assertions(3);
+
+		const listener = queueListener();
+		const { join, leave, owner } = makeOwner();
+		const server = startIpcServer(listener, { ...options(), owner });
+		const connection = slowReads(scriptedConnection([HELLO, OWN]));
+		listener.push(connection);
+		await vi.waitFor(() => {
+			assert(connection.readTimeouts.length > 2, "the owner is held");
+		});
+		await server.closeAsync();
+
+		expect(join).toHaveBeenCalledOnce();
+		expect(leave).not.toHaveBeenCalled();
+		expect(connection.isClosed()).toBeTrue();
+	});
+
 	it("should serve each client on its own until closed", async () => {
 		expect.assertions(3);
 

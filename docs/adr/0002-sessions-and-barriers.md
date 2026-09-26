@@ -5,12 +5,13 @@ status: accepted
 # Sessions: one supervisor process, a singleton lock, and barriers
 
 > **Amended by [ADR 0006](./0006-part-ownership-and-idle-timeout.md).** A
-> session is a set of parts with an owner or none. A second `start` or `up`
-> joins the running session instead of failing or ignoring its flags; the end of
-> the owner pipe stops only the parts `start` owns and never closes Studio; a
-> service's exit stops only its part; `down` stops and closes only parts with no
-> owner, and the session ends when none is left. The singleton lock, barriers,
-> and evidence rules below are unchanged.
+> session is a set of parts with an owner or none. A second `up`, or a `start`
+> while no other `start` owns the session, joins the running session instead of
+> failing or ignoring its flags; the end of the owner pipe stops only the parts
+> `start` owns and never closes Studio; a service's exit stops only its part;
+> `down` stops and closes only parts with no owner, and the session ends when
+> none is left. The singleton lock, barriers, and evidence rules below are
+> unchanged.
 
 Every session runs in its own supervisor process (`dist/supervisor.mjs`), also
 for `forge start`. There is no in-process session mode, and no forge command
@@ -70,11 +71,10 @@ in-process session cannot do.
   it (such as a save prompt, which an agent cannot answer), or after 15 s. It
   ends Studio at once too when the lock file goes: the place is closed, and
   Studio's own exit is slow. After a kill it deletes the lock file and handles
-  Studio's auto-recovery files. Then the session ends by itself
-  (`studio_closed`) once syncback of a last save is done (at most 30 s), and
-  `down` gives it that time before it asks. `--keep-studio` leaves Studio open.
-  A Studio that `down` cannot verify or end is reported in `studio` and does not
-  fail `down`. `--force` does not change how Studio closes.
+  Studio's auto-recovery files. Then the session ends once syncback of a last
+  save is done (at most 30 s). `--keep-studio` leaves Studio open. A Studio that
+  `down` cannot verify or end is reported in `studio` and does not fail `down`.
+  `--force` does not change how Studio closes.
 - **Evidence, not PIDs.** A process belongs to a session only by its marker, its
   lease descriptor (POSIX), its recorded job (Windows), or a recorded pin. Every
   kill goes through a pin and re-checks that evidence. An unverifiable process

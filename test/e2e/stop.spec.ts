@@ -176,14 +176,14 @@ describe("forge stop", () => {
 		expect(isProcessAlive(pidOf(studio))).toBeFalse();
 	});
 
-	it("should wait for the Studio a session is opening, then close it through the session", async () => {
+	it("should wait for the Studio a start is opening, then close it through the session with --force", async () => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
 		await startReadyAsync(fixture, START_STUDIO, {
 			FIXTURE_STUDIO_LOCK_DELAY_MS: "2000",
 		});
-		const stop = await runForgeAsync(fixture, ["stop", "--json"]);
+		const stop = await runForgeAsync(fixture, ["stop", "--force", "--json"]);
 		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
 
 		expect(stop.result.data).toMatchObject({

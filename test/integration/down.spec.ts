@@ -25,6 +25,7 @@ import {
 	currentIdentity,
 	filesLeft,
 	launch,
+	launchUnowned,
 	makeProjectAsync,
 	native,
 	ROJO_ONLY,
@@ -267,7 +268,7 @@ describe("forge down", () => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync({ gracefulTimeoutMs: 2000 });
-		const run = launch(project, ROJO_ONLY, {
+		const run = launchUnowned(project, ROJO_ONLY, {
 			FIXTURE_GRANDCHILDREN: "2",
 			FIXTURE_IGNORE_SIGNALS: "1",
 		});
@@ -302,7 +303,7 @@ describe("forge down", () => {
 		expect.assertions(2);
 
 		const project = await makeProjectAsync();
-		const run = launch(project, ROJO_ONLY);
+		const run = launchUnowned(project, ROJO_ONLY);
 		await waitForReadyAsync(run);
 		const session = findSession(nodeFs, forgeFiles(project.project));
 		assert(session !== undefined, "no session is named");
@@ -354,7 +355,7 @@ describe("forge down", () => {
 		expect.assertions(2);
 
 		const project = await makeProjectAsync();
-		const first = launch(project);
+		const first = launchUnowned(project);
 		await waitForReadyAsync(first);
 		const a = currentIdentity(project);
 		await waitForWorkersAsync(project.log, 1);

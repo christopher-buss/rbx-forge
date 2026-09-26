@@ -31,7 +31,8 @@ import {
 } from "./session/pause.ts";
 import { createStopSource } from "./session/stop-source.ts";
 import type { SessionRequest } from "./supervisor/channel.ts";
-import { createChannelReporter, parseSessionRequest } from "./supervisor/channel.ts";
+import { createChannelReporter, encodeMessage, parseSessionRequest } from "./supervisor/channel.ts";
+import type { SupervisorOwner } from "./supervisor/owner-end.ts";
 import { watchOwner } from "./supervisor/owner.ts";
 import { runSupervisorAsync } from "./supervisor/run-supervisor.ts";
 
@@ -51,11 +52,30 @@ function readRequest(): ForgeError | SessionRequest {
 const REQUEST = readRequest();
 const REPORT = REQUEST instanceof ForgeError ? undefined : REQUEST.detached?.report;
 
+/**
+ * The `start` that owns this session: the owner pipe's end, and where the
+ * news goes that the session let it go.
+ *
+ * @returns The owner; `undefined` when detached.
+ */
+function watchOwnerPipe(): SupervisorOwner | undefined {
+	if (REPORT !== undefined) {
+		return undefined;
+	}
+
+	const end = createStopSource();
+	watchOwner(process.stdin, end);
+	return {
+		onEnd: end.onStop,
+		onReleased: ({ data, summary }) => {
+			process.stdout.write(encodeMessage({ data, summary, type: "released" }));
+		},
+	};
+}
+
 // Next: the owner pipe and the stop signals, so no stop is ever missed.
 const stop = createStopSource();
-if (REPORT === undefined) {
-	watchOwner(process.stdin, stop);
-}
+const OWNER = watchOwnerPipe();
 
 createSignals(process).onStop((signal) => {
 	stop.request({ signal, type: "signal" });
@@ -79,6 +99,9 @@ const PAUSE: Pause =
 				pid: process.pid,
 				points: PAUSE_POINTS,
 			});
+
+/** What every run of the supervisor gets, but its `onReady`. */
+const SUPERVISE = { owner: OWNER, pause: PAUSE, stop, version: packageJson.version };
 
 /**
  * Test only (`RBX_FORGE_TEST_PAUSE=block`): once the test writes
@@ -166,7 +189,7 @@ async function superviseAsync(): Promise<number> {
 				}),
 			},
 			REQUEST,
-			{ onReady, pause: PAUSE, stop, version: packageJson.version },
+			{ ...SUPERVISE, onReady },
 		);
 		reporter.succeed("start", result);
 		return 0;

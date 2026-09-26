@@ -8,9 +8,12 @@
  * file type), and the tests make and remove Studio's lock file themselves.
  */
 import { rmSync, utimesSync, writeFileSync } from "node:fs";
+import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, expect, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
+import type { SessionStatus } from "../../src/session/status.ts";
+import { parseStatus } from "../../src/session/status.ts";
 import { parseLines, parseResult } from "../helpers/output.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import {
@@ -20,6 +23,7 @@ import {
 	waitForWorkersAsync,
 } from "../helpers/worker-log.ts";
 import { runBinAsync } from "./run-bin.ts";
+import type { Fixture } from "./session-fixture.ts";
 import {
 	holdPortAsync,
 	IS_WINDOWS,
@@ -50,12 +54,41 @@ function rojoServe(log: string): WorkerRecord {
 	return record;
 }
 
+/**
+ * Run `forge status --json` until `isDone` holds for the status.
+ *
+ * @param fixture - The project and its environment.
+ * @param isDone - The condition.
+ * @returns That status.
+ * @rejects When 30 seconds pass first.
+ */
+async function waitForStatusAsync(
+	fixture: Fixture,
+	isDone: (status: SessionStatus) => boolean,
+): Promise<SessionStatus> {
+	const deadline = Date.now() + 30_000;
+	for (;;) {
+		const { stdout } = await runBinAsync(
+			["status", "--json"],
+			fixture.project,
+			fixture.environment(),
+		);
+		const status = parseStatus(parseResult(stdout).data);
+		if (status !== undefined && isDone(status)) {
+			return status;
+		}
+
+		assert(Date.now() < deadline, "the status never came");
+		await sleep(100);
+	}
+}
+
 function describeWorker({ args, role }: WorkerRecord): string {
 	return [role, ...args].join(" ");
 }
 
 describe("forge start", () => {
-	it("should run the whole workflow and leave zero survivors once Studio closes the place", async () => {
+	it("should run the whole workflow, go on when its Studio closes, and leave zero survivors once killed", async () => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync({
@@ -68,25 +101,29 @@ describe("forge start", () => {
 		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
 		const studio = await waitForRoleAsync(fixture.log, "studio");
 		writeFileSync(`${fixture.place}.lock`, `${studio.pid}\n`);
-		await waitForOutputAsync(session, "The session ends when Studio closes it.");
+		await waitForOutputAsync(session, "Roblox Studio has ");
 		// Studio saves the place.
 		const later = new Date(Date.now() + 60_000);
 		utimesSync(fixture.place, later, later);
 		await waitForRoleAsync(fixture.log, "hook");
 		rmSync(`${fixture.place}.lock`);
-		const status = await session.closed;
+		// The close of the Studio start owns stops nothing: start decides.
+		const closed = await waitForStatusAsync(fixture, ({ services }) => {
+			return services.studio.status === "closed";
+		});
+		session.child.kill("SIGKILL");
+		await session.closed;
 		const workers = workersOf(fixture.log);
 		const sessions = new Set(workers.map(({ markers }) => markers.session));
 
 		// Every worker, the hook included, is a worker of one session's reaper.
-		expect({
-			result: parseResult(session.stdout()),
-			sessions: sessions.size,
-			status,
-		}).toMatchObject({
-			result: { data: { reason: "studio_closed" } },
+		expect({ services: closed.services, sessions: sessions.size }).toMatchObject({
+			services: {
+				compiler: { owner: "start", status: "ready" },
+				rojo: { owner: "start", status: "ready" },
+				studio: { owner: "start", status: "closed" },
+			},
 			sessions: 1,
-			status: EXIT_SUCCESS,
 		});
 		// Rojo and the compiler start their processes at about the same time.
 		expect(workers.map(describeWorker)).toIncludeSameMembers([

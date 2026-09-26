@@ -9,6 +9,7 @@ import type { StudioStop, StudioTarget } from "../studio/close-studio.ts";
 import { closeStudioAsync, STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
+import type { Ownership } from "./ownership.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
 import type {
@@ -108,8 +109,25 @@ export interface StopperSetup {
 export interface StopperParts {
 	/** Looks at the place once more and waits for the syncback runs. */
 	flushSyncbackAsync: () => Promise<void>;
+	/** A `start` holds the session: it ends on the owner's end only. */
+	ownership: Pick<Ownership, "isOwned">;
 	parts: Pick<ServiceParts, "isRunning" | "stopAsync">;
 	state: StudioState;
+}
+
+/**
+ * Whether a part runs, by the session's status: a service `starting` or
+ * `ready`, a Studio `opening` or `open`.
+ *
+ * @param services - The parts' status.
+ * @param part - Which of them.
+ * @returns Whether it runs.
+ */
+export function isPartRunning(services: SessionStatus["services"], part: PartId): boolean {
+	const { status } = services[part];
+	return part === "studio"
+		? status === "open" || status === "opening"
+		: status === "ready" || status === "starting";
 }
 
 /**
@@ -128,7 +146,7 @@ export function planStops(
 	const plan: StopPlan = { kept: [], stop: [] };
 	for (const part of partsInScope(services.studio, request)) {
 		const { owner } = services[part];
-		if (!isRunning(services, part)) {
+		if (!isPartRunning(services, part)) {
 			continue;
 		}
 
@@ -216,21 +234,6 @@ export function createPartStopper(
 			...(studio?.outcome === undefined ? {} : { studio: studio.outcome }),
 		};
 	};
-}
-
-/**
- * Whether a part runs, by the session's status: a service `starting` or
- * `ready`, a Studio `opening` or `open`.
- *
- * @param services - The parts' status.
- * @param part - Which of them.
- * @returns Whether it runs.
- */
-function isRunning(services: SessionStatus["services"], part: PartId): boolean {
-	const { status } = services[part];
-	return part === "studio"
-		? status === "open" || status === "opening"
-		: status === "ready" || status === "starting";
 }
 
 /**
@@ -403,14 +406,19 @@ async function stopStudioAsync(
 }
 
 /**
- * Whether the session has no part left: no service runs, and no Studio is
- * attached.
+ * Whether the session may end: no `start` holds it, no service runs, and no
+ * Studio is attached.
  *
- * @param stopper - The parts and the Studio state.
- * @returns `true` when none is left.
+ * @param stopper - The ownership, the parts, and the Studio state.
+ * @returns `true` when nothing keeps it.
  */
-function isEmpty({ parts, state }: StopperParts): boolean {
-	return !parts.isRunning("compiler") && !parts.isRunning("rojo") && !state.isAttached;
+function isEmpty({ ownership, parts, state }: StopperParts): boolean {
+	return (
+		!ownership.isOwned &&
+		!parts.isRunning("compiler") &&
+		!parts.isRunning("rojo") &&
+		!state.isAttached
+	);
 }
 
 /**
