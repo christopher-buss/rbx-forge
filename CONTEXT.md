@@ -6,9 +6,24 @@ syncback) for one Rojo project, and owns every process it starts.
 ## Sessions
 
 **Session**:\
-One running dev environment for one project: Rojo, the compiler, an optional
-syncback watch, and an optional Studio.\
+One running dev environment for one project (one per worktree): its parts, and
+an optional syncback watch. It can run with no part.\
 _Avoid_: dev server, watch mode, run
+
+**Part**:\
+The compiler, Rojo, or Studio of a session. Rojo is a part only together with an
+attached Studio.\
+_Avoid_: component, piece
+
+**Owner**:\
+The `start` terminal that owns a part. Only its owner stops an owned part; any
+client, and the idle timeout, can stop a part with no owner.\
+_Avoid_: holder, creator
+
+**Idle timeout**:\
+The time with no activity (a client request, a compile start, a Studio save)
+after which a session stops its parts that have no owner.\
+_Avoid_: TTL, expiry
 
 **Supervisor**:\
 The Node process that runs one session. `start` binds it to the terminal; `up`
@@ -26,8 +41,8 @@ run, a hook.\
 _Avoid_: child, job, task
 
 **Service**:\
-A worker that runs for the whole session (Rojo, the watch-mode compiler). Its
-exit ends the session.\
+A worker that runs for as long as its part (Rojo, the watch-mode compiler). Its
+exit stops only its part, which is then failed.\
 _Avoid_: daemon
 
 **Step**:\
@@ -36,8 +51,8 @@ syncback), with its own hooks.\
 _Avoid_: task, stage
 
 **Owner pipe**:\
-The pipe that ties a `start` session to the `start` process. Its end of file
-stops the session.\
+The pipe that ties a `start` process to the parts it owns. Its end of file stops
+those parts, and never closes Studio.\
 _Avoid_: heartbeat, parent watch
 
 ## Builds
@@ -100,6 +115,16 @@ _Avoid_: place lock, Studio lock
 `<place>_AutoRecovery_<n>.rbxl` in Studio's AutoSaves folder. Studio deletes it
 only when it closes by itself; forge handles the ones of a Studio it ended.\
 _Avoid_: autosave, backup
+
+**Attach**:\
+To add a Studio, with its Rojo, to a running session as parts. A Studio that
+already has the place open is attached as it is, never opened a second time.\
+_Avoid_: connect, join
+
+**Snapshot**:\
+A copy of the place that `forge open` builds and opens, outside every session
+and with no Rojo. forge keeps the newest five.\
+_Avoid_: one-shot place, temp place
 
 ## Control
 
