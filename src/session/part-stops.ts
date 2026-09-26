@@ -7,6 +7,7 @@ import type { IpcFailure } from "../ipc/protocol.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import type { StudioStop, StudioTarget } from "../studio/close-studio.ts";
 import { closeStudioAsync, STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
+import type { StudioProcess } from "../studio/launcher.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
@@ -100,7 +101,7 @@ export interface StopperSetup {
 	config: Pick<ResolvedConfig, "studio">;
 	/** The seams, environment, and project root. */
 	context: CommandContext;
-	status: Pick<StatusStore, "phase" | "snapshot">;
+	status: Pick<StatusStore, "phase" | "snapshot" | "studio">;
 }
 
 /** The session state a stop changes. */
@@ -360,6 +361,16 @@ async function closeSessionStudioAsync(
 }
 
 /**
+ * The Studio process the session recorded.
+ *
+ * @param studio - The Studio the session reports.
+ * @returns Its PID and start time; `null` when it has none.
+ */
+function studioProcess({ pid, startTime }: SessionStudio): null | StudioProcess {
+	return pid === undefined || startTime === undefined ? null : { pid, startTime };
+}
+
+/**
  * Close or let go of the session's Studio for a request.
  *
  * @param setup - The seams, environment, project, and recovery default.
@@ -377,6 +388,12 @@ async function stopStudioAsync(
 ): Promise<{ isGone: boolean; outcome: StudioOutcome | undefined }> {
 	const outcome = await closeSessionStudioAsync(setup, services.studio, request.recovery);
 	const isGone = outcome !== undefined && "stop" in outcome;
+	if (isGone) {
+		// The answer and the state contract agree, before the close watch sees
+		// it.
+		setup.status.studio("closed", outcome.place, studioProcess(services.studio));
+	}
+
 	// `down` lets go of a Studio it could not close: the session still ends.
 	if (isGone || request.scope === "down") {
 		stopper.state.isAttached = false;

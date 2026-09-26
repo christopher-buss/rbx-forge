@@ -216,7 +216,11 @@ async function serveSessionAsync(
 		{
 			config: { studio: DEFAULT_CONFIG.studio },
 			context: project.context,
-			status: { phase: vi.fn<StatusStore["phase"]>(), snapshot: status },
+			status: {
+				phase: vi.fn<StatusStore["phase"]>(),
+				snapshot: status,
+				studio: vi.fn<StatusStore["studio"]>(),
+			},
 		},
 		{ end: vi.fn<SessionScope["end"]>() },
 		{
