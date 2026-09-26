@@ -1,6 +1,9 @@
+import assert from "node:assert/strict";
 import { stripVTControlCharacters } from "node:util";
 
-import type { CompileReport } from "../compiler/diagnostics.ts";
+import type { KnownSession } from "../client/session.ts";
+import { fetchStatusAsync, findSession } from "../client/session.ts";
+import type { CompileReport, Diagnostic } from "../compiler/diagnostics.ts";
 import { createCompilerOutputParser } from "../compiler/sloptor.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
@@ -12,7 +15,10 @@ import type { ProcessOutcome } from "../process/process-runner.ts";
 import type { ToolCall } from "../process/run-tool.ts";
 import { checkToolOutcome, spawnToolAsync } from "../process/run-tool.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import { COMPILER_MISSING_HINT } from "../session/plan.ts";
+import type { SessionStatus } from "../session/status.ts";
+import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
 /** What one successful compile produced. */
@@ -72,14 +78,17 @@ export async function compileAsync(
 /**
  * `forge compile`: compile a roblox-ts project once. The compiler's output is
  * read into diagnostics and written in full to the compile log; the view
- * shows only a bounded tail of it.
+ * shows only a bounded tail of it. While a session runs, its watch-mode
+ * compiler owns the output: this waits for its fresh build instead.
  *
  * @param context - The run: project root, seams, and reporter.
  * @param input - The parsed flags.
- * @returns The diagnostics, error count, log path, and hook results.
+ * @returns The diagnostics, error count, log path, and hook results; with a
+ *   session, also its `sessionId`.
  * @rejects {ForgeError} `command_unavailable` for a Luau project,
- *   `compile_failed` when the compiler reports errors, a config error, or a
- *   failure from the compiler or a hook.
+ *   `compile_failed` when the compiler reports errors, `compiler_off` when
+ *   a session runs with no compiler, a config error, or a failure from the
+ *   compiler, the session's wait, or a hook.
  */
 export async function runCompileCommandAsync(
 	context: CommandContext,
@@ -100,12 +109,16 @@ export async function runCompileCommandAsync(
 		);
 	}
 
+	const session = await runningSessionAsync(context);
+	if (session !== undefined) {
+		return sessionBuildAsync(context, config, session);
+	}
+
 	const { hooks, value } = await compileAsync(context, config);
-	const warnings = value.diagnostics.filter(({ severity }) => severity === "warning").length;
 
 	return {
 		data: { ...value, hooks },
-		summary: `Compiled: ${plural(value.errors, "error")}, ${plural(warnings, "warning")}. Full output: ${value.log}`,
+		summary: `Compiled: ${counts(value)}. Full output: ${value.log}`,
 	};
 }
 
@@ -131,4 +144,113 @@ function compileError(
 			hint: "Fix the errors, then run forge compile again.",
 		},
 	);
+}
+
+function counts({ diagnostics, errors }: CompileReport): string {
+	const warnings = diagnostics.filter(({ severity }) => severity === "warning").length;
+	return `${plural(errors, "error")}, ${plural(warnings, "warning")}`;
+}
+
+/**
+ * The project's session, if one answers, with its compiler running.
+ *
+ * @param context - The project root and seams.
+ * @returns The session, or `undefined` when none answers.
+ * @rejects {ForgeError} `compiler_off` when its compiler does not run; a
+ *   status failure other than `not_running`.
+ */
+async function runningSessionAsync(context: CommandContext): Promise<KnownSession | undefined> {
+	const { fileSystem, ipc } = context.seams;
+	const session = findSession(fileSystem, forgeFiles(context.cwd));
+	if (session === undefined) {
+		return undefined;
+	}
+
+	let status: SessionStatus;
+	try {
+		status = await fetchStatusAsync(ipc, session);
+	} catch (err) {
+		if (err instanceof ForgeError && err.code === "not_running") {
+			return undefined;
+		}
+
+		throw err;
+	}
+
+	const { sessionId } = session.files;
+	const { status: compiler } = status.services.compiler;
+	if (compiler !== "ready" && compiler !== "starting") {
+		throw new ForgeError(
+			"compiler_off",
+			`Session ${sessionId} runs, but its compiler is ${compiler}: no build to report.`,
+			{
+				details: { sessionId, status: compiler },
+				hint: 'Run "forge up" to start the compiler, then forge compile again.',
+			},
+		);
+	}
+
+	return session;
+}
+
+function describeDiagnostic({ code, column, file, line, message, severity }: Diagnostic): string {
+	const where = file === null ? "" : `${file}:${line}:${column} - `;
+	return `  ${where}${severity} ${code}: ${message.split("\n", 1)[0]}`;
+}
+
+function sessionCompileError(
+	sessionId: string,
+	details: Pick<CompileOutcome, "diagnostics" | "errors" | "log">,
+): ForgeError {
+	const errors = details.diagnostics.filter(({ severity }) => severity === "error");
+	const shown = errors.slice(0, MESSAGE_TAIL_LINES).map(describeDiagnostic);
+	const more = errors.length - shown.length;
+	const lines = [
+		`The build of session ${sessionId} has ${plural(details.errors, "error")}:`,
+		...shown,
+		...(more > 0 ? [`  ...and ${more} more`] : []),
+		`Full output: ${details.log}`,
+	];
+
+	return new ForgeError("compile_failed", lines.join("\n"), {
+		details: { ...details, sessionId },
+		hint: "Fix the errors, then run forge compile again.",
+	});
+}
+
+/**
+ * `forge compile` in a running session: wait for the session's fresh build,
+ * with the `compile` hooks around the wait, and report it as a compile.
+ *
+ * @param context - The run.
+ * @param config - The hooks.
+ * @param session - The session with its compiler running.
+ * @returns The build's diagnostics, error count, log path, and hook results.
+ * @rejects {ForgeError} `compile_failed` when the build has errors; the
+ *   wait's failure, such as `compile_timeout` or `service_failed`.
+ */
+async function sessionBuildAsync(
+	context: CommandContext,
+	config: ResolvedConfig,
+	session: KnownSession,
+): Promise<CommandResult> {
+	const { sessionId } = session.files;
+	const log = logFilePath(context.cwd, "compiler");
+	const { hooks, value } = await runWithHooksAsync(context, config, "compile", async () => {
+		const status = await fetchStatusAsync(context.seams.ipc, session, FRESH_BUILD_TIMEOUT_MS);
+		const build = status.services.compiler.lastBuild;
+		assert(build !== undefined);
+		const { diagnostics, errors } = build;
+		if (errors > 0) {
+			throw sessionCompileError(sessionId, { diagnostics, errors, log });
+		}
+
+		const durationMs = Date.parse(build.at) - Date.parse(build.startedAt);
+		return { diagnostics, durationMs, errors, log };
+	});
+
+	return {
+		data: { ...value, hooks, sessionId },
+		summary: `Session ${sessionId} built: ${counts(value)}. Full output: ${log}`,
+	};
 }

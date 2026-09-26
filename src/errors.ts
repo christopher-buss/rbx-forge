@@ -22,6 +22,7 @@ export type ForgeErrorCode =
 	| "compile_failed"
 	| "compile_timeout"
 	| "compiler_missing"
+	| "compiler_off"
 	| "config_exists"
 	| "config_invalid"
 	| "config_load_failed"
@@ -82,6 +83,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		text: "No fresh build came within the wait bound of `status --wait`.",
 	},
 	compiler_missing: { exitCode: EXIT_FAILURE, text: "The compiler is not installed." },
+	compiler_off: {
+		exitCode: EXIT_FAILURE,
+		text: "A session runs, but its compiler does not, so `forge compile` has no build to report.",
+	},
 	config_exists: {
 		exitCode: EXIT_FAILURE,
 		text: "`init` found a config file it will not replace.",
