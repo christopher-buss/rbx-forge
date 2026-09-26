@@ -16,6 +16,7 @@ import { isReady, parseStatus } from "../../src/session/status.ts";
 import type { SessionRequest } from "../../src/supervisor/channel.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
+import { isRojoServe } from "../helpers/worker-log.ts";
 import {
 	filesLeft,
 	launch,
@@ -27,6 +28,7 @@ import {
 
 const NO_ROJO: SessionRequest = { compiler: true, config: {}, open: false, rojo: false };
 const POLL_MS = 50;
+const WAIT_MS = 30_000;
 
 /**
  * Listen on a free port of `127.0.0.1` until the test ends.
@@ -52,10 +54,12 @@ async function busyPortAsync(): Promise<number> {
  *
  * @param target - The session's endpoint and token.
  * @returns Its first status with phase `ready`.
+ * @rejects When {@link WAIT_MS} pass first.
  */
 async function readyStatusAsync(target: IpcTarget): Promise<SessionStatus> {
 	const transport = realTransport();
-	for (;;) {
+	const deadline = Date.now() + WAIT_MS;
+	while (Date.now() < deadline) {
 		const status = parseStatus(await callSessionAsync(transport, target, "status"));
 		if (status !== undefined && isReady(status)) {
 			return status;
@@ -63,6 +67,8 @@ async function readyStatusAsync(target: IpcTarget): Promise<SessionStatus> {
 
 		await sleep(POLL_MS);
 	}
+
+	throw new Error("the session was never ready");
 }
 
 describe("supervisor --no-rojo", () => {
@@ -79,9 +85,7 @@ describe("supervisor --no-rojo", () => {
 			endpoint: session.identity.endpoint,
 			token: session.token,
 		});
-		const serves = workersOf(project, session.identity.sessionId).filter(({ args }) => {
-			return args.includes("serve");
-		});
+		const serves = workersOf(project, session.identity.sessionId).filter(isRojoServe);
 		run.stop("SIGINT");
 		const settled = await settledWithinAsync(run, "stop", 30_000);
 

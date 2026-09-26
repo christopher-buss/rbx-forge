@@ -10,7 +10,6 @@ const START: StatusStart = {
 	open: true,
 	pid: 42,
 	port: 34_872,
-	rojo: true,
 	sessionId: "s1",
 	startedAt: AT,
 	syncback: true,
@@ -103,7 +102,7 @@ describe(createStatusStore, () => {
 	it("should start with Rojo off and no port, and be ready with the compiler alone", () => {
 		expect.assertions(3);
 
-		const { store } = makeStore({ ...START, rojo: false });
+		const { store } = makeStore({ ...START, port: null });
 		const before = store.snapshot();
 		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, false);
 
@@ -115,7 +114,7 @@ describe(createStatusStore, () => {
 	it("should read back a status with Rojo off", () => {
 		expect.assertions(1);
 
-		const { store } = makeStore({ ...START, rojo: false });
+		const { store } = makeStore({ ...START, port: null });
 		const status = store.snapshot();
 
 		expect(parseStatus(JSON.parse(JSON.stringify(status)))).toStrictEqual(status);

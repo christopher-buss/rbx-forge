@@ -114,8 +114,8 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 			context: workerContext(session, scope, "syncback"),
 			requireSyncback,
 		});
-		// The save watch starts once the session is ready; until then no save
-		// is seen.
+		// The save watch starts once Rojo serves, or at once with no Rojo;
+		// until then no save is seen.
 		const saves: Pick<SaveWatch, "check"> = { check: noSaveWatch };
 		if (opened !== undefined) {
 			async function flushSyncbackAsync(): Promise<void> {
@@ -434,12 +434,12 @@ async function watchStudioAsync(
 	scope.end({ type: "studio_closed" });
 }
 
-function announceReady({ config, context, plan, rojo }: SessionSetup): void {
+function announceReady({ compiler, config, context, rojo }: SessionSetup): void {
 	const services = [
 		...(rojo === undefined
 			? []
 			: [`Rojo serves ${config.rojoProjectPath} on port ${config.rojoPort}.`]),
-		...(plan.compiler === undefined ? [] : ["The compiler watches your code."]),
+		...(compiler === undefined ? [] : ["The compiler watches your code."]),
 	];
 	context.reporter.emit({
 		message: `${services.join(" ")} Press Ctrl+C to stop.`,

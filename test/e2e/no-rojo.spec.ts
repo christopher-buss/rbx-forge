@@ -8,20 +8,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_SUCCESS, EXIT_USAGE } from "../../src/exit-codes.ts";
-import type { WorkerRecord } from "../helpers/worker-log.ts";
-import { readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
+import { isRojoServe, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 import { holdPortAsync, makeFixtureAsync } from "./session-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
-
-/**
- * Every `rojo serve` a fixture log records.
- *
- * @param log - The fixture log.
- * @returns Their records, in start order.
- */
-function rojoServes(log: string): Array<WorkerRecord> {
-	return readWorkerLog(log).filter(({ args, role }) => role === "rojo" && args[0] === "serve");
-}
 
 describe("forge up --no-rojo", () => {
 	it("should run the compiler alone on a busy Rojo port, through up, status --wait, and down", async () => {
@@ -56,7 +45,7 @@ describe("forge up --no-rojo", () => {
 		expect(fresh.result.data).toMatchObject({
 			services: { compiler: { lastBuild: { errors: 1 } }, rojo: { status: "off" } },
 		});
-		expect(rojoServes(fixture.log)).toStrictEqual([]);
+		expect(readWorkerLog(fixture.log).filter(isRojoServe)).toStrictEqual([]);
 		await expect(
 			waitForDeathAsync([Number(up.result.data!["pid"])], 10_000),
 		).resolves.toStrictEqual([]);

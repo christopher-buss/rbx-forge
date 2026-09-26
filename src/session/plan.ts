@@ -20,7 +20,7 @@ export interface SessionPlan {
 	compiler: CompilerWatch | undefined;
 	/** Open the place in Studio; the session ends when Studio closes it. */
 	open: boolean;
-	/** The Rojo serve service. */
+	/** Serve the project with Rojo. */
 	rojo: boolean;
 	/** Run syncback on every place save. */
 	syncback: boolean;

@@ -141,9 +141,8 @@ export interface StatusStart {
 	/** The session opens Studio. */
 	open: boolean;
 	pid: number;
-	port: number;
-	/** The session runs Rojo serve. */
-	rojo: boolean;
+	/** Rojo's port; `null` when the session serves no Rojo. */
+	port: null | number;
 	sessionId: string;
 	startedAt: string;
 	/** The session runs syncback on save. */
@@ -209,9 +208,10 @@ function initialStatus(start: StatusStart): SessionStatus {
 		running: true,
 		services: {
 			compiler: { building: false, status: start.compiler ? "starting" : "off" },
-			rojo: start.rojo
-				? { port: start.port, status: "starting" }
-				: { port: null, status: "off" },
+			rojo:
+				start.port === null
+					? { port: null, status: "off" }
+					: { port: start.port, status: "starting" },
 			studio: { status: start.open ? "opening" : "off" },
 			syncback: { status: start.syncback ? "idle" : "off" },
 		},

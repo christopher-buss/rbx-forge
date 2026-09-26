@@ -372,7 +372,7 @@ async function runLockedAsync(
 		identity: identityOf(context, config, options.version),
 		onReady: options.onReady,
 		pause: async () => options.pause("control", options.stop.signal),
-		port: config.rojoPort,
+		port: servedPort(config, services),
 		stop: options.stop,
 		sync,
 	});
@@ -401,6 +401,9 @@ function resolveServices(
 	config: ResolvedConfig,
 	plan: SessionPlan,
 ): Pick<SessionSetup, "compiler" | "config" | "context" | "plan" | "rojo"> {
+	const rojo = plan.rojo
+		? rojoInvocation(context, config, rojoServeArgs(config.rojoProjectPath, config.rojoPort))
+		: undefined;
 	const { compiler } = plan;
 	return {
 		compiler:
@@ -417,16 +420,6 @@ function resolveServices(
 		config,
 		context,
 		plan,
-		rojo: plan.rojo
-			? {
-					...rojoInvocation(
-						context,
-						config,
-						rojoServeArgs(config.rojoProjectPath, config.rojoPort),
-					),
-					id: "rojo",
-					step: "rojo serve",
-				}
-			: undefined,
+		rojo: rojo && { ...rojo, id: "rojo", step: "rojo serve" },
 	};
 }

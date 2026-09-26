@@ -17,7 +17,6 @@ function makeTarget() {
 			open: false,
 			pid: 7,
 			port: 1,
-			rojo: true,
 			sessionId: "s1",
 			startedAt: "2026-01-01T00:00:00.000Z",
 			syncback: false,
