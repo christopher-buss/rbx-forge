@@ -5,6 +5,7 @@ import { startIpcServer } from "../ipc/server.ts";
 import type { Seams } from "../seams/seams.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
 import { createBuildWatch } from "../session/build-watch.ts";
+import type { PartRequests } from "../session/part-requests.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { SessionStatus, StatusStore } from "../session/status.ts";
 import { createStatusStore, isReady } from "../session/status.ts";
@@ -19,14 +20,16 @@ export interface ControlSetup {
 	identity: IdentityRecord;
 	/** Called once, when the session is first ready. */
 	onReady: (() => void) | undefined;
+	/** Adds parts through the session body, for `forge up`. */
+	parts: Pick<PartRequests, "addAsync">;
 	/**
 	 * The test pause point `control`: the files and `current` exist, the
 	 * endpoint does not.
 	 */
 	pause: () => Promise<void>;
-	/** What the session runs, for its first status. */
-	plan: { compiler: boolean; open: boolean; syncback: boolean };
-	/** The fixed Rojo port. */
+	/** What the session starts with, for its first status. */
+	plan: { compiler: boolean; open: boolean; rojo: boolean; syncback: boolean };
+	/** The Rojo port. */
 	port: number;
 	/** The session reads its compiler's builds (roblox-ts). */
 	readsBuilds: boolean;
@@ -56,11 +59,11 @@ export type ControlSeams = Pick<
 >;
 
 /**
- * Step 5 of `runSupervisorAsync`: create the session
- * directory with its identity record and token, keep `state.json` up to
- * date, and open the control endpoint (`status`, `freshStatus`, `sync`,
- * `shutdown`). Call only while holding the singleton lock. When the endpoint
- * cannot open, nothing of the session ran, so its files go.
+ * Step 5 of `runSupervisorAsync`: create the session directory with its
+ * identity record and token, keep `state.json` up to date, and open the
+ * control endpoint (`status`, `freshStatus`, `addParts`, `sync`, `shutdown`).
+ * Call only while holding the singleton lock. When the endpoint cannot open,
+ * nothing of the session ran, so its files go.
  *
  * @param seams - The clock, file system, host, transport, addon, and ids.
  * @param setup - The identity, plan, port, stop requests, and `onReady`.
@@ -82,6 +85,7 @@ export async function openSessionAsync(
 	const server = startIpcServer(listener, {
 		handlers: controlHandlers({
 			builds,
+			parts: setup.parts,
 			sessionId: setup.identity.sessionId,
 			status,
 			stop: setup.stop,

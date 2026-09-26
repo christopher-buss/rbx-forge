@@ -35,9 +35,13 @@ Error codes are stable: a code is never renamed or reused. The full list is in
 
 ## Agent loop
 
-1. `forge up --json`: start the session, or find the running one
-   (`data.started`). Returns when no part is `starting`: Rojo listens and the
-   first compile is done, or the part failed (see [Parts](#parts)).
+1. `forge up --json`: start a session with the watch-mode compiler alone, or
+   find the running one (`data.started`). On a running session, it starts the
+   parts it asks for that are `off` or `failed`, and never touches a part that
+   runs. `data.added` names the parts this `up` started (`[]` when none).
+   Returns when no part is `starting`: the first compile is done, or the part
+   failed (see [Parts](#parts)). A project with no compiler gets a session with
+   no part.
 2. Edit code.
 3. `forge status --json --wait`: `data.services.compiler.lastBuild` has `errors`
    and `diagnostics` (`file`, `line`, `column`, `code`, `message`, `severity`),
@@ -45,7 +49,8 @@ Error codes are stable: a code is never renamed or reused. The full list is in
    it the build of your edit; see below. `data.services.studio` has `status`
    (`opening`, `open`, `closed`, `off`), `place`, and, for a Studio forge
    started or attached, `pid` and `startTime`.
-4. Play and read the console with the Roblox Studio MCP.
+4. To play, `forge open --json` opens the place in Studio; read the console with
+   the Roblox Studio MCP.
 5. `forge sync --json`: pull Studio edits into the project, with the syncback
    hooks. It waits for a running save-triggered run, then runs once more.
    Failures keep their code, with hook results in `error.details.hooks`.
@@ -66,8 +71,9 @@ has:
   `outputTail`, the last lines of its output. `forge logs <part>` has all of it.
 
 A service's exit stops only its part: the session and its other parts keep
-running. The phase is `ready` once no part is `starting`, also with a part `off`
-or `failed`. `data.services.studio` also has `owner`.
+running. A second `forge up` starts a `failed` compiler again, as a new part.
+The phase is `ready` once the session started its parts and none is `starting`,
+also with a part `off` or `failed`. `data.services.studio` also has `owner`.
 
 ## Fresh builds: `status --wait`
 

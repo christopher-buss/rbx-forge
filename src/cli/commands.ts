@@ -75,7 +75,7 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		flags: UP_FLAGS,
 		run: runUpAsync,
 		summary:
-			"Start the dev session in the background, as start does, and return once Rojo and the compiler are ready. Reports the running session if there is one.",
+			"Start the dev session in the background with the watch-mode compiler alone, and return once its first compile is done. On a running session, start only the parts that are missing or failed.",
 	},
 	{
 		name: "status",

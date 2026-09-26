@@ -28,8 +28,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 
 import { pinNow, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { makeFixtureAsync } from "./session-fixture.ts";
-import type { UpRun } from "./up-fixture.ts";
+import { makeFixtureAsync, START_STUDIO, startReadyAsync } from "./session-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
 const { env } = process;
@@ -37,7 +36,6 @@ const IS_ENABLED = env["RBX_FORGE_TEST_REAL_STUDIO"] === "1" && process.platform
 const PLACES = path.join(import.meta.dirname, "..", "fixtures", "studio");
 /** A name no place of the user has: its auto-recovery files are forge's. */
 const PLACE = "forge-real-studio.rbxl";
-const UP = ["up", "--no-compiler", "--json"];
 /** How long Studio may take to open a place. */
 const OPEN_MS = 90_000;
 /** How long Studio stays free of dialogs before a test counts it loaded. */
@@ -127,18 +125,12 @@ async function makeRealProjectAsync(fixturePlace: string): Promise<Fixture> {
  * of dialogs (such as "Opening place") for a while.
  *
  * @param fixture - The project.
- * @param up - The `up` run.
+ * @param sessionId - The session that opens Studio.
  * @returns The PID the session recorded, and the PID the lock file names.
  * @rejects When Studio does not open the place in time.
  */
-async function waitForLoadedAsync(fixture: Fixture, up: UpRun): Promise<[unknown, number]> {
-	const state = path.join(
-		fixture.project,
-		".forge",
-		"sessions",
-		String(up.result.data!["sessionId"]),
-		"state.json",
-	);
+async function waitForLoadedAsync(fixture: Fixture, sessionId: string): Promise<[unknown, number]> {
+	const state = path.join(fixture.project, ".forge", "sessions", sessionId, "state.json");
 	const deadline = Date.now() + OPEN_MS;
 	while (!existsSync(state) || !readFileSync(state, "utf8").includes('"status":"open"')) {
 		if (Date.now() > deadline) {
@@ -172,7 +164,7 @@ async function waitForLoadedAsync(fixture: Fixture, up: UpRun): Promise<[unknown
 
 describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 	it(
-		"should open Studio directly with up, and close it with down",
+		"should open Studio directly with start, and close it with down",
 		{ timeout: 240_000 },
 		async () => {
 			expect.assertions(4);
@@ -180,8 +172,12 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("saved.rbxl");
 			const started = Date.now();
-			const up = await runForgeAsync(fixture, UP, realVariables(fixture));
-			const [recorded, lockPid] = await waitForLoadedAsync(fixture, up);
+			const { sessionId } = await startReadyAsync(
+				fixture,
+				START_STUDIO,
+				realVariables(fixture),
+			);
+			const [recorded, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			const opened = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables(fixture));
 			note({ closeMs: Date.now() - opened, openMs: opened - started, test: "down" });
@@ -200,8 +196,8 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 		killNewStudiosAtEnd();
 		const fixture = await makeRealProjectAsync("saved.rbxl");
-		const up = await runForgeAsync(fixture, UP, realVariables(fixture));
-		const [, lockPid] = await waitForLoadedAsync(fixture, up);
+		const { sessionId } = await startReadyAsync(fixture, START_STUDIO, realVariables(fixture));
+		const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 		const loaded = Date.now();
 		const stop = await runForgeAsync(fixture, ["stop", "--json"], realVariables(fixture));
 		note({ closeMs: Date.now() - loaded, test: "stop" });
@@ -223,8 +219,12 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("unsaved.rbxl");
-			const up = await runForgeAsync(fixture, UP, realVariables(fixture));
-			const [, lockPid] = await waitForLoadedAsync(fixture, up);
+			const { sessionId } = await startReadyAsync(
+				fixture,
+				START_STUDIO,
+				realVariables(fixture),
+			);
+			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			const loaded = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables(fixture));
 			note({ closeMs: Date.now() - loaded, test: "dialog" });

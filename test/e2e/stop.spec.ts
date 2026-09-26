@@ -18,7 +18,12 @@ import {
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
 import { makeProject, runBinAsync } from "./run-bin.ts";
-import { closedOnRequest, makeFixtureAsync } from "./session-fixture.ts";
+import {
+	closedOnRequest,
+	makeFixtureAsync,
+	START_STUDIO,
+	startReadyAsync,
+} from "./session-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
 /**
@@ -151,7 +156,7 @@ describe("forge stop", () => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
-		await runForgeAsync(fixture, ["up", "--no-compiler", "--json"], {
+		await startReadyAsync(fixture, START_STUDIO, {
 			FIXTURE_STUDIO_LOCK_DELAY_MS: "2000",
 		});
 		const stop = await runForgeAsync(fixture, ["stop", "--json"]);

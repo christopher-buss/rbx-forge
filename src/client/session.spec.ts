@@ -5,7 +5,13 @@ import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
-import { fetchStatusAsync, findSession, probeSessionAsync, readIdentity } from "./session.ts";
+import {
+	addPartsAsync,
+	fetchStatusAsync,
+	findSession,
+	probeSessionAsync,
+	readIdentity,
+} from "./session.ts";
 
 const FORGE = forgeFiles(PROJECT);
 const IDENTITY = {
@@ -84,6 +90,42 @@ describe(fetchStatusAsync, () => {
 			code: "internal_error",
 			hint: "The session may run another forge version. Stop it, then start it again.",
 			message: "The session answered status with something else.",
+		});
+	});
+});
+
+describe(addPartsAsync, () => {
+	it("should ask for the parts and return those the session started", async () => {
+		expect.assertions(2);
+
+		const memory = createMemoryFileSystem();
+		const transport = createMemoryTransport();
+		const fake = await serveFakeSessionAsync(memory, transport);
+		const asked: Array<unknown> = [];
+		fake.addParts = (parameters) => {
+			asked.push(parameters);
+			return { added: ["compiler"] };
+		};
+
+		await expect(
+			addPartsAsync(transport, findSession(memory.fileSystem, FORGE)!, ["compiler"], 1000),
+		).resolves.toStrictEqual(["compiler"]);
+		expect(asked).toStrictEqual([{ parts: ["compiler"] }]);
+	});
+
+	it("should reject an answer that is not a list of parts as internal_error", async () => {
+		expect.assertions(1);
+
+		const memory = createMemoryFileSystem();
+		const transport = createMemoryTransport();
+		const fake = await serveFakeSessionAsync(memory, transport);
+		fake.addParts = () => ({ added: ["studio"] });
+		const added = addPartsAsync(transport, findSession(memory.fileSystem, FORGE)!, [], 1000);
+
+		await expect(added).rejects.toMatchObject({
+			code: "internal_error",
+			hint: "The session may run another forge version. Stop it, then start it again.",
+			message: "The session answered addParts with something else.",
 		});
 	});
 });

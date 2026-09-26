@@ -1,7 +1,7 @@
 /**
- * `forge start` and `forge up` attach a Studio that already has the place
- * open: no build of the place, no second Studio, and the session records
- * and watches that Studio (#50).
+ * `forge start` attaches a Studio that already has the place open: no build
+ * of the place, no second Studio, and the session records and watches that
+ * Studio (#50).
  */
 import nodeFs from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import type { Fixture } from "./session-fixture.ts";
 import {
 	closedOnRequest,
 	makeFixtureAsync,
+	startReadyAsync,
 	startSession,
 	waitForOutputAsync,
 } from "./session-fixture.ts";
@@ -29,15 +30,15 @@ function rolesOf(fixture: Fixture): Array<string> {
 }
 
 describe("attach an open Studio", () => {
-	it("should attach the Studio that has the place open on up, and close it on down", async () => {
+	it("should attach the Studio that has the place open on start, and close it on down", async () => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(BUILD_FIRST, { studio: true });
 		const studio = pidOf(await openStudioStandInAsync(fixture.place));
-		const up = await runForgeAsync(fixture, ["up", "--no-compiler", "--json"]);
+		const { session } = await startReadyAsync(fixture, START);
 		const down = await runForgeAsync(fixture, ["down", "--json"]);
 
-		expect(up.result).toMatchObject({ ok: true });
+		await expect(session.closed).resolves.toBe(0);
 		expect(down.result).toMatchObject({
 			data: {
 				studio: closedOnRequest({ pid: studio, place: fixture.place, status: "closed" }),

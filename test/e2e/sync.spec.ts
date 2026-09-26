@@ -10,7 +10,7 @@ import { EXIT_NOT_RUNNING, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { readWorkerLog } from "../helpers/worker-log.ts";
 import { makeFixtureAsync, waitForRoleAsync } from "./session-fixture.ts";
-import { runForgeAsync, UP_ROJO_ONLY } from "./up-fixture.ts";
+import { runForgeAsync, UP } from "./up-fixture.ts";
 
 const HOOKED = { hooks: { syncback: { post: ["hook"] } } };
 /** How long each fixture hook runs. */
@@ -28,7 +28,7 @@ describe("forge sync", () => {
 
 		const fixture = await makeFixtureAsync(HOOKED);
 		writeFileSync(fixture.place, "place");
-		const up = await runForgeAsync(fixture, UP_ROJO_ONLY);
+		const up = await runForgeAsync(fixture, UP);
 		const sync = await runForgeAsync(fixture, ["sync", "--json"]);
 		const status = await runForgeAsync(fixture, ["status", "--json"]);
 		const { sessionId } = up.result.data!;
@@ -68,7 +68,7 @@ describe("forge sync", () => {
 			hooks: { syncback: { post: ["no-such-hook"] } },
 		});
 		writeFileSync(fixture.place, "place");
-		await runForgeAsync(fixture, UP_ROJO_ONLY);
+		await runForgeAsync(fixture, UP);
 		const sync = await runForgeAsync(fixture, ["sync", "--json"]);
 
 		expect(sync.status).not.toBe(EXIT_SUCCESS);
@@ -83,7 +83,7 @@ describe("forge sync", () => {
 
 		const fixture = await makeFixtureAsync(HOOKED);
 		writeFileSync(fixture.place, "place");
-		await runForgeAsync(fixture, [...UP_ROJO_ONLY, "--syncback"], {
+		await runForgeAsync(fixture, [...UP, "--syncback"], {
 			FIXTURE_HOOK_MS: String(HOOK_MS),
 		});
 		// Studio saves the place: the save watch starts a run.

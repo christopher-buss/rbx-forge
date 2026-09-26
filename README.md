@@ -66,16 +66,16 @@ The bins `forge` and `rbx-forge` are the same. Run forge from the project root.
 
 Session commands:
 
-| Command             | What it does                                                                                                                                                                       |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `forge start`       | Run the session in this terminal. Ctrl+C, a closed terminal, or a killed `start` stops every process of the session.                                                               |
-| `forge up`          | Start the same session in the background. Returns when no part is starting: Rojo listens and the first compile is done, or the part failed. Reports a running session if one runs. |
-| `forge status`      | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                  |
-| `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                                                                     |
-| `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                   |
-| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.                                                    |
+| Command             | What it does                                                                                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `forge start`       | Run the session in this terminal. Ctrl+C, a closed terminal, or a killed `start` stops every process of the session.                                                                       |
+| `forge up`          | Start a session in the background with the watch-mode compiler alone. Returns when its first compile is done, or it failed. On a running session, starts only the missing or failed parts. |
+| `forge status`      | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                          |
+| `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                                                                             |
+| `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                           |
+| `forge down`        | Close the session's Studio, then stop the session. Reports `stopped` only when its supervisor and every process of it are gone.                                                            |
 
-`start` and `up` take the same flags:
+`start` runs the compiler, Rojo, and Studio. Its flags:
 
 - `--no-compiler`: no compile, no build, no watch-mode compiler: only Rojo and
   Studio. The open step still builds when `open.buildFirst` is on.
@@ -87,6 +87,14 @@ Session commands:
   kill them, each verified as that session's own.
 - `--studio-path <path>`: the Roblox Studio executable to start (see
   [Opening Studio](./docs/studio.md#opening-studio)).
+
+`up` runs no Rojo and no Studio, and builds no place: it starts the watch-mode
+compiler, which does the first compile. A project with no compiler (Luau with no
+`luau.watch.command`) gets a session with no part. `up` takes `--syncback`,
+`--force`, and `--no-compiler` (start no part). On a running session, `up`
+starts the parts it asks for that are missing or failed, such as a compiler that
+crashed, and names them in `data.added`; it never stops or restarts a part that
+runs.
 
 `down` takes `--timeout <seconds>` (default 15), `--force` (kill a supervisor
 that does not stop, and what is left of its session, each verified),
@@ -100,8 +108,9 @@ compile runs, and none started for a short quiet window. Run it after an edit.
 no roblox-ts compiler in the session, it returns at once.
 
 One session runs per project (per worktree and build output). A second `start`
-fails with `session_running`; a second `up` joins the running session. A new
-session waits until every process of a crashed old one is gone.
+fails with `session_running`; a second `up` joins the running session and adds
+its missing parts. A new session waits until every process of a crashed old one
+is gone.
 
 One-shot commands:
 
@@ -150,14 +159,16 @@ With `--json`, or when stdout is not a terminal, forge writes NDJSON and ends
 with one `result` line. A run that cannot prompt never prompts. Error codes are
 stable, and each maps to one exit code. The loop:
 
-1. `forge up --json` starts the session, or finds the running one.
+1. `forge up --json` starts the compiler in a background session. On a running
+   session, it starts the compiler again if it failed.
 2. Edit code.
 3. `forge status --json --wait` gives the compile errors with file, line, and
    column. `--wait` waits for the compile of your edit, so the result is never
    the build before it.
-4. Play and read the console with the Roblox Studio MCP.
+4. To play, open the place with `forge open --json`, and read the console with
+   the Roblox Studio MCP.
 5. `forge sync --json` pulls Studio edits into the project.
-6. `forge down --json` closes Studio and stops the session.
+6. `forge down --json` stops the session.
 
 See [docs/json-output.md](./docs/json-output.md) for the result fields and exit
 codes.

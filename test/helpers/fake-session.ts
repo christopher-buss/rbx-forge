@@ -14,6 +14,8 @@ import { PROJECT } from "./seams.ts";
  * memory.
  */
 export interface FakeSession {
+	/** Answers `addParts`; no part added by default. */
+	addParts: IpcHandler;
 	/** What `status` answers instead of the status, such as a bad answer. */
 	answer?: Record<string, unknown>;
 	/** Answers `freshStatus`; the status at once by default. */
@@ -74,6 +76,7 @@ export async function serveFakeSessionAsync(
 ): Promise<FakeSession> {
 	const identity = writeSessionFiles(memory, status);
 	const session: FakeSession = {
+		addParts: () => ({ added: [] }),
 		freshStatus: () => answerStatus(),
 		identity,
 		status,
@@ -88,6 +91,7 @@ export async function serveFakeSessionAsync(
 
 	const server: IpcServer = startIpcServer(await transport.listenAsync(identity.endpoint), {
 		handlers: {
+			addParts: async (parameters) => session.addParts(parameters),
 			freshStatus: async (parameters) => session.freshStatus(parameters),
 			status: answerStatus,
 			sync: async (parameters) => session.sync(parameters),

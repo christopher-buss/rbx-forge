@@ -19,7 +19,7 @@ import { realTransport } from "../helpers/native-testing.ts";
 import type { Project } from "./session-harness.ts";
 import { launch, makeProjectAsync, waitForAsync } from "./session-harness.ts";
 
-const WITH_COMPILER: SessionRequest = { compiler: true, config: {}, open: false };
+const WITH_COMPILER: SessionRequest = { compiler: true, config: {}, open: false, rojo: true };
 const POLL_MS = 50;
 const WAIT_MS = 20_000;
 

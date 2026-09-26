@@ -137,6 +137,11 @@ export interface StatusRecorder {
 	/** A service's tree is gone and nothing stopped it: its part failed. */
 	serviceFailed: (id: ServiceId, failure: PartFailure) => void;
 	/**
+	 * The session started its parts: from now on the phase is `ready` once
+	 * no part is starting.
+	 */
+	started: () => void;
+	/**
 	 * Studio was launched with the place, has it open, or closed it.
 	 * `process`: the Studio forge started directly, if it did.
 	 */
@@ -167,6 +172,8 @@ export interface StatusStart {
 	open: boolean;
 	pid: number;
 	port: number;
+	/** The session serves Rojo. */
+	rojo: boolean;
 	sessionId: string;
 	startedAt: string;
 	/** The session runs syncback on save. */
@@ -174,8 +181,8 @@ export interface StatusStart {
 }
 
 /**
- * Whether a session is ready: no part is starting. A failed or stopped part
- * does not hold it back.
+ * Whether a session is ready: it started its parts, and none is starting. A
+ * failed or stopped part does not hold it back.
  *
  * @param status - The session's status.
  * @returns `true` once `forge up` may return.
@@ -205,8 +212,9 @@ export function createStatusStore(
 ): StatusStore {
 	const status = initialStatus(start);
 	let isEnding = false;
+	let isStarted = false;
 	function changed(): void {
-		if (!isEnding) {
+		if (!isEnding && isStarted) {
 			status.phase = derivePhase(status);
 		}
 
@@ -222,6 +230,10 @@ export function createStatusStore(
 			changed();
 		},
 		snapshot: () => structuredClone(status),
+		started: () => {
+			isStarted = true;
+			changed();
+		},
 	};
 }
 
@@ -232,7 +244,7 @@ function initialStatus(start: StatusStart): SessionStatus {
 		running: true,
 		services: {
 			compiler: { building: false, owner: null, status: start.compiler ? "starting" : "off" },
-			rojo: { owner: null, port: start.port, status: "starting" },
+			rojo: { owner: null, port: start.port, status: start.rojo ? "starting" : "off" },
 			studio: { owner: null, status: start.open ? "opening" : "off" },
 			syncback: { status: start.syncback ? "idle" : "off" },
 		},
@@ -291,7 +303,7 @@ function createRecorder(
 	status: SessionStatus,
 	now: () => number,
 	changed: () => void,
-): StatusRecorder {
+): Pick<StatusRecorder, Exclude<keyof StatusRecorder, "started">> {
 	// Between runs, syncback is back where it started: `idle` or `off`.
 	const resting = status.services.syncback.status;
 

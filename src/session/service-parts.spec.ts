@@ -78,6 +78,7 @@ async function makePartsAsync(isEnding = false): Promise<PartsRun> {
 			open: false,
 			pid: 1,
 			port: 34_872,
+			rojo: true,
 			sessionId: "s1",
 			startedAt: "t",
 			syncback: false,

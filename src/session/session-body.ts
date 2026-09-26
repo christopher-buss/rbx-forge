@@ -5,23 +5,19 @@ import { compileAsync } from "../commands/compile.ts";
 import type { CommandContext } from "../commands/context.ts";
 import { openPlaceAsync } from "../commands/open.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
-import { ForgeError } from "../errors.ts";
 import { logFilePath, openLogFile } from "../output/log-file.ts";
 import type { Clock } from "../seams/clock.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
 import type { OpenedStudio } from "./attach.ts";
 import { attachStudio } from "./attach.ts";
-import type { BuildWatch } from "./build-watch.ts";
+import type { AdderSetup, CompilerService } from "./compiler-part.ts";
+import { createPartAdder, startCompilerAsync } from "./compiler-part.ts";
+import type { PartRequests } from "./part-requests.ts";
 import type { SessionPlan } from "./plan.ts";
 import { createReaperRunner } from "./reaper-runner.ts";
 import type { SessionScope } from "./run-session.ts";
-import type {
-	RunningPart,
-	ServiceHooks,
-	ServiceInvocation,
-	ServiceParts,
-} from "./service-parts.ts";
+import type { RunningPart, ServiceInvocation, ServiceParts } from "./service-parts.ts";
 import { createServiceParts } from "./service-parts.ts";
 import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
@@ -31,18 +27,17 @@ import type { SaveWatch, WatchOptions } from "./watch.ts";
 import { waitForStudioCloseAsync } from "./watch.ts";
 
 /** Everything one dev session runs with. */
-export interface SessionSetup {
-	/** Reads the compiler's builds, for `status` and `status --wait`. */
-	builds: Pick<BuildWatch, "fail" | "read">;
-	/** The compiler service, when the plan has one. */
-	compiler: undefined | { parsesDiagnostics: boolean; service: ServiceInvocation };
+export interface SessionSetup extends AdderSetup {
+	/** The compiler service, when the plan starts one. */
+	compiler: CompilerService | undefined;
 	config: ResolvedConfig;
-	/** The command's context: project root, environment, seams, reporter. */
-	context: CommandContext;
 	/** `.forge/sessions/<id>`: raw worker output while the session runs. */
 	directory: string;
+	/** Gets the session's part adder, for `forge up`. */
+	parts: Pick<PartRequests, "attach">;
 	plan: SessionPlan;
-	rojo: ServiceInvocation;
+	/** Rojo's service, when the plan serves Rojo. */
+	rojo: ServiceInvocation | undefined;
 	/** Gets what the session does, for `status` and `state.json`. */
 	status: StatusRecorder;
 	/** Gets the session's syncback runner, for `forge sync`. */
@@ -70,12 +65,15 @@ export const STUDIO_CLOSED_SYNCBACK_MS = 30_000;
  * `runSessionAsync`:
  *
  * 1. With syncback on, check that Rojo has syncback, before anything runs.
- * 2. Compile (roblox-ts) and build once, when the session has a compiler.
+ * 2. Compile (roblox-ts) and build once, when the plan asks: a session with
+ *    a compiler and Rojo or Studio.
  * 3. Open the place in Studio (or attach a verified Studio that has it
  *    open), and end the session when Studio closes it, once a save just
  *    before the close has synced back.
- * 4. Start Rojo and the watch-mode compiler. Each is a service with its
- *    part: its exit stops only that part, which is then `failed`.
+ * 4. Start Rojo and the watch-mode compiler, as the plan asks. Each is a
+ *    service with its part: its exit stops only that part, which is then
+ *    `failed`. From then on, `forge up` can add the parts that are missing
+ *    or failed.
  * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
  *    on each place save: one run at a time, with requests during a run
  *    folded into one more run. Rojo's syncback support is checked once per
@@ -130,51 +128,23 @@ function noSaveWatch(): void {
 }
 
 /**
- * Read the watch-mode compiler's output as builds, and report each one. Once
- * the compiler stops, every wait for a build fails.
- *
- * @param session - The session's builds and reporter.
- * @returns What its service reads each line with, and does once it stopped.
- */
-function compileReader(session: SessionSetup): Pick<ServiceHooks, "onLine" | "onStopped"> {
-	return {
-		onLine: (line) => {
-			const build = session.builds.read(line);
-			if (build !== undefined) {
-				const { diagnostics, errors } = build;
-				session.context.reporter.emit({ diagnostics, errors, type: "compiled" });
-			}
-		},
-		onStopped: () => {
-			session.builds.fail(
-				new ForgeError("service_failed", "The compiler stopped, so no build comes.", {
-					details: { reason: "service_failed:compiler" },
-					hint: `Its output is in ${logFilePath(session.context.cwd, "compiler")}.`,
-				}),
-			);
-		},
-	};
-}
-
-/**
- * Start Rojo, then the watch-mode compiler, if any. Rojo is ready once it
- * listens; a compiler that reports compiles, after its first one.
+ * Start Rojo, then the watch-mode compiler, as the plan asks. Rojo is ready
+ * once it listens; a compiler that reports compiles, after its first one.
  *
  * @param session - The resolved services.
  * @param parts - Starts them.
- * @returns Rojo's part, or `undefined` when the session is ending.
+ * @returns Rojo's part, if it runs.
  */
 async function startServicesAsync(
 	session: SessionSetup,
 	parts: ServiceParts,
 ): Promise<RunningPart | undefined> {
-	const rojo = await parts.startAsync(session.rojo, { initial: "starting" });
-	const { compiler } = session;
-	if (compiler !== undefined) {
-		const hooks: ServiceHooks = compiler.parsesDiagnostics
-			? { ...compileReader(session), initial: "starting" }
-			: { initial: "ready" };
-		await parts.startAsync(compiler.service, hooks);
+	const rojo =
+		session.rojo === undefined
+			? undefined
+			: await parts.startAsync(session.rojo, { initial: "starting" });
+	if (session.compiler !== undefined) {
+		await startCompilerAsync(session, parts, session.compiler);
 	}
 
 	return rojo;
@@ -253,7 +223,8 @@ async function waitForRojoAsync(
 }
 
 /**
- * Start the services as parts, and wait until Rojo listens or stopped.
+ * Start the services as parts, hand the part adder over, and wait until
+ * Rojo listens or stopped.
  *
  * @param session - The resolved services.
  * @param scope - Starts them; its end signal.
@@ -265,12 +236,10 @@ async function runServicesAsync(
 ): Promise<boolean | undefined> {
 	const parts = createServiceParts(session, scope);
 	const rojo = await startServicesAsync(session, parts);
-	// A stop request while the services started: the session is ending.
-	if (rojo === undefined) {
-		return undefined;
-	}
-
-	const isServing = await waitForRojoAsync(session, scope, { parts, rojo });
+	session.parts.attach(createPartAdder(session, parts));
+	session.status.started();
+	const isServing =
+		rojo !== undefined && (await waitForRojoAsync(session, scope, { parts, rojo }));
 	return hasEnded(scope) ? undefined : isServing;
 }
 
