@@ -128,6 +128,8 @@ describe("forge up", () => {
 		});
 		const failed = await waitForCompilerFailedAsync(fixture);
 		const second = await runForgeAsync(fixture, UP);
+		// A compiler is ready once it runs, maybe before it logs itself.
+		await waitForWorkersAsync(fixture.log, 2);
 
 		expect(first.status).toBe(EXIT_SUCCESS);
 		expect(failed).toMatchObject({

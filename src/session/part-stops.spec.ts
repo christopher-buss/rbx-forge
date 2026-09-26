@@ -231,6 +231,8 @@ interface StopWorld {
 	/** Runs on each sleep, once the time moved. */
 	onSleep: Array<(now: number) => void>;
 	phase: ReturnType<typeof vi.fn<StatusStore["phase"]>>;
+	/** What `studio` recorded. */
+	recorded: ReturnType<typeof vi.fn<StatusStore["studio"]>>;
 	running: Set<ServiceId>;
 	/** What `snapshot` answers; change it to move the session on. */
 	services: Services;
@@ -259,6 +261,7 @@ function makeWorld(services: Services, running: Array<ServiceId> = []): StopWorl
 		now: () => now,
 		onSleep,
 		phase: vi.fn<StatusStore["phase"]>(),
+		recorded: vi.fn<StatusStore["studio"]>(),
 		running: new Set(running),
 		services,
 		stopped: [],
@@ -334,6 +337,7 @@ async function stopAsync(world: StopWorld, request: StopPartsRequest): Promise<P
 			status: {
 				phase: world.phase,
 				snapshot: () => ({ ...makeStatus(), services: world.services }),
+				studio: world.recorded,
 			},
 		},
 		{
@@ -353,7 +357,7 @@ const CLOSED_BY_REQUEST: StudioOutcome = {
 
 describe(createPartStopper, () => {
 	it("should close Studio, stop Rojo and the compiler, then end the session for down", async () => {
-		expect.assertions(4);
+		expect.assertions(5);
 
 		const world = makeWorld(servicesWith({ compiler: READY, rojo: READY, studio: OPEN }), [
 			"compiler",
@@ -368,6 +372,7 @@ describe(createPartStopper, () => {
 			studio: CLOSED_BY_REQUEST,
 		});
 		expect(studio).toMatchObject({ alive: false, closeRequests: 1 });
+		expect(world.recorded.mock.calls).toStrictEqual([["closed", PLACE, null]]);
 		expect({ flushed: world.flushed(), stopped: world.stopped }).toStrictEqual({
 			flushed: 1,
 			stopped: ["rojo", "compiler"],
@@ -679,8 +684,13 @@ describe(createPartStopper, () => {
 		await expect(stopAsync(world, STOP)).resolves.toMatchObject({
 			studio: { stop: { end: "exited", pid: STUDIO_PID, status: "stopped" } },
 		});
-		expect({ alive: studio.alive, waited: world.now() }).toStrictEqual({
+		expect({
+			alive: studio.alive,
+			recorded: world.recorded.mock.calls,
+			waited: world.now(),
+		}).toStrictEqual({
 			alive: false,
+			recorded: [["closed", PLACE, { pid: STUDIO_PID, startTime: String(STUDIO_PID) }]],
 			waited: STUDIO_OPEN_WAIT_MS,
 		});
 	});

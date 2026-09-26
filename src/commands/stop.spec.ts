@@ -40,6 +40,9 @@ import { runStopAsync } from "./stop.ts";
 
 const PLACE = path.join(PROJECT, "game.rbxl");
 const LOCK = "game.rbxl.lock";
+const SNAPSHOTS = path.join(PROJECT, ".forge", "snapshots");
+const SNAPSHOT_A = "2026-01-01T00-00-01-000_game.rbxl";
+const SNAPSHOT_B = "2026-01-01T00-00-02-000_game.rbxl";
 const STUDIO = String.raw`C:\Roblox\Versions\version-1\RobloxStudioBeta.exe`;
 const STUDIO_PID = 4242;
 /** When the test lock files were last written. */
@@ -213,7 +216,11 @@ async function serveSessionAsync(
 		{
 			config: { studio: DEFAULT_CONFIG.studio },
 			context: project.context,
-			status: { phase: vi.fn<StatusStore["phase"]>(), snapshot: status },
+			status: {
+				phase: vi.fn<StatusStore["phase"]>(),
+				snapshot: status,
+				studio: vi.fn<StatusStore["studio"]>(),
+			},
 		},
 		{ end: vi.fn<SessionScope["end"]>() },
 		{
@@ -237,6 +244,23 @@ async function serveSessionAsync(
 		await server.closeAsync();
 	});
 	return requests;
+}
+
+/**
+ * A Studio that has a snapshot open, and deletes its lock file on close.
+ *
+ * @param project - The project, once made.
+ * @param place - The snapshot file it has open.
+ * @returns The fake process.
+ */
+function snapshotStudio(project: () => StopProject, place: string): FakeProcess {
+	return {
+		alive: true,
+		executablePath: STUDIO,
+		onClose: () => {
+			project().context.seams.fileSystem.rmSync(`${place}.lock`, { force: true });
+		},
+	};
 }
 
 function studioLock(pid: number, host = TEST_HOSTNAME): string {
@@ -350,6 +374,7 @@ describe(runStopAsync, () => {
 				pid: STUDIO_PID,
 				place: PLACE,
 				recovery: null,
+				snapshots: [],
 				stopped: true,
 			},
 			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}.`,
@@ -391,6 +416,7 @@ describe(runStopAsync, () => {
 				pid: STUDIO_PID,
 				place: PLACE,
 				recovery: MOVED_NONE,
+				snapshots: [],
 				stopped: true,
 			},
 			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}: a dialog blocked it, so forge ended it without saving.`,
@@ -768,32 +794,108 @@ describe(runStopAsync, () => {
 		expect(requests).toMatchObject([{ force: true }]);
 	});
 
-	it("should close the Studio of the place --place names, outside the session", async () => {
+	it("should close only the Studio of the place --place names, outside the session", async () => {
 		expect.assertions(3);
 
-		const other = path.join(PROJECT, "snapshots", "other.rbxl");
+		const other = path.join(SNAPSHOTS, SNAPSHOT_A);
 		const project = makeProject({
-			files: { [LOCK]: studioLock(STUDIO_PID), "snapshots/other.rbxl.lock": studioLock(7) },
+			files: {
+				[`.forge/snapshots/${SNAPSHOT_A}.lock`]: studioLock(7),
+				[`.forge/snapshots/${SNAPSHOT_A}`]: "place",
+				[`.forge/snapshots/${SNAPSHOT_B}.lock`]: studioLock(8),
+				[`.forge/snapshots/${SNAPSHOT_B}`]: "place",
+				[LOCK]: studioLock(STUDIO_PID),
+			},
 			processes: {
-				7: {
-					alive: true,
-					executablePath: STUDIO,
-					onClose: () => {
-						project.context.seams.fileSystem.rmSync(`${other}.lock`, { force: true });
-					},
-				},
+				7: snapshotStudio(() => project, other),
+				8: snapshotStudio(() => project, path.join(SNAPSHOTS, SNAPSHOT_B)),
 				[STUDIO_PID]: { alive: true, executablePath: STUDIO },
 			},
 		});
 		const requests = await serveSessionAsync(project, () => ({ place: PLACE, status: "open" }));
 
 		await expect(
-			runStopAsync(project.context, { config: {}, flags: { place: "snapshots/other.rbxl" } }),
+			runStopAsync(project.context, {
+				config: {},
+				flags: { place: path.join(".forge", "snapshots", SNAPSHOT_A) },
+			}),
 		).resolves.toMatchObject({
-			data: { parts: { kept: [], stopped: [] }, pid: 7, place: other, stopped: true },
+			data: {
+				parts: { kept: [], stopped: [] },
+				pid: 7,
+				place: other,
+				snapshots: [],
+				stopped: true,
+			},
 		});
 		expect(requests).toMatchObject([{ place: other }]);
-		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
+		expect([STUDIO_PID, 8].map((pid) => project.processes.get(pid)!.alive)).toStrictEqual([
+			true,
+			true,
+		]);
+	});
+
+	it("should close every snapshot Studio, then the Studio of the project's place", async () => {
+		expect.assertions(2);
+
+		const first = path.join(SNAPSHOTS, SNAPSHOT_A);
+		const second = path.join(SNAPSHOTS, SNAPSHOT_B);
+		const project = makeProject({
+			files: {
+				".forge/snapshots/2026-01-01T00-00-03-000_game.rbxl": "place",
+				[`.forge/snapshots/${SNAPSHOT_A}.lock`]: studioLock(7),
+				[`.forge/snapshots/${SNAPSHOT_A}`]: "place",
+				[`.forge/snapshots/${SNAPSHOT_B}.lock`]: studioLock(8),
+				[`.forge/snapshots/${SNAPSHOT_B}`]: "place",
+				[LOCK]: studioLock(STUDIO_PID),
+			},
+			processes: {
+				7: snapshotStudio(() => project, first),
+				8: snapshotStudio(() => project, second),
+				[STUDIO_PID]: { alive: true, executablePath: STUDIO },
+			},
+		});
+
+		const stopped = { end: "exited", forced: false, recovery: null, stopped: true };
+
+		await expect(stopAsync(project)).resolves.toStrictEqual({
+			data: {
+				...stopped,
+				parts: null,
+				pid: STUDIO_PID,
+				place: PLACE,
+				snapshots: [
+					{ ...stopped, pid: 7, place: first },
+					{ ...stopped, pid: 8, place: second },
+				],
+			},
+			summary: [
+				`Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}.`,
+				`Stopped Roblox Studio (PID 7) for ${first}.`,
+				`Stopped Roblox Studio (PID 8) for ${second}.`,
+			].join(" "),
+		});
+		expect([7, 8, STUDIO_PID].map((pid) => project.processes.get(pid)!.alive)).toStrictEqual([
+			false,
+			false,
+			false,
+		]);
+	});
+
+	it("should close the snapshot Studios before it fails with studio_owned", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: {
+				[`.forge/snapshots/${SNAPSHOT_A}.lock`]: studioLock(7),
+				[`.forge/snapshots/${SNAPSHOT_A}`]: "place",
+			},
+			processes: { 7: snapshotStudio(() => project, path.join(SNAPSHOTS, SNAPSHOT_A)) },
+		});
+		await serveSessionAsync(project, () => ({ place: PLACE, status: "open" }), "start");
+
+		await expect(stopAsync(project)).rejects.toMatchObject({ code: "studio_owned" });
+		expect(project.processes.get(7)!.alive).toBeFalse();
 	});
 
 	it("should close the lock file's Studio when the session is still starting", async () => {
@@ -927,6 +1029,7 @@ describe(runStopAsync, () => {
 				pid: STUDIO_PID,
 				place: PLACE,
 				recovery: MOVED_NONE,
+				snapshots: [],
 				stopped: true,
 			},
 			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}: it did not close within ${STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving.`,
@@ -998,7 +1101,7 @@ describe(runStopAsync, () => {
 		expect.assertions(1);
 
 		await expect(stopAsync(makeProject())).resolves.toStrictEqual({
-			data: { parts: null, place: PLACE, stopped: false },
+			data: { parts: null, place: PLACE, snapshots: [], stopped: false },
 			summary: `Roblox Studio does not have ${PLACE} open.`,
 		});
 	});
@@ -1041,7 +1144,7 @@ describe(runStopAsync, () => {
 		const project = makeProject({ files: { [LOCK]: studioLock(STUDIO_PID) } });
 
 		await expect(stopAsync(project)).resolves.toStrictEqual({
-			data: { parts: null, pid: STUDIO_PID, place: PLACE, stopped: false },
+			data: { parts: null, pid: STUDIO_PID, place: PLACE, snapshots: [], stopped: false },
 			summary: `Roblox Studio is not running: the lock file names PID ${STUDIO_PID}, which has exited.`,
 		});
 		expect(project.files()[LOCK]).toBe(studioLock(STUDIO_PID));
@@ -1256,7 +1359,7 @@ describe(runStopAsync, () => {
 		closeStudioBefore(project, "readFileSync");
 
 		await expect(stopAsync(project)).resolves.toStrictEqual({
-			data: { parts: null, place: PLACE, stopped: false },
+			data: { parts: null, place: PLACE, snapshots: [], stopped: false },
 			summary: `Roblox Studio does not have ${PLACE} open.`,
 		});
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
@@ -1272,7 +1375,7 @@ describe(runStopAsync, () => {
 		closeStudioBefore(project, "statSync");
 
 		await expect(stopAsync(project)).resolves.toStrictEqual({
-			data: { parts: null, pid: STUDIO_PID, place: PLACE, stopped: false },
+			data: { parts: null, pid: STUDIO_PID, place: PLACE, snapshots: [], stopped: false },
 			summary: `Roblox Studio (PID ${STUDIO_PID}) closed ${PLACE} while forge checked it.`,
 		});
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();

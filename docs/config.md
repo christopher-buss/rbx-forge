@@ -240,33 +240,32 @@ defineConfig({
 
 ### `open`
 
-Options for `forge open` and the session's open step.
+Options for the session's open step (`start`, `up --studio`) and for
+`forge open`, which always builds a snapshot.
 
 #### `open.buildFirst`
 
 - Type: `boolean`
 - Default: `true`
-- Flag: `forge open --build` / `--no-build`
 
-Build the place before opening it. When off and the place is missing, forge asks
-at a terminal (answering no fails with `declined`); a run that cannot ask fails
-with `place_not_found`.
+Build the place before a session opens it. When off and the place is missing,
+the session fails with `place_not_found`. `forge open` always builds.
 
 #### `open.buildOutputPath`
 
 - Type: `string`
 - Default: `buildOutputPath`
-- Flag: `forge open --place <path>`
 
-The place to open (and to build, when building first). `forge stop` also looks
-for Studio's lock file next to this place.
+The place a session opens (and builds, when building first). `forge stop` also
+looks for Studio's lock file next to this place. `forge open` names its
+snapshots after this file.
 
 #### `open.projectPath`
 
 - Type: `string`
 - Default: `rojoProjectPath`
 
-The Rojo project to build before opening.
+The Rojo project to build before opening, also for snapshots.
 
 ```ts
 defineConfig({
@@ -421,8 +420,8 @@ option.
 - `pre` hooks run in order before the step. A failure aborts the command.
 - `post` hooks run in order only after the step succeeds. A failed `post` hook
   fails the command.
-- Chained steps run their own hooks. `forge open` that builds first runs: `open`
-  `pre`, `build` `pre`, the build, `build` `post`, Studio, `open` `post`.
+- Chained steps run their own hooks. `forge open` runs: `open` `pre`, `build`
+  `pre`, the build, `build` `post`, Studio, `open` `post`.
 - Each hook runs through the system shell (`cmd.exe` on Windows, `/bin/sh`
   elsewhere) in the project root, with `node_modules/.bin` first on `PATH`. The
   hooks work the same with pnpm, npm, bun, mise, or no task runner. forge does

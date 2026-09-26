@@ -30,6 +30,7 @@ describe(forgeFiles, () => {
 			directory: path.join(PROJECT, ".forge"),
 			lock: path.join(PROJECT, ".forge", "supervisor.lock"),
 			sessions: path.join(PROJECT, ".forge", "sessions"),
+			snapshots: path.join(PROJECT, ".forge", "snapshots"),
 		});
 	});
 });

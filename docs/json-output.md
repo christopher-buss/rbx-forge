@@ -54,8 +54,9 @@ Error codes are stable: a code is never renamed or reused. The full list is in
    once Rojo listens and Studio has the place open; read the console with the
    Roblox Studio MCP. A Studio that has the place open already is used. A busy
    configured `rojoPort` fails with `port_in_use`; with none set, the session
-   picks a port, in `data.services.rojo.port`. `forge open --json` opens the
-   place for a one-time look.
+   picks a port, in `data.services.rojo.port`. `forge open --json` builds a
+   snapshot and opens it outside the session, for a one-time look: `data.place`
+   is the snapshot, `data.pruned` the old snapshots it deleted.
 5. `forge sync --json`: pull Studio edits into the project, with the syncback
    hooks. It waits for a running save-triggered run, then runs once more.
    Failures keep their code, with hook results in `error.details.hooks`.
@@ -156,9 +157,10 @@ A `closed` Studio also has:
   `warnings`. forge handles the auto-recovery files after every kill, also after
   `lock_released`. See [Auto-recovery](./studio.md#auto-recovery).
 
-`forge stop` reports the same Studio fields in `data`, with `stopped` and
-`parts`. It closes the session's Studio with its Rojo; the compiler keeps
+`forge stop` reports the same Studio fields in `data`, with `stopped`, `parts`,
+and `snapshots`: the same fields for each snapshot Studio it closed (none with
+`--place`). It closes the session's Studio with its Rojo; the compiler keeps
 running. A Studio that a `forge start` terminal owns fails with `studio_owned`
 (exit 1, `details.owner`, `details.sessionId`, and `details.pid` and
 `details.place` when known); `stop --force` closes it. `--place <path>` selects
-the Studio of another place, such as one `forge open` opened.
+the Studio of one place, such as a snapshot that `forge open` opened.
