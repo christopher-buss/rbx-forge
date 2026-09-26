@@ -18,7 +18,7 @@ import type { ProcessRunner, ProcessSpec } from "../process/process-runner.ts";
 import { OUTPUT_TAIL_LINES } from "../process/process-runner.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
-import type { LastBuild, ServiceStatus, SessionStatus } from "../session/status.ts";
+import type { LastBuild, PartStatus, SessionStatus } from "../session/status.ts";
 import { runCompileCommandAsync } from "./compile.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
@@ -443,11 +443,14 @@ function sessionBuild(diagnostics: Array<Diagnostic>): LastBuild {
 	};
 }
 
-function compilerStatus(status: ServiceStatus, lastBuild?: LastBuild): SessionStatus {
+function compilerStatus(status: PartStatus, lastBuild?: LastBuild): SessionStatus {
 	const base = makeStatus();
 	const compiler = lastBuild === undefined ? {} : { lastBuild };
 	return makeStatus({
-		services: { ...base.services, compiler: { building: false, status, ...compiler } },
+		services: {
+			...base.services,
+			compiler: { building: false, owner: null, status, ...compiler },
+		},
 	});
 }
 
@@ -546,7 +549,7 @@ describe("runCompileCommandAsync with a running session", () => {
 		});
 	});
 
-	it.for<ServiceStatus>(["off", "stopped"])(
+	it.for<PartStatus>(["off", "failed"])(
 		"should fail with compiler_off when the session's compiler is %s",
 		async (status) => {
 			expect.assertions(2);

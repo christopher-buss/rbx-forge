@@ -12,25 +12,37 @@ describe(sessionStudioTarget, () => {
 		expect.assertions(2);
 
 		expect(
-			sessionStudioTarget({ pid: 7, place: PLACE, startTime: "70", status: "open" }),
+			sessionStudioTarget({
+				owner: null,
+				pid: 7,
+				place: PLACE,
+				startTime: "70",
+				status: "open",
+			}),
 		).toStrictEqual({ place: PLACE, process: { pid: 7, startTime: "70" } });
-		expect(sessionStudioTarget({ place: PLACE, status: "opening" })).toStrictEqual({
-			place: PLACE,
-		});
+		expect(sessionStudioTarget({ owner: null, place: PLACE, status: "opening" })).toStrictEqual(
+			{
+				place: PLACE,
+			},
+		);
 	});
 
 	it("should target nothing for a closed or unknown place", () => {
 		expect.assertions(3);
 
-		expect(sessionStudioTarget({ place: PLACE, status: "closed" })).toBeUndefined();
-		expect(sessionStudioTarget({ place: PLACE, status: "off" })).toBeUndefined();
-		expect(sessionStudioTarget({ status: "opening" })).toBeUndefined();
+		expect(
+			sessionStudioTarget({ owner: null, place: PLACE, status: "closed" }),
+		).toBeUndefined();
+		expect(sessionStudioTarget({ owner: null, place: PLACE, status: "off" })).toBeUndefined();
+		expect(sessionStudioTarget({ owner: null, status: "opening" })).toBeUndefined();
 	});
 
 	it("should need both the PID and the start time to pin", () => {
 		expect.assertions(1);
 
-		expect(sessionStudioTarget({ pid: 7, place: PLACE, status: "open" })).toStrictEqual({
+		expect(
+			sessionStudioTarget({ owner: null, pid: 7, place: PLACE, status: "open" }),
+		).toStrictEqual({
 			place: PLACE,
 		});
 	});

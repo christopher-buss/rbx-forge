@@ -98,10 +98,11 @@ The fixed port of `rojo serve` in a session. forge never picks another port: a
 busy port fails the session with `port_in_use`. Give each worktree its own port
 so each Studio connects to the right server.
 
-The session is ready only when Rojo accepts connections on `127.0.0.1` at this
-port, within 60 s (else `service_failed`). A `serveAddress` in the Rojo project
-file that does not listen on `127.0.0.1` (for example a LAN address) makes the
-session fail; `0.0.0.0` is fine.
+Rojo is ready only when it accepts connections on `127.0.0.1` at this port. When
+it does not within 60 s, forge stops it and its part is `failed`; the session
+goes on. A `serveAddress` in the Rojo project file that does not listen on
+`127.0.0.1` (for example a LAN address) makes Rojo fail this way; `0.0.0.0` is
+fine.
 
 ```ts
 defineConfig({

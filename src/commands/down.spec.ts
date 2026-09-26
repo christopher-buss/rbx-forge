@@ -24,7 +24,10 @@ const FORGE = forgeFiles(PROJECT);
 const FILES = sessionFiles(FORGE, "s1");
 const PLACE = path.join(PROJECT, "game.rbxl");
 const STUDIO_PID = 4242;
-const STUDIO_OPEN: SessionStatus["services"]["studio"] = { place: PLACE, status: "open" };
+const STUDIO_OPEN: Pick<
+	SessionStatus["services"]["studio"],
+	"pid" | "place" | "startTime" | "status"
+> = { place: PLACE, status: "open" };
 const SESSION_FILES = {
 	".forge/current": "s1\n",
 	".forge/sessions/s1/supervisor.id": `${JSON.stringify({
@@ -99,7 +102,10 @@ function makeContext({
 async function serveStudioAsync(
 	{ context, native }: { context: CommandContext; native: FakeNative },
 	studio: Partial<FakeProcess>,
-	entry: SessionStatus["services"]["studio"] = STUDIO_OPEN,
+	entry: Pick<
+		SessionStatus["services"]["studio"],
+		"pid" | "place" | "startTime" | "status"
+	> = STUDIO_OPEN,
 ): Promise<void> {
 	const { fileSystem, ipc } = context.seams;
 	fileSystem.writeFileSync(
@@ -119,9 +125,9 @@ async function serveStudioAsync(
 		pid: 500,
 		running: true,
 		services: {
-			compiler: { building: false, status: "off" },
-			rojo: { port: 34_872, status: "ready" },
-			studio: entry,
+			compiler: { building: false, owner: null, status: "off" },
+			rojo: { owner: null, port: 34_872, status: "ready" },
+			studio: { owner: null, ...entry },
 			syncback: { status: "off" },
 		},
 		sessionId: "s1",

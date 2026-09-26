@@ -139,6 +139,6 @@ describe("forge status --wait", () => {
 		]);
 
 		expect(fresh.status).toBe(EXIT_SUCCESS);
-		expect(statusOf(fresh)).toStrictEqual({ building: false, status: "off" });
+		expect(statusOf(fresh)).toStrictEqual({ building: false, owner: null, status: "off" });
 	});
 });

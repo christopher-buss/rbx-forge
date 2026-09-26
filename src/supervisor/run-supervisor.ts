@@ -104,7 +104,7 @@ interface OwnSession {
  * @rejects {ForgeError} `session_running`; `previous_generation_alive`;
  *   `cleanup_unverifiable` (only with `force`); `port_in_use`; `rojo_missing`
  *   or `compiler_missing`; a step's failure (such as `compile_failed` or
- *   `hook_failed`); `service_failed` when a service exits;
+ *   `hook_failed`);
  *   `cleanup_in_progress` when a worker outlived the wait; a config error;
  *   `endpoint_in_use`; or `reaper_unavailable`.
  */
@@ -280,7 +280,7 @@ async function runSessionOnceAsync(
  * @rejects As {@link runSupervisorAsync}.
  */
 async function runOpenSessionAsync(
-	{ cwd, reporter, seams }: CommandContext,
+	{ reporter, seams }: CommandContext,
 	options: SupervisorOptions,
 	session: OwnSession,
 	cleanups: Array<ForcedCleanup>,
@@ -295,7 +295,7 @@ async function runOpenSessionAsync(
 
 	await finalBarrierAsync(seams, forge, files, end.reports);
 	status.phase("stopped");
-	return endedResult(reason, cwd, {
+	return endedResult(reason, {
 		port: config.rojoPort,
 		reports: end.reports,
 		...(cleanups.length > 0 ? { cleanups } : {}),

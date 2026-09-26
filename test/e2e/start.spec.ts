@@ -8,7 +8,7 @@
  * file type), and the tests make and remove Studio's lock file themselves.
  */
 import { rmSync, utimesSync, writeFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import { parseLines, parseResult } from "../helpers/output.ts";
@@ -34,6 +34,20 @@ import {
 
 function workersOf(log: string): Array<WorkerRecord> {
 	return readWorkerLog(log).filter(({ role }) => WORKER_ROLES.has(role));
+}
+
+/**
+ * The `rojo serve` worker in a fixture log.
+ *
+ * @param log - The fixture log.
+ * @returns Its record.
+ */
+function rojoServe(log: string): WorkerRecord {
+	const record = readWorkerLog(log).find(
+		({ args, role }) => role === "rojo" && args[0] === "serve",
+	);
+	assert(record !== undefined, "Rojo never served");
+	return record;
 }
 
 function describeWorker({ args, role }: WorkerRecord): string {
@@ -99,22 +113,26 @@ describe("forge start", () => {
 		}).toStrictEqual({ isStudioAlive: true, survivors: [] });
 	});
 
-	it("should run Rojo and the compiler without Studio with --no-open, and stop with service_failed:compiler when it exits", async () => {
-		expect.assertions(4);
+	it("should run Rojo and the compiler without Studio with --no-open, and keep Rojo when the compiler exits", async () => {
+		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
 		const session = startSession(fixture, ["start", "--no-open", "--json"], {
 			FIXTURE_EXIT_AFTER_MS: "3000",
 			FIXTURE_EXIT_ROLE: "rbxtsc",
 		});
-		const status = await session.closed;
+		await waitForOutputAsync(session, "compiler exited (exit code 0)");
+		const rojo = rojoServe(fixture.log);
 
-		expect(status).toBe(EXIT_FAILURE);
-		expect(parseResult(session.stdout()).error).toMatchObject({
-			code: "service_failed",
-			details: { reason: "service_failed:compiler" },
-		});
+		expect({
+			isRojoAlive: isProcessAlive(rojo.pid),
+			isRunning: session.child.exitCode === null,
+		}).toStrictEqual({ isRojoAlive: true, isRunning: true });
 		expect(readWorkerLog(fixture.log).map(({ role }) => role)).not.toContain("studio");
+
+		session.child.kill("SIGKILL");
+		await session.closed;
+
 		await expect(
 			waitForDeathAsync(readWorkerLog(fixture.log).map(({ pid }) => pid)),
 		).resolves.toStrictEqual([]);
@@ -201,7 +219,7 @@ describe("forge start --no-open --no-compiler", () => {
 		await expect(waitForDeathAsync(records.map(({ pid }) => pid))).resolves.toStrictEqual([]);
 	});
 
-	it("should stop the session with service_failed when Rojo exits, killing what it left", async () => {
+	it("should fail only Rojo's part when it exits, killing what it left, and keep the session", async () => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync();
@@ -211,14 +229,17 @@ describe("forge start --no-open --no-compiler", () => {
 			FIXTURE_GRANDCHILDREN: "2",
 		});
 		const records = await waitForWorkersAsync(fixture.log, 3, 30_000);
-		const status = await session.closed;
+		await waitForOutputAsync(session, "rojo exited (exit code 3)");
+		const survivors = await waitForDeathAsync(records.map(({ pid }) => pid));
+		const { exitCode } = session.child;
+		session.child.kill("SIGKILL");
+		await session.closed;
 
-		expect(status).toBe(EXIT_FAILURE);
-		expect(parseResult(session.stdout()).error).toMatchObject({
-			code: "service_failed",
-			details: { reason: "service_failed:rojo" },
-		});
-		await expect(waitForDeathAsync(records.map(({ pid }) => pid))).resolves.toStrictEqual([]);
+		expect(survivors).toStrictEqual([]);
+		expect(exitCode).toBeNull();
+		expect(session.stdout()).toContain(
+			"rojo exited (exit code 3); the session goes on without it.",
+		);
 	});
 
 	it("should fail with port_in_use when the fixed port is busy, starting nothing", async () => {

@@ -140,7 +140,8 @@ _Avoid_: password, key
 
 **State contract**:\
 The shape of a session's status (`forge status --json`, `state.json`): phase,
-services, last build, last syncback run.\
+each part's status (`off`, `starting`, `ready`, `failed`) and owner, last build,
+last syncback run.\
 _Avoid_: status file
 
 ## Hooks

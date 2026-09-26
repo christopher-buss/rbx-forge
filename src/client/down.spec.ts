@@ -181,7 +181,7 @@ async function serveAsync(
  * @returns The `status` answer.
  */
 function statusWith(
-	studio: SessionStatus["services"]["studio"],
+	studio: Pick<SessionStatus["services"]["studio"], "pid" | "place" | "startTime" | "status">,
 	sessionId = "s1",
 ): () => Record<string, unknown> {
 	const status: SessionStatus = {
@@ -189,9 +189,9 @@ function statusWith(
 		pid: SUPERVISOR,
 		running: true,
 		services: {
-			compiler: { building: false, status: "off" },
-			rojo: { port: 34_872, status: "ready" },
-			studio,
+			compiler: { building: false, owner: null, status: "off" },
+			rojo: { owner: null, port: 34_872, status: "ready" },
+			studio: { owner: null, ...studio },
 			syncback: { status: "off" },
 		},
 		sessionId,

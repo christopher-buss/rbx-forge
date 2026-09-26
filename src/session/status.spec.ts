@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { SessionStatus, StatusStart } from "./status.ts";
+import type { SessionStatus, StatusStart, StatusStore } from "./status.ts";
 import { createStatusStore, isReady, parseStatus } from "./status.ts";
 
 const NOW = Date.UTC(2026, 0, 1);
@@ -38,18 +38,18 @@ describe(createStatusStore, () => {
 			pid: 42,
 			running: true,
 			services: {
-				compiler: { building: false, status: "starting" },
-				rojo: { port: 34_872, status: "starting" },
-				studio: { status: "opening" },
+				compiler: { building: false, owner: null, status: "starting" },
+				rojo: { owner: null, port: 34_872, status: "starting" },
+				studio: { owner: null, status: "opening" },
 				syncback: { status: "idle" },
 			},
 			sessionId: "s1",
 			startedAt: AT,
 		});
 		expect(bare.snapshot().services).toStrictEqual({
-			compiler: { building: false, status: "off" },
-			rojo: { port: 34_872, status: "starting" },
-			studio: { status: "off" },
+			compiler: { building: false, owner: null, status: "off" },
+			rojo: { owner: null, port: 34_872, status: "starting" },
+			studio: { owner: null, status: "off" },
 			syncback: { status: "off" },
 		});
 	});
@@ -66,6 +66,7 @@ describe(createStatusStore, () => {
 		expect(store.snapshot().services.compiler).toStrictEqual({
 			building: false,
 			lastBuild: { at: AT, diagnostics: [], errors: 0, startedAt: AT },
+			owner: null,
 			status: "ready",
 		});
 		expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "ready" }));
@@ -81,11 +82,12 @@ describe(createStatusStore, () => {
 		const isStillBuilding = store.snapshot().services.compiler.building;
 		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, false);
 
-		expect(building).toStrictEqual({ building: true, status: "starting" });
+		expect(building).toStrictEqual({ building: true, owner: null, status: "starting" });
 		expect(isStillBuilding).toBeTrue();
 		expect(onChange.mock.lastCall![0].services.compiler).toStrictEqual({
 			building: false,
 			lastBuild: { at: AT, diagnostics: [], errors: 0, startedAt: AT },
+			owner: null,
 			status: "ready",
 		});
 	});
@@ -133,6 +135,62 @@ describe(createStatusStore, () => {
 		expect(store.snapshot().phase).toBe("starting");
 	});
 
+	it.for([
+		[
+			"off",
+			(store: StatusStore) => {
+				store.service("rojo", "off");
+			},
+		],
+		[
+			"failed",
+			(store: StatusStore) => {
+				store.serviceFailed("rojo", { exitCode: 1, outputTail: [] });
+			},
+		],
+	] as const)("should be ready with the compiler done and Rojo %s", ([, stopRojo]) => {
+		expect.assertions(1);
+
+		const { store } = makeStore();
+		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, false);
+		stopRojo(store);
+
+		expect(store.snapshot().phase).toBe("ready");
+	});
+
+	it("should be ready once a compiler that never built has failed", () => {
+		expect.assertions(1);
+
+		const { store } = makeStore();
+		store.service("rojo", "ready");
+		store.serviceFailed("compiler", { exitCode: null, outputTail: [] });
+
+		expect(isReady(store.snapshot())).toBeTrue();
+	});
+
+	it("should show a failed part with its exit code and output tail, and drop them once it runs again", () => {
+		expect.assertions(3);
+
+		const { store } = makeStore();
+		store.serviceFailed("compiler", { exitCode: 2, outputTail: ["boom"] });
+		const failed = store.snapshot();
+		store.service("compiler", "starting");
+
+		expect(failed.services.compiler).toStrictEqual({
+			building: false,
+			exitCode: 2,
+			outputTail: ["boom"],
+			owner: null,
+			status: "failed",
+		});
+		expect(parseStatus(failed)).toStrictEqual(failed);
+		expect(store.snapshot().services.compiler).toStrictEqual({
+			building: false,
+			owner: null,
+			status: "starting",
+		});
+	});
+
 	it("should record syncback runs and Studio", () => {
 		expect.assertions(3);
 
@@ -148,6 +206,7 @@ describe(createStatusStore, () => {
 			status: "idle",
 		});
 		expect(store.snapshot().services.studio).toStrictEqual({
+			owner: null,
 			place: "/project/game.rbxl",
 			status: "open",
 		});
@@ -160,6 +219,7 @@ describe(createStatusStore, () => {
 		store.studio("opening", "/project/game.rbxl", { pid: 7, startTime: "70" });
 
 		expect(parseStatus(store.snapshot())!.services.studio).toStrictEqual({
+			owner: null,
 			pid: 7,
 			place: "/project/game.rbxl",
 			startTime: "70",
