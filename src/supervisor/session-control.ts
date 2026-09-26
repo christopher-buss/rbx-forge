@@ -29,8 +29,8 @@ export interface ControlSetup {
 	pause: () => Promise<void>;
 	/** What the session starts with, for its first status. */
 	plan: { compiler: boolean; open: boolean; rojo: boolean; syncback: boolean };
-	/** The Rojo port. */
-	port: number;
+	/** Rojo's port, when the session chose it before it started. */
+	port: number | undefined;
 	/** The session reads its compiler's builds (roblox-ts). */
 	readsBuilds: boolean;
 	/** The supervisor's stop requests: `shutdown` feeds them. */

@@ -1,13 +1,23 @@
 import { type } from "arktype";
 
 import { ForgeError } from "../errors.ts";
-import type { ServiceId } from "./status.ts";
+import type { PartId } from "./status.ts";
 
-/** A part a client can ask a running session to add. */
-export type AddablePart = "compiler";
+/**
+ * A part a client can ask a running session to add: `studio` attaches
+ * Studio with its Rojo.
+ */
+export type AddablePart = "compiler" | "studio";
+
+/** What one `addParts` request asks for. */
+export interface PartRequest {
+	readonly parts: ReadonlyArray<AddablePart>;
+	/** The Studio executable to start (`up --studio-path`), absolute. */
+	readonly studioPath?: string | undefined;
+}
 
 /** Adds the parts that are missing or failed, and returns those it started. */
-export type PartAdder = (parts: ReadonlyArray<AddablePart>) => Promise<Array<ServiceId>>;
+export type PartAdder = (request: PartRequest) => Promise<Array<PartId>>;
 
 /**
  * `forge up` on a running session: the control channel asks, the session
@@ -33,17 +43,20 @@ export interface PartRequests {
 	close: () => void;
 }
 
-const addableParts = type("('compiler')[]");
+const partRequest = type({
+	"parts": "('compiler' | 'studio')[]",
+	"studioPath?": "string",
+});
 
 /**
- * Read the parts an `addParts` request asks for.
+ * Read what an `addParts` request asks for.
  *
- * @param value - What the request sent as its `parts`.
- * @returns The parts to add, in the request's order.
- * @throws {ForgeError} `usage` when it is not a list of parts.
+ * @param parameters - What the request sent.
+ * @returns The parts to add, in the request's order, and the Studio path.
+ * @throws {ForgeError} `usage` when `parts` is not a list of parts.
  */
-export function parseAddableParts(value: unknown): Array<AddablePart> {
-	const parsed = addableParts(value);
+export function parsePartRequest(parameters: Record<string, unknown>): PartRequest {
+	const parsed = partRequest(parameters);
 	if (parsed instanceof type.errors) {
 		throw new ForgeError("usage", `addParts takes a list of parts: ${parsed.summary}`);
 	}

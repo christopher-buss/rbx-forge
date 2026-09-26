@@ -139,6 +139,22 @@ describe(runStatusAsync, () => {
 		});
 	});
 
+	it("should name no Rojo port before the session chose one", async () => {
+		expect.assertions(1);
+
+		const { context, ipc, memory } = makeContext();
+		const { services } = makeStatus();
+		await serveFakeSessionAsync(
+			memory,
+			ipc,
+			makeStatus({ services: { ...services, rojo: { owner: null, status: "off" } } }),
+		);
+
+		const { summary } = await runStatusAsync(context);
+
+		expect(summary.split("\n", 2)[1]).toBe("  rojo: off");
+	});
+
 	it("should report the plain lines of a fresh session", async () => {
 		expect.assertions(1);
 

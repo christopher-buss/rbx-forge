@@ -3,12 +3,12 @@
  * and Studio, and the real reaper. Only NDJSON output, exit codes, files, and
  * the process table are checked.
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 
 import { EXIT_CLEANUP_PENDING, EXIT_NOT_RUNNING, EXIT_SUCCESS } from "../../src/exit-codes.ts";
+import { parseStatus } from "../../src/session/status.ts";
 import { openStudioStandInAsync, pidOf, waitForFileAsync } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import {
@@ -29,6 +29,8 @@ import {
 import { runForgeAsync, UP, WATCH_COMMAND } from "./up-fixture.ts";
 
 const DOWN = ["down", "--json"];
+/** A session with no compiler: the open step builds the place first. */
+const UP_STUDIO = ["up", "--no-compiler", "--studio", "--json"];
 /** How long a dead process may stay a zombie before its parent reaps it. */
 const REAP_MS = 2000;
 /**
@@ -67,34 +69,8 @@ function filesLeft(project: string): Array<string> {
 }
 
 /**
- * Wait until the session reports that Studio has its place open.
- *
- * @param fixture - The project.
- * @param sessionId - The session's id, from the `up` result.
- * @returns The PID the session recorded for the Studio it started.
- * @rejects When 30 seconds pass first.
- */
-async function waitForStudioOpenAsync(fixture: Fixture, sessionId: unknown): Promise<unknown> {
-	const state = path.join(fixture.project, ".forge", "sessions", String(sessionId), "state.json");
-	const deadline = Date.now() + 30_000;
-	while (!existsSync(state) || !readFileSync(state, "utf8").includes('"status":"open"')) {
-		if (Date.now() > deadline) {
-			throw new Error(`expected Studio open in ${state}`);
-		}
-
-		await sleep(50);
-	}
-
-	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the session's state contract
-	const status = JSON.parse(readFileSync(state, "utf8")) as {
-		services: { studio: { pid?: number } };
-	};
-	return status.services.studio.pid;
-}
-
-/**
- * Start a session whose stand-in Studio has the place open, and a second
- * stand-in Studio with another place open.
+ * Start a session with `up --studio`, whose stand-in Studio has the place
+ * open, and a second stand-in Studio with another place open.
  *
  * @param variables - Fixture variables for the session and its Studio.
  * @returns The fixture, the session id, the session's Studio PID, and the
@@ -110,10 +86,16 @@ async function upWithStudioAsync(variables: Record<string, string> = {}): Promis
 }> {
 	const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
 	const other = await openStudioStandInAsync(path.join(fixture.project, "other.rbxl"));
-	const { sessionId } = await startReadyAsync(fixture, START_STUDIO, variables);
-	const recorded = await waitForStudioOpenAsync(fixture, sessionId);
+	const { result } = await runForgeAsync(fixture, UP_STUDIO, variables);
+	const status = parseStatus(result.data);
 	const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
-	return { fixture, other: pidOf(other), recorded, sessionId, studio: studio!.pid };
+	return {
+		fixture,
+		other: pidOf(other),
+		recorded: status?.services.studio.pid,
+		sessionId: status?.sessionId,
+		studio: studio!.pid,
+	};
 }
 
 describe("forge down", () => {
@@ -129,7 +111,8 @@ describe("forge down", () => {
 			data: {
 				sessionId,
 				status: "stopped",
-				stoppedBy: "studio_closed",
+				// The session goes on without the Studio `up --studio` attached.
+				stoppedBy: "shutdown",
 				studio: closedOnRequest({ pid: studio, place: fixture.place, status: "closed" }),
 			},
 			ok: true,
@@ -186,7 +169,9 @@ describe("forge down", () => {
 		const down = await runForgeAsync(fixture, DOWN);
 		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
 
+		// The session of `start` ends by itself once its Studio closed.
 		expect(down.result.data).toMatchObject({
+			stoppedBy: "studio_closed",
 			studio: { end: CLOSED_END, pid: studio!.pid, status: "closed" },
 		});
 		expect(existsSync(`${fixture.place}.lock`)).toBeFalse();

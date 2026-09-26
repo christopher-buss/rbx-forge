@@ -102,6 +102,10 @@ function describePart({ exitCode, status }: ServicePart): string {
 	return typeof exitCode === "number" ? `failed (exit code ${exitCode})` : "failed";
 }
 
+function portOf({ port }: SessionStatus["services"]["rojo"]): string {
+	return port === undefined ? "" : ` on port ${port}`;
+}
+
 /**
  * The TTY lines of a status: the session, then one line per service.
  *
@@ -119,7 +123,7 @@ function describeStatus({ phase, pid, services, sessionId }: SessionStatus): str
 	const synced = run === undefined ? "" : `, last run ${outcome}`;
 	const lines = [
 		`Session ${sessionId} (pid ${pid}): ${phase}`,
-		`  rojo: ${describePart(rojo)} on port ${rojo.port}`,
+		`  rojo: ${describePart(rojo)}${portOf(rojo)}`,
 		`  compiler: ${describePart(compiler)}${building}${built}`,
 		`  syncback: ${syncback.status}${synced}`,
 		`  studio: ${studio.status}`,

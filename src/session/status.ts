@@ -49,6 +49,9 @@ export interface ServicePart extends Partial<PartFailure> {
 /** The services a session can run, by their part's name. */
 export type ServiceId = "compiler" | "rojo";
 
+/** The parts a session can have: its services and Studio. */
+export type PartId = "studio" | ServiceId;
+
 /** Where the whole session is. */
 export type SessionPhase = "ready" | "starting" | "stopped" | "stopping";
 
@@ -104,7 +107,8 @@ export interface SessionStatus {
 	services: {
 		/** `building`: a compile runs (from its start line to its summary). */
 		compiler: ServicePart & { building: boolean; lastBuild?: LastBuild };
-		rojo: ServicePart & { port: number };
+		/** `port`: once the session chose it; it keeps it from then on. */
+		rojo: ServicePart & { port?: number };
 		/**
 		 * `place`: the place Studio opens or has open, once forge launched
 		 * it. `pid` and `startTime`: the Studio forge started directly.
@@ -129,6 +133,8 @@ export interface StatusRecorder {
 	 * still runs.
 	 */
 	compiled: (build: LastBuild, isBuilding: boolean) => void;
+	/** The session chose Rojo's port. */
+	rojoPort: (port: number) => void;
 	/**
 	 * A service's worker started (`ready` or, for a compiler that reports
 	 * compiles, `starting`), or its tree is gone after a stop (`off`).
@@ -171,7 +177,8 @@ export interface StatusStart {
 	/** The session opens Studio. */
 	open: boolean;
 	pid: number;
-	port: number;
+	/** Rojo's port, when the session chose it before it started. */
+	port: number | undefined;
 	/** The session serves Rojo. */
 	rojo: boolean;
 	sessionId: string;
@@ -244,7 +251,11 @@ function initialStatus(start: StatusStart): SessionStatus {
 		running: true,
 		services: {
 			compiler: { building: false, owner: null, status: start.compiler ? "starting" : "off" },
-			rojo: { owner: null, port: start.port, status: start.rojo ? "starting" : "off" },
+			rojo: {
+				owner: null,
+				...(start.port === undefined ? {} : { port: start.port }),
+				status: start.rojo ? "starting" : "off",
+			},
 			studio: { owner: null, status: start.open ? "opening" : "off" },
 			syncback: { status: start.syncback ? "idle" : "off" },
 		},
@@ -278,8 +289,12 @@ function setPart(
 function createPartRecorder(
 	status: SessionStatus,
 	changed: () => void,
-): Pick<StatusRecorder, "service" | "serviceFailed"> {
+): Pick<StatusRecorder, "rojoPort" | "service" | "serviceFailed"> {
 	return {
+		rojoPort: (port) => {
+			status.services.rojo.port = port;
+			changed();
+		},
 		service: (id, partStatus) => {
 			setPart(status.services[id], { status: partStatus });
 			changed();
@@ -385,7 +400,7 @@ const statusSchema: Type<SessionStatus> = type({
 				startedAt: TEXT,
 			},
 		}),
-		rojo: servicePart.and({ port: INTEGER }),
+		rojo: servicePart.and({ "port?": INTEGER }),
 		studio: {
 			"owner": OWNER,
 			"pid?": INTEGER,

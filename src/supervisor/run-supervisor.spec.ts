@@ -28,14 +28,13 @@ import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { Pause, PausePoint } from "../session/pause.ts";
 import { neverPauseAsync } from "../session/pause.ts";
+import { ROJO_LISTEN_BOUND_MS } from "../session/rojo-part.ts";
 import { OUTPUT_POLL_MS, PART_TAIL_LINES } from "../session/service-parts.ts";
-import {
-	FILE_POLL_MS,
-	ROJO_LISTEN_BOUND_MS,
-	STUDIO_CLOSED_SYNCBACK_MS,
-} from "../session/session-body.ts";
+import { STUDIO_CLOSED_SYNCBACK_MS } from "../session/session-body.ts";
 import type { StopSource } from "../session/stop-source.ts";
 import { createStopSource } from "../session/stop-source.ts";
+import { STUDIO_OPEN_BOUND_MS } from "../session/studio-part.ts";
+import { FILE_POLL_MS } from "../session/worker-context.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
 import type { SessionRequest } from "./channel.ts";
 import { endpointFor } from "./endpoint.ts";
@@ -64,6 +63,8 @@ const IDENTITY: Pick<
 	version: "9.9.9",
 };
 const TOOL_FILES = { "tools/rbxtsc": "", "tools/rojo": "" };
+/** The port the OS gives out as free. */
+const FREE_PORT = 50_000;
 /** A Studio that opened the place at boot, before the test. */
 const STUDIO_PID = 777;
 const OPEN_STUDIO: Record<number, FakeProcess> = {
@@ -95,6 +96,8 @@ interface StartSetup {
 	processes?: Record<number, FakeProcess>;
 	projectType?: "luau" | "rbxts";
 	reaper?: FakeReaperOptions;
+	/** The config file's `rojoPort`; 4000 by default. */
+	rojoPort?: "unset" | number;
 	/** The addon's private file writer (Windows). */
 	writePrivateFile?: (file: string, text: string) => void;
 }
@@ -188,6 +191,7 @@ function startCommand({
 	processes = {},
 	projectType = "luau",
 	reaper = {},
+	rojoPort = 4000,
 	writePrivateFile,
 }: StartSetup = {}): StartRun {
 	const memory = createMemoryFileSystem(files);
@@ -205,10 +209,11 @@ function startCommand({
 	const reporter = createRecordingReporter();
 	const isPortFreeAsync = vi.fn<Network["isPortFreeAsync"]>().mockResolvedValue(isPortFree);
 	const isListeningAsync = vi.fn<Network["isListeningAsync"]>(isListening);
+	const freePortAsync = vi.fn<Network["freePortAsync"]>().mockResolvedValue(FREE_PORT);
 	const studioLauncher = vi.fn<StudioLauncher>().mockResolvedValue({ type: "launched" });
 	const configLoader = vi.fn<ConfigLoader>().mockResolvedValue({
 		path: path.join(PROJECT, "rbx-forge.config.ts"),
-		value: { projectType, rojoPort: 4000, ...file },
+		value: { projectType, ...(rojoPort === "unset" ? {} : { rojoPort }), ...file },
 	});
 	const context = createCommandContext({
 		env: { PATH: TOOLS },
@@ -225,7 +230,7 @@ function startCommand({
 					...(writePrivateFile === undefined ? {} : { writePrivateFile }),
 				};
 			},
-			network: { isListeningAsync, isPortFreeAsync },
+			network: { freePortAsync, isListeningAsync, isPortFreeAsync },
 			randomId: () => "session-1",
 			reaper: fake.launch,
 			studioLauncher,
@@ -1100,11 +1105,21 @@ describe(runSupervisorAsync, () => {
 
 		await expect(run.result).rejects.toMatchObject({
 			code: "port_in_use",
-			hint: "Stop the program that uses it, or set rojoPort to a free port.",
 			message: "Rojo port 4000 is in use.",
 		});
 		expect(run.isPortFreeAsync).toHaveBeenCalledExactlyOnceWith(4000);
 		expect(run.fake.launches).toStrictEqual([]);
+	});
+
+	it("should serve Rojo on a free port when none is set and the default port is busy", async () => {
+		expect.assertions(2);
+
+		const run = await stoppedAsync({ isPortFree: false, rojoPort: "unset" });
+
+		await expect(run.result).resolves.toMatchObject({ data: { port: FREE_PORT } });
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			`rojo: serve default.project.json --port ${FREE_PORT}`,
+		]);
 	});
 
 	it.for([
@@ -1282,6 +1297,21 @@ describe("forge start hooks and syncback", () => {
 		await passAsync(run, OUTPUT_POLL_MS);
 
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "studio_closed" } });
+	});
+
+	it("should show the session stopping with Studio closed while syncback settles", async () => {
+		expect.assertions(1);
+
+		const run = await studioSyncbackAsync({ oneShot: oneShotsWith({ "syncback-1": "hold" }) });
+		await saveAndCloseAsync(run);
+		const settling = stateOf(run);
+		await passAsync(run, STUDIO_CLOSED_SYNCBACK_MS);
+		await run.result;
+
+		expect(settling).toMatchObject({
+			phase: "stopping",
+			services: { studio: { status: "closed" } },
+		});
 	});
 
 	it("should end with studio_closed at once when no syncback runs", async () => {
@@ -2131,14 +2161,14 @@ async function freshWithinAsync(run: StartRun): Promise<unknown> {
 }
 
 describe("forge up parts", () => {
-	it("should start only the compiler for up: no compile or build step, no Rojo, no port check", async () => {
-		expect.assertions(3);
+	it("should start only the compiler for up: no compile or build step, no Rojo, no port", async () => {
+		expect.assertions(4);
 
 		const run = startCommand({ flags: UP, projectType: "rbxts" });
 		await flushAsync();
 		const state = stateOf(run);
 		run.signals.fire("SIGINT");
-		await run.result;
+		const result = await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual(["compiler: -w"]);
 		expect(run.isPortFreeAsync).not.toHaveBeenCalled();
@@ -2146,10 +2176,11 @@ describe("forge up parts", () => {
 			phase: "starting",
 			services: {
 				compiler: { status: "starting" },
-				rojo: { port: 4000, status: "off" },
+				rojo: { owner: null, status: "off" },
 				studio: { status: "off" },
 			},
 		});
+		expect(result.data).not.toHaveProperty("port");
 	});
 
 	it("should be ready at once with no part in a Luau project with no watch command", async () => {
@@ -2340,6 +2371,273 @@ describe("forge up parts", () => {
 		await run.result.catch(ignoreFailure);
 
 		await expect(answer).rejects.toMatchObject({ code: "not_running" });
+	});
+});
+
+/** The Studio the session launches for an attach. */
+const LAUNCHED_PID = 900;
+const LAUNCHED_LOCK = `${LAUNCHED_PID}\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`;
+const STUDIO = { parts: ["studio"] };
+
+/**
+ * Ask the session to add parts, with no bound the test reaches.
+ *
+ * @param run - The session.
+ * @param parameters - The request's params.
+ * @returns The answer, or the failure it rejected with.
+ */
+async function askAddAsync(run: StartRun, parameters: Record<string, unknown>): Promise<unknown> {
+	return callSessionAsync(run.ipc, CONTROL_TARGET, "addParts", {
+		params: parameters,
+		responseTimeoutMs: 600_000,
+	}).catch((err: unknown) => err);
+}
+
+/**
+ * Ask the session to attach Studio, and let the launched Studio open the
+ * place.
+ *
+ * @param run - The session; its launcher starts Studio {@link LAUNCHED_PID}.
+ * @param parameters - The request's params.
+ * @returns The answer, or the failure it rejected with.
+ */
+async function attachAsync(
+	run: StartRun,
+	parameters: Record<string, unknown> = STUDIO,
+): Promise<unknown> {
+	run.studioLauncher.mockResolvedValue({
+		studio: { pid: LAUNCHED_PID, startTime: "900" },
+		type: "launched",
+	});
+	const answer = askAddAsync(run, parameters);
+	await passAsync(run, FILE_POLL_MS);
+	run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+	await passAsync(run, FILE_POLL_MS);
+	return answer;
+}
+
+describe("forge up --studio", () => {
+	it("should build the place, open Studio, and serve Rojo, then answer once both are ready", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		const answer = await attachAsync(run, { parts: ["studio"], studioPath: "/opt/Studio" });
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: ["studio", "rojo"] });
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"start-1: build default.project.json --output game.rbxl",
+			"rojo: serve default.project.json --port 4000",
+		]);
+		expect(run.studioLauncher).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ place: PLACE, studioPath: "/opt/Studio" }),
+		);
+		expect(state).toMatchObject({
+			phase: "ready",
+			services: {
+				rojo: { owner: null, port: 4000, status: "ready" },
+				studio: { owner: null, pid: LAUNCHED_PID, place: PLACE, status: "open" },
+			},
+		});
+	});
+
+	it("should attach the Studio that has the place open: no build, no launch", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({
+			files: { ...TOOL_FILES, "game.rbxl.lock": STUDIO_LOCK },
+			flags: UP,
+			processes: OPEN_STUDIO,
+		});
+		await flushAsync();
+		const answer = askAddAsync(run, STUDIO);
+		await passAsync(run, FILE_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"rojo: serve default.project.json --port 4000",
+		]);
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+	});
+
+	it("should wait for the compiler's fresh build before it builds the place", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ flags: UP, projectType: "rbxts" });
+		await flushAsync();
+		const answer = attachAsync(run, { parts: ["compiler", "studio"] });
+		await passAsync(run, OUTPUT_POLL_MS);
+		const beforeBuild = spawnedIds(run.fake);
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "compiler.log"),
+			"Found 0 errors. Watching for file changes.\n",
+		);
+		await passAsync(run, 2 * FILE_POLL_MS);
+		run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(beforeBuild).toStrictEqual(["compiler: -w"]);
+		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
+	});
+
+	it("should fail with port_in_use before Studio opens when the set port is busy", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ flags: UP, isPortFree: false });
+		await flushAsync();
+		const answer = await askAddAsync(run, STUDIO);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toMatchObject({ code: "port_in_use", message: "Rojo port 4000 is in use." });
+		expect([spawnedIds(run.fake), run.studioLauncher.mock.calls]).toStrictEqual([[], []]);
+		expect(state).toMatchObject({ services: { studio: { status: "off" } } });
+	});
+
+	it("should take a free port when none is set, and keep it when Rojo starts again", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ flags: UP, isPortFree: false, rojoPort: "unset" });
+		await flushAsync();
+		const first = await attachAsync(run);
+		run.fake.exit("rojo", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const repair = await askAddAsync(run, { parts: [] });
+		run.signals.fire("SIGINT");
+		const result = await run.result;
+
+		expect([first, repair]).toStrictEqual([{ added: ["studio", "rojo"] }, { added: ["rojo"] }]);
+		expect(spawnedIds(run.fake).filter((id) => id.startsWith("rojo"))).toStrictEqual([
+			`rojo: serve default.project.json --port ${FREE_PORT}`,
+			`rojo: serve default.project.json --port ${FREE_PORT}`,
+		]);
+		expect(result.data).toMatchObject({ port: FREE_PORT });
+	});
+
+	it("should add nothing while Studio and its Rojo run", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		await attachAsync(run);
+		const again = await askAddAsync(run, STUDIO);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(again).toStrictEqual({ added: [] });
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+	});
+
+	it("should stop only Rojo when the attached Studio closes, and attach again later", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({
+			file: { luau: { watch: { command: "darklua" } } },
+			files: { ...TOOL_FILES, "tools/darklua": "" },
+			flags: UP,
+		});
+		await flushAsync();
+		await attachAsync(run);
+		run.memory.fileSystem.rmSync(LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		const stopCalls = run.fake.calls.filter((call) => call.startsWith("stop "));
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const closed = stateOf(run);
+		const again = await attachAsync(run);
+		run.signals.fire("SIGINT");
+
+		expect(stopCalls).toStrictEqual(["stop rojo 3000"]);
+		expect(closed).toMatchObject({
+			phase: "ready",
+			services: {
+				compiler: { status: "ready" },
+				rojo: { port: 4000, status: "off" },
+				studio: { status: "closed" },
+			},
+		});
+		expect(again).toStrictEqual({ added: ["studio", "rojo"] });
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
+	});
+
+	it("should say that the attached Studio's close stops its Rojo", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		await attachAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(run.reporter.events).toContainEqual({
+			message: `Roblox Studio has ${PLACE} open. Its Rojo stops when Studio closes it.`,
+			type: "info",
+		});
+	});
+
+	it("should attach Studio to a session whose Rojo runs, and start no second Rojo", async () => {
+		expect.assertions(2);
+
+		const run = startCommand();
+		await flushAsync();
+		const answer = await attachAsync(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: ["studio"] });
+		expect(spawnedIds(run.fake).filter((id) => id.startsWith("rojo"))).toHaveLength(1);
+	});
+
+	it("should fail with studio_launch_failed when Studio does not open the place in time", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		const answer = askAddAsync(run, STUDIO);
+		await passAsync(run, STUDIO_OPEN_BOUND_MS + FILE_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		await expect(answer).resolves.toMatchObject({
+			code: "studio_launch_failed",
+			message: `Roblox Studio did not open ${PLACE} within 180 s.`,
+		});
+		expect(state).toMatchObject({
+			services: { rojo: { status: "ready" }, studio: { status: "opening" } },
+		});
+	});
+
+	it("should open no Studio and start no Rojo once the session stops during the build", async () => {
+		expect.assertions(2);
+
+		const run: StartRun = startCommand({
+			file: { luau: { watch: { command: "darklua" } } },
+			files: { ...TOOL_FILES, "tools/darklua": "" },
+			flags: UP,
+			reaper: {
+				onSpawn: onSpawnOf("start-1", () => {
+					run.signals.fire("SIGINT");
+				}),
+			},
+		});
+		await flushAsync();
+		const answer = askAddAsync(run, STUDIO);
+		await run.result;
+
+		await expect(answer).resolves.toBeDefined();
+		expect([run.studioLauncher.mock.calls, spawnedIds(run.fake)]).toStrictEqual([
+			[],
+			["compiler: ", "start-1: build default.project.json --output game.rbxl"],
+		]);
 	});
 });
 

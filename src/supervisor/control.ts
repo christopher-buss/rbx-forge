@@ -3,7 +3,7 @@ import type { IpcServerOptions } from "../ipc/server.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { PartRequests } from "../session/part-requests.ts";
-import { parseAddableParts } from "../session/part-requests.ts";
+import { parsePartRequest } from "../session/part-requests.ts";
 import type { SessionSync } from "../session/session-sync.ts";
 import type { StatusStore } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
@@ -21,10 +21,12 @@ export interface ControlTarget {
 /**
  * The methods a session serves on its control channel:
  *
- * - `addParts`: start the parts in the `parts` param (`compiler`) that are
- *   missing or failed; a part that runs is never touched. Waits until the
- *   session has started its own parts, and answers once the new ones run,
- *   with `added`: the parts it started.
+ * - `addParts`: start the parts in the `parts` param (`compiler`, `studio`)
+ *   that are missing or failed; a part that runs is never touched. `studio`
+ *   attaches Studio (started with the `studioPath` param, if any) with its
+ *   Rojo. Waits until the session has started its own parts, and answers
+ *   once the new ones run (Rojo listens, Studio has the place open), with
+ *   `added`: the parts it started.
  * - `status`: the state contract (`session/status.ts`).
  * - `freshStatus`: the state contract once the compiler's last build is
  *   fresh (`session/build-watch.ts`), waiting up to the `timeoutMs` param
@@ -45,7 +47,7 @@ export interface ControlTarget {
  */
 export function controlHandlers(target: ControlTarget): IpcServerOptions["handlers"] {
 	return {
-		addParts: async ({ parts }) => addPartsAsync(target, parts),
+		addParts: async (parameters) => addPartsAsync(target, parameters),
 		freshStatus: async ({ timeoutMs }) => {
 			await target.builds.waitAsync(
 				typeof timeoutMs === "number" && timeoutMs >= 0
@@ -77,9 +79,9 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 
 async function addPartsAsync(
 	target: ControlTarget,
-	parts: unknown,
+	parameters: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-	const added = await target.parts.addAsync(parseAddableParts(parts));
+	const added = await target.parts.addAsync(parsePartRequest(parameters));
 	return { added };
 }
 

@@ -92,11 +92,19 @@ defineConfig({
 ### `rojoPort`
 
 - Type: `integer`, 1 to 65535
-- Default: `34872`
+- Default: none
 
-The fixed port of `rojo serve` in a session. forge never picks another port: a
-busy port fails the session with `port_in_use`. Give each worktree its own port
-so each Studio connects to the right server.
+The port of `rojo serve` in a session. A session chooses it when Rojo first
+starts (`forge start`, or `forge up --studio`), and keeps it for its whole life:
+a Rojo that starts again, such as after `forge up` repairs it, serves on the
+same port, so its Studio connects to the same server.
+
+- **Set**: the port is fixed. forge never picks another port: a busy port fails
+  with `port_in_use`.
+- **Not set**: forge takes `34872` (Rojo's default) when it is free, else a free
+  port the OS gives out. So sessions in several worktrees can each attach a
+  Studio. `forge status` and `services.rojo.port` in the state contract show the
+  port.
 
 Rojo is ready only when it accepts connections on `127.0.0.1` at this port. When
 it does not within 60 s, forge stops it and its part is `failed`; the session

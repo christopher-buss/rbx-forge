@@ -266,6 +266,23 @@ describe(createStatusStore, () => {
 		});
 	});
 
+	it("should have no Rojo port until the session chose one, then keep it", () => {
+		expect.assertions(3);
+
+		const { onChange, store } = makeStore({ ...NO_PARTS, port: undefined });
+		const before = store.snapshot().services.rojo;
+		store.rojoPort(50_000);
+		store.service("rojo", "off");
+
+		expect(before).toStrictEqual({ owner: null, status: "off" });
+		expect(store.snapshot().services.rojo).toStrictEqual({
+			owner: null,
+			port: 50_000,
+			status: "off",
+		});
+		expect(onChange).toHaveBeenCalledTimes(2);
+	});
+
 	it("should hand out copies", () => {
 		expect.assertions(2);
 

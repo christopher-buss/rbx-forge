@@ -23,10 +23,10 @@ import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import type { IdentityRecord } from "../supervisor/session-files.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
 import type { DownOptions, DownPoint, DownReport, DownStudio } from "./down.ts";
-import { FORCED_SHUTDOWN_MS, KILL_WAIT_MS, stopSessionAsync, STUDIO_END_WAIT_MS } from "./down.ts";
+import { FORCED_SHUTDOWN_MS, KILL_WAIT_MS, stopSessionAsync } from "./down.ts";
 import type { KnownSession } from "./session.ts";
 import { findSession } from "./session.ts";
-import { STUDIO_OPEN_WAIT_MS } from "./studio.ts";
+import { STUDIO_END_WAIT_MS, STUDIO_OPEN_WAIT_MS } from "./studio.ts";
 
 const FORGE = forgeFiles(PROJECT);
 const FILES = sessionFiles(FORGE, "s1");
@@ -201,6 +201,22 @@ function statusWith(
 }
 
 const STUDIO_OPEN = statusWith({ place: PLACE, status: "open" });
+
+/**
+ * The status of a session that sees its Studio close the place at once.
+ *
+ * @param world - The project, with the place's lock file.
+ * @param phase - The session's phase once Studio closed.
+ * @returns The `status` answer: Studio `open` while the lock file is there.
+ */
+function statusFollowingLock(
+	world: World,
+	phase: SessionStatus["phase"],
+): () => Record<string, unknown> {
+	const open = statusWith({ place: PLACE, status: "open" });
+	const closed = statusWith({ place: PLACE, status: "closed" });
+	return () => (world.memory.fileSystem.existsSync(LOCK) ? open() : { ...closed(), phase });
+}
 
 /**
  * Studio with the place open: its lock file, and its process.
@@ -401,6 +417,35 @@ describe(stopSessionAsync, () => {
 			waited: STUDIO_END_WAIT_MS,
 		});
 		expect(STUDIO_END_WAIT_MS).toBe(35_000);
+	});
+
+	it("should ask at once a session that goes on once its Studio closed", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		openStudio(world);
+		await serveAsync(world, exitOnShutdown, statusFollowingLock(world, "ready"));
+
+		await expect(downAsync(world)).resolves.toMatchObject({
+			stoppedBy: "shutdown",
+			studio: { status: "closed" },
+		});
+		expect({ asked: world.asked, waited: world.clock.now() }).toStrictEqual({
+			asked: [{ sessionId: "s1" }],
+			waited: 0,
+		});
+	});
+
+	it("should wait for a session that is stopping once its Studio closed", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld();
+		openStudio(world);
+		await serveAsync(world, exitOnShutdown, statusFollowingLock(world, "stopping"));
+		at(world, 800, world.exit);
+
+		await expect(downAsync(world)).resolves.toMatchObject({ stoppedBy: "studio_closed" });
+		expect(world.asked).toStrictEqual([]);
 	});
 
 	it("should end a Studio that stays open, without a save, and report it", async () => {
