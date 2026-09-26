@@ -79,6 +79,10 @@ Session commands:
 
 - `--no-compiler`: no compile, no build, no watch-mode compiler: only Rojo and
   Studio. The open step still builds when `open.buildFirst` is on.
+- `--no-rojo`: no `rojo serve`, and no check of `rojoPort`: the session is ready
+  after its first compile. Syncback still runs (one-shot `rojo syncback`).
+  `--no-rojo` with `--no-compiler`, or in a Luau project with no
+  `luau.watch.command`, leaves no service and fails with `usage`.
 - `--no-open`: do not open Studio. By default the session opens the place and
   ends when Studio closes it.
 - `--syncback`: run syncback and its hooks each time the place file is saved

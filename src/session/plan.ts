@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config/resolve.ts";
+import { ForgeError } from "../errors.ts";
 import type { ToolProbe } from "../process/run-tool.ts";
 
 /** The compiler a session runs in watch mode. */
@@ -19,14 +20,20 @@ export interface SessionPlan {
 	compiler: CompilerWatch | undefined;
 	/** Open the place in Studio; the session ends when Studio closes it. */
 	open: boolean;
+	/** The Rojo serve service. */
+	rojo: boolean;
 	/** Run syncback on every place save. */
 	syncback: boolean;
 }
 
-/** The session flags: `--no-compiler` and `--no-open` turn these off. */
+/**
+ * The session flags: `--no-compiler`, `--no-open`, and `--no-rojo` turn these
+ * off.
+ */
 export interface SessionFlags {
 	compiler: boolean;
 	open: boolean;
+	rojo: boolean;
 }
 
 /** The compiler's watch flag; roblox-ts reads it. */
@@ -38,22 +45,32 @@ export const COMPILER_MISSING_HINT =
 const LUAU_MISSING_HINT = "Install it, or fix luau.watch.command in the config.";
 
 /**
- * Decide what a session runs: Rojo always; the
+ * Decide what a session runs: Rojo serve unless `--no-rojo`; the
  * compiler in watch mode unless `--no-compiler`; Studio unless `--no-open`;
  * syncback on save with `--syncback` or `syncback.runOnStart`. A session with
  * a compiler compiles (roblox-ts) and builds once before its services start.
  *
  * @param config - The resolved config; the flags already set its values.
- * @param flags - Whether `--compiler` and `--open` are on.
+ * @param flags - Whether `--compiler`, `--open`, and `--rojo` are on.
  * @returns What the session runs, in order.
+ * @throws {ForgeError} `usage` when the session would run no service.
  */
 export function planSession(config: ResolvedConfig, flags: SessionFlags): SessionPlan {
 	const compiler = flags.compiler ? compilerWatch(config) : undefined;
+	if (compiler === undefined && !flags.rojo) {
+		throw new ForgeError("usage", "With --no-rojo, the session runs no service.", {
+			hint: flags.compiler
+				? "Drop --no-rojo, or set luau.watch.command in the config."
+				: "Drop --no-rojo or --no-compiler.",
+		});
+	}
+
 	return {
 		build: compiler !== undefined,
 		compile: compiler !== undefined && config.projectType === "rbxts",
 		compiler,
 		open: flags.open,
+		rojo: flags.rojo,
 		syncback: config.syncback.runOnStart,
 	};
 }

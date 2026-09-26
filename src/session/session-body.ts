@@ -19,6 +19,7 @@ import type { OutputFollower } from "./output-follower.ts";
 import { followOutput } from "./output-follower.ts";
 import type { SessionPlan } from "./plan.ts";
 import { createReaperRunner } from "./reaper-runner.ts";
+import { waitForRojoAsync } from "./rojo-ready.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
@@ -47,7 +48,8 @@ export interface SessionSetup {
 	/** `.forge/sessions/<id>`: raw worker output while the session runs. */
 	directory: string;
 	plan: SessionPlan;
-	rojo: ServiceInvocation;
+	/** The Rojo serve service, when the plan has one. */
+	rojo: ServiceInvocation | undefined;
 	/** Gets what the session does, for `status` and `state.json`. */
 	status: StatusRecorder;
 	/** Gets the session's syncback runner, for `forge sync`. */
@@ -75,18 +77,6 @@ export const OUTPUT_POLL_MS = 250;
 /** How often the session looks at the place and Studio's lock file. */
 export const FILE_POLL_MS = 500;
 
-/** A promise that never settles: a pause that only time or a signal ends. */
-const NEVER = new Promise<void>(() => {
-	// Never resolves.
-});
-
-/** How often the session checks whether Rojo listens on its port. */
-const ROJO_LISTEN_POLL_MS = 100;
-/**
- * How long Rojo gets to listen on its port once it runs. Rojo builds the
- * whole project tree before it listens, so a big project takes a while.
- */
-export const ROJO_LISTEN_BOUND_MS = 60_000;
 /**
  * How long a session whose Studio closed waits for syncback before it ends:
  * a save just before the close still syncs back.
@@ -101,8 +91,8 @@ export const STUDIO_CLOSED_SYNCBACK_MS = 30_000;
  * 2. Compile (roblox-ts) and build once, when the session has a compiler.
  * 3. Open the place in Studio, and end the session when Studio closes it,
  *    once a save just before the close has synced back.
- * 4. Start Rojo and the watch-mode compiler. Each is a service: its exit
- *    ends the session.
+ * 4. Start Rojo and the watch-mode compiler, each when the plan has it. Each
+ *    is a service: its exit ends the session.
  * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
  *    on each place save: one run at a time, with requests during a run
  *    folded into one more run. Rojo's syncback support is checked once per
@@ -124,7 +114,8 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 			context: workerContext(session, scope, "syncback"),
 			requireSyncback,
 		});
-		// The save watch starts once Rojo serves; until then no save is seen.
+		// The save watch starts once the session is ready; until then no save
+		// is seen.
 		const saves: Pick<SaveWatch, "check"> = { check: noSaveWatch };
 		if (opened !== undefined) {
 			async function flushSyncbackAsync(): Promise<void> {
@@ -285,15 +276,18 @@ async function startServiceAsync(
 }
 
 /**
- * Start Rojo, then the watch-mode compiler, if any. Rojo is ready once it
- * listens; a compiler that reports compiles, after its first one.
+ * Start Rojo, then the watch-mode compiler, each if any. Rojo is ready once
+ * it listens; a compiler that reports compiles, after its first one.
  *
  * @param session - The resolved services.
  * @param scope - Starts them.
  */
 async function startServicesAsync(session: SessionSetup, scope: SessionScope): Promise<void> {
-	await startServiceAsync(session, scope, session.rojo, { initial: "starting" });
-	const { compiler } = session;
+	const { compiler, rojo } = session;
+	if (rojo !== undefined) {
+		await startServiceAsync(session, scope, rojo, { initial: "starting" });
+	}
+
 	if (compiler !== undefined) {
 		const hooks: ServiceHooks = compiler.parsesDiagnostics
 			? { ...compileReader(session), initial: "starting" }
@@ -440,58 +434,15 @@ async function watchStudioAsync(
 	scope.end({ type: "studio_closed" });
 }
 
-function hasEnded(scope: SessionScope): boolean {
-	return scope.signal.aborted;
-}
-
-/**
- * Wait until Rojo listens on its port, so `ready` means a client can
- * connect, then mark it ready.
- *
- * @param session - The config, clock, network, and status.
- * @param scope - Its end signal.
- * @returns `true` once Rojo listens; `false` when the session ended first.
- * @rejects {ForgeError} `service_failed` when Rojo does not listen within
- *   {@link ROJO_LISTEN_BOUND_MS}.
- */
-async function waitForRojoAsync(session: SessionSetup, scope: SessionScope): Promise<boolean> {
-	const { config, context } = session;
-	const { clock, network } = context.seams;
-	const port = config.rojoPort;
-	const deadline = clock.now() + ROJO_LISTEN_BOUND_MS;
-	while (!hasEnded(scope)) {
-		if (await network.isListeningAsync(port)) {
-			// The session may have ended while the check ran.
-			if (hasEnded(scope)) {
-				return false;
-			}
-
-			session.status.service("rojo", "ready");
-			return true;
-		}
-
-		if (clock.now() >= deadline) {
-			throw new ForgeError(
-				"service_failed",
-				`rojo did not listen on port ${port} within ${ROJO_LISTEN_BOUND_MS / 1000} s, so the session stopped.`,
-				{
-					details: { reason: "service_failed:rojo" },
-					hint: `Its output is in ${logFilePath(context.cwd, "rojo")}.`,
-				},
-			);
-		}
-
-		// The session's end ends the pause early.
-		await settlesWithinAsync(clock, NEVER, ROJO_LISTEN_POLL_MS, scope.signal);
-	}
-
-	return false;
-}
-
-function announceReady({ config, context, plan }: SessionSetup): void {
-	const services = plan.compiler === undefined ? "" : " The compiler watches your code.";
+function announceReady({ config, context, plan, rojo }: SessionSetup): void {
+	const services = [
+		...(rojo === undefined
+			? []
+			: [`Rojo serves ${config.rojoProjectPath} on port ${config.rojoPort}.`]),
+		...(plan.compiler === undefined ? [] : ["The compiler watches your code."]),
+	];
 	context.reporter.emit({
-		message: `Rojo serves ${config.rojoProjectPath} on port ${config.rojoPort}.${services} Press Ctrl+C to stop.`,
+		message: `${services.join(" ")} Press Ctrl+C to stop.`,
 		type: "info",
 	});
 }

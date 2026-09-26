@@ -39,6 +39,8 @@ export interface SessionRequest {
 	force?: boolean;
 	/** `--no-open` sets it to `false`. */
 	open: boolean;
+	/** `--no-rojo` sets it to `false`. */
+	rojo: boolean;
 }
 
 /** A failed session, as the supervisor reports it. */
@@ -101,6 +103,7 @@ const requestSchema = jsonLine.pipe(
 		"detached?": { report: "string" },
 		"force?": "boolean",
 		"open": "boolean",
+		"rojo": "boolean",
 	}),
 );
 
@@ -145,6 +148,7 @@ export function parseSessionRequest(text: string | undefined): SessionRequest {
 		config,
 		...(parsed.detached === undefined ? {} : { detached: parsed.detached }),
 		open: parsed.open,
+		rojo: parsed.rojo,
 		...(parsed.force === true ? { force: true } : {}),
 	};
 }

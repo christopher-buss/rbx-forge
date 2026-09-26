@@ -36,7 +36,10 @@ Error codes are stable: a code is never renamed or reused. The full list is in
 ## Agent loop
 
 1. `forge up --json`: start the session, or find the running one
-   (`data.started`). Returns when Rojo listens and the first compile is done.
+   (`data.started`). Returns when Rojo listens and the first compile is done. A
+   loop that reads only the compiled output runs
+   `forge up --no-open --no-rojo --json`: no Rojo serve, so it takes no
+   `rojoPort`, and `data.services.rojo` is `{"status":"off","port":null}`.
 2. Edit code.
 3. `forge status --json --wait`: `data.services.compiler.lastBuild` has `errors`
    and `diagnostics` (`file`, `line`, `column`, `code`, `message`, `severity`),

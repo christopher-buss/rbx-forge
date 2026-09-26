@@ -19,6 +19,11 @@ export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
 		kind: "boolean",
 		text: "Open the place in Studio and stop when Studio closes it (the default); --no-open leaves Studio alone.",
 	},
+	{
+		name: "rojo",
+		kind: "boolean",
+		text: "Serve the project with Rojo (the default); --no-rojo runs no Rojo serve and takes no port.",
+	},
 	STUDIO_PATH_FLAG,
 	{
 		name: "syncback",
@@ -59,6 +64,7 @@ export async function runStartAsync(
 			compiler: input.flags["compiler"] !== false,
 			config: input.config,
 			open: input.flags["open"] !== false,
+			rojo: input.flags["rojo"] !== false,
 			...(input.flags["force"] === true ? { force: true } : {}),
 		},
 	});

@@ -120,6 +120,22 @@ describe(runStatusAsync, () => {
 		});
 	});
 
+	it("should name no port for a session with Rojo off", async () => {
+		expect.assertions(1);
+
+		const { context, ipc, memory } = makeContext();
+		const status = makeStatus();
+		await serveFakeSessionAsync(
+			memory,
+			ipc,
+			makeStatus({ services: { ...status.services, rojo: { port: null, status: "off" } } }),
+		);
+
+		const { summary } = await runStatusAsync(context);
+
+		expect(summary.split("\n")).toContain("  rojo: off");
+	});
+
 	it("should fail with not_running when no session runs or its endpoint is silent", async () => {
 		expect.assertions(2);
 

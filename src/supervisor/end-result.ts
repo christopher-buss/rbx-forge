@@ -32,7 +32,7 @@ export function endedResult(
 	data: {
 		cleanups?: Array<ForcedCleanup>;
 		escalation?: ReaperEnd["escalation"];
-		port: number;
+		port: null | number;
 		reports: Array<FinalReport>;
 	},
 ): CommandResult {

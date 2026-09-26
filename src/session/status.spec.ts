@@ -10,6 +10,7 @@ const START: StatusStart = {
 	open: true,
 	pid: 42,
 	port: 34_872,
+	rojo: true,
 	sessionId: "s1",
 	startedAt: AT,
 	syncback: true,
@@ -97,6 +98,27 @@ describe(createStatusStore, () => {
 		store.service("rojo", "ready");
 
 		expect(isReady(store.snapshot())).toBeTrue();
+	});
+
+	it("should start with Rojo off and no port, and be ready with the compiler alone", () => {
+		expect.assertions(3);
+
+		const { store } = makeStore({ ...START, rojo: false });
+		const before = store.snapshot();
+		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, false);
+
+		expect(before.services.rojo).toStrictEqual({ port: null, status: "off" });
+		expect(before.phase).toBe("starting");
+		expect(isReady(store.snapshot())).toBeTrue();
+	});
+
+	it("should read back a status with Rojo off", () => {
+		expect.assertions(1);
+
+		const { store } = makeStore({ ...START, rojo: false });
+		const status = store.snapshot();
+
+		expect(parseStatus(JSON.parse(JSON.stringify(status)))).toStrictEqual(status);
 	});
 
 	it("should keep the phase it is told once the session ends", () => {

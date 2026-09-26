@@ -7,7 +7,7 @@ import { encodeMessage } from "./channel.ts";
 import type { SupervisorRun } from "./launcher.ts";
 import { createSupervisorLauncher } from "./launcher.ts";
 
-const REQUEST = { compiler: true, config: {}, open: false };
+const REQUEST = { compiler: true, config: {}, open: false, rojo: true };
 
 function launch() {
 	const spawner = createFakeSpawner();

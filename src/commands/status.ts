@@ -103,9 +103,10 @@ function describeStatus({ phase, pid, services, sessionId }: SessionStatus): str
 	const built = build === undefined ? "" : `, last build ${errors}`;
 	const outcome = run?.ok === true ? "ok" : "failed";
 	const synced = run === undefined ? "" : `, last run ${outcome}`;
+	const port = rojo.port === null ? "" : ` on port ${rojo.port}`;
 	const lines = [
 		`Session ${sessionId} (pid ${pid}): ${phase}`,
-		`  rojo: ${rojo.status} on port ${rojo.port}`,
+		`  rojo: ${rojo.status}${port}`,
 		`  compiler: ${compiler.status}${building}${built}`,
 		`  syncback: ${syncback.status}${synced}`,
 		`  studio: ${studio.status}`,
