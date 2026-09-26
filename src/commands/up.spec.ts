@@ -161,6 +161,23 @@ describe(runUpAsync, () => {
 		expect(launchFiles(up)).toStrictEqual([]);
 	});
 
+	it("should name no failed compiler among the parts its own session started", async () => {
+		expect.assertions(1);
+
+		const { run } = makeUp((_request, self) => {
+			self.ticks.push(async () => {
+				const status = compilerStatus("failed", { pid: 700 });
+				await serveFakeSessionAsync(self.memory, self.ipc, status);
+			});
+			return 700;
+		});
+
+		await expect(run()).resolves.toMatchObject({
+			data: { added: [], started: true },
+			summary: "Started session s1: the compiler is failed.",
+		});
+	});
+
 	it("should relay an event the supervisor wrote in two parts once", async () => {
 		expect.assertions(1);
 

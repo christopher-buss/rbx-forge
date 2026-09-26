@@ -8,7 +8,8 @@ import { ForgeError } from "../errors.ts";
 import type { PinnedProcess } from "../native/addon.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { AddablePart, PartRequest } from "../session/part-requests.ts";
-import type { PartId, PartStatus, SessionStatus, StudioStatus } from "../session/status.ts";
+import { isPartRunning } from "../session/part-stops.ts";
+import type { PartId, SessionStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
 import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import type { SessionRequest, SupervisorMessage } from "../supervisor/channel.ts";
@@ -92,7 +93,8 @@ interface UpState {
  * @param status - The session's status.
  * @returns Such as `the compiler is ready, Rojo serves on port 34872`.
  */
-export function describeParts({ services: { compiler, rojo, studio } }: SessionStatus): string {
+export function describeParts({ services }: SessionStatus): string {
+	const { compiler, rojo } = services;
 	const parts: Array<string> = [];
 	if (compiler.status !== "off") {
 		parts.push(`the compiler is ${compiler.status}`);
@@ -104,8 +106,8 @@ export function describeParts({ services: { compiler, rojo, studio } }: SessionS
 		parts.push(`Rojo is ${rojo.status}`);
 	}
 
-	if (isRunning(studio.status)) {
-		parts.push(describeStudio(studio));
+	if (isPartRunning(services, "studio")) {
+		parts.push(describeStudio(services.studio));
 	}
 
 	return parts.length === 0 ? "no part runs" : parts.join(", ");
@@ -171,17 +173,6 @@ export async function runUpAsync(
 
 function describeStudio({ place, status }: SessionStatus["services"]["studio"]): string {
 	return status === "open" ? `Studio has ${place} open` : `Studio is ${status}`;
-}
-
-/**
- * Whether a part runs: a service not `off`, a Studio that opens or has the
- * place open.
- *
- * @param status - The part's status.
- * @returns Whether it runs.
- */
-function isRunning(status: PartStatus | StudioStatus): boolean {
-	return status !== "off" && status !== "closed";
 }
 
 /**
@@ -316,7 +307,7 @@ function checkLaunched(context: CommandContext, state: UpState): void {
 }
 
 function runningParts(status: SessionStatus): Array<PartId> {
-	return PART_IDS.filter((id) => isRunning(status.services[id].status));
+	return PART_IDS.filter((id) => isPartRunning(status.services, id));
 }
 
 /**
