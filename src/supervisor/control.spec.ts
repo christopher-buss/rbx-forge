@@ -28,6 +28,11 @@ function makeTarget() {
 	);
 	const runAsync = vi.fn<SessionSync["runAsync"]>().mockResolvedValue({ input: "game.rbxl" });
 	const addAsync = vi.fn<PartRequests["addAsync"]>().mockResolvedValue(["compiler"]);
+	const stopAsync = vi.fn<PartRequests["stopAsync"]>().mockResolvedValue({
+		ending: false,
+		kept: [{ owner: "start", part: "studio" }],
+		stopped: ["compiler"],
+	});
 	const builds = {
 		tick: vi.fn<BuildWatch["tick"]>(),
 		waitAsync: vi.fn<BuildWatch["waitAsync"]>().mockResolvedValue(),
@@ -37,7 +42,7 @@ function makeTarget() {
 		builds,
 		handlers: controlHandlers({
 			builds,
-			parts: { addAsync },
+			parts: { addAsync, stopAsync },
 			sessionId: "s1",
 			status,
 			stop: { request },
@@ -46,6 +51,7 @@ function makeTarget() {
 		request,
 		runAsync,
 		status,
+		stopAsync,
 	};
 }
 
@@ -173,6 +179,62 @@ describe(controlHandlers, () => {
 		await expect(added).rejects.toMatchObject({ code: "usage" });
 		await expect(added).rejects.toThrow("addParts takes a list of parts: ");
 		expect(addAsync).not.toHaveBeenCalled();
+	});
+
+	it("should answer stopParts with what the session stopped and kept", async () => {
+		expect.assertions(2);
+
+		const { handlers, stopAsync } = makeTarget();
+
+		await expect(
+			handlers.stopParts!({
+				force: true,
+				place: "/p/game.rbxl",
+				recovery: "delete",
+				scope: "stop",
+				sessionId: "s1",
+			}),
+		).resolves.toStrictEqual({
+			ending: false,
+			kept: [{ owner: "start", part: "studio" }],
+			stopped: ["compiler"],
+		});
+		expect(stopAsync).toHaveBeenCalledExactlyOnceWith({
+			force: true,
+			keepStudio: false,
+			place: "/p/game.rbxl",
+			recovery: "delete",
+			scope: "stop",
+		});
+	});
+
+	it("should refuse stopParts for another session's id", async () => {
+		expect.assertions(2);
+
+		const { handlers, stopAsync } = makeTarget();
+
+		await expect(
+			handlers.stopParts!({ scope: "down", sessionId: "old" }),
+		).rejects.toMatchObject({
+			code: "session_replaced",
+		});
+		expect(stopAsync).not.toHaveBeenCalled();
+	});
+
+	it.for([
+		[{}],
+		[{ scope: "idle" }],
+		[{ force: "yes", scope: "down" }],
+		[{ place: 1, scope: "stop" }],
+	] as const)("should refuse stopParts params %j with usage", async ([parameters]) => {
+		expect.assertions(3);
+
+		const { handlers, stopAsync } = makeTarget();
+		const stopped = handlers.stopParts!(parameters);
+
+		await expect(stopped).rejects.toMatchObject({ code: "usage" });
+		await expect(stopped).rejects.toThrow("stopParts takes a scope: ");
+		expect(stopAsync).not.toHaveBeenCalled();
 	});
 
 	it("should answer sync with the session's syncback run", async () => {

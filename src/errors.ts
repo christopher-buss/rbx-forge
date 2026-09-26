@@ -49,6 +49,7 @@ export type ForgeErrorCode =
 	| "session_running"
 	| "sourcemap_invalid"
 	| "studio_launch_failed"
+	| "studio_owned"
 	| "supervisor_unresponsive"
 	| "syncback_unsupported"
 	| "usage";
@@ -160,6 +161,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	studio_launch_failed: {
 		exitCode: EXIT_FAILURE,
 		text: "The platform launcher could not open the place in Roblox Studio.",
+	},
+	studio_owned: {
+		exitCode: EXIT_FAILURE,
+		text: "A forge start terminal owns the Studio; only --force closes it.",
 	},
 	supervisor_unresponsive: {
 		exitCode: EXIT_CLEANUP_PENDING,

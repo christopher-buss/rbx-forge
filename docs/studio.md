@@ -60,11 +60,14 @@ forge closes only a Studio it can verify:
 
 It never touches another Studio.
 
-`stop` asks the running session for its Studio, and falls back to the lock file
-of the configured place. When the session reports Studio as `opening` (started,
-the place not open yet), `stop` and `down` wait up to 60 seconds for it to be
-`open`, then close it. When `down` closes Studio, the session ends by itself
-once a syncback run for a last save is done. `--force` does not change how
+`stop` and `down` ask the running session to close its Studio; the session
+closes it and stops its Rojo. `stop` falls back to the lock file of the
+configured place (or of `--place <path>`) when the session has no Studio of that
+place. When the session reports Studio as `opening` (started, the place not open
+yet), the session waits up to 60 seconds for it to be `open`, then closes it. A
+session with no part left ends, once a syncback run for a last save is done. A
+Studio that a `forge start` terminal owns stays: `stop` fails with
+`studio_owned`, and `stop --force` closes it. `--force` does not change how
 Studio closes.
 
 ## Auto-recovery

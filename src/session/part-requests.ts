@@ -1,6 +1,7 @@
 import { type } from "arktype";
 
 import { ForgeError } from "../errors.ts";
+import type { PartStopper } from "./part-stops.ts";
 import type { PartId } from "./status.ts";
 
 /**
@@ -19,11 +20,18 @@ export interface PartRequest {
 /** Adds the parts that are missing or failed, and returns those it started. */
 export type PartAdder = (request: PartRequest) => Promise<Array<PartId>>;
 
+/** What the session body adds and stops parts with. */
+export interface PartHandlers {
+	add: PartAdder;
+	stop: PartStopper;
+}
+
 /**
- * `forge up` on a running session: the control channel asks, the session
- * body adds. The channel opens before the body has started its parts, so a
- * request waits until the body hands its adder over. Requests run one at a
- * time.
+ * `forge up`, `down`, and `stop` on a running session: the control channel
+ * asks, the session body adds or stops. The channel opens before the body
+ * has started its parts, so an add waits until the body hands its handlers
+ * over; a stop before that fails at once, and the client stops the whole
+ * session. Requests run one at a time.
  */
 export interface PartRequests {
 	/**
@@ -34,13 +42,21 @@ export interface PartRequests {
 	 *   adder's failure, such as `compiler_missing`.
 	 */
 	addAsync: PartAdder;
-	/** The body started its parts and can add more now. */
-	attach: (add: PartAdder) => void;
+	/** The body started its parts and can add and stop them now. */
+	attach: (handlers: PartHandlers) => void;
 	/**
 	 * The session is ending: every request from now on, and every waiting one,
 	 * fails.
 	 */
 	close: () => void;
+	/**
+	 * Stop the parts a request may stop.
+	 *
+	 * @returns What it stopped and kept.
+	 * @rejects {ForgeError} `not_running` while the session starts, or once it
+	 *   is stopping.
+	 */
+	stopAsync: PartStopper;
 }
 
 const partRequest = type({
@@ -66,31 +82,38 @@ export function parsePartRequest(parameters: Record<string, unknown>): PartReque
 
 /**
  * Make the link between a session's control channel and its body for
- * `forge up`.
+ * `forge up`, `down`, and `stop`.
  *
- * @returns A link with no adder yet.
+ * @returns A link with no handlers yet.
  */
 export function createPartRequests(): PartRequests {
-	const adder = Promise.withResolvers<PartAdder | undefined>();
-	let isClosed = false;
-	let queue: Promise<unknown> = Promise.resolve();
+	const attached = Promise.withResolvers<PartHandlers | undefined>();
+	const link: { handlers?: PartHandlers; isClosed: boolean } = { isClosed: false };
+	const enqueueAsync = createQueue();
 	return {
 		addAsync: async (parts) => {
-			const add = await adder.promise;
-			if (add === undefined || isClosed) {
-				throw stopping();
-			}
-
-			const run = queue.then(async () => add(parts));
-			queue = run.catch(ignore);
-			return run;
+			// Once attached, requests queue in the order they came.
+			const handlers =
+				link.handlers === undefined || link.isClosed
+					? await waitForHandlersAsync(attached.promise, link)
+					: link.handlers;
+			return enqueueAsync(async () => handlers.add(parts));
 		},
-		attach: (add) => {
-			adder.resolve(add);
+		attach: (handlers) => {
+			link.handlers = handlers;
+			attached.resolve(handlers);
 		},
 		close: () => {
-			isClosed = true;
-			adder.resolve(undefined);
+			link.isClosed = true;
+			attached.resolve(undefined);
+		},
+		stopAsync: async (request) => {
+			const { handlers, isClosed } = link;
+			if (handlers === undefined || isClosed) {
+				throw isClosed ? stopping() : starting();
+			}
+
+			return enqueueAsync(async () => handlers.stop(request));
 		},
 	};
 }
@@ -99,8 +122,50 @@ function ignore(): void {
 	// The caller of that request gets its failure.
 }
 
+/**
+ * A queue that runs one request at a time, in order; a failed one does not
+ * hold up the next.
+ *
+ * @returns What queues a request, and resolves as it does.
+ */
+function createQueue(): <T>(run: () => Promise<T>) => Promise<T> {
+	let queue: Promise<unknown> = Promise.resolve();
+	return async (run) => {
+		const next = queue.then(run);
+		queue = next.catch(ignore);
+		return next;
+	};
+}
+
 function stopping(): ForgeError {
-	return new ForgeError("not_running", "The session is stopping; it adds no parts.", {
+	return new ForgeError("not_running", "The session is stopping; it adds and stops no parts.", {
 		hint: 'Start a session with "forge up".',
+	});
+}
+
+/**
+ * Wait until the body hands its handlers over.
+ *
+ * @param attached - Resolves with them, or with none once closed.
+ * @param link - Whether the link closed.
+ * @param link.isClosed - Set once the session is stopping.
+ * @returns What adds and stops parts.
+ * @rejects {ForgeError} `not_running` once the session is stopping.
+ */
+async function waitForHandlersAsync(
+	attached: Promise<PartHandlers | undefined>,
+	link: { isClosed: boolean },
+): Promise<PartHandlers> {
+	const handlers = await attached;
+	if (handlers === undefined || link.isClosed) {
+		throw stopping();
+	}
+
+	return handlers;
+}
+
+function starting(): ForgeError {
+	return new ForgeError("not_running", "The session is starting; it stops no part yet.", {
+		hint: "Stop the whole session.",
 	});
 }

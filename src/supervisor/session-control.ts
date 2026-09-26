@@ -20,8 +20,11 @@ export interface ControlSetup {
 	identity: IdentityRecord;
 	/** Called once, when the session is first ready. */
 	onReady: (() => void) | undefined;
-	/** Adds parts through the session body, for `forge up`. */
-	parts: Pick<PartRequests, "addAsync">;
+	/**
+	 * Adds and stops parts through the session body, for `up`, `down`, and
+	 * `stop`.
+	 */
+	parts: Pick<PartRequests, "addAsync" | "stopAsync">;
 	/**
 	 * The test pause point `control`: the files and `current` exist, the
 	 * endpoint does not.
@@ -61,9 +64,9 @@ export type ControlSeams = Pick<
 /**
  * Step 5 of `runSupervisorAsync`: create the session directory with its
  * identity record and token, keep `state.json` up to date, and open the
- * control endpoint (`status`, `freshStatus`, `addParts`, `sync`, `shutdown`).
- * Call only while holding the singleton lock. When the endpoint cannot open,
- * nothing of the session ran, so its files go.
+ * control endpoint (`status`, `freshStatus`, `addParts`, `stopParts`, `sync`,
+ * `shutdown`). Call only while holding the singleton lock. When the endpoint
+ * cannot open, nothing of the session ran, so its files go.
  *
  * @param seams - The clock, file system, host, transport, addon, and ids.
  * @param setup - The identity, plan, port, stop requests, and `onReady`.

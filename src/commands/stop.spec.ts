@@ -1,7 +1,8 @@
 import path from "node:path";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
+import { makeStatus } from "../../test/helpers/fake-session.ts";
 import type { FakeProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import {
@@ -11,15 +12,23 @@ import {
 	PROJECT,
 	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
-import { STUDIO_OPEN_WAIT_MS } from "../client/studio.ts";
+import { DEFAULT_CONFIG } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
+import type { IpcHandler } from "../ipc/server.ts";
 import { startIpcServer } from "../ipc/server.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Host } from "../seams/host.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { Environment } from "../seams/seams.ts";
-import type { SessionStatus } from "../session/status.ts";
+import { parseStopRequest } from "../session/part-stop-schema.ts";
+import {
+	createPartStopper,
+	STOP_PARTS_WAIT_MS,
+	STUDIO_OPEN_WAIT_MS,
+} from "../session/part-stops.ts";
+import type { SessionScope } from "../session/run-session.ts";
+import type { PartOwner, SessionStatus, StatusStore } from "../session/status.ts";
 import {
 	STUDIO_CLOSE_MS,
 	STUDIO_CLOSE_POLL_MS,
@@ -160,10 +169,13 @@ function makeProject({
 
 /**
  * Run session `s1` of the project: its files, and an endpoint whose
- * `status` reports this Studio.
+ * `status` reports this Studio, and whose `stopParts` runs the session's
+ * stopper on the project's seams.
  *
  * @param project - The stop test project.
  * @param studio - What the session reports about Studio, now.
+ * @param owner - Who owns the Studio.
+ * @returns Every `stopParts` request's params.
  */
 async function serveSessionAsync(
 	project: StopProject,
@@ -171,7 +183,9 @@ async function serveSessionAsync(
 		SessionStatus["services"]["studio"],
 		"pid" | "place" | "startTime" | "status"
 	>,
-): Promise<void> {
+	owner: null | PartOwner = null,
+): Promise<Array<Record<string, unknown>>> {
+	const requests: Array<Record<string, unknown>> = [];
 	const { fileSystem, ipc } = project.context.seams;
 	for (const [file, content] of Object.entries(SESSION_FILES)) {
 		const full = path.join(PROJECT, file);
@@ -179,22 +193,42 @@ async function serveSessionAsync(
 		fileSystem.writeFileSync(full, content);
 	}
 
+	function status(): SessionStatus {
+		return {
+			phase: "ready",
+			pid: 500,
+			running: true,
+			services: {
+				compiler: { building: false, owner: null, status: "off" },
+				rojo: { owner: null, port: 34_872, status: "off" },
+				studio: { owner, ...studio() },
+				syncback: { status: "off" },
+			},
+			sessionId: "s1",
+			startedAt: "2026-01-01T00:00:00.000Z",
+		};
+	}
+
+	const stop = createPartStopper(
+		{
+			config: { studio: DEFAULT_CONFIG.studio },
+			context: project.context,
+			status: { phase: vi.fn<StatusStore["phase"]>(), snapshot: status },
+		},
+		{ end: vi.fn<SessionScope["end"]>() },
+		{
+			flushSyncbackAsync: async () => {},
+			// The compiler keeps the session, so it never ends here.
+			parts: { isRunning: (id) => id === "compiler", stopAsync: async () => {} },
+			state: { isAttached: true },
+		},
+	);
 	const server = startIpcServer(await ipc.listenAsync("endpoint-s1"), {
 		handlers: {
-			status: () => {
-				return {
-					phase: "ready",
-					pid: 500,
-					running: true,
-					services: {
-						compiler: { building: false, owner: null, status: "off" },
-						rojo: { owner: null, port: 34_872, status: "ready" },
-						studio: { owner: null, ...studio() },
-						syncback: { status: "off" },
-					},
-					sessionId: "s1",
-					startedAt: "2026-01-01T00:00:00.000Z",
-				};
+			status: () => ({ ...status() }),
+			stopParts: async (parameters) => {
+				requests.push(parameters);
+				return { ...(await stop(parseStopRequest(parameters))) };
 			},
 		},
 		token: "token",
@@ -202,6 +236,7 @@ async function serveSessionAsync(
 	onTestFinished(async () => {
 		await server.closeAsync();
 	});
+	return requests;
 }
 
 function studioLock(pid: number, host = TEST_HOSTNAME): string {
@@ -260,6 +295,30 @@ function failOn({ context }: StopProject, member: "readFileSync" | "statSync", c
 	};
 }
 
+/**
+ * Run session `s1` of the project with an endpoint whose `stopParts`
+ * answers as `answer` says.
+ *
+ * @param project - The stop test project.
+ * @param answer - Answers `stopParts`.
+ */
+async function serveAnswerAsync(project: StopProject, answer: IpcHandler): Promise<void> {
+	const { fileSystem, ipc } = project.context.seams;
+	for (const [file, content] of Object.entries(SESSION_FILES)) {
+		const full = path.join(PROJECT, file);
+		fileSystem.mkdirSync(path.dirname(full), { recursive: true });
+		fileSystem.writeFileSync(full, content);
+	}
+
+	const server = startIpcServer(await ipc.listenAsync("endpoint-s1"), {
+		handlers: { status: () => ({ ...makeStatus() }), stopParts: answer },
+		token: "token",
+	});
+	onTestFinished(async () => {
+		await server.closeAsync();
+	});
+}
+
 async function stopAsync({ context }: StopProject): Promise<CommandResult> {
 	return runStopAsync(context, { config: {}, flags: {} });
 }
@@ -287,6 +346,7 @@ describe(runStopAsync, () => {
 			data: {
 				end: "exited",
 				forced: false,
+				parts: null,
 				pid: STUDIO_PID,
 				place: PLACE,
 				recovery: null,
@@ -327,6 +387,7 @@ describe(runStopAsync, () => {
 			data: {
 				end: "dialog",
 				forced: true,
+				parts: null,
 				pid: STUDIO_PID,
 				place: PLACE,
 				recovery: MOVED_NONE,
@@ -621,6 +682,226 @@ describe(runStopAsync, () => {
 		});
 	});
 
+	it("should report the session's parts it stopped, and ask with the recovery mode", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		const requests = await serveSessionAsync(project, () => ({ place: PLACE, status: "open" }));
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { parts: { kept: [], stopped: ["studio"] }, pid: STUDIO_PID, stopped: true },
+		});
+		expect(requests).toStrictEqual([
+			{
+				force: false,
+				keepStudio: false,
+				recovery: "move",
+				scope: "stop",
+				sessionId: "s1",
+			},
+		]);
+	});
+
+	it("should fail with studio_owned for a Studio a forge start terminal owns, and touch it not", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		await serveSessionAsync(
+			project,
+			() => {
+				return {
+					pid: STUDIO_PID,
+					place: PLACE,
+					startTime: String(STUDIO_PID),
+					status: "open",
+				};
+			},
+			"start",
+		);
+
+		await expect(stopAsync(project)).rejects.toMatchObject({
+			code: "studio_owned",
+			details: { owner: "start", pid: STUDIO_PID, place: PLACE, sessionId: "s1" },
+			hint: 'Close it in Studio, or run "forge stop --force".',
+			message: `Roblox Studio (PID ${STUDIO_PID}) of session s1 has an owner: the forge start terminal.`,
+		});
+		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
+	});
+
+	it("should name no PID for an owned Studio forge did not start", async () => {
+		expect.assertions(2);
+
+		const project = makeProject();
+		await serveSessionAsync(project, () => ({ status: "open" }), "start");
+
+		const error = await catchStopErrorAsync(project);
+
+		expect({ code: error.code, details: error.details, message: error.message }).toStrictEqual({
+			code: "studio_owned",
+			details: { owner: "start", sessionId: "s1" },
+			message: "Roblox Studio of session s1 has an owner: the forge start terminal.",
+		});
+	});
+
+	it("should close an owned Studio with --force", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		const requests = await serveSessionAsync(
+			project,
+			() => ({ place: PLACE, status: "open" }),
+			"start",
+		);
+
+		await expect(
+			runStopAsync(project.context, { config: {}, flags: { force: true } }),
+		).resolves.toMatchObject({ data: { stopped: true } });
+		expect(requests).toMatchObject([{ force: true }]);
+	});
+
+	it("should close the Studio of the place --place names, outside the session", async () => {
+		expect.assertions(3);
+
+		const other = path.join(PROJECT, "snapshots", "other.rbxl");
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID), "snapshots/other.rbxl.lock": studioLock(7) },
+			processes: {
+				7: {
+					alive: true,
+					executablePath: STUDIO,
+					onClose: () => {
+						project.context.seams.fileSystem.rmSync(`${other}.lock`, { force: true });
+					},
+				},
+				[STUDIO_PID]: { alive: true, executablePath: STUDIO },
+			},
+		});
+		const requests = await serveSessionAsync(project, () => ({ place: PLACE, status: "open" }));
+
+		await expect(
+			runStopAsync(project.context, { config: {}, flags: { place: "snapshots/other.rbxl" } }),
+		).resolves.toMatchObject({
+			data: { parts: { kept: [], stopped: [] }, pid: 7, place: other, stopped: true },
+		});
+		expect(requests).toMatchObject([{ place: other }]);
+		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
+	});
+
+	it("should close the lock file's Studio when the session is still starting", async () => {
+		expect.assertions(1);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		for (const [file, content] of Object.entries(SESSION_FILES)) {
+			const full = path.join(PROJECT, file);
+			project.context.seams.fileSystem.mkdirSync(path.dirname(full), { recursive: true });
+			project.context.seams.fileSystem.writeFileSync(full, content);
+		}
+
+		const server = startIpcServer(await project.context.seams.ipc.listenAsync("endpoint-s1"), {
+			handlers: {
+				status: () => ({ ...makeStatus() }),
+				stopParts: () => {
+					throw new ForgeError("not_running", "The session is starting.");
+				},
+			},
+			token: "token",
+		});
+		onTestFinished(async () => {
+			await server.closeAsync();
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { parts: null, pid: STUDIO_PID, stopped: true },
+		});
+	});
+
+	it("should fail with internal_error when the session answers with something else", async () => {
+		expect.assertions(1);
+
+		const project = makeProject();
+		for (const [file, content] of Object.entries(SESSION_FILES)) {
+			const full = path.join(PROJECT, file);
+			project.context.seams.fileSystem.mkdirSync(path.dirname(full), { recursive: true });
+			project.context.seams.fileSystem.writeFileSync(full, content);
+		}
+
+		const server = startIpcServer(await project.context.seams.ipc.listenAsync("endpoint-s1"), {
+			handlers: {
+				status: () => ({ ...makeStatus() }),
+				stopParts: () => ({ ending: "no" }),
+			},
+			token: "token",
+		});
+		onTestFinished(async () => {
+			await server.closeAsync();
+		});
+
+		await expect(stopAsync(project)).rejects.toMatchObject({
+			code: "internal_error",
+			hint: "The session may run another forge version. Stop it, then start it again.",
+			message: "The session answered stopParts with something else.",
+		});
+	});
+
+	it("should close the lock file's Studio when the session kept only other parts", async () => {
+		expect.assertions(1);
+
+		const project = makeProject();
+		await serveAnswerAsync(project, () => {
+			return {
+				ending: false,
+				kept: [{ owner: "start", part: "compiler" }],
+				stopped: [],
+			};
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: {
+				parts: { kept: [{ owner: "start", part: "compiler" }], stopped: [] },
+				stopped: false,
+			},
+		});
+	});
+
+	it("should give the session its Studio time and the services' grace to answer", async () => {
+		expect.assertions(1);
+
+		const project = makeProject({ config: { gracefulTimeoutMs: 1234 } });
+		const waits: Array<number> = [];
+		const { ipc } = project.context.seams;
+		const { connectAsync } = ipc;
+		ipc.connectAsync = async (endpoint, timeoutMs) => {
+			const connection = await connectAsync(endpoint, timeoutMs);
+			assert(connection !== undefined);
+			const { readLineAsync } = connection;
+			connection.readLineAsync = async (waitMs) => {
+				waits.push(waitMs);
+				return readLineAsync(waitMs);
+			};
+
+			return connection;
+		};
+
+		await serveAnswerAsync(project, () => {
+			return { ending: false, kept: [], stopped: [] };
+		});
+		await stopAsync(project);
+
+		expect(waits[1]).toBe(STOP_PARTS_WAIT_MS + 1234);
+	});
+
 	it("should end a Studio that stays open after the close request, without a save", async () => {
 		expect.assertions(4);
 
@@ -642,6 +923,7 @@ describe(runStopAsync, () => {
 			data: {
 				end: "timeout",
 				forced: true,
+				parts: null,
 				pid: STUDIO_PID,
 				place: PLACE,
 				recovery: MOVED_NONE,
@@ -716,7 +998,7 @@ describe(runStopAsync, () => {
 		expect.assertions(1);
 
 		await expect(stopAsync(makeProject())).resolves.toStrictEqual({
-			data: { place: PLACE, stopped: false },
+			data: { parts: null, place: PLACE, stopped: false },
 			summary: `Roblox Studio does not have ${PLACE} open.`,
 		});
 	});
@@ -759,7 +1041,7 @@ describe(runStopAsync, () => {
 		const project = makeProject({ files: { [LOCK]: studioLock(STUDIO_PID) } });
 
 		await expect(stopAsync(project)).resolves.toStrictEqual({
-			data: { pid: STUDIO_PID, place: PLACE, stopped: false },
+			data: { parts: null, pid: STUDIO_PID, place: PLACE, stopped: false },
 			summary: `Roblox Studio is not running: the lock file names PID ${STUDIO_PID}, which has exited.`,
 		});
 		expect(project.files()[LOCK]).toBe(studioLock(STUDIO_PID));
@@ -974,7 +1256,7 @@ describe(runStopAsync, () => {
 		closeStudioBefore(project, "readFileSync");
 
 		await expect(stopAsync(project)).resolves.toStrictEqual({
-			data: { place: PLACE, stopped: false },
+			data: { parts: null, place: PLACE, stopped: false },
 			summary: `Roblox Studio does not have ${PLACE} open.`,
 		});
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
@@ -990,7 +1272,7 @@ describe(runStopAsync, () => {
 		closeStudioBefore(project, "statSync");
 
 		await expect(stopAsync(project)).resolves.toStrictEqual({
-			data: { pid: STUDIO_PID, place: PLACE, stopped: false },
+			data: { parts: null, pid: STUDIO_PID, place: PLACE, stopped: false },
 			summary: `Roblox Studio (PID ${STUDIO_PID}) closed ${PLACE} while forge checked it.`,
 		});
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();

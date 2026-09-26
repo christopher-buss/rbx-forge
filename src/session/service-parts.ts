@@ -59,6 +59,8 @@ export interface ServiceParts {
 	 * `failure` (why it failed) set.
 	 */
 	stop: (id: ServiceId, failure?: string) => void;
+	/** Stop a running part on request, and wait until its tree is gone. */
+	stopAsync: (id: ServiceId) => Promise<void>;
 }
 
 /** What the service parts run with. */
@@ -85,6 +87,8 @@ interface Stopping {
 interface PartRun {
 	hooks: ServiceHooks;
 	service: ServiceInvocation;
+	/** Resolves once its tree is gone and its status tells how it ended. */
+	stopped?: Promise<void>;
 	stopping?: Stopping;
 	tail: Array<string>;
 	worker: SpawnedWorker;
@@ -99,6 +103,10 @@ interface PartRun {
  */
 export function createServiceParts(setup: PartsSetup, scope: SessionScope): ServiceParts {
 	const running = new Map<ServiceId, PartRun>();
+	function stop(id: ServiceId, failure?: string): void {
+		stopRun(scope, running.get(id), failure);
+	}
+
 	return {
 		isRunning: (id) => running.has(id),
 		startAsync: async (service, hooks) => {
@@ -112,19 +120,37 @@ export function createServiceParts(setup: PartsSetup, scope: SessionScope): Serv
 			const stopped = followPartAsync(setup, scope.signal, { follower, run }).finally(() => {
 				running.delete(service.id);
 			});
+			run.stopped = stopped;
 			scope.track(stopped);
 			return { stopped };
 		},
-		stop: (id, failure) => {
-			const run = running.get(id);
-			if (run === undefined || run.stopping !== undefined) {
-				return;
-			}
-
-			run.stopping = { failure };
-			scope.stopWorker(id);
+		stop,
+		stopAsync: async (id) => {
+			const stopped = running.get(id)?.stopped;
+			stop(id);
+			await stopped;
 		},
 	};
+}
+
+/**
+ * Stop a running part once: its worker gets the graceful signal.
+ *
+ * @param scope - Stops the worker.
+ * @param run - The part; `undefined` when it does not run.
+ * @param failure - Why it failed; unset for a stop on request.
+ */
+function stopRun(
+	scope: Pick<SessionScope, "stopWorker">,
+	run: PartRun | undefined,
+	failure: string | undefined,
+): void {
+	if (run === undefined || run.stopping !== undefined) {
+		return;
+	}
+
+	run.stopping = { failure };
+	scope.stopWorker(run.service.id);
 }
 
 /**

@@ -105,11 +105,19 @@ describe("forge up --studio", () => {
 			},
 			ok: true,
 		});
-		expect(processes(fixture).filter((line) => !line.startsWith("rojo build"))).toStrictEqual([
-			"rbxtsc -w",
-			expect.stringMatching(/^studio /),
-			`rojo serve default.project.json --port ${fixture.port}`,
-		]);
+
+		const [compiler, ...attached] = processes(fixture).filter(
+			(line) => !line.startsWith("rojo build"),
+		);
+
+		// Studio starts first, but the stand-in may log after Rojo.
+		expect({ attached: attached.toSorted(), compiler }).toStrictEqual({
+			attached: [
+				`rojo serve default.project.json --port ${fixture.port}`,
+				expect.stringMatching(/^studio /),
+			],
+			compiler: "rbxtsc -w",
+		});
 	});
 
 	it("should start a session with its compiler, then attach Studio and Rojo", async () => {

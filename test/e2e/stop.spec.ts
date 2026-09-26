@@ -16,7 +16,7 @@ import {
 	waitForExitAsync,
 } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
-import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
+import { isProcessAlive, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 import { makeProject, runBinAsync } from "./run-bin.ts";
 import {
 	closedOnRequest,
@@ -24,7 +24,7 @@ import {
 	START_STUDIO,
 	startReadyAsync,
 } from "./session-fixture.ts";
-import { runForgeAsync } from "./up-fixture.ts";
+import { runForgeAsync, UP, WATCH_COMMAND } from "./up-fixture.ts";
 
 /**
  * This process's variables, without `CI`, with the native addon directory set.
@@ -100,7 +100,7 @@ describe("forge stop", () => {
 
 		expect(status).toBe(EXIT_SUCCESS);
 		expect(parseResult(stdout).data).toStrictEqual(
-			closedOnRequest({ pid: pidOf(studio), place, stopped: true }),
+			closedOnRequest({ parts: null, pid: pidOf(studio), place, stopped: true }),
 		);
 		expect(existsSync(`${place}.lock`)).toBeFalse();
 		expect({
@@ -123,6 +123,7 @@ describe("forge stop", () => {
 		expect(parseResult(stdout).data).toStrictEqual({
 			end: BLOCKED_END,
 			forced: true,
+			parts: null,
 			pid: pidOf(studio),
 			place,
 			recovery: { deleted: [], mode: "move", moved: [], warnings: [] },
@@ -169,6 +170,81 @@ describe("forge stop", () => {
 			stopped: true,
 		});
 		expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
+	});
+
+	it("should close the attached Studio and stop its Rojo, and keep the compiler and the session", async () => {
+		expect.assertions(3);
+
+		const fixture = await makeFixtureAsync(
+			{ ...WATCH_COMMAND, open: { buildFirst: true } },
+			{ studio: true },
+		);
+		await runForgeAsync(fixture, [...UP, "--studio"]);
+		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
+		const stop = await runForgeAsync(fixture, ["stop", "--json"]);
+		const status = await runForgeAsync(fixture, ["status", "--json"]);
+
+		expect(stop.result).toMatchObject({
+			data: {
+				end: CLOSED_END,
+				parts: { kept: [], stopped: ["studio", "rojo"] },
+				pid: studio!.pid,
+				place: fixture.place,
+				stopped: true,
+			},
+			ok: true,
+		});
+		expect(status.result.data).toMatchObject({
+			phase: "ready",
+			running: true,
+			services: {
+				compiler: { status: "ready" },
+				rojo: { status: "off" },
+				studio: { status: "closed" },
+			},
+		});
+		await expect(waitForDeathAsync([studio!.pid], 2000)).resolves.toStrictEqual([]);
+	});
+
+	it("should close a Studio with --force, as one with no owner", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
+		await runForgeAsync(fixture, ["up", "--no-compiler", "--studio", "--json"]);
+		const stop = await runForgeAsync(fixture, ["stop", "--force", "--json"]);
+		const down = await runForgeAsync(fixture, ["down", "--json"]);
+
+		expect(stop.result).toMatchObject({
+			data: { parts: { kept: [], stopped: ["studio", "rojo"] }, stopped: true },
+			ok: true,
+		});
+		// With no part left, the up session ended by itself.
+		expect(down.result.error!.code).toBe("not_running");
+	});
+
+	it("should close the Studio of the place --place names, and no other", async () => {
+		expect.assertions(3);
+
+		const { other, place, project, studio } = await makeStudioProjectAsync();
+		const otherPlace = path.join(project, "other.rbxl");
+		const { status, stdout } = await runBinAsync(
+			["stop", "--place", "other.rbxl", "--json"],
+			project,
+			NATIVE,
+		);
+		await waitForExitAsync(other);
+
+		expect(status).toBe(EXIT_SUCCESS);
+		expect(parseResult(stdout).data).toMatchObject({
+			parts: null,
+			pid: pidOf(other),
+			place: otherPlace,
+			stopped: true,
+		});
+		expect({
+			isOpen: existsSync(`${place}.lock`),
+			isStudioAlive: isProcessAlive(pidOf(studio)),
+		}).toStrictEqual({ isOpen: true, isStudioAlive: true });
 	});
 
 	it("should kill nothing when a stale lock names a PID that another program reused", async () => {
@@ -225,6 +301,7 @@ describe("forge stop", () => {
 
 		expect(status).toBe(EXIT_SUCCESS);
 		expect(parseResult(stdout).data).toStrictEqual({
+			parts: null,
 			pid: pidOf(sleeper),
 			place,
 			stopped: false,

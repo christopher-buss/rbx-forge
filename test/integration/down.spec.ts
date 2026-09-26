@@ -11,7 +11,7 @@ import { assert, describe, expect, it, onTestFinished } from "vitest";
 
 import type { DownOptions, DownReport } from "../../src/client/down.ts";
 import { stopSessionAsync } from "../../src/client/down.ts";
-import { findSession } from "../../src/client/session.ts";
+import { fetchStatusAsync, findSession, stopPartsAsync } from "../../src/client/session.ts";
 import { ForgeError } from "../../src/errors.ts";
 import { nodeClock } from "../../src/seams/clock.ts";
 import { nodeHost } from "../../src/seams/host.ts";
@@ -40,7 +40,7 @@ const SHORT = {
 	force: false,
 	keepStudio: false,
 	// No Studio runs in these sessions; keep would touch no file either way.
-	recovery: { env: {}, mode: "keep", recoveryDirectory: "" },
+	recovery: "keep",
 	timeoutMs: 1000,
 } satisfies DownOptions;
 
@@ -282,17 +282,43 @@ describe("forge down", () => {
 		// until its parent reaps it.
 		const alive = await waitForDeathAsync([pid, ...pidsOf(project, sessionId)], 2000);
 
+		// The session stopped Rojo, waiting through its grace, then ended.
 		expect(outcome).toStrictEqual({
 			ok: true,
 			report: {
+				parts: { kept: [], stopped: ["rojo"] },
 				removed: false,
 				sessionId,
+				status: "stopped",
 				stoppedBy: "shutdown",
 				studio: { status: "none" },
 			},
 		});
 		expect(elapsed).toBeGreaterThanOrEqual(2000);
 		expect({ alive, files: filesLeft(project) }).toStrictEqual({ alive: [], files: [] });
+	}, 60_000);
+
+	it("should leave a session running when a stop reaches none of its parts", async () => {
+		expect.assertions(2);
+
+		const project = await makeProjectAsync();
+		const run = launch(project, ROJO_ONLY);
+		await waitForReadyAsync(run);
+		const session = findSession(nodeFs, forgeFiles(project.project));
+		assert(session !== undefined, "no session is named");
+		const stops = await stopPartsAsync(
+			realTransport(),
+			session,
+			{ force: false, keepStudio: false, scope: "stop" },
+			5000,
+		);
+		const status = await fetchStatusAsync(realTransport(), session);
+
+		expect(stops).toStrictEqual({ ending: false, kept: [], stopped: [] });
+		expect({ phase: status.phase, rojo: status.services.rojo.status }).toStrictEqual({
+			phase: "ready",
+			rojo: "ready",
+		});
 	}, 60_000);
 
 	it("should never report stopped while a worker lives, and clean it up with --force", async () => {
