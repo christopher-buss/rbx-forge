@@ -1,9 +1,13 @@
 import type { AutoRecoveryMode } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
+import { FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
 import type { AddablePart, PartAdder } from "./part-requests.ts";
 import type { KeptPart, PartStopper, StudioOutcome } from "./part-stops.ts";
+import { STOP_PARTS_WAIT_MS } from "./part-stops.ts";
+import { ROJO_LISTEN_BOUND_MS } from "./rojo-part.ts";
 import type { ServiceParts } from "./service-parts.ts";
 import type { PartId, ServiceId, SessionStatus, StatusStore } from "./status.ts";
+import { STUDIO_OPEN_BOUND_MS } from "./studio-part.ts";
 
 /** What one `restartParts` request asks for. */
 export interface RestartRequest {
@@ -26,6 +30,12 @@ export interface PartRestarts {
 	studio?: StudioOutcome;
 }
 
+/**
+ * How long the reaper takes past a worker's grace to prove its killed tree
+ * empty (`CONFIRM_BOUND` in reaper/src/reaper.rs).
+ */
+const TREE_CHECK_MS = 5000;
+
 /** Stops the parts a restart may touch, and starts them again. */
 export type PartRestarter = (request: RestartRequest) => Promise<PartRestarts>;
 
@@ -35,6 +45,25 @@ export interface RestarterParts {
 	add: PartAdder;
 	parts: Pick<ServiceParts, "hasSurvivors">;
 	stop: PartStopper;
+}
+
+/**
+ * How long a restart may take the session to answer, from the bounds it
+ * runs with: the stop (`STOP_PARTS_WAIT_MS`), each of the two services'
+ * grace and tree check, then the adds: the compiler's first build, Rojo's
+ * listen, and Studio's open.
+ *
+ * @param graceMs - The grace of each service's stop.
+ * @returns The wait, in milliseconds.
+ */
+export function restartWaitMs(graceMs: number): number {
+	return (
+		STOP_PARTS_WAIT_MS +
+		2 * (graceMs + TREE_CHECK_MS) +
+		FRESH_BUILD_TIMEOUT_MS +
+		ROJO_LISTEN_BOUND_MS +
+		STUDIO_OPEN_BOUND_MS
+	);
 }
 
 /**

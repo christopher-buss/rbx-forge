@@ -10,7 +10,7 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { PartRestarts, RestartRequest } from "../session/part-restarts.ts";
-import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
+import { restartWaitMs } from "../session/part-restarts.ts";
 import type { SessionStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
 import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
@@ -71,7 +71,7 @@ export async function runRestartAsync(
 		seams.ipc,
 		session,
 		restartRequest(context, input, config),
-		STOP_PARTS_WAIT_MS + config.gracefulTimeoutMs + UP_TIMEOUT_MS,
+		restartWaitMs(config.gracefulTimeoutMs),
 	);
 	const outcome = restarts.studio;
 	if (outcome !== undefined && "error" in outcome) {

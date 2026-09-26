@@ -13,8 +13,11 @@ import {
 import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
+import { ROJO_LISTEN_BOUND_MS } from "../session/rojo-part.ts";
 import type { SessionStatus } from "../session/status.ts";
+import { STUDIO_OPEN_BOUND_MS } from "../session/studio-part.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 import { RESTART_FLAGS, runRestartAsync } from "./restart.ts";
 import { UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
@@ -214,7 +217,7 @@ describe(runRestartAsync, () => {
 		},
 	);
 
-	it("should give the session its Studio time, the services' grace, and a startup to answer", async () => {
+	it("should give the session as long to answer as its stop and adds may take", async () => {
 		expect.assertions(1);
 
 		const run = makeRestart({ gracefulTimeoutMs: 1234 });
@@ -235,7 +238,14 @@ describe(runRestartAsync, () => {
 		await serveAsync(run, EVERY_PART);
 		await restartAsync(run);
 
-		expect(waits).toContain(STOP_PARTS_WAIT_MS + 1234 + UP_TIMEOUT_MS);
+		// Two services, each with its grace and the reaper's 5 s tree check.
+		expect(waits).toContain(
+			STOP_PARTS_WAIT_MS +
+				2 * (1234 + 5000) +
+				FRESH_BUILD_TIMEOUT_MS +
+				ROJO_LISTEN_BOUND_MS +
+				STUDIO_OPEN_BOUND_MS,
+		);
 	});
 
 	it("should fail as Studio's close failed, and say it restarted nothing", async () => {
