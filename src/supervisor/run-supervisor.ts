@@ -103,8 +103,8 @@ interface OwnSession {
  * 4. Choose Rojo's port, when the session serves Rojo (`rojo/rojo-port.ts`).
  * 5. Create the session directory: write-once identity record, token,
  *    `current`. Open the control endpoint (`status`, `freshStatus`,
- *    `addParts`, `stopParts`, `own`, `sync`, `shutdown`), and keep
- *    `state.json` up to date.
+ *    `addParts`, `stopParts`, `restartParts`, `own`, `sync`, `shutdown`),
+ *    and keep `state.json` up to date.
  * 6. Run the session (`runSessionAsync`): launch the reaper, admit it only
  *    while no stop request came, and run the body.
  * 7. Final barrier: no process of the session is left once the reaper and

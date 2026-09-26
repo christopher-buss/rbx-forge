@@ -6,6 +6,7 @@ import { DOWN_FLAGS, runDownAsync } from "../commands/down.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
 import { LOG_NAMES, LOGS_FLAGS, runLogsAsync } from "../commands/logs.ts";
 import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
+import { RESTART_FLAGS, runRestartAsync } from "../commands/restart.ts";
 import { runStartAsync, START_FLAGS } from "../commands/start.ts";
 import { runStatusAsync, STATUS_FLAGS } from "../commands/status.ts";
 import { runStopAsync, STOP_FLAGS } from "../commands/stop.ts";
@@ -114,6 +115,13 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		run: runStopAsync,
 		summary:
 			"Close Roblox Studio for this project's place, after verifying the process is Studio.",
+	},
+	{
+		name: "restart",
+		flags: RESTART_FLAGS,
+		run: runRestartAsync,
+		summary:
+			"Restart the running session's parts with no owner: the compiler, then a fresh Studio (closed without a save, built again) with Rojo on the same port, once the old processes are gone and the compiler has built.",
 	},
 	{
 		name: "syncback",

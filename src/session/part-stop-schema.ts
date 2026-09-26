@@ -3,21 +3,24 @@ import { type } from "arktype";
 
 import { ForgeError } from "../errors.ts";
 import type { StudioStop } from "../studio/close-studio.ts";
+import type { PartRestarts, RestartRequest } from "./part-restarts.ts";
 import type { PartStops, StopPartsRequest } from "./part-stops.ts";
 
 const PART = "'compiler' | 'rojo' | 'studio'";
+const PARTS = `(${PART})[]`;
+const RECOVERY_MODE = "'delete' | 'keep' | 'move'";
 
 const stopRequest = type({
 	"force?": "boolean",
 	"keepStudio?": "boolean",
 	"place?": "string",
-	"recovery?": "'delete' | 'keep' | 'move'",
+	"recovery?": RECOVERY_MODE,
 	"scope": "'down' | 'restart' | 'stop'",
 });
 
 const recoveryReport = type({
 	deleted: "string[]",
-	mode: "'delete' | 'keep' | 'move'",
+	mode: RECOVERY_MODE,
 	moved: type({ from: "string", to: "string" }).array(),
 	warnings: "string[]",
 });
@@ -34,22 +37,39 @@ const studioStop: Type<StudioStop> = type.or(
 	{ status: "'not_open'" },
 );
 
+const studioOutcome = type.or(
+	{
+		error: {
+			"code": "string",
+			"details?": "Record<string, unknown>",
+			"hint?": "string",
+			"message": "string",
+		},
+		place: "string",
+	},
+	{ place: "string", stop: studioStop },
+);
+
+const kept = type({ owner: "'start'", part: PART }).array();
+
 const stopsResult: Type<PartStops> = type({
 	"ending": "boolean",
-	"kept": type({ owner: "'start'", part: PART }).array(),
-	"stopped": `(${PART})[]`,
-	"studio?": type.or(
-		{
-			error: {
-				"code": "string",
-				"details?": "Record<string, unknown>",
-				"hint?": "string",
-				"message": "string",
-			},
-			place: "string",
-		},
-		{ place: "string", stop: studioStop },
-	),
+	kept,
+	"stopped": PARTS,
+	"studio?": studioOutcome,
+});
+
+const restartRequest = type({
+	"force?": "boolean",
+	"recovery?": RECOVERY_MODE,
+	"studioPath?": "string",
+});
+
+const restartResult: Type<PartRestarts> = type({
+	"added": PARTS,
+	kept,
+	"stopped": PARTS,
+	"studio?": studioOutcome,
 });
 
 /**
@@ -83,5 +103,40 @@ export function parseStopRequest(parameters: Record<string, unknown>): StopParts
  */
 export function parseStopResult(value: unknown): PartStops | undefined {
 	const parsed = stopsResult(value);
+	return parsed instanceof type.errors ? undefined : parsed;
+}
+
+/**
+ * Read what a `restartParts` request asks for.
+ *
+ * @param parameters - What the request sent.
+ * @returns `force`, and the recovery mode and Studio path when set.
+ * @throws {ForgeError} `usage` when it is not a restart request.
+ */
+export function parseRestartRequest(parameters: Record<string, unknown>): RestartRequest {
+	const parsed = restartRequest(parameters);
+	if (parsed instanceof type.errors) {
+		throw new ForgeError(
+			"usage",
+			`restartParts takes force, recovery, and studioPath: ${parsed.summary}`,
+		);
+	}
+
+	return {
+		force: parsed.force === true,
+		...(parsed.recovery === undefined ? {} : { recovery: parsed.recovery }),
+		...(parsed.studioPath === undefined ? {} : { studioPath: parsed.studioPath }),
+	};
+}
+
+/**
+ * Read what a session answered `restartParts` with.
+ *
+ * @param value - The `result` of the session's answer.
+ * @returns What it stopped, kept, and started, or `undefined` when it is
+ *   not that.
+ */
+export function parseRestartResult(value: unknown): PartRestarts | undefined {
+	const parsed = restartResult(value);
 	return parsed instanceof type.errors ? undefined : parsed;
 }

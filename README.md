@@ -74,15 +74,16 @@ Session commands:
 | `forge status`      | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                                                              |
 | `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                                                                                                                 |
 | `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                                                               |
+| `forge restart`     | Restart the session's parts that have no owner: the compiler, then a fresh Studio with Rojo on the same port. See below.                                                                                                       |
 | `forge down`        | Stop the session's parts that have no owner (Studio first), and end the session when none is left. Reports `stopped` only when its supervisor and every process of it are gone.                                                |
 
-`start` runs the compiler, Rojo, and Studio, and owns them: `down`, `stop`, and
-the idle timeout leave them alone. When a session runs (such as an agent's
-`up`), `start` joins it instead: it takes every running part, without a restart,
-and starts the missing ones. On Ctrl+C (or a closed terminal) it stops the parts
-it started and gives back the parts it took, which run on with no owner; the
-session ends when no part is left. It never closes Studio, and the close of its
-Studio stops nothing. Its flags:
+`start` runs the compiler, Rojo, and Studio, and owns them: `down`, `stop`,
+`restart`, and the idle timeout leave them alone. When a session runs (such as
+an agent's `up`), `start` joins it instead: it takes every running part, without
+a restart, and starts the missing ones. On Ctrl+C (or a closed terminal) it
+stops the parts it started and gives back the parts it took, which run on with
+no owner; the session ends when no part is left. It never closes Studio, and the
+close of its Studio stops nothing. Its flags:
 
 - `--no-compiler`: no compile, no build, no watch-mode compiler: only Rojo and
   Studio. The open step still builds when `open.buildFirst` is on.
@@ -115,6 +116,17 @@ owns keeps running, and so does the session: `down` names it in
 of its session, each verified), `--keep-studio` (leave the session's Studio
 open), and `--recovery <mode>` (see
 [Auto-recovery](./docs/studio.md#auto-recovery)).
+
+`restart` restarts every part with no owner. It closes Studio without a save (as
+`stop` does), stops Rojo and the compiler, and waits until the reaper reports
+each old process tree gone; when one is not, it fails with `cleanup_in_progress`
+and starts nothing. Then it starts the compiler and, once its first build is
+done, builds the place, opens it in a new Studio, and serves Rojo on the same
+port. So a deleted output folder or a reinstalled `node_modules` recovers. A
+failed compiler starts again too. It names the parts that a `forge start`
+terminal owns in `data.kept` and leaves them alone; `--force` restarts them too,
+and they keep their owner. It returns when no part is starting. It takes
+`--recovery <mode>` and `--studio-path <path>`.
 
 `status --wait` returns the status once the compiler's last build is fresh: no
 compile runs, and none started for a short quiet window. Run it after an edit.
@@ -190,7 +202,8 @@ with one `result` line. A run that cannot prompt never prompts. Error codes are
 stable, and each maps to one exit code. The loop:
 
 1. `forge up --json` starts the compiler in a background session. On a running
-   session, it starts the compiler again if it failed.
+   session, it starts the compiler again if it failed. `forge restart --json`
+   restarts every part with no owner, such as after a deleted output folder.
 2. Edit code.
 3. `forge status --json --wait` gives the compile errors with file, line, and
    column. `--wait` waits for the compile of your edit, so the result is never

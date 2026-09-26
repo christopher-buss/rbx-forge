@@ -87,6 +87,31 @@ interface UpState {
 }
 
 /**
+ * Say where each part that runs is.
+ *
+ * @param status - The session's status.
+ * @returns Such as `the compiler is ready, Rojo serves on port 34872`.
+ */
+export function describeParts({ services: { compiler, rojo, studio } }: SessionStatus): string {
+	const parts: Array<string> = [];
+	if (compiler.status !== "off") {
+		parts.push(`the compiler is ${compiler.status}`);
+	}
+
+	if (rojo.status === "ready") {
+		parts.push(`Rojo serves on port ${rojo.port}`);
+	} else if (rojo.status !== "off") {
+		parts.push(`Rojo is ${rojo.status}`);
+	}
+
+	if (isRunning(studio.status)) {
+		parts.push(describeStudio(studio));
+	}
+
+	return parts.length === 0 ? "no part runs" : parts.join(", ");
+}
+
+/**
  * `forge up`: start the dev session in the background with the watch-mode
  * compiler, and return once no part starts: the compiler finished its first
  * compile or stopped. With `--studio`, it then attaches Studio with the
@@ -145,6 +170,21 @@ export async function runUpAsync(
 	};
 }
 
+function describeStudio({ place, status }: SessionStatus["services"]["studio"]): string {
+	return status === "open" ? `Studio has ${place} open` : `Studio is ${status}`;
+}
+
+/**
+ * Whether a part runs: a service not `off`, a Studio that opens or has the
+ * place open.
+ *
+ * @param status - The part's status.
+ * @returns Whether it runs.
+ */
+function isRunning(status: PartStatus | StudioStatus): boolean {
+	return status !== "off" && status !== "closed";
+}
+
 /**
  * What `up` asks a session to add: the compiler unless `--no-compiler`,
  * Studio with `--studio`.
@@ -173,46 +213,6 @@ function wantedParts(context: CommandContext, flags: CommandInput["flags"]): Par
 function describeAdded(added: ReadonlyArray<PartId>): string {
 	const names = added.map((id) => PART_NAMES[id]);
 	return names.length === 0 ? "added no part" : `started ${names.join(" and ")}`;
-}
-
-function describeStudio({ place, status }: SessionStatus["services"]["studio"]): string {
-	return status === "open" ? `Studio has ${place} open` : `Studio is ${status}`;
-}
-
-/**
- * Whether a part runs: a service not `off`, a Studio that opens or has the
- * place open.
- *
- * @param status - The part's status.
- * @returns Whether it runs.
- */
-function isRunning(status: PartStatus | StudioStatus): boolean {
-	return status !== "off" && status !== "closed";
-}
-
-/**
- * Say where each part that runs is.
- *
- * @param status - The session's status.
- * @returns Such as `the compiler is ready, Rojo serves on port 34872`.
- */
-function describeParts({ services: { compiler, rojo, studio } }: SessionStatus): string {
-	const parts: Array<string> = [];
-	if (compiler.status !== "off") {
-		parts.push(`the compiler is ${compiler.status}`);
-	}
-
-	if (rojo.status === "ready") {
-		parts.push(`Rojo serves on port ${rojo.port}`);
-	} else if (rojo.status !== "off") {
-		parts.push(`Rojo is ${rojo.status}`);
-	}
-
-	if (isRunning(studio.status)) {
-		parts.push(describeStudio(studio));
-	}
-
-	return parts.length === 0 ? "no part runs" : parts.join(", ");
 }
 
 /**

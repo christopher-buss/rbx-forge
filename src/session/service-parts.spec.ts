@@ -179,6 +179,26 @@ describe(createServiceParts, () => {
 		expect(run.fake.calls).toStrictEqual([]);
 	});
 
+	it("should note a tree that left processes, until the part's next tree is gone", async () => {
+		expect.assertions(3);
+
+		const run = await makePartsAsync();
+		await run.parts.startAsync(ROJO, { initial: "ready" });
+		const hasBefore = run.parts.hasSurvivors("rojo");
+		const stopping = run.parts.stopAsync("rojo");
+		run.fake.exit("rojo", { ...EXITED, incomplete: true });
+		await stopping;
+		const hasAfter = run.parts.hasSurvivors("rojo");
+		await run.parts.startAsync(ROJO, { initial: "ready" });
+		const stoppingAgain = run.parts.stopAsync("rojo");
+		run.fake.exit("rojo", EXITED);
+		await stoppingAgain;
+
+		expect(hasBefore).toBeFalse();
+		expect(hasAfter).toBeTrue();
+		expect(run.parts.hasSurvivors("rojo")).toBeFalse();
+	});
+
 	it("should start nothing once the session is ending", async () => {
 		expect.assertions(2);
 

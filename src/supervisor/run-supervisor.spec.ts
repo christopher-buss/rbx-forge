@@ -3413,3 +3413,205 @@ describe("idle timeout", () => {
 		expect(after).toBe(1);
 	});
 });
+
+/**
+ * Ask the session to restart its parts.
+ *
+ * @param run - The session.
+ * @param parameters - The request's params.
+ * @returns The answer, or the failure it rejected with.
+ */
+async function askRestartAsync(
+	run: StartRun,
+	parameters: Record<string, unknown> = {},
+): Promise<unknown> {
+	return callSessionAsync(run.ipc, CONTROL_TARGET, "restartParts", {
+		params: parameters,
+		responseTimeoutMs: 600_000,
+	}).catch((err: unknown) => err);
+}
+
+/**
+ * Wait until the session asks a service to stop, then let it exit.
+ *
+ * @param run - The session.
+ * @param id - The service.
+ * @param report - How its tree ended.
+ */
+async function exitOnStopAsync(
+	run: StartRun,
+	id: string,
+	report: WorkerReport = OK,
+): Promise<void> {
+	await vi.waitFor(async () => {
+		await passAsync(run, OUTPUT_POLL_MS);
+		assert(run.fake.calls.includes(`stop ${id} 3000`), `${id} is asked to stop`);
+	});
+	run.fake.exit(id, report);
+	await passAsync(run, OUTPUT_POLL_MS);
+}
+
+/** The Studio a restart starts again. */
+const RELAUNCHED_PID = 901;
+const RELAUNCHED_LOCK = `${RELAUNCHED_PID}\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`;
+
+describe("forge restart control channel", () => {
+	it("should stop the compiler until its tree is gone, then start it again", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...WATCH, flags: UP });
+		await flushAsync();
+		const answer = askRestartAsync(run);
+		await exitOnStopAsync(run, "compiler");
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		await expect(answer).resolves.toStrictEqual({
+			added: ["compiler"],
+			kept: [],
+			stopped: ["compiler"],
+		});
+		expect(spawnedIds(run.fake)).toStrictEqual(["compiler: ", "compiler: "]);
+		expect(state).toMatchObject({
+			phase: "ready",
+			services: { compiler: { owner: null, status: "ready" } },
+		});
+	});
+
+	it("should start nothing again when the compiler's tree left processes", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...WATCH, flags: UP });
+		await flushAsync();
+		const answer = askRestartAsync(run);
+		await exitOnStopAsync(run, "compiler", { ...OK, incomplete: true });
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		await expect(answer).resolves.toMatchObject({
+			code: "cleanup_in_progress",
+			details: { parts: ["compiler"] },
+		});
+		expect(spawnedIds(run.fake)).toStrictEqual(["compiler: "]);
+		expect(state).toMatchObject({ services: { compiler: { status: "off" } } });
+	});
+
+	it("should leave the parts a start owns, and restart them with force, each with its owner", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({ ...WATCH, flags: UP, owned: true });
+		await flushAsync();
+		const kept = await askRestartAsync(run);
+		const stopsAfterKept = run.fake.calls.filter((call) => call.startsWith("stop "));
+		const forced = askRestartAsync(run, { force: true });
+		await exitOnStopAsync(run, "compiler");
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(kept).toStrictEqual({
+			added: [],
+			kept: [{ owner: "start", part: "compiler" }],
+			stopped: [],
+		});
+		expect(stopsAfterKept).toStrictEqual([]);
+		await expect(forced).resolves.toStrictEqual({
+			added: ["compiler"],
+			kept: [],
+			stopped: ["compiler"],
+		});
+		expect(state).toMatchObject({
+			services: { compiler: { owner: "start", status: "ready" } },
+		});
+	});
+
+	it("should serve Rojo again that ran with no Studio, on its port and with its owner", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ owned: true });
+		await flushAsync();
+		const answer = askRestartAsync(run, { force: true });
+		await exitOnStopAsync(run, "rojo");
+		const state = stateOf(run);
+		run.owner.request({ signal: "SIGINT", type: "signal" });
+		await run.result;
+
+		await expect(answer).resolves.toStrictEqual({
+			added: ["rojo"],
+			kept: [],
+			stopped: ["rojo"],
+		});
+		expect(spawnedIds(run.fake)).toStrictEqual([
+			"rojo: serve default.project.json --port 4000",
+			"rojo: serve default.project.json --port 4000",
+		]);
+		expect(state).toMatchObject({
+			services: { rojo: { owner: "start", port: 4000, status: "ready" } },
+		});
+	});
+
+	it("should close Studio, then start the compiler, and build, open, and serve only after its first build", async () => {
+		expect.assertions(4);
+
+		const run: StartRun = startCommand({
+			flags: UP,
+			processes: {
+				[LAUNCHED_PID]: {
+					alive: true,
+					executablePath: "/opt/RobloxStudio",
+					onClose: () => {
+						run.memory.fileSystem.rmSync(LOCK);
+					},
+					startTime: "900",
+				},
+			},
+			projectType: "rbxts",
+		});
+		const compilerLog = path.join(SESSION, "output", "compiler.log");
+		const built = "Found 0 errors. Watching for file changes.\n";
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(compilerLog, built);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await attachAsync(run);
+		const before = spawnedIds(run.fake).length;
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: RELAUNCHED_PID, startTime: "901" },
+			type: "launched",
+		});
+		const answer = askRestartAsync(run);
+		await exitOnStopAsync(run, "rojo");
+		await exitOnStopAsync(run, "compiler");
+		await passAsync(run, 2 * FILE_POLL_MS);
+		const beforeBuild = spawnedIds(run.fake).slice(before);
+		run.memory.fileSystem.writeFileSync(compilerLog, built);
+		await passAsync(run, 2 * FILE_POLL_MS);
+		run.memory.fileSystem.writeFileSync(LOCK, RELAUNCHED_LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(beforeBuild).toStrictEqual(["compiler: -w"]);
+		expect(spawnedIds(run.fake).slice(before)).toStrictEqual([
+			"compiler: -w",
+			"start-1: build default.project.json --output game.rbxl",
+			"rojo: serve default.project.json --port 4000",
+		]);
+		await expect(answer).resolves.toMatchObject({
+			added: ["compiler", "studio", "rojo"],
+			kept: [],
+			stopped: ["studio", "rojo", "compiler"],
+			studio: { place: PLACE, stop: { pid: LAUNCHED_PID, status: "stopped" } },
+		});
+		expect(state).toMatchObject({
+			phase: "ready",
+			services: {
+				compiler: { status: "ready" },
+				rojo: { port: 4000, status: "ready" },
+				studio: { pid: RELAUNCHED_PID, status: "open" },
+			},
+		});
+	});
+});

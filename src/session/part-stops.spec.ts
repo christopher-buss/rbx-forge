@@ -525,6 +525,32 @@ describe(createPartStopper, () => {
 		}).toStrictEqual({ attached: false, ended: [], running: ["compiler"] });
 	});
 
+	it("should end the follow of the Studio it closed, so its late close stops nothing", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(servicesWith({ rojo: READY, studio: OPEN }), ["rojo"]);
+		const letGo = vi.fn<() => void>();
+		world.stopper.state.letGo = letGo;
+		openStudio(world);
+		await stopAsync(world, { ...DOWN, scope: "restart" });
+
+		expect(letGo).toHaveBeenCalledOnce();
+		expect(world.stopper.state).toStrictEqual({ isAttached: false, letGo: undefined });
+	});
+
+	it("should keep following a Studio it could not close", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(servicesWith({ rojo: READY, studio: OPEN }), ["rojo"]);
+		const letGo = vi.fn<() => void>();
+		world.stopper.state.letGo = letGo;
+		openStudio(world, { executablePath: "/usr/bin/node" });
+		await stopAsync(world, STOP);
+
+		expect(letGo).not.toHaveBeenCalled();
+		expect(world.stopper.state).toStrictEqual({ isAttached: true, letGo });
+	});
+
 	it("should leave the session alone for stop when it has no Studio", async () => {
 		expect.assertions(1);
 

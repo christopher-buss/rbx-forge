@@ -12,6 +12,7 @@ import {
 	joinSessionAsync,
 	probeSessionAsync,
 	readIdentity,
+	restartPartsAsync,
 } from "./session.ts";
 
 const FORGE = forgeFiles(PROJECT);
@@ -140,6 +141,58 @@ describe(addPartsAsync, () => {
 			code: "internal_error",
 			hint: "The session may run another forge version. Stop it, then start it again.",
 			message: "The session answered addParts with something else.",
+		});
+	});
+});
+
+describe(restartPartsAsync, () => {
+	it("should ask for the restart with the session's id and return what it did", async () => {
+		expect.assertions(2);
+
+		const memory = createMemoryFileSystem();
+		const transport = createMemoryTransport();
+		const fake = await serveFakeSessionAsync(memory, transport);
+		const asked: Array<unknown> = [];
+		const answer = {
+			added: ["compiler", "studio", "rojo"],
+			kept: [{ owner: "start", part: "studio" }],
+			stopped: ["rojo", "compiler"],
+			studio: { error: { code: "identity_mismatch", message: "no" }, place: "/p/game.rbxl" },
+		};
+		fake.restartParts = (parameters) => {
+			asked.push(parameters);
+			return answer;
+		};
+
+		await expect(
+			restartPartsAsync(
+				transport,
+				findSession(memory.fileSystem, FORGE)!,
+				{ force: true, studioPath: "/opt/S" },
+				1000,
+			),
+		).resolves.toStrictEqual(answer);
+		expect(asked).toStrictEqual([{ force: true, sessionId: "s1", studioPath: "/opt/S" }]);
+	});
+
+	it("should reject an answer that is not a restart as internal_error", async () => {
+		expect.assertions(1);
+
+		const memory = createMemoryFileSystem();
+		const transport = createMemoryTransport();
+		const fake = await serveFakeSessionAsync(memory, transport);
+		fake.restartParts = () => ({ added: [], kept: [] });
+		const restarted = restartPartsAsync(
+			transport,
+			findSession(memory.fileSystem, FORGE)!,
+			{ force: false },
+			1000,
+		);
+
+		await expect(restarted).rejects.toMatchObject({
+			code: "internal_error",
+			hint: "The session may run another forge version. Stop it, then start it again.",
+			message: "The session answered restartParts with something else.",
 		});
 	});
 });
