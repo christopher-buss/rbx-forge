@@ -129,7 +129,7 @@ One-shot commands:
 | `forge config`   | Print the resolved config.                                                                                |
 | `forge build`    | Build the Rojo project. `-o, --output <path>`, or `--plugin <name>` for Studio's plugins folder.          |
 | `forge compile`  | Compile roblox-ts once and report errors (rbxts only). While a session runs: see below.                   |
-| `forge open`     | Open the place in Studio. `--place <path>`, `--build` / `--no-build`, `--studio-path <path>`.             |
+| `forge open`     | Build a snapshot of the place and open it in Studio, outside every session. `--studio-path <path>`.       |
 | `forge stop`     | Close the session's Studio (and stop its Rojo) or the Studio of a place, after it verifies it. See below. |
 | `forge syncback` | Sync the place back into the project once. `--input <path>`, `--project <path>`.                          |
 | `forge typegen`  | Write service types from the Rojo sourcemap. `-o`, `--include`, `--exclude`, `--max-depth` (rbxts only).  |
@@ -138,8 +138,14 @@ One-shot commands:
 running, and an `up` session with no part left ends. A Studio that a
 `forge start` terminal owns fails with `studio_owned` (exit 1); `--force` closes
 it too. With no session Studio, `stop` closes the Studio that the place's lock
-file names. `--place <path>` selects the place, and `--recovery <mode>` handles
-the auto-recovery files.
+file names. It also closes every snapshot Studio. `--place <path>` selects one
+place, and `--recovery <mode>` handles the auto-recovery files.
+
+`open` builds a snapshot of the place into `.forge/snapshots/` and opens it with
+no session and no Rojo, the same with or without a running session. It keeps the
+five newest snapshots, and every snapshot that a Studio has open. A snapshot is
+a normal place file: `forge syncback --input <snapshot>` syncs changes made in
+it back into the project.
 
 While a session runs, `forge compile` starts no second compiler: it waits for
 the session's fresh build (as `status --wait`), with its `compile` hooks around
@@ -182,8 +188,8 @@ stable, and each maps to one exit code. The loop:
    the build before it.
 4. To play, `forge up --studio --json` attaches Studio and Rojo to the session;
    read the console with the Roblox Studio MCP. For a one-time look,
-   `forge open --json` opens the place. `forge stop --json` closes Studio and
-   its Rojo; the compiler runs on.
+   `forge open --json` opens a snapshot outside the session. `forge stop --json`
+   closes Studio and its Rojo, and the snapshot Studios; the compiler runs on.
 5. `forge sync --json` pulls Studio edits into the project.
 6. `forge down --json` stops the parts with no owner, and the session once none
    is left. It never fails because a `forge start` terminal owns a part.

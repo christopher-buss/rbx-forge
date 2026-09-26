@@ -80,3 +80,24 @@ export function captureOutput(): CapturedOutput {
 		stdout: () => stdout,
 	};
 }
+
+const openedSnapshot = type({
+	place: "string",
+	studio: type({ pid: "number" }).or("null"),
+});
+
+/** What `forge open --json` reports: the snapshot and its Studio. */
+export type OpenedSnapshot = typeof openedSnapshot.infer;
+
+/**
+ * Read the snapshot and its Studio from `forge open`'s result data.
+ *
+ * @param data - The result's data.
+ * @returns The snapshot's path, and the Studio forge started (`null` for
+ *   the platform launcher).
+ */
+export function parseOpened(data: unknown): OpenedSnapshot {
+	const parsed = openedSnapshot(data);
+	assert(!(parsed instanceof type.errors), "the data names the snapshot and its Studio");
+	return parsed;
+}

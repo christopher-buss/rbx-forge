@@ -9,31 +9,31 @@ import { runWithHooksAsync } from "../hooks/run-hooks.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
+import { pruneSnapshots, snapshotName } from "../studio/snapshots.ts";
+import { forgeFiles } from "../supervisor/session-files.ts";
 import { askAsync } from "./ask.ts";
 import type { BuildOutcome } from "./build.ts";
 import { buildAsync } from "./build.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
-export const OPEN_FLAGS: ReadonlyArray<FlagDefinition> = [
-	{
-		name: "place",
-		config: "open.buildOutputPath",
-		kind: "string",
-		text: "The place file to open (and to build, when building first).",
-		value: "<path>",
-	},
-	{
-		name: "build",
-		config: "open.buildFirst",
-		kind: "boolean",
-		text: "Build the place before opening it; --no-build opens it as it is.",
-	},
-	STUDIO_PATH_FLAG,
-];
+export const OPEN_FLAGS: ReadonlyArray<FlagDefinition> = [STUDIO_PATH_FLAG];
 
 /** A build that ran before the place opened, with its `build` hooks. */
 export interface OpenBuild extends BuildOutcome {
 	hooks: Array<HookResult>;
+}
+
+/** What `forge open` did. */
+export interface OpenedSnapshot {
+	build: OpenBuild;
+	/** The `open` hook results. */
+	hooks: Array<HookResult>;
+	/** The absolute path of the snapshot. */
+	place: string;
+	/** The old snapshots it deleted. */
+	pruned: Array<string>;
+	/** The Studio forge started directly; `null` for the platform launcher. */
+	studio: null | StudioProcess;
 }
 
 /** What the open step did. */
@@ -66,7 +66,8 @@ interface Place {
 const STEP = "open Roblox Studio";
 
 /**
- * The place `forge open` opens, as the config names it.
+ * The place a session's Studio opens, as the config names it; snapshots take
+ * its file name.
  *
  * @param config - The resolved config.
  * @returns `open.buildOutputPath`, else `buildOutputPath`.
@@ -77,8 +78,8 @@ export function openPlacePath(config: Pick<ResolvedConfig, "buildOutputPath" | "
 
 /**
  * The open step with its `open` hooks: build the place when configured or
- * missing (unless the caller built it), then open it in Studio. `forge open`
- * runs it, and so does `forge start`.
+ * missing (unless the caller built it), then open it in Studio. A session's
+ * Studio opens through it.
  *
  * @param context - The run: project root, seams, and reporter.
  * @param config - The resolved config: the place, the build, and the hooks.
@@ -108,37 +109,50 @@ export async function openPlaceAsync(
 }
 
 /**
- * `forge open`: open the place file in Roblox Studio, building it first when
- * `open.buildFirst` or `--build` asks. Studio starts detached
- * (`seams.studioLauncher`), so it is never a child of forge and outlives it. A
- * missing place is built when the user agrees; a run that cannot ask fails.
+ * `forge open`: build a snapshot of the place into `.forge/snapshots/`, keep
+ * the five newest (and every one a Studio has open),
+ * and open it in Roblox Studio. It runs outside every session and with no
+ * Rojo, so it never shares a place file with a session's Studio. Studio
+ * starts detached (`seams.studioLauncher`), so it is never a child of forge
+ * and outlives it.
  *
  * @param context - The run: project root, seams, and reporter.
- * @param input - The config values the flags set.
- * @returns The place, the build (or `null`), and the `open` hook results.
- * @rejects {ForgeError} `place_not_found`, `declined`, `studio_launch_failed`, a build
- *   failure from `buildAsync`, a hook failure, or a config error.
+ * @param input - `--studio-path` and the config values flags set.
+ * @returns The snapshot, its build, the snapshots it deleted, the Studio
+ *   forge started, and the `open` hook results.
+ * @rejects {ForgeError} `studio_launch_failed`, a build failure from
+ *   `buildAsync`, a hook failure, or a config error.
  */
 export async function runOpenAsync(
 	context: CommandContext,
 	input: CommandInput,
 ): Promise<CommandResult> {
-	const { config } = await loadProjectConfigAsync(
-		context.cwd,
-		context.seams.configLoader,
-		input.config,
-	);
+	const { cwd, reporter, seams } = context;
+	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
 	const studioPath = input.flags["studio-path"];
-	const opened = await openPlaceAsync(context, config, {
-		isBuilt: false,
-		studioPath:
-			typeof studioPath === "string" ? path.resolve(context.cwd, studioPath) : undefined,
-	});
+	const { snapshots } = forgeFiles(cwd);
+	const place = path.join(snapshots, snapshotName(seams.clock.now(), openPlacePath(config)));
 
-	return {
-		data: { ...opened },
-		summary: `Opened ${opened.place} in Roblox Studio.`,
-	};
+	const { hooks, value } = await runWithHooksAsync(context, config, "open", async () => {
+		const build = await buildAsync(context, config, {
+			project: config.open.projectPath ?? config.rojoProjectPath,
+			target: { output: path.relative(cwd, place), type: "output" },
+		});
+		const { pruned, warnings } = pruneSnapshots(seams.fileSystem, snapshots);
+		for (const message of warnings) {
+			reporter.emit({ message, type: "warning" });
+		}
+
+		const studio = await launchAsync(
+			context,
+			place,
+			typeof studioPath === "string" ? path.resolve(cwd, studioPath) : undefined,
+		);
+		return { build: { ...build.value, hooks: build.hooks }, pruned, studio };
+	});
+	const opened: OpenedSnapshot = { ...value, hooks, place };
+
+	return { data: { ...opened }, summary: `Opened a snapshot, ${place}, in Roblox Studio.` };
 }
 
 async function shouldBuildAsync(
@@ -164,7 +178,7 @@ async function shouldBuildAsync(
 		},
 		unattended: { answer: "unasked" },
 	});
-	const hint = 'Build it first: run "forge open --build" or "forge build".';
+	const hint = 'Build it first: run "forge build", or set open.buildFirst.';
 	if (answer === "declined") {
 		throw new ForgeError("declined", `${place} does not exist, and it was not built.`, {
 			hint,
