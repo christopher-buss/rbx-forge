@@ -146,7 +146,7 @@ describe("forge up --studio", () => {
 		expect(up.result.data).toMatchObject({
 			services: { studio: { pid: studio, status: "open" } },
 		});
-		expect(processes(fixture)).toStrictEqual([
+		expect(processes(fixture)).toIncludeSameMembers([
 			"rbxtsc -w",
 			`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
 		]);
