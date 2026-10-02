@@ -357,6 +357,60 @@ const CLOSED_BY_REQUEST: StudioOutcome = {
 };
 
 describe(createPartStopper, () => {
+	it.for<{ name: string; studio: Partial<SessionStudio> }>([
+		{ name: "attached", studio: {} },
+		{ name: "launched", studio: { pid: STUDIO_PID } },
+	])("should close a $name Studio while initial sync is pending", async ({ studio }) => {
+		expect.assertions(2);
+
+		const world = makeWorld(
+			servicesWith({
+				compiler: READY,
+				studio: {
+					...studio,
+					place: PLACE,
+					startTime: String(STUDIO_PID),
+					status: "opening",
+				},
+			}),
+			["compiler"],
+		);
+		world.stopper.state.waitsForSync = true;
+		openStudio(world);
+
+		await expect(stopAsync(world, STOP)).resolves.toMatchObject({
+			stopped: ["studio"],
+			studio: { stop: { status: "stopped" } },
+		});
+		expect(world.now()).toBe(0);
+	});
+
+	it("should wait for its own Studio lock while synchronization is pending", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(
+			servicesWith({
+				compiler: READY,
+				studio: {
+					pid: STUDIO_PID,
+					place: PLACE,
+					startTime: String(STUDIO_PID),
+					status: "opening",
+				},
+			}),
+			["compiler"],
+		);
+		world.stopper.state.waitsForSync = true;
+		openStudio(world);
+		world.memory.fileSystem.writeFileSync(LOCK, "invalid lock");
+		atTime(world, 2000, () => {
+			openStudio(world);
+		});
+
+		await expect(stopAsync(world, STOP)).resolves.toMatchObject({ stopped: ["studio"] });
+		expect(world.now()).toBe(2000);
+	});
+
 	it("should close Studio, stop Rojo and the compiler, then end the session for down", async () => {
 		expect.assertions(5);
 
@@ -739,6 +793,7 @@ describe(createPartStopper, () => {
 		);
 		const studio = openStudio(world);
 		world.memory.fileSystem.rmSync(LOCK);
+		world.stopper.state.waitsForSync = true;
 
 		await expect(stopAsync(world, STOP)).resolves.toMatchObject({
 			studio: { stop: { end: "exited", pid: STUDIO_PID, status: "stopped" } },
@@ -755,15 +810,17 @@ describe(createPartStopper, () => {
 	});
 
 	it("should touch no Studio that has no place yet", async () => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ studio: { status: "opening" } }));
+		world.stopper.state.waitsForSync = true;
 
 		await expect(stopAsync(world, STOP)).resolves.toStrictEqual({
 			ending: false,
 			kept: [],
 			stopped: [],
 		});
+		expect(world.now()).toBe(STUDIO_OPEN_WAIT_MS);
 	});
 
 	it("should end Studio without a save after its close time, keeping its files as asked", async () => {

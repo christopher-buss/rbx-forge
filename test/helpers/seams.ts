@@ -169,6 +169,9 @@ function unreachableNetwork(): Network {
 		getRojoInfoAsync: vi.fn<Network["getRojoInfoAsync"]>(unreachable("network")),
 		isListeningAsync: vi.fn<Network["isListeningAsync"]>(unreachable("network")),
 		isPortFreeAsync: vi.fn<Network["isPortFreeAsync"]>(unreachable("network")),
+		listenForStudioReadyAsync: vi.fn<Network["listenForStudioReadyAsync"]>(
+			unreachable("network"),
+		),
 	};
 }
 

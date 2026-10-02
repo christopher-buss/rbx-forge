@@ -22,9 +22,12 @@ describe.skipIf(!IS_ENABLED)("real Studio Rojo synchronization", () => {
 		"should apply the marker's initial tree without confirmation",
 		{ timeout: 240_000 },
 		async () => {
-			expect.assertions(3);
+			expect.assertions(4);
 
 			const studio = await makeRealStudioSyncAsync(true);
+
+			await expect(studio.waitForReadyAsync()).resolves.toBeTrue();
+
 			const observed = await studio.waitForValueAsync("initial");
 			studio.writeProbe("live-edit");
 			const edited = await studio.waitForValueAsync("live-edit");

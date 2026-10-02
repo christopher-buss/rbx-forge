@@ -338,6 +338,11 @@ describe("forge start --no-compiler", () => {
 			},
 			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
 			{
+				message:
+					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+				type: "warning",
+			},
+			{
 				message: `Rojo serves default.project.json on port ${fixture.port}. Press Ctrl+C to stop.`,
 				type: "info",
 			},

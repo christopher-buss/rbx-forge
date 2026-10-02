@@ -11,7 +11,7 @@ import type { RojoServerInfo } from "../seams/network.ts";
  * @param context - The network and file system seams.
  * @param directory - Where this supervisor keeps its generated files.
  * @param port - Where the session's server listens on loopback.
- * @param signal - The session's end signal.
+ * @param options - The session's end signal and temporary callback.
  * @returns The script path and validated Rojo identity.
  * @rejects Invalid Rojo identity, an identity mismatch, cancellation, or an I/O failure.
  */
@@ -19,7 +19,10 @@ export async function writeSessionMarkerAsync(
 	{ seams }: CommandContext,
 	directory: string,
 	port: number,
-	signal: AbortSignal,
+	{
+		readyUrl,
+		signal,
+	}: { readyUrl: (info: RojoServerInfo) => Promise<string>; signal: AbortSignal },
 ): Promise<{ info: RojoServerInfo; runScript: string }> {
 	let info: RojoServerInfo;
 	try {
@@ -44,7 +47,9 @@ export async function writeSessionMarkerAsync(
 
 	signal.throwIfAborted();
 	const file = path.join(directory, "studio-marker.lua");
-	seams.fileSystem.writeFileSync(file, markerScript(info, port));
+	const url = await readyUrl(info);
+	signal.throwIfAborted();
+	seams.fileSystem.writeFileSync(file, markerScript(info, port, url));
 	return { info, runScript: file };
 }
 
@@ -55,11 +60,12 @@ function luaString(value: string): string {
 	});
 }
 
-function markerScript(info: RojoServerInfo, port: number): string {
+function markerScript(info: RojoServerInfo, port: number, readyUrl: string): string {
 	const attributes: Record<string, string> = {
 		Host: "127.0.0.1",
 		Port: String(port),
 		ProjectName: info.projectName,
+		ReadyUrl: readyUrl,
 		SessionId: info.sessionId,
 	};
 	const setters = Object.entries(attributes)

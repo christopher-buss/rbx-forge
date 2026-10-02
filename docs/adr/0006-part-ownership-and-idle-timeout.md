@@ -58,7 +58,12 @@ the caller: `start` owns, `up` does not.
   its port.
 - **Studio launch.** `start` and `up --studio` wait until Rojo listens before
   launching a new Studio. A Rojo that fails to listen leaves Studio unopened; an
-  already-open Studio is attached as it is.
+  already-open Studio is attached as it is. Managed launches stay `opening`
+  until the place lock and a launch-token acknowledgement confirm completed
+  initial sync and an open stream. Readiness waits run alongside the Studio
+  follow; control handlers remain available, and a permitted stop interrupts the
+  wait before entering the part-request queue. Manual attachments confirm only
+  the place lock.
 
 ## Considered options
 
@@ -86,6 +91,8 @@ the caller: `start` owns, `up` does not.
 - The supervisor gets an IPC request to add parts and a path to stop one part
   without ending the session; the reaper's admission already stays open until
   shutdown (ADR 0002).
+- The acknowledgement listener is temporary and closes on every completion path.
+  Its readiness deadline is a tuning surface.
 - `start` must connect as the owner of a supervisor that already runs, not only
   of one it spawned.
 - An agent that disobeys its skill and uses `--force` can still close a human's

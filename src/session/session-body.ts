@@ -9,7 +9,7 @@ import type { Ownership } from "./ownership.ts";
 import { createOwnerHandlers } from "./ownership.ts";
 import type { PartAdder, PartRequests } from "./part-requests.ts";
 import { createPartRestarter } from "./part-restarts.ts";
-import { createPartStopper } from "./part-stops.ts";
+import { createPartStopper, planStops } from "./part-stops.ts";
 import type { SessionPlan } from "./plan.ts";
 import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./rojo-part.ts";
 import type { SessionScope } from "./run-session.ts";
@@ -105,13 +105,9 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 		const requireSyncback = checkSyncbackOnce(session.config);
 		const steps = workerContext(session, scope, "start");
 		const prepared = await runStepsAsync(session, { requireSyncback, steps });
-		const { flushSyncbackAsync, saves, syncback } = startSyncbackRuns(
-			session,
-			scope,
-			requireSyncback,
-		);
+		const syncing = startSyncbackRuns(session, scope, requireSyncback);
 		const state: BodyState = {
-			flushSyncbackAsync,
+			flushSyncbackAsync: syncing.flushSyncbackAsync,
 			parts: createServiceParts(session, scope),
 			steps,
 			studio: { isAttached: false },
@@ -123,12 +119,15 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 			return;
 		}
 
-		await openPreparedStudioAsync(session, scope, state, { port: served.port, prepared });
+		const opening = await openPreparedStudioAsync(session, scope, state, {
+			...served,
+			prepared,
+		});
 
 		attachPartHandlers(session, scope, state);
-		announceReady(session, served.port);
+		announceWhenReady(session, scope, served.port, opening);
 		if (session.plan.syncback) {
-			saves.check = watchSaves(session, scope, syncback);
+			syncing.saves.check = watchSaves(session, scope, syncing.syncback);
 		}
 	};
 }
@@ -161,13 +160,14 @@ function followPreparedStudio(
  * @param opening - The prepared place and listening port, when present.
  * @param opening.prepared - The place prepared before services started.
  * @param opening.port - The port on which Rojo listens, when it does.
+ * @returns A managed launch's readiness wait, when one is required.
  */
 async function openPreparedStudioAsync(
 	session: SessionSetup,
 	scope: SessionScope,
 	state: BodyState,
 	{ port, prepared }: { port: number | undefined; prepared: PreparedStudio | undefined },
-): Promise<void> {
+): Promise<undefined | { open: Promise<void> }> {
 	if (prepared === undefined || prepared.attached !== undefined) {
 		return;
 	}
@@ -179,12 +179,22 @@ async function openPreparedStudioAsync(
 			{ signal: scope.signal },
 			prepared,
 		);
-		followSessionStudio(session, scope, { ...state, state: state.studio }, opened);
+		const following = followSessionStudio(
+			session,
+			scope,
+			{ ...state, state: state.studio },
+			opened,
+		);
+		if (opened.readiness !== undefined) {
+			return following;
+		}
 	}
 
 	if (!state.studio.isAttached) {
 		session.status.studioLeft();
 	}
+
+	return undefined;
 }
 
 function noSaveWatch(): void {
@@ -335,11 +345,19 @@ function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: B
 	const stop = createPartStopper(session, scope, { ...state, ownership, state: state.studio });
 	session.parts.attach({
 		add: withNoOwner(session, add),
+		beforeStop: (request) => {
+			const { services } = session.status.snapshot();
+			if (
+				planStops(services, request).stop.includes("studio") ||
+				(request.scope === "down" && (services.studio.owner === null || request.force))
+			) {
+				state.studio.cancelReady?.();
+			}
+		},
 		restart: createPartRestarter(session, { add, parts, stop }),
 		stop,
 		...createOwnerHandlers(session, scope, { add, ownership, parts, studio: state.studio }),
 	});
-	session.status.started();
 	watchIdle(session, scope);
 }
 
@@ -382,4 +400,29 @@ function announceReady({ config, context, plan }: SessionSetup, port: number | u
 		message: `${rojo}${compiler}Press Ctrl+C to stop.`,
 		type: "info",
 	});
+}
+
+function announceWhenReady(
+	session: SessionSetup,
+	scope: SessionScope,
+	port: number | undefined,
+	opening: undefined | { open: Promise<void> },
+): void {
+	function ready(): void {
+		session.status.started();
+		announceReady(session, port);
+	}
+
+	if (opening === undefined) {
+		ready();
+		return;
+	}
+
+	function syncReady(): void {
+		if (session.status.snapshot().services.studio.status === "open") {
+			ready();
+		}
+	}
+
+	scope.track(opening.open.then(syncReady));
 }

@@ -8,6 +8,7 @@ import { settlesWithinAsync } from "../seams/clock.ts";
 import type { StudioStop, StudioTarget } from "../studio/close-studio.ts";
 import { closeStudioAsync, STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
+import { parseStudioLock, readLockFile, studioLockPath } from "../studio/lock-file.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { Ownership } from "./ownership.ts";
 import type { SessionScope } from "./run-session.ts";
@@ -207,7 +208,7 @@ export function createPartStopper(
 	stopper: StopperParts,
 ): PartStopper {
 	return async (request) => {
-		const services = await servicesForAsync(setup, request);
+		const services = await servicesForAsync(setup, request, stopper.state);
 		const { kept, stop } = planStops(services, request);
 		const studio = stop.includes("studio")
 			? await stopStudioAsync(setup, stopper, request, services)
@@ -259,18 +260,44 @@ function partsInScope(
 }
 
 /**
+ * A synchronization wait does not delay closing a place already locked by
+ * Studio.
+ *
+ * @param setup - The place files.
+ * @param studio - The recorded place and optional launch identity.
+ * @returns Whether the recorded Studio holds the place lock.
+ */
+function hasStudioLock(setup: StopperSetup, { pid, place }: SessionStudio): boolean {
+	if (place === undefined) {
+		return false;
+	}
+
+	const lock = readLockFile(setup.context.seams.fileSystem, studioLockPath(place));
+	if (lock === undefined) {
+		return false;
+	}
+
+	return pid === undefined || parseStudioLock(lock)?.pid === pid;
+}
+
+/**
  * The session's parts once its Studio is past `opening`, or once
  * {@link STUDIO_OPEN_WAIT_MS} have passed.
  *
  * @param setup - The clock and status.
+ * @param state - Whether opening status also waits for synchronization.
  * @returns The parts' status.
  */
-async function settledServicesAsync(setup: StopperSetup): Promise<SessionStatus["services"]> {
+async function settledServicesAsync(
+	setup: StopperSetup,
+	state: StudioState,
+): Promise<SessionStatus["services"]> {
 	const { clock } = setup.context.seams;
 	const deadline = clock.now() + STUDIO_OPEN_WAIT_MS;
 	for (;;) {
 		const { services } = setup.status.snapshot();
-		if (services.studio.status !== "opening" || clock.now() >= deadline) {
+		const hasLock = state.waitsForSync === true && hasStudioLock(setup, services.studio);
+		if (hasLock || services.studio.status !== "opening" || clock.now() >= deadline) {
 			return services;
 		}
 
@@ -284,15 +311,17 @@ async function settledServicesAsync(setup: StopperSetup): Promise<SessionStatus[
  *
  * @param setup - The clock and status.
  * @param request - The scope, place, and `force`.
+ * @param state - Whether opening status also waits for synchronization.
  * @returns The parts' status.
  */
 async function servicesForAsync(
 	setup: StopperSetup,
 	request: StopPartsRequest,
+	state: StudioState,
 ): Promise<SessionStatus["services"]> {
 	const { services } = setup.status.snapshot();
 	return planStops(services, request).stop.includes("studio")
-		? settledServicesAsync(setup)
+		? settledServicesAsync(setup, state)
 		: services;
 }
 

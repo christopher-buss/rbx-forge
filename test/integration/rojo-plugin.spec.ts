@@ -52,10 +52,10 @@ describe.skipIf(process.platform !== "win32" && process.platform !== "darwin")(
 			]);
 
 			expect(app).toStartWith(
-				"-- rbx-forge patch 1 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n",
+				"-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n",
 			);
 			expect(session).toStartWith(
-				"-- rbx-forge patch 1 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a\n",
+				"-- rbx-forge patch 2 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a\n",
 			);
 			expect(
 				native.readModelScriptSources(model, [["Rojo", "Plugin", "Config"]]),

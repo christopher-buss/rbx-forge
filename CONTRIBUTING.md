@@ -2,7 +2,7 @@
 
 ## Setup
 
-1. `mise install` (Node, pnpm, hk, pkl, Rust, Rojo).
+1. `mise install` (Node, pnpm, hk, pkl, Rust, Rojo, Luau).
 2. `pnpm install`.
 3. `hk install --global --mise` to install the git hooks
    (<https://hk.jdx.dev/mise_integration.html#make-tools-available-to-git>)

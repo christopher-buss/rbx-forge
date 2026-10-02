@@ -7,7 +7,7 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
 import { readVariable } from "../process/environment.ts";
 import { runRojoAsync } from "../rojo/rojo.ts";
-import stock from "./rojo-plugin/stock.json" with { type: "json" };
+import patched from "./rojo-plugin/patched.json" with { type: "json" };
 
 /**
  * Whether forge can guarantee automatic sync and acknowledge its completion.
@@ -19,18 +19,18 @@ export interface PluginCapabilities {
 }
 
 /** Current patch version, shared with the readable source distribution. */
-export const VERSION = 1;
+export const VERSION = 2;
 /** Script bodies and provenance for the source distribution. */
 export const SCRIPTS: ReadonlyArray<{ hash: string; name: string; source: string }> = [
 	{
 		name: "App",
 		hash: "f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
-		source: stock.App,
+		source: patched.App,
 	},
 	{
 		name: "ServeSession",
 		hash: "e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
-		source: stock.ServeSession,
+		source: patched.ServeSession,
 	},
 ];
 
@@ -40,9 +40,9 @@ const MANUAL: PluginCapabilities = {
 	syncAcknowledgement: false,
 };
 const FORGE: PluginCapabilities = {
-	autoConnect: false,
+	autoConnect: true,
 	source: "forge",
-	syncAcknowledgement: false,
+	syncAcknowledgement: true,
 };
 const MARK = /^-- rbx-forge patch (\d+) stock ([a-f0-9]{64})\n/u;
 const PROTOCOL = /\bprotocolVersion\s*=\s*(\d+)\s*[,}]/u;
@@ -149,11 +149,21 @@ function recognizes(
 	source: string,
 ): boolean {
 	const mark = MARK.exec(source);
-	return mark === null
-		? createHash("sha256").update(source).digest("hex") === hash
-		: mark[2] === hash &&
-				Number(mark[1]) <= VERSION &&
-				source.slice(mark[0].length) === original;
+	if (mark === null) {
+		return createHash("sha256").update(source).digest("hex") === hash;
+	}
+
+	const body = source.slice(mark[0].length);
+	const version = Number(mark[1]);
+	if (version > VERSION) {
+		return false;
+	}
+
+	const isKnownBody =
+		version === VERSION
+			? body === original
+			: createHash("sha256").update(body).digest("hex") === hash;
+	return mark[2] === hash && isKnownBody;
 }
 
 function upstream(context: CommandContext): PluginCapabilities {

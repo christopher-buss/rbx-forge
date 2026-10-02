@@ -9,7 +9,7 @@ export default {
 	],
 	ignore: [".agents/**"],
 	// External tools exercised by integration and opt-in Studio tests.
-	ignoreBinaries: ["rojo", "tasklist"],
+	ignoreBinaries: ["luau", "rojo", "tasklist"],
 	ignoreDependencies: [
 		// Ambient lib replacement through `libReplacement`.
 		"better-typescript-lib",

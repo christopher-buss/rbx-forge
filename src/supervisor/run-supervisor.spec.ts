@@ -1,7 +1,7 @@
 import { fromAny } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { assert, describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
@@ -28,6 +28,7 @@ import { callSessionAsync, ownSessionAsync } from "../ipc/client.ts";
 import type { OwnedSession } from "../ipc/client.ts";
 import type { WorkerReport, WorkerSpec } from "../reaper/protocol.ts";
 import type { ReaperEnd } from "../reaper/reaper-client.ts";
+import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
@@ -97,6 +98,8 @@ interface StartSetup {
 	isListening?: Network["isListeningAsync"];
 	/** Whether the Rojo port is free. */
 	isPortFree?: boolean;
+	launchedStudio?: boolean;
+	listenForStudioReady?: Network["listenForStudioReadyAsync"];
 	/** How a one-shot run ends; services never end on their own. */
 	oneShot?: (worker: WorkerSpec) => undefined | WorkerReport;
 	/** Gets the supervisor's ready call. */
@@ -142,7 +145,378 @@ const SYNCBACK: StartSetup = {
 	flags: { compiler: false, open: false, syncback: true },
 };
 
+function pendingStudio(setup: StartSetup = {}) {
+	const ready = Promise.withResolvers<boolean>();
+	const close = vi.fn<() => void>();
+	const onReady = vi.fn<() => void>();
+	const run: StartRun = startCommand({
+		files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+		launchedStudio: true,
+		listenForStudioReady: async () => {
+			return { close, ready: ready.promise, url: "http://127.0.0.1:50001/ready/token" };
+		},
+		onReady,
+		platform: "darwin",
+		pluginSources: stockPluginSources(),
+		processes: {
+			1: {
+				alive: true,
+				executablePath: "/opt/RobloxStudio",
+				onClose: () => {
+					run.memory.fileSystem.rmSync(LOCK);
+				},
+				startTime: "0",
+			},
+		},
+		...setup,
+	});
+	return { close, onReady, ready, run };
+}
+
+function holdStudioPoll(original: Clock["sleep"], until: Promise<void>): Clock["sleep"] {
+	return async (ms, signal) => {
+		if (ms !== FILE_POLL_MS) {
+			return original(ms, signal);
+		}
+
+		await until;
+		signal?.throwIfAborted();
+	};
+}
+
 describe("managed Rojo plugin lifecycle", () => {
+	it("should wait for a manual launch's lock observation before closing it", async () => {
+		expect.assertions(2);
+
+		const { run } = pendingStudio({ platform: "linux" });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		const stopped = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await flushAsync();
+
+		expect(run.fake.calls).not.toContain("stop rojo 3000");
+
+		await passAsync(run, FILE_POLL_MS);
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await stopped;
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should finish the Studio follow before returning from cancelled startup", async () => {
+		expect.assertions(3);
+
+		const gate = Promise.withResolvers<void>();
+		onTestFinished(() => {
+			gate.resolve();
+		});
+		const { close, run } = pendingStudio();
+		run.clock.clock.sleep = holdStudioPoll(run.clock.clock.sleep, gate.promise);
+		let isFinished = false;
+		const result = run.result.then((value) => {
+			isFinished = true;
+			return value;
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await flushAsync();
+
+		expect(isFinished).toBeFalse();
+		expect(close).toHaveBeenCalledOnce();
+
+		gate.resolve();
+
+		await expect(result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it.for([
+		{
+			name: "foreign place",
+			owned: false,
+			request: { keepStudio: true, place: "/foreign.rbxl", scope: "stop" },
+		},
+		{ name: "owned Studio", owned: true, request: { keepStudio: true, scope: "down" } },
+	])(
+		"should preserve pending synchronization for a refused $name stop",
+		async ({ owned, request }) => {
+			expect.assertions(4);
+
+			const { close, onReady, ready, run } = pendingStudio({ owned });
+			await flushAsync();
+			run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+			await passAsync(run, FILE_POLL_MS);
+			await callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", { params: request });
+
+			expect(close).not.toHaveBeenCalled();
+			expect(onReady).not.toHaveBeenCalled();
+
+			ready.resolve(true);
+			await flushAsync();
+
+			expect(stateOf(run)).toMatchObject({ services: { studio: { status: "open" } } });
+
+			run.signals.fire("SIGINT");
+
+			await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+		},
+	);
+
+	it("should close a managed locked Studio immediately when a permitted down interrupts synchronization", async () => {
+		expect.assertions(3);
+
+		const { close, run } = pendingStudio();
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		const stopped = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await flushAsync();
+
+		expect(run.fake.calls).toContain("stop rojo 3000");
+		expect(close).toHaveBeenCalledOnce();
+
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await stopped;
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should cancel synchronization when forced down leaves an owned Studio open", async () => {
+		expect.assertions(2);
+
+		const { close, run } = pendingStudio({ owned: true });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		const stopped = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { force: true, keepStudio: true, scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await flushAsync();
+
+		expect(close).toHaveBeenCalledOnce();
+
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await stopped;
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should report a callback that closes without acknowledging initial sync", async () => {
+		expect.assertions(3);
+
+		const close = vi.fn<() => void>();
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			launchedStudio: true,
+			listenForStudioReady: async () => {
+				return {
+					close,
+					ready: Promise.resolve(false),
+					url: "http://127.0.0.1:50001/ready/token",
+				};
+			},
+			platform: "darwin",
+			pluginSources: stockPluginSources(),
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(state).toMatchObject({ services: { studio: { status: "opening" } } });
+		expect(close).toHaveBeenCalledOnce();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Studio did not acknowledge its initial Rojo synchronization before the readiness deadline.",
+			type: "warning",
+		});
+	});
+
+	it("should bound missing sync acknowledgements and ignore a late callback", async () => {
+		expect.assertions(5);
+
+		const ready = Promise.withResolvers<boolean>();
+		const close = vi.fn<() => void>();
+		const onReady = vi.fn<() => void>();
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			launchedStudio: true,
+			listenForStudioReady: async () => {
+				return {
+					close,
+					ready: ready.promise,
+					url: "http://127.0.0.1:50001/ready/token",
+				};
+			},
+			onReady,
+			platform: "darwin",
+			pluginSources: stockPluginSources(),
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, STUDIO_OPEN_BOUND_MS);
+
+		expect(close).toHaveBeenCalledOnce();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Studio did not acknowledge its initial Rojo synchronization before the readiness deadline.",
+			type: "warning",
+		});
+
+		ready.resolve(true);
+		await flushAsync();
+
+		expect(stateOf(run)).toMatchObject({ services: { studio: { status: "opening" } } });
+		expect(onReady).not.toHaveBeenCalled();
+
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should close the callback listener when Studio closes before acknowledging sync", async () => {
+		expect.assertions(4);
+
+		const ready = Promise.withResolvers<boolean>();
+		const close = vi.fn<() => void>();
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			launchedStudio: true,
+			listenForStudioReady: async () => {
+				return {
+					close,
+					ready: ready.promise,
+					url: "http://127.0.0.1:50001/ready/token",
+				};
+			},
+			platform: "darwin",
+			pluginSources: stockPluginSources(),
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+		run.memory.fileSystem.rmSync(LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		ready.resolve(true);
+		await flushAsync();
+
+		expect(stateOf(run)).toMatchObject({ services: { studio: { status: "closed" } } });
+		expect(close).toHaveBeenCalledOnce();
+		expect(run.reporter.events).not.toContainEqual({
+			message:
+				"Studio did not acknowledge its initial Rojo synchronization before the readiness deadline.",
+			type: "warning",
+		});
+
+		run.fake.exit("rojo", OK);
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should let down interrupt an up that is waiting for sync acknowledgement", async () => {
+		expect.assertions(4);
+
+		const ready = Promise.withResolvers<boolean>();
+		const close = vi.fn<() => void>();
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			flags: { compiler: false, open: false },
+			launchedStudio: true,
+			listenForStudioReady: async () => {
+				return {
+					close,
+					ready: ready.promise,
+					url: "http://127.0.0.1:50001/ready/token",
+				};
+			},
+			platform: "darwin",
+			pluginSources: stockPluginSources(),
+		});
+		await flushAsync();
+		const up = askAddAsync(run, { parts: ["studio"] });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+		const down = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { keepStudio: true, scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await flushAsync();
+
+		expect(close).toHaveBeenCalledOnce();
+		expect(run.fake.calls).toContain("stop rojo 3000");
+
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await down;
+
+		await expect(up).resolves.toMatchObject({ code: "studio_launch_failed" });
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should keep Studio opening after its lock arrives until sync is acknowledged", async () => {
+		expect.assertions(4);
+
+		const ready = Promise.withResolvers<boolean>();
+		const close = vi.fn<() => void>();
+		const onReady = vi.fn<() => void>();
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			launchedStudio: true,
+			listenForStudioReady: async () => {
+				return {
+					close,
+					ready: ready.promise,
+					url: "http://127.0.0.1:50001/ready/token?projectName=Example&sessionId=rojo-session",
+				};
+			},
+			onReady,
+			platform: "darwin",
+			pluginSources: stockPluginSources(),
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+
+		expect({ readyCalls: onReady.mock.calls.length, state: stateOf(run) }).toMatchObject({
+			readyCalls: 0,
+			state: { services: { studio: { status: "opening" } } },
+		});
+		expect(
+			run.memory.fileSystem.readFileSync(path.join(SESSION, "studio-marker.lua"), "utf8"),
+		).toContain(
+			'm:SetAttribute("ReadyUrl","http://127.0.0.1:50001/ready/token?projectName=Example&sessionId=rojo-session")',
+		);
+
+		ready.resolve(true);
+		await flushAsync();
+
+		expect({
+			closedCalls: close.mock.calls.length,
+			readyCalls: onReady.mock.calls.length,
+			state: stateOf(run),
+		}).toMatchObject({
+			closedCalls: 1,
+			readyCalls: 1,
+			state: { services: { studio: { status: "open" } } },
+		});
+
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
 	it("should patch both stock scripts before launching a new Studio", async () => {
 		expect.assertions(2);
 
@@ -161,10 +535,10 @@ describe("managed Rojo plugin lifecycle", () => {
 		await run.result;
 
 		expect(sources[0]).toContain(
-			"-- rbx-forge patch 1 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+			"-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
 		);
 		expect(sources[1]).toContain(
-			"-- rbx-forge patch 1 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+			"-- rbx-forge patch 2 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
 		);
 	});
 
@@ -180,10 +554,10 @@ describe("managed Rojo plugin lifecycle", () => {
 		await endPluginSessionAsync(run);
 
 		expect(sources[0].split("\n", 1)[0]).toBe(
-			"-- rbx-forge patch 1 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+			"-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
 		);
 		expect(sources[1]!.split("\n", 1)[0]).toBe(
-			"-- rbx-forge patch 1 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+			"-- rbx-forge patch 2 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
 		);
 	});
 
@@ -272,7 +646,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		await endPluginSessionAsync(run);
 
 		expect(run.fake.spawned.map(({ args }) => args)).not.toContainEqual(["plugin", "install"]);
-		expect(sources[0]).toStartWith("-- rbx-forge patch 1");
+		expect(sources[0]).toStartWith("-- rbx-forge patch 2");
 	});
 
 	it.for(["", undefined])(
@@ -372,7 +746,7 @@ describe("managed Rojo plugin lifecycle", () => {
 				file: path.join(TOOLS, "custom-rojo"),
 			}),
 		);
-		expect(sources[0]).toStartWith("-- rbx-forge patch 1");
+		expect(sources[0]).toStartWith("-- rbx-forge patch 2");
 	});
 
 	it("should fail on a protocol mismatch before changing the plugin or launching", async () => {
@@ -508,6 +882,14 @@ function startCommand({
 	ipc: makeTransport = createMemoryTransport,
 	isListening = async () => true,
 	isPortFree = true,
+	launchedStudio = false,
+	listenForStudioReady = async () => {
+		return {
+			close: () => {},
+			ready: Promise.resolve(true),
+			url: "http://127.0.0.1:50001/ready/test?projectName=Example&sessionId=rojo-session",
+		};
+	},
 	oneShot = succeedOneShots,
 	onReady,
 	owned = false,
@@ -543,7 +925,10 @@ function startCommand({
 	const freePortAsync = vi.fn<Network["freePortAsync"]>().mockResolvedValue(FREE_PORT);
 	const studioLauncher = vi.fn<StudioLauncher>(async (launch) => {
 		await launch.beforeLaunch?.();
-		return { type: "launched" };
+		return {
+			type: "launched",
+			...(launchedStudio ? { studio: { pid: 1, startTime: "0" } } : {}),
+		};
 	});
 	if (pluginSources !== undefined) {
 		configureModelSources(
@@ -587,6 +972,7 @@ function startCommand({
 				getRojoInfoAsync: vi.fn<Network["getRojoInfoAsync"]>(getRojoInfo),
 				isListeningAsync,
 				isPortFreeAsync,
+				listenForStudioReadyAsync: listenForStudioReady,
 			},
 			randomId: () => "session-1",
 			reaper: fake.launch,
@@ -1000,7 +1386,7 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(marker).toContain(
-			`m:SetAttribute("ProjectName","A \\\"quoted\\\" project\\\\name\\\\u1234\\u{0001}雪@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("SessionId","id\\\"\\\\\\n")`,
+			`m:SetAttribute("ProjectName","A \\\"quoted\\\" project\\\\name\\\\u1234\\u{0001}雪@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("ReadyUrl","http://127.0.0.1:50001/ready/test?projectName=Example&sessionId=rojo-session");m:SetAttribute("SessionId","id\\\"\\\\\\n")`,
 		);
 	});
 
@@ -1137,7 +1523,7 @@ describe(runSupervisorAsync, () => {
 			runScript: path.join(SESSION, "studio-marker.lua"),
 		});
 		expect(marker).toBe(
-			`local m=Instance.new("Configuration");m.Name="ROJO_OPEN_"..game:GetService("StudioService"):GetUserId();m.Archivable=false;m:SetAttribute("Host","127.0.0.1");m:SetAttribute("Port","4000");m:SetAttribute("ProjectName","Example@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("SessionId","rojo-session");m.Parent=game\n`,
+			`local m=Instance.new("Configuration");m.Name="ROJO_OPEN_"..game:GetService("StudioService"):GetUserId();m.Archivable=false;m:SetAttribute("Host","127.0.0.1");m:SetAttribute("Port","4000");m:SetAttribute("ProjectName","Example@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("ReadyUrl","http://127.0.0.1:50001/ready/test?projectName=Example&sessionId=rojo-session");m:SetAttribute("SessionId","rojo-session");m.Parent=game\n`,
 		);
 	});
 
@@ -1300,6 +1686,11 @@ describe(runSupervisorAsync, () => {
 			{ name: "rbxtsc watch", status: "succeeded", type: "step" },
 			{ name: "open Roblox Studio", status: "started", type: "step" },
 			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
+			{
+				message:
+					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+				type: "warning",
+			},
 			{
 				message:
 					"Rojo serves default.project.json on port 4000. The compiler watches your code. Press Ctrl+C to stop.",
@@ -1996,7 +2387,13 @@ describe(runSupervisorAsync, () => {
 		const { data } = await run.result;
 
 		expect(Object.keys(data)).not.toContain("escalation");
-		expect(run.reporter.events.filter(({ type }) => type === "warning")).toStrictEqual([]);
+		expect(run.reporter.events.filter(({ type }) => type === "warning")).toStrictEqual([
+			{
+				message:
+					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+				type: "warning",
+			},
+		]);
 	});
 
 	it.for([
@@ -3459,7 +3856,7 @@ describe("forge up --studio", () => {
 
 		await expect(answer).resolves.toMatchObject({
 			code: "studio_launch_failed",
-			hint: 'The session keeps waiting for it; check "forge status".',
+			hint: 'Check "forge status" and Studio\'s Rojo connection.',
 			message: `Roblox Studio did not open ${PLACE} within 180 s.`,
 		});
 		expect(state).toMatchObject({

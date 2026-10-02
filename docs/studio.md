@@ -14,10 +14,11 @@ Studio. A Studio that already has the place open is attached as before.
 session Studio uses `--task RunScript --localPlaceFile <place> --runScriptFile
 <script>` to create a non-archivable `ROJO_OPEN_<UserId>` configuration under
 `game`. Its attributes identify the session's Rojo host, port, session id, and
-worktree project name. Forge checks that Rojo serves the generated wrapper before
-writing the script. The stock Rojo plugin ignores this marker. A snapshot opens
-with the place as its only argument, as a double-click on the place does. Studio runs
-outside every process group and job of forge, so it outlives forge. The session
+worktree project name, plus a temporary loopback readiness callback. Forge checks
+that Rojo serves the generated wrapper before writing the script. The managed
+plugin consumes the marker and connects without a confirmation dialog. A snapshot
+opens with the place as its only argument, as a double-click on the place does.
+Studio runs outside every process group and job of forge, so it outlives forge. The session
 records the Studio process's PID and start time, so `stop` and `down` can verify
 it later. forge finds the executable in this order:
 
@@ -66,8 +67,9 @@ dialog may still need accepting in Studio.
 
 Both script sources are replaced atomically. A current coherent pair is left
 alone, because writing the file can reload the plugin in an open Studio. The
-initial lifecycle patch marks the stock sources; it does not yet implement
-automatic connection. A plugin/server protocol mismatch fails with
+patch connects only when the server's project name and initial session id match
+the launch marker. It accepts that project's initial patch and renames `game`
+to the wrapper name, as stock Rojo does. A plugin/server protocol mismatch fails with
 `plugin_protocol_mismatch` (exit 7); an atomic write failure uses
 `plugin_write_failed` (exit 8).
 
@@ -84,6 +86,20 @@ wrapper, which names the worktree and points at the original project with
 `$path`. Changes to that project file reload while Rojo runs. The wrapper's name
 and root serve fields stay frozen while Rojo runs and are regenerated when Rojo
 starts again.
+
+For a managed launch, Studio stays `opening` until its place lock names the
+launched process and the plugin acknowledges both completed initial synchronization
+and an open synchronization stream. The temporary callback uses a random launch
+token and the expected Rojo identity. It closes on success, cancellation, Studio
+close, failure, or the readiness deadline. `down` and `stop` remain responsive
+while synchronization is pending. If synchronization is not acknowledged before
+the deadline, forge reports the failure; a late callback cannot make Studio ready.
+
+An unknown or upstream plugin, an existing Studio, and a platform fallback need
+manual connection. Their `open` status confirms only the place lock. The managed
+plugin leaves a Studio opened without a launch marker disconnected until a manual
+Connect; saved edit-mode endpoints do not connect automatically. Manual controls
+and playtest connections retain their stock behavior.
 
 ## Closing Studio
 
@@ -117,8 +133,9 @@ closes it and stops its Rojo. `stop` falls back to the lock file of the
 configured place (or of `--place <path>`) when the session has no Studio of that
 place. With no `--place`, `stop` first closes every snapshot Studio: each
 snapshot with a lock file, verified as above. When the session reports Studio as
-`opening` (started, the place not open yet), the session waits up to 60 seconds
-for it to be `open`, then closes it. A session with no part left ends, once a
+`opening`, a managed synchronization wait does not delay closing a place already
+locked by its Studio. While the place has no matching lock, the session waits up
+to 60 seconds for the lock, then closes Studio. A session with no part left ends, once a
 syncback run for a last save is done. A Studio that a `forge start` terminal
 owns stays: `stop` fails with `studio_owned`, and `stop --force` closes it.
 `--force` does not change how Studio closes.

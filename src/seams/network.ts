@@ -1,6 +1,9 @@
 import { decode } from "@msgpack/msgpack";
 
 import { type } from "arktype";
+import { randomBytes } from "node:crypto";
+import { createServer as createHttpServer } from "node:http";
+import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { connect, createServer } from "node:net";
 
@@ -10,6 +13,15 @@ export interface RojoServerInfo {
 	protocolVersion: number;
 	serverVersion: string;
 	sessionId: string;
+}
+
+/** One launch's temporary sync acknowledgement endpoint. */
+export interface StudioReadyListener {
+	/** Dispose the endpoint and finish an unacknowledged wait with false. */
+	close: () => void;
+	/** True only when the launch token and expected identity were received. */
+	ready: Promise<boolean>;
+	url: string;
 }
 
 const ROJO_INFO = type({
@@ -42,6 +54,11 @@ export interface Network {
 	 * serves by default. Resolves `false` when anything else listens there.
 	 */
 	isPortFreeAsync: (port: number) => Promise<boolean>;
+	/** Bind a temporary acknowledgement endpoint before launching Studio. */
+	listenForStudioReadyAsync: (
+		identity: Pick<RojoServerInfo, "projectName" | "sessionId">,
+		signal?: AbortSignal,
+	) => Promise<StudioReadyListener>;
 }
 
 export const nodeNetwork: Network = {
@@ -98,4 +115,60 @@ export const nodeNetwork: Network = {
 			});
 		});
 	},
+	listenForStudioReadyAsync: async ({ projectName, sessionId }, signal) => {
+		signal?.throwIfAborted();
+		const ready = Promise.withResolvers<boolean>();
+		const query = new URLSearchParams({ projectName, sessionId });
+		const route = `/ready/${randomBytes(32).toString("hex")}?${query.toString()}`;
+		let isClosed = false;
+		const server = createHttpServer((request, response) => {
+			const isAccepted = !isClosed && request.method === "GET" && request.url === route;
+			response.writeHead(isAccepted ? 204 : 404);
+			response.end();
+			if (isAccepted) {
+				isClosed = true;
+				ready.resolve(true);
+			}
+		});
+		function close(): void {
+			ready.resolve(false);
+			signal?.removeEventListener("abort", close);
+			server.close();
+			server.closeAllConnections();
+		}
+
+		await bindReadyAsync(server, signal, close);
+
+		signal?.addEventListener("abort", close);
+		// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- listening HTTP server has an address
+		const { port } = server.address() as AddressInfo;
+		return { close, ready: ready.promise, url: `http://127.0.0.1:${port}${route}` };
+	},
 };
+
+/**
+ * Bind the loopback server before exposing its callback URL.
+ *
+ * @param server - The acknowledgement server.
+ * @param signal - Cancels a launch during binding.
+ * @param close - Disposes a failed or cancelled binding.
+ * @rejects A bind failure.
+ */
+async function bindReadyAsync(
+	server: Server,
+	signal: AbortSignal | undefined,
+	close: () => void,
+): Promise<void> {
+	try {
+		await new Promise<void>((resolve, reject) => {
+			// Stryker disable next-line StringLiteral,CallExpression: OS bind
+			// failure
+			server.once("error", reject);
+			server.listen({ host: "127.0.0.1", port: 0 }, resolve);
+		});
+		signal?.throwIfAborted();
+	} catch (err) {
+		close();
+		throw err;
+	}
+}

@@ -11,6 +11,7 @@ import type { CommandContext } from "../../src/commands/context.ts";
 import type { PinnedProcess } from "../../src/native/addon.ts";
 import { readVariable } from "../../src/process/environment.ts";
 import { rojoWrapperPath, writeRojoWrapper } from "../../src/rojo/wrapper-project.ts";
+import type { StudioReadyListener } from "../../src/seams/network.ts";
 import { findStudioExecutable } from "../../src/studio/discover.ts";
 import { writeSessionMarkerAsync } from "../../src/studio/session-marker.ts";
 import { waitForExitAsync } from "./real-native.ts";
@@ -36,6 +37,7 @@ export interface RealStudioSync {
 	restartRojoAsync: (otherName?: string) => Promise<void>;
 	sessionId: string;
 	stopRojoAsync: () => Promise<void>;
+	waitForReadyAsync: () => Promise<boolean>;
 	waitForValueAsync: (value: string) => Promise<Observation>;
 	writeProbe: (value: string) => void;
 }
@@ -52,6 +54,7 @@ interface Runtime {
 	original: Buffer | undefined;
 	port: number;
 	projectName: string;
+	readiness?: StudioReadyListener;
 	rojo: string;
 	sessionId: string;
 	studio: PinnedProcess | undefined;
@@ -134,6 +137,7 @@ async function stopChildAsync(child: ChildProcess | undefined): Promise<void> {
 }
 
 async function cleanupAsync(runtime: Runtime): Promise<void> {
+	runtime.readiness?.close();
 	try {
 		runtime.studio?.kill();
 		await waitAsync(() => runtime.studio?.isAlive() !== true, "owned Studio exit", 10_000);
@@ -216,18 +220,20 @@ async function restartRojoAsync(runtime: Runtime, otherName?: string): Promise<v
 	runtime.projectName ||= projectName;
 }
 
-async function observerScriptAsync(
-	{ collector, context, directory, port }: Runtime,
-	withMarker: boolean,
-): Promise<string> {
+async function observerScriptAsync(runtime: Runtime, withMarker: boolean): Promise<string> {
+	const { collector, context, directory, port } = runtime;
 	let marker = "";
 	if (withMarker) {
-		const generated = await writeSessionMarkerAsync(
-			context,
-			directory,
-			port,
-			AbortSignal.timeout(15_000),
-		);
+		const generated = await writeSessionMarkerAsync(context, directory, port, {
+			readyUrl: async (info) => {
+				runtime.readiness = await context.seams.network.listenForStudioReadyAsync(
+					info,
+					AbortSignal.timeout(90_000),
+				);
+				return runtime.readiness.url;
+			},
+			signal: AbortSignal.timeout(15_000),
+		});
 		marker = readFileSync(generated.runScript, "utf8");
 	}
 
@@ -309,6 +315,7 @@ function controls(runtime: Runtime): RealStudioSync {
 			return runtime.sessionId;
 		},
 		stopRojoAsync: async () => stopRojoAsync(runtime),
+		waitForReadyAsync: async () => runtime.readiness?.ready ?? false,
 		waitForValueAsync: async (value) => waitForValueAsync(runtime, value),
 		writeProbe: (value) => {
 			writeProbe(runtime, value);

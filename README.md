@@ -112,9 +112,11 @@ serves on the session's port (see [`rojoPort`](./docs/config.md#rojoport)) and
 must listen before forge launches a new Studio. If Rojo fails to listen, forge
 reports its failure and launches no Studio. A direct session launch runs a
 marker script identifying that Rojo; see
-[Opening Studio](./docs/studio.md#opening-studio). It returns when Rojo listens
-and Studio has the place open. When that Studio closes the place, only its Rojo
-stops; the compiler runs on.
+[Opening Studio](./docs/studio.md#opening-studio). With the managed plugin, it
+returns once Studio opens the place, completes its initial sync, and opens the
+sync stream. Existing Studios and unsupported plugins need manual connection;
+their open status confirms only the place lock. When Studio closes the place,
+only its Rojo stops; the compiler runs on.
 
 Before a new direct session launch, forge prepares the managed Rojo plugin by
 default. Rojo 7.7.0 and 7.7.1 share the supported stock sources; other versions

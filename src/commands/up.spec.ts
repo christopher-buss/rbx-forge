@@ -358,8 +358,8 @@ describe(runUpAsync, () => {
 		]);
 	});
 
-	it("should name a Studio that still opens the place, and none that closed it", async () => {
-		expect.assertions(2);
+	it("should wait for a requested Studio to open and fail if it closes first", async () => {
+		expect.assertions(3);
 
 		const { run, up } = makeUp(undefined, { config: {}, flags: { studio: true } });
 		const status = compilerStatus("ready");
@@ -367,17 +367,47 @@ describe(runUpAsync, () => {
 			...status,
 			services: { ...status.services, studio: { owner: null, status: "opening" } },
 		});
-		const opening = await run();
+		up.ticks.push(
+			() => {},
+			() => {
+				session.status = {
+					...status,
+					services: {
+						...status.services,
+						studio: { owner: null, place: PLACE, status: "open" },
+					},
+				};
+			},
+		);
+		const opened = await run();
 		session.status = {
 			...status,
 			services: { ...status.services, studio: { owner: null, status: "closed" } },
 		};
-		const closed = await run();
 
-		expect(opening.summary).toBe(
-			"Found session s1 and added no part: the compiler is ready, Studio is opening.",
-		);
-		expect(closed.summary).toBe("Found session s1 and added no part: the compiler is ready.");
+		expect(opened.summary).toContain(`Studio has ${PLACE} open`);
+		expect(up.now()).toBe(2 * UP_POLL_MS);
+		await expect(run()).rejects.toMatchObject({
+			code: "studio_launch_failed",
+			hint: 'Check "forge status" and try "forge up --studio" again.',
+			message: "Studio stopped before its attachment was ready.",
+		});
+	});
+
+	it("should describe an opening Studio when only the compiler was requested", async () => {
+		expect.assertions(1);
+
+		const { run, up } = makeUp();
+		const status = compilerStatus("ready");
+		await serveFakeSessionAsync(up.memory, up.ipc, {
+			...status,
+			services: { ...status.services, studio: { owner: null, status: "opening" } },
+		});
+
+		await expect(run()).resolves.toMatchObject({
+			summary:
+				"Found session s1 and added no part: the compiler is ready, Studio is opening.",
+		});
 	});
 
 	it("should fail with usage for --studio-path without --studio, and start nothing", async () => {
@@ -538,6 +568,34 @@ describe(runUpAsync, () => {
 			message: "The session's supervisor exited without a result.",
 		});
 		expect(launchFiles(up)).toStrictEqual([]);
+	});
+
+	it("should classify its daemon ending during a Studio attachment as a launch failure", async () => {
+		expect.assertions(2);
+
+		const { run, up } = makeUp(
+			(_request, self) => {
+				self.ticks.push(async () => {
+					const session = await serveFakeSessionAsync(
+						self.memory,
+						self.ipc,
+						compilerStatus("off", { pid: 700 }),
+					);
+					session.addParts = () => {
+						self.native.addon.pinProcess(700)!.kill();
+						throw new ForgeError(
+							"not_running",
+							"The session stopped during attachment.",
+						);
+					};
+				});
+				return 700;
+			},
+			{ config: {}, flags: { compiler: false, studio: true } },
+		);
+
+		await expect(run()).rejects.toMatchObject({ code: "studio_launch_failed" });
+		expect(up.detachedSupervisor).toHaveBeenCalledOnce();
 	});
 
 	it("should fail with supervisor_unresponsive when the session is not ready in time", async () => {
