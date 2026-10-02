@@ -1,7 +1,6 @@
 import { compileAsync } from "../commands/compile.ts";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
-import type { OpenedStudio } from "./attach.ts";
 import type { AdderSetup, CompilerService } from "./compiler-part.ts";
 import { createPartAdder, startCompilerAsync } from "./compiler-part.ts";
 import type { IdleTracker } from "./idle.ts";
@@ -20,8 +19,13 @@ import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
 import { checkSyncbackOnce, startSyncback, watchSavesForSyncback } from "./session-syncback.ts";
 import type { PartOwner, StatusRecorder, StatusStore } from "./status.ts";
-import type { StudioSetup, StudioState } from "./studio-part.ts";
-import { createStudioAdder, followSessionStudio, openStudioAsync } from "./studio-part.ts";
+import type { PreparedStudio, StudioSetup, StudioState } from "./studio-part.ts";
+import {
+	createStudioAdder,
+	followSessionStudio,
+	openStudioAsync,
+	prepareStudioAsync,
+} from "./studio-part.ts";
 import type { SaveWatch } from "./watch.ts";
 import { watchOptions, workerContext } from "./worker-context.ts";
 
@@ -70,9 +74,7 @@ const ALL_PARTS = ["studio", "rojo", "compiler"] as const;
  * 1. With syncback on, check that Rojo has syncback, before anything runs.
  * 2. Compile (roblox-ts) and build once, when the plan asks: a session with
  *    a compiler and Studio.
- * 3. Open the place in Studio (or attach a verified Studio that has it
- *    open), and follow it: the close of an owned Studio stops nothing, of
- *    one with no owner only its Rojo.
+ * 3. Attach a verified Studio that already has the place open.
  * 4. Start Rojo and the watch-mode compiler, as the plan asks. Each is a
  *    service with its part: its exit stops only that part, which is then
  *    `failed`. From then on, `forge up` can add the parts that are missing
@@ -82,7 +84,10 @@ const ALL_PARTS = ["studio", "rojo", "compiler"] as const;
  *    them again (`part-restarts.ts`); a `start` can join as the
  *    owner, and its end stops what it started and gives back what it took
  *    (`ownership.ts`).
- * 5. Run syncback and its hooks for `forge sync` and, with syncback on,
+ * 5. Once Rojo listens, open a new Studio when none was attached and follow
+ *    it: the close of an owned Studio stops nothing, of one with no owner
+ *    only its Rojo. Expose part requests after this initial launch.
+ * 6. Run syncback and its hooks for `forge sync` and, with syncback on,
  *    on each place save: one run at a time, with requests during a run
  *    folded into one more run. Rojo's syncback support is checked once per
  *    session.
@@ -99,7 +104,7 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 	return async (scope) => {
 		const requireSyncback = checkSyncbackOnce(session.config);
 		const steps = workerContext(session, scope, "start");
-		const opened = await runStepsAsync(session, scope, { requireSyncback, steps });
+		const prepared = await runStepsAsync(session, { requireSyncback, steps });
 		const { flushSyncbackAsync, saves, syncback } = startSyncbackRuns(
 			session,
 			scope,
@@ -111,20 +116,75 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 			steps,
 			studio: { isAttached: false },
 		};
-		if (opened !== undefined) {
-			followSessionStudio(session, scope, { ...state, state: state.studio }, opened);
-		}
+		followPreparedStudio(session, scope, state, prepared);
 
 		const served = await runServicesAsync(session, scope, state);
 		if (served === undefined) {
 			return;
 		}
 
+		await openPreparedStudioAsync(session, scope, state, { port: served.port, prepared });
+
+		attachPartHandlers(session, scope, state);
 		announceReady(session, served.port);
 		if (session.plan.syncback) {
 			saves.check = watchSaves(session, scope, syncback);
 		}
 	};
+}
+
+/**
+ * Follow an already-open Studio before starting its Rojo.
+ *
+ * @param session - The context and status.
+ * @param scope - Its end signal and watches.
+ * @param state - The Studio state and parts.
+ * @param prepared - The prepared place, when requested.
+ */
+function followPreparedStudio(
+	session: SessionSetup,
+	scope: SessionScope,
+	state: BodyState,
+	prepared: PreparedStudio | undefined,
+): void {
+	if (prepared?.attached !== undefined) {
+		followSessionStudio(session, scope, { ...state, state: state.studio }, prepared.attached);
+	}
+}
+
+/**
+ * Launch a new session Studio only while its Rojo listens.
+ *
+ * @param session - The config and context.
+ * @param scope - The session's end signal and watches.
+ * @param state - The Studio state and parts.
+ * @param opening - The prepared place and listening port, when present.
+ * @param opening.prepared - The place prepared before services started.
+ * @param opening.port - The port on which Rojo listens, when it does.
+ */
+async function openPreparedStudioAsync(
+	session: SessionSetup,
+	scope: SessionScope,
+	state: BodyState,
+	{ port, prepared }: { port: number | undefined; prepared: PreparedStudio | undefined },
+): Promise<void> {
+	if (prepared === undefined || prepared.attached !== undefined) {
+		return;
+	}
+
+	if (port !== undefined) {
+		const opened = await openStudioAsync(
+			session,
+			state.steps,
+			{ signal: scope.signal },
+			prepared,
+		);
+		followSessionStudio(session, scope, { ...state, state: state.studio }, opened);
+	}
+
+	if (!state.studio.isAttached) {
+		session.status.studioLeft();
+	}
 }
 
 function noSaveWatch(): void {
@@ -186,6 +246,40 @@ function watchSaves(
 }
 
 /**
+ * Start Rojo, then the watch-mode compiler, as the plan asks, and wait until
+ * Rojo listens or stopped. Rojo is
+ * ready once it listens; a compiler that reports compiles, after its first
+ * one.
+ *
+ * @param session - The resolved services.
+ * @param scope - Starts them; its end signal.
+ * @param state - The steps context and the Studio state, for the adder.
+ * @returns Rojo's port while it serves; `undefined` once the session is
+ *   ending.
+ * @rejects `port_in_use` or `rojo_missing` (resolved before, so neither
+ *   comes), or as `ServiceParts.startAsync`.
+ */
+async function runServicesAsync(
+	session: SessionSetup,
+	scope: SessionScope,
+	{ parts }: BodyState,
+): Promise<undefined | { port: number | undefined }> {
+	const rojo = session.plan.open
+		? await startRojoAsync(session, parts, await resolveRojoAsync(session))
+		: undefined;
+	if (session.compiler !== undefined) {
+		await startCompilerAsync(session, parts, session.compiler);
+	}
+
+	const isServing = rojo !== undefined && (await waitForRojoAsync(session, scope, parts, rojo));
+	if (hasEnded(scope)) {
+		return undefined;
+	}
+
+	return { port: isServing ? rojo.port : undefined };
+}
+
+/**
  * The adder for `forge up`: the parts it starts have no owner, also a part
  * that failed while a `start` owned it.
  *
@@ -223,31 +317,14 @@ function watchIdle({ config, context, idle, parts }: SessionSetup, scope: Sessio
 }
 
 /**
- * Start Rojo, then the watch-mode compiler, as the plan asks, hand the part
- * adder and stopper over, and wait until Rojo listens or stopped. Rojo is
- * ready once it listens; a compiler that reports compiles, after its first
- * one.
+ * Expose part requests after the initial Studio launch, then mark startup done.
  *
- * @param session - The resolved services.
- * @param scope - Starts them; its end signal.
- * @param state - The steps context and the Studio state, for the adder.
- * @returns Rojo's port while it serves; `undefined` once the session is
- *   ending.
- * @rejects `port_in_use` or `rojo_missing` (resolved before, so neither
- *   comes), or as `ServiceParts.startAsync`.
+ * @param session - The config and part requests.
+ * @param scope - Its end signal and watches.
+ * @param state - The services and Studio state.
  */
-async function runServicesAsync(
-	session: SessionSetup,
-	scope: SessionScope,
-	state: BodyState,
-): Promise<undefined | { port: number | undefined }> {
+function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: BodyState): void {
 	const { parts } = state;
-	const rojo = session.plan.open
-		? await startRojoAsync(session, parts, await resolveRojoAsync(session))
-		: undefined;
-	if (session.compiler !== undefined) {
-		await startCompilerAsync(session, parts, session.compiler);
-	}
 
 	const addStudio = createStudioAdder(session, scope, { ...state, state: state.studio });
 	const add = createPartAdder(session, parts, addStudio);
@@ -264,33 +341,24 @@ async function runServicesAsync(
 	});
 	session.status.started();
 	watchIdle(session, scope);
-	const isServing = rojo !== undefined && (await waitForRojoAsync(session, scope, parts, rojo));
-	if (hasEnded(scope)) {
-		return undefined;
-	}
-
-	return { port: isServing ? rojo.port : undefined };
 }
 
 /**
- * The steps before the services: syncback check, compile, build, open.
+ * The steps before the services: syncback check, compile, build.
  *
  * @param session - The config, plan, and context.
- * @param scope - Its reaper and end signal.
  * @param stages - The session's check of Rojo's syncback support, and the
  *   steps context.
  * @param stages.requireSyncback - Checks Rojo's syncback support.
  * @param stages.steps - Runs the steps and their hooks as workers.
- * @returns The place opened in Studio and the Studio forge started or
- *   attached, or `undefined` when none was.
+ * @returns The prepared place, or `undefined` when none was requested.
  * @rejects A step's failure. A step that the session's end
  *   stopped fails too; the session has its reason by then.
  */
 async function runStepsAsync(
 	session: SessionSetup,
-	scope: SessionScope,
 	{ requireSyncback, steps }: { requireSyncback: SyncbackCheck; steps: CommandContext },
-): Promise<OpenedStudio | undefined> {
+): Promise<PreparedStudio | undefined> {
 	const { config, plan } = session;
 	if (plan.syncback) {
 		await requireSyncback(steps);
@@ -303,9 +371,7 @@ async function runStepsAsync(
 	}
 
 	// A build runs only for the Studio it opens.
-	return plan.open
-		? openStudioAsync(session, steps, { build: plan.build, signal: scope.signal })
-		: undefined;
+	return plan.open ? prepareStudioAsync(session, steps, { build: plan.build }) : undefined;
 }
 
 function announceReady({ config, context, plan }: SessionSetup, port: number | undefined): void {

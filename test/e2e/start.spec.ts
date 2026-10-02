@@ -275,14 +275,16 @@ describe("forge start --no-compiler", () => {
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
 		const session = startSession(fixture, START_STUDIO);
 		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
+		const output = parseLines(session.stdout());
+		await waitForRoleAsync(fixture.log, "studio");
 
-		expect(parseLines(session.stdout())).toStrictEqual([
+		expect(output).toStrictEqual([
+			{ name: "rojo serve", status: "started", type: "step" },
+			{ name: "rojo serve", status: "succeeded", type: "step" },
 			{ name: "rojo build", status: "started", type: "step" },
 			{ name: "rojo build", status: "succeeded", type: "step" },
 			{ name: "open Roblox Studio", status: "started", type: "step" },
 			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
-			{ name: "rojo serve", status: "started", type: "step" },
-			{ name: "rojo serve", status: "succeeded", type: "step" },
 			{
 				message: `Rojo serves default.project.json on port ${fixture.port}. Press Ctrl+C to stop.`,
 				type: "info",
