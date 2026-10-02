@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -110,6 +111,23 @@ export function makeStudioExecutable(): string {
 }
 
 /**
+ * A native Studio stand-in that accepts RunScript and plain-place launches.
+ *
+ * @returns Its temporary executable path.
+ */
+export function makeRunScriptStudioExecutable(): string {
+	const name = process.platform === "win32" ? "RobloxStudioBeta.exe" : "RobloxStudio";
+	const source = path.join(
+		NATIVE_DIRECTORY,
+		process.platform === "win32" ? "forge-studio-fixture.exe" : "forge-studio-fixture",
+	);
+	const executable = path.join(makeTemporaryDirectory(), name);
+	copyFileSync(source, executable);
+	chmodSync(executable, 0o755);
+	return executable;
+}
+
+/**
  * A process whose executable the OS reports as Roblox Studio, running until
  * the test ends. It does nothing else.
  *
@@ -131,6 +149,7 @@ export function studioVariables(executable: string): Record<string, string> {
 	return {
 		FIXTURE_NATIVE_ADDON: realNativePath(),
 		FIXTURE_STUDIO_EXE: executable,
+		FIXTURE_STUDIO_HOSTNAME: os.hostname(),
 		FIXTURE_STUDIO_LOCK: "1",
 		RBX_FORGE_STUDIO_PATH: executable,
 	};

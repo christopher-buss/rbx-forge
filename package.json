@@ -49,7 +49,7 @@
 		"build": "tsdown",
 		"build:all": "pnpm build:native && pnpm build:reaper && pnpm build",
 		"build:native": "napi build --manifest-path reaper/Cargo.toml --platform --release --no-js --output-dir reaper/target/napi",
-		"build:reaper": "cargo build --manifest-path reaper/Cargo.toml --release --bin forge-reaper && node -e \"const fs = require('node:fs'); const exe = process.platform === 'win32' ? '.exe' : ''; fs.mkdirSync('reaper/target/napi', { recursive: true }); fs.copyFileSync('reaper/target/release/forge-reaper' + exe, 'reaper/target/napi/forge-reaper' + exe);\"",
+		"build:reaper": "cargo build --manifest-path reaper/Cargo.toml --release --bin forge-reaper --bin forge-studio-fixture && node -e \"const fs = require('node:fs'); const exe = process.platform === 'win32' ? '.exe' : ''; fs.mkdirSync('reaper/target/napi', { recursive: true }); for (const bin of ['forge-reaper', 'forge-studio-fixture']) fs.copyFileSync('reaper/target/release/' + bin + exe, 'reaper/target/napi/' + bin + exe);\"",
 		"eslint-config": "pnpm dlx @eslint/config-inspector",
 		"knip": "knip",
 		"lint": "isentinel-lint",
