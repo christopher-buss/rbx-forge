@@ -89,6 +89,26 @@ export interface Session {
 }
 
 /**
+ * The serve wrapper of the fixture's session, identified by its workers.
+ *
+ * @param fixture - The project and worker log.
+ * @returns The wrapper path in the session directory.
+ */
+export function wrapperPath(fixture: Fixture): string {
+	const worker = readWorkerLog(fixture.log).find(
+		({ args, role }) => role === "rojo" && args[0] === "serve",
+	);
+	assert(worker?.markers.session !== undefined, "expected a Rojo session worker");
+	return path.join(
+		fixture.project,
+		".forge",
+		"sessions",
+		worker.markers.session,
+		"rojo.project.json",
+	);
+}
+
+/**
  * Listen on `port` of `127.0.0.1` until the test ends.
  *
  * @param port - The port to hold.

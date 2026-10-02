@@ -7,13 +7,15 @@
  * `open.spec.ts` (a batch file on Windows, where `start` picks the app by
  * file type), and the tests make and remove Studio's lock file themselves.
  */
-import { rmSync, utimesSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, expect, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
+import { endpointKey } from "../../src/supervisor/endpoint.ts";
 import { parseLines, parseResult } from "../helpers/output.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import {
@@ -36,6 +38,7 @@ import {
 	waitForOutputAsync,
 	waitForRoleAsync,
 	WORKER_ROLES,
+	wrapperPath,
 } from "./session-fixture.ts";
 
 function workersOf(log: string): Array<WorkerRecord> {
@@ -152,7 +155,7 @@ describe("forge start", () => {
 			"rojo syncback --help",
 			"rbxtsc",
 			`rojo build default.project.json --output ${PLACE}`,
-			`rojo serve default.project.json --port ${fixture.port}`,
+			`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
 			"rbxtsc -w",
 			`rojo syncback default.project.json --input ${PLACE} --non-interactive`,
 			"hook",
@@ -258,7 +261,7 @@ describe("forge start --no-compiler", () => {
 		await session.closed;
 
 		expect(records[0]).toMatchObject({
-			args: ["serve", "default.project.json", "--port", String(fixture.port)],
+			args: ["serve", wrapperPath(fixture), "--port", String(fixture.port)],
 			role: "rojo",
 		});
 		expect(records.map(({ markers }) => markers.worker)).toStrictEqual([
@@ -267,6 +270,29 @@ describe("forge start --no-compiler", () => {
 			"rojo",
 		]);
 		await expect(waitForDeathAsync(records.map(({ pid }) => pid))).resolves.toStrictEqual([]);
+	});
+
+	it("should write a worktree wrapper while building the original project", async () => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
+		const session = startSession(fixture, START_STUDIO);
+		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
+		const wrapper: unknown = JSON.parse(readFileSync(wrapperPath(fixture), "utf8"));
+		const workers = readWorkerLog(fixture.log);
+		session.child.kill("SIGKILL");
+		await session.closed;
+
+		expect(wrapper).toStrictEqual({
+			name: `fixture@${endpointKey(fixture.project, PLACE)}`,
+			tree: { $path: path.join(fixture.project, "default.project.json") },
+		});
+		expect(workers).toContainEqual(
+			expect.objectContaining({
+				args: ["build", "default.project.json", "--output", PLACE],
+				role: "rojo",
+			}),
+		);
 	});
 
 	it("should report ready once Rojo runs", async () => {

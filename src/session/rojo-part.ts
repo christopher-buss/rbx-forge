@@ -1,5 +1,7 @@
 import type { CommandContext } from "../commands/context.ts";
+import type { ResolvedConfig } from "../config/resolve.ts";
 import type { RojoPort } from "../rojo/rojo-port.ts";
+import { rojoWrapperPath, writeRojoWrapper } from "../rojo/wrapper-project.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { RunningPart, ServiceInvocation, ServiceParts } from "./service-parts.ts";
@@ -15,13 +17,15 @@ export const ROJO_LISTEN_BOUND_MS = 60_000;
 
 /** What Rojo's part runs with. */
 export interface RojoSetup {
+	config: ResolvedConfig;
 	context: CommandContext;
+	directory: string;
 	/**
 	 * Resolve `rojo serve` on a port.
 	 *
 	 * @throws `rojo_missing`.
 	 */
-	resolveRojo: (port: number) => ServiceInvocation;
+	resolveRojo: (port: number, project?: string) => ServiceInvocation;
 	/** The session's Rojo port, kept across Rojo's starts. */
 	rojoPort: Pick<RojoPort, "chooseAsync">;
 	status: Pick<StatusRecorder, "rojoPort" | "service">;
@@ -48,7 +52,7 @@ export interface RunningRojo {
  */
 export async function resolveRojoAsync(setup: RojoSetup): Promise<RojoService> {
 	const port = await setup.rojoPort.chooseAsync();
-	return { port, service: setup.resolveRojo(port) };
+	return { port, service: setup.resolveRojo(port, rojoWrapperPath(setup.directory)) };
 }
 
 /**
@@ -65,6 +69,7 @@ export async function startRojoAsync(
 	parts: Pick<ServiceParts, "startAsync">,
 	{ port, service }: RojoService,
 ): Promise<RunningRojo | undefined> {
+	writeRojoWrapper(setup.context, setup.config, setup.directory);
 	setup.status.rojoPort(port);
 	const part = await parts.startAsync(service, { initial: "starting" });
 	return part === undefined ? undefined : { part, port };
