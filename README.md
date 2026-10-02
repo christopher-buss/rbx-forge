@@ -112,12 +112,18 @@ serves on the session's port (see [`rojoPort`](./docs/config.md#rojoport)). It
 returns when Rojo listens and Studio has the place open. When that Studio closes
 the place, only its Rojo stops; the compiler runs on.
 
+A Studio that already had the place open when the session attached it is a found
+Studio (`origin: "found"` in `status`; a Studio the session opened is `forge`).
+Only `--force` closes it: `down` and the idle timeout stop its Rojo and leave it
+open, `restart` keeps it, and `stop` fails with `studio_found` (exit 1).
+
 `down` acts only on parts with no owner. A part that a `forge start` terminal
 owns keeps running, and so does the session: `down` names it in
-`data.parts.kept` and still succeeds. `down` takes `--timeout <seconds>`
-(default 15), `--force` (kill a supervisor that does not stop, and what is left
-of its session, each verified), `--keep-studio` (leave the session's Studio
-open), and `--recovery <mode>` (see
+`data.parts.kept` and still succeeds. A found Studio stays open: `down` names it
+in `data.parts.kept` with no owner, and reports Studio `kept`. `down` takes
+`--timeout <seconds>` (default 15), `--force` (kill a supervisor that does not
+stop, and what is left of its session, each verified), `--keep-studio` (leave
+the session's Studio open), and `--recovery <mode>` (see
 [Auto-recovery](./docs/studio.md#auto-recovery)).
 
 `restart` restarts every part with no owner. It closes Studio without a save (as
@@ -128,9 +134,10 @@ Then it starts the compiler and, once its first build is done, builds the place,
 opens it in a new Studio, and serves Rojo on the same port. So a deleted output
 folder or a reinstalled `node_modules` recovers. A failed compiler starts again
 too. It names the parts that a `forge start` terminal owns in `data.kept` and
-leaves them alone; `--force` restarts them too, and they keep their owner. It
-returns when no part is starting. It takes `--recovery <mode>` and
-`--studio-path <path>`.
+leaves them alone; `--force` restarts them too, and they keep their owner. A
+found Studio stays open (unless `--force`); the compiler and Rojo restart, and
+Rojo keeps its port. It returns when no part is starting. It takes
+`--recovery <mode>` and `--studio-path <path>`.
 
 `status --wait` returns the status once the compiler's last build is fresh: no
 compile runs, and none started for a short quiet window. Run it after an edit.
@@ -143,8 +150,8 @@ joins the running session and adds its missing parts; a `start` joins it as its
 owner, and fails with `session_running` while another `start` owns it. A new
 session waits until every process of a crashed old one is gone. After 30 minutes
 with no activity (a command that talks to the session, a compile start, or a
-Studio save), a session stops its parts with no owner, as `down` does; set it
-with `session.idleTimeout`.
+Studio save), a session stops its parts with no owner, as `down` does, and
+leaves a found Studio open; set it with `session.idleTimeout`.
 
 One-shot commands:
 
@@ -161,10 +168,11 @@ One-shot commands:
 
 `stop` closes the session's Studio and stops its Rojo; the compiler keeps
 running, and an `up` session with no part left ends. A Studio that a
-`forge start` terminal owns fails with `studio_owned` (exit 1); `--force` closes
-it too. With no session Studio, `stop` closes the Studio that the place's lock
-file names. It also closes every snapshot Studio. `--place <path>` selects one
-place, and `--recovery <mode>` handles the auto-recovery files.
+`forge start` terminal owns fails with `studio_owned` (exit 1), and a found
+Studio with `studio_found` (exit 1); `--force` closes both. With no session
+Studio, `stop` closes the Studio that the place's lock file names. It also
+closes every snapshot Studio. `--place <path>` selects one place, and
+`--recovery <mode>` handles the auto-recovery files.
 
 `open` builds a snapshot of the place into `.forge/snapshots/` and opens it with
 no session and no Rojo, the same with or without a running session. It keeps the
