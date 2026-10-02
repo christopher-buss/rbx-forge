@@ -624,7 +624,7 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should compile, build, open, then serve Rojo and watch, all through the reaper", async () => {
+	it("should compile and build, then serve Rojo and watch before opening Studio", async () => {
 		expect.assertions(3);
 
 		const run = await stoppedAsync({ flags: {}, projectType: "rbxts" });
@@ -752,22 +752,28 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should never open Studio after a stop signal during the build", async () => {
-		expect.assertions(2);
+	it.for<[boolean, string]>([
+		[true, "start-2"],
+		[false, "start-1"],
+	])(
+		"should never open Studio after a stop during the build (compiler: %s)",
+		async ([compiler, build]) => {
+			expect.assertions(2);
 
-		const run: StartRun = startCommand({
-			flags: {},
-			projectType: "rbxts",
-			reaper: {
-				onSpawn: onSpawnOf("start-2", () => {
-					run.signals.fire("SIGINT");
-				}),
-			},
-		});
+			const run: StartRun = startCommand({
+				flags: { compiler },
+				projectType: "rbxts",
+				reaper: {
+					onSpawn: onSpawnOf(build, () => {
+						run.signals.fire("SIGINT");
+					}),
+				},
+			});
 
-		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
-		expect(run.studioLauncher).not.toHaveBeenCalled();
-	});
+			await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
+			expect(run.studioLauncher).not.toHaveBeenCalled();
+		},
+	);
 
 	it("should leave no timer behind once the session ended", async () => {
 		expect.assertions(1);
@@ -789,12 +795,12 @@ describe(runSupervisorAsync, () => {
 			{ name: "rbxtsc", status: "succeeded", type: "step" },
 			{ name: "rojo build", status: "started", type: "step" },
 			{ name: "rojo build", status: "succeeded", type: "step" },
-			{ name: "open Roblox Studio", status: "started", type: "step" },
-			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
 			{ name: "rojo serve", status: "started", type: "step" },
 			{ name: "rojo serve", status: "succeeded", type: "step" },
 			{ name: "rbxtsc watch", status: "started", type: "step" },
 			{ name: "rbxtsc watch", status: "succeeded", type: "step" },
+			{ name: "open Roblox Studio", status: "started", type: "step" },
+			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
 			{
 				message:
 					"Rojo serves default.project.json on port 4000. The compiler watches your code. Press Ctrl+C to stop.",
@@ -810,8 +816,8 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			"start-1: build default.project.json --output game.rbxl",
 			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			"start-1: build default.project.json --output game.rbxl",
 		]);
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
@@ -894,8 +900,8 @@ describe(runSupervisorAsync, () => {
 		});
 		expect(run.fake.calls).toStrictEqual([
 			"go",
-			"spawn start-1",
 			"spawn rojo",
+			"spawn start-1",
 			"terminate 3000",
 		]);
 	});
@@ -1092,12 +1098,13 @@ describe(runSupervisorAsync, () => {
 	});
 
 	it("should keep Rojo starting until its port listens, then report it ready", async () => {
-		expect.assertions(3);
+		expect.assertions(5);
 
 		const answers = [false, false, true];
 		const run = startCommand({ isListening: async () => answers.shift()! });
 		await flushAsync();
 		const before = stateOf(run);
+		const launchesBeforeListening = run.studioLauncher.mock.calls.length;
 		// Each pass wakes the check once.
 		await passAsync(run, 2 * OUTPUT_POLL_MS);
 		const after = stateOf(run);
@@ -1113,6 +1120,8 @@ describe(runSupervisorAsync, () => {
 			services: { rojo: { status: "ready" } },
 		});
 		expect(run.isListeningAsync).toHaveBeenCalledWith(4000);
+		expect(launchesBeforeListening).toBe(0);
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
 
 	it("should not report Rojo ready when a stop signal came while it checked the port", async () => {
@@ -1177,11 +1186,17 @@ describe(runSupervisorAsync, () => {
 		const state = stateOf(run);
 		run.signals.fire("SIGINT");
 
-		expect(stopped.at(-1)).toBe("stop rojo 3000");
+		expect([stopped.at(-1), run.studioLauncher.mock.calls]).toStrictEqual([
+			"stop rojo 3000",
+			[],
+		]);
 		expect(state).toMatchObject({
 			phase: "ready",
 			running: true,
-			services: { rojo: { exitCode: null, outputTail: [], status: "failed" } },
+			services: {
+				rojo: { exitCode: null, outputTail: [], status: "failed" },
+				studio: { status: "off" },
+			},
 		});
 		expect(run.reporter.events).toContainEqual({
 			message: `rojo did not listen on port 4000 within 60 s; the session goes on without it. Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
@@ -2627,7 +2642,100 @@ async function attachAsync(
 }
 
 describe("forge up --studio", () => {
-	it("should build the place, open Studio, and serve Rojo, then answer once both are ready", async () => {
+	it("should stop the Rojo it starts when Studio cannot launch", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		run.studioLauncher.mockResolvedValue({ message: "Studio is missing", type: "failed" });
+		const answer = await askAddAsync(run, STUDIO);
+		const callsAfterFailure = [...run.fake.calls];
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toMatchObject({ code: "studio_launch_failed" });
+		expect(callsAfterFailure).toContain("stop rojo 3000");
+		expect(state).toMatchObject({
+			services: { rojo: { status: "off" }, studio: { status: "off" } },
+		});
+	});
+
+	it("should wait for the initial Studio launch when an attach arrives while Rojo starts", async () => {
+		expect.assertions(3);
+
+		const listening = Promise.withResolvers<boolean>();
+		const run = startCommand({ isListening: async () => listening.promise });
+		await flushAsync();
+		const answer = askAddAsync(run, STUDIO);
+		await flushAsync();
+		const launchesBeforeListening = run.studioLauncher.mock.calls.length;
+		listening.resolve(true);
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(launchesBeforeListening).toBe(0);
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+		await expect(answer).resolves.toStrictEqual({ added: [] });
+	});
+
+	it("should report a Rojo failure without launching Studio when Rojo never listens", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ flags: UP, isListening: async () => false });
+		await flushAsync();
+		const answer = askAddAsync(run, STUDIO);
+		await flushAsync();
+		await passAsync(run, ROJO_LISTEN_BOUND_MS);
+		run.fake.exit("rojo", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+		await expect(answer).resolves.toMatchObject({
+			code: "process_failed",
+			message: "Rojo did not become ready on port 4000; Studio was not launched.",
+		});
+		expect(run.reporter.events).toContainEqual(
+			expect.objectContaining({
+				message: `rojo did not listen on port 4000 within 60 s; the session goes on without it. Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
+				type: "warning",
+			}),
+		);
+	});
+
+	it("should launch Studio only after its Rojo listens", async () => {
+		expect.assertions(3);
+
+		const listening = Promise.withResolvers<boolean>();
+		const run = startCommand({ flags: UP, isListening: async () => listening.promise });
+		await flushAsync();
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: LAUNCHED_PID, startTime: "900" },
+			type: "launched",
+		});
+		const answer = askAddAsync(run, STUDIO);
+		await flushAsync();
+		const launchesBeforeListening = run.studioLauncher.mock.calls.length;
+		listening.resolve(true);
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(launchesBeforeListening).toBe(0);
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
+	});
+
+	it("should serve Rojo before building and opening Studio, then answer once both are ready", async () => {
 		expect.assertions(4);
 
 		const run = startCommand({ flags: UP });
@@ -2639,8 +2747,8 @@ describe("forge up --studio", () => {
 
 		expect(answer).toStrictEqual({ added: ["studio", "rojo"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			"start-1: build default.project.json --output game.rbxl",
 			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			"start-1: build default.project.json --output game.rbxl",
 		]);
 		expect(run.studioLauncher).toHaveBeenCalledExactlyOnceWith(
 			expect.objectContaining({ place: PLACE, studioPath: "/opt/Studio" }),
@@ -3003,8 +3111,8 @@ describe("forge sync control channel", () => {
 			project: "default.project.json",
 		});
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			"start-1: build default.project.json --output game.rbxl",
 			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			"start-1: build default.project.json --output game.rbxl",
 			"syncback-1: syncback --help",
 			"syncback-2: syncback default.project.json --input game.rbxl --non-interactive",
 			"syncback-3: -c lint",

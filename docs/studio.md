@@ -6,6 +6,10 @@ auto-recovery files.
 
 ## Opening Studio
 
+`start` and `up --studio` start Rojo and wait until it listens before launching
+a new Studio. If Rojo fails to listen, forge reports its failure and launches no
+Studio. A Studio that already has the place open is attached as before.
+
 `open`, `start`, and `up --studio` start the Studio executable directly, with
 the place as its only argument, as a double-click on the place does. Studio runs
 outside every process group and job of forge, so it outlives forge. The session

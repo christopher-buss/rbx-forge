@@ -52,6 +52,11 @@ export interface OpenedPlace {
 export interface OpenOptions {
 	/** The caller already built this place, so it is opened as it is. */
 	isBuilt: boolean;
+	/**
+	 * A session's end, checked just before launching Studio outside its
+	 * reaper.
+	 */
+	signal?: AbortSignal;
 	/** The `--studio-path` flag, resolved. */
 	studioPath?: string | undefined;
 }
@@ -101,6 +106,7 @@ export async function openPlaceAsync(
 		const built = options.isBuilt
 			? null
 			: await prepareAsync(context, config, { output, place });
+		options.signal?.throwIfAborted();
 		const studio = await launchAsync(context, place, options.studioPath);
 		return { built, studio };
 	});

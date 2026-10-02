@@ -56,6 +56,9 @@ the caller: `start` owns, `up` does not.
 - **Rojo port.** A `rojoPort` in the config is fixed, and a busy port fails.
   With none, forge tries 34872, then takes a free port. A restart of Rojo keeps
   its port.
+- **Studio launch.** `start` and `up --studio` wait until Rojo listens before
+  launching a new Studio. A Rojo that fails to listen leaves Studio unopened; an
+  already-open Studio is attached as it is.
 
 ## Considered options
 

@@ -11,16 +11,16 @@
 </div>
 
 forge runs the dev loop of a roblox-ts or Luau Rojo project: compile, build,
-open Studio, serve Rojo, watch, and sync Studio edits back. It owns every
+serve Rojo, open Studio, watch, and sync Studio edits back. It owns every
 process it starts, so when the session stops, however it stops, every process
 stops with it. Every command has `--json` output, so an AI agent can drive it.
 
 ## What forge does
 
-One command, `forge start`, compiles the project, builds the place, opens it in
-Studio, serves Rojo, and starts the watch-mode compiler. With syncback on, each
-save in Studio syncs the place back into the project and runs your hooks, such
-as `eslint --fix`.
+One command, `forge start`, compiles the project, builds the place, serves Rojo,
+and starts the watch-mode compiler. It opens Studio only once Rojo listens. With
+syncback on, each save in Studio syncs the place back into the project and runs
+your hooks, such as `eslint --fix`.
 
 A session runs in its own supervisor process. A native reaper process starts
 every worker (Rojo, the compiler, syncback, hooks) and owns it at OS level.
@@ -55,7 +55,7 @@ Requirements:
 ```bash
 npm install --save-dev rbx-forge
 npx forge init --type rbxts   # writes rbx-forge.config.ts, and nothing else
-npx forge start               # compile, build, open Studio, serve Rojo, watch
+npx forge start               # compile, build, serve Rojo, watch, open Studio
 ```
 
 Add `.forge/` to your `.gitignore`. forge keeps its session files and logs
@@ -108,9 +108,11 @@ names them in `data.added`; it never stops or restarts a part that runs.
 `up --studio` also attaches Studio and Rojo, once the compiler's build is fresh:
 it uses the Studio that has the place open (verified as `stop` does), or builds
 the place and opens it (`--studio-path <path>` names the executable). Rojo
-serves on the session's port (see [`rojoPort`](./docs/config.md#rojoport)). It
-returns when Rojo listens and Studio has the place open. When that Studio closes
-the place, only its Rojo stops; the compiler runs on.
+serves on the session's port (see [`rojoPort`](./docs/config.md#rojoport)) and
+must listen before forge launches a new Studio. If Rojo fails to listen, forge
+reports its failure and launches no Studio. It returns when Rojo listens and
+Studio has the place open. When that Studio closes the place, only its Rojo
+stops; the compiler runs on.
 
 `down` acts only on parts with no owner. A part that a `forge start` terminal
 owns keeps running, and so does the session: `down` names it in

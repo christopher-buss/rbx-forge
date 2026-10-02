@@ -255,6 +255,7 @@ describe("forge start --no-compiler", () => {
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
 		const session = startSession(fixture, START_STUDIO, { FIXTURE_GRANDCHILDREN: "2" });
 		const records = await waitForRojoTreeAsync(fixture.log);
+		await waitForRoleAsync(fixture.log, "studio");
 		// A hard kill: no handler in forge runs. Only the reaper's stdin EOF
 		// is left to end the workers.
 		session.child.kill("SIGKILL");
@@ -280,6 +281,7 @@ describe("forge start --no-compiler", () => {
 		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
 		const wrapper: unknown = JSON.parse(readFileSync(wrapperPath(fixture), "utf8"));
 		const workers = readWorkerLog(fixture.log);
+		await waitForRoleAsync(fixture.log, "studio");
 		session.child.kill("SIGKILL");
 		await session.closed;
 
@@ -301,14 +303,16 @@ describe("forge start --no-compiler", () => {
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
 		const session = startSession(fixture, START_STUDIO);
 		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
+		const output = parseLines(session.stdout());
+		await waitForRoleAsync(fixture.log, "studio");
 
-		expect(parseLines(session.stdout())).toStrictEqual([
+		expect(output).toStrictEqual([
+			{ name: "rojo serve", status: "started", type: "step" },
+			{ name: "rojo serve", status: "succeeded", type: "step" },
 			{ name: "rojo build", status: "started", type: "step" },
 			{ name: "rojo build", status: "succeeded", type: "step" },
 			{ name: "open Roblox Studio", status: "started", type: "step" },
 			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
-			{ name: "rojo serve", status: "started", type: "step" },
-			{ name: "rojo serve", status: "succeeded", type: "step" },
 			{
 				message: `Rojo serves default.project.json on port ${fixture.port}. Press Ctrl+C to stop.`,
 				type: "info",

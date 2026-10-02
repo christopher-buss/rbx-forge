@@ -44,11 +44,17 @@ export interface StudioSetup extends RojoSetup {
 	status: Pick<StatusRecorder, "rojoPort" | "service" | "studio"> & Pick<StatusStore, "snapshot">;
 }
 
+/** A place prepared for Studio, without launching a new Studio yet. */
+export interface PreparedStudio {
+	attached: OpenedStudio | undefined;
+	isBuilt: boolean;
+}
+
 /** How the session opens Studio. */
 interface OpenOptions {
 	/** Build the session's place first, unless Studio has it open. */
 	build: boolean;
-	/** The session's end: once it came, no Studio opens. */
+	/** The session's end signal. */
 	signal: AbortSignal;
 	/** The Studio executable to start, absolute. */
 	studioPath?: string | undefined;
@@ -69,35 +75,47 @@ type FollowSetup = Pick<StudioSetup, "context" | "idle" | "status">;
 type FollowParts = Pick<AttachParts, "parts" | "state">;
 
 /**
- * Open the place in Studio, or attach the verified Studio that has it open.
+ * Prepare the place, or find the verified Studio that has it open.
  * A place is never built under the Studio that has it open.
  *
  * @param setup - The config and context.
  * @param steps - The steps context.
- * @param options - Whether to build, the end signal, and the Studio path.
- * @returns The place and its Studio, or `undefined` once the session is
- *   ending.
- * @rejects A step's failure, as `openPlaceAsync`.
+ * @param options - Whether to build the session's place.
+ * @returns The build state and any existing Studio.
+ * @rejects A build failure.
  */
-export async function openStudioAsync(
+export async function prepareStudioAsync(
 	{ config, context }: Pick<StudioSetup, "config" | "context">,
 	steps: CommandContext,
-	{ build, signal, studioPath }: OpenOptions,
-): Promise<OpenedStudio | undefined> {
+	{ build }: Pick<OpenOptions, "build">,
+): Promise<PreparedStudio> {
 	const attached = attachStudio(context, config);
 	if (build && attached?.place !== path.resolve(context.cwd, config.buildOutputPath)) {
 		await buildPlaceAsync(steps, config);
 	}
 
-	// Studio starts outside the reaper, so this step checks by itself.
-	if (signal.aborted) {
-		return undefined;
-	}
-
 	// The build above wrote the place `open` would build.
 	const isBuilt =
 		build && config.open.buildOutputPath === undefined && config.open.projectPath === undefined;
-	return attached ?? (await openPlaceAsync(steps, config, { isBuilt, studioPath }));
+	return { attached, isBuilt };
+}
+
+/**
+ * Open the prepared place after Rojo listens, while the session runs.
+ *
+ * @param setup - The config.
+ * @param steps - The steps context.
+ * @param options - The Studio path and session end signal.
+ * @param prepared - Whether the place is already built.
+ * @returns The launched Studio.
+ */
+export async function openStudioAsync(
+	{ config }: Pick<StudioSetup, "config">,
+	steps: CommandContext,
+	{ signal, studioPath }: Pick<OpenOptions, "signal" | "studioPath">,
+	{ isBuilt }: Pick<PreparedStudio, "isBuilt">,
+): Promise<OpenedStudio> {
+	return openPlaceAsync(steps, config, { isBuilt, signal, studioPath });
 }
 
 /**
@@ -154,10 +172,9 @@ export function leaveStudio(state: StudioState, status: Pick<StatusRecorder, "st
  *    port or a missing Rojo fails before Studio opens.
  * 2. Wait for the compiler's fresh build, when it runs: the place build and
  *    Rojo read its output.
- * 3. Attach the Studio that has the place open, or build the place and open
- *    it. When Studio closes it, only its Rojo stops.
+ * 3. Attach the Studio that has the place open, or prepare its place.
  * 4. Start Rojo, when it does not run, and wait until it listens.
- * 5. Wait until Studio has the place open.
+ * 5. Launch a new Studio only after Rojo listens, then wait for its place.
  *
  * @param setup - The config, context, builds, Rojo, and status.
  * @param scope - Its end signal; tracks the Studio follow.
@@ -181,13 +198,18 @@ export function createStudioAdder(
 			await setup.builds.waitAsync(FRESH_BUILD_TIMEOUT_MS);
 		}
 
-		const opening = isStudioWanted
-			? await attachAsync(setup, scope, attach, {
-					build: hasCompiler,
-					studioPath: request.studioPath,
-				})
+		const prepared = isStudioWanted
+			? await prepareStudioAsync(setup, attach.steps, { build: hasCompiler })
 			: undefined;
+		let opening = followPreparedStudio(setup, scope, attach, prepared);
 		const isRojoStarted = await serveRojoAsync(setup, scope, attach.parts, rojo);
+		if (prepared !== undefined && opening === undefined && !hasEnded(scope)) {
+			opening = await attachAsync(setup, scope, attach, {
+				prepared,
+				studioPath: request.studioPath,
+			});
+		}
+
 		if (opening !== undefined && !hasEnded(scope)) {
 			await waitForOpenAsync(setup, opening);
 		}
@@ -279,28 +301,55 @@ async function followAsync(
 }
 
 /**
+ * Follow the verified Studio that already has the prepared place open.
+ *
+ * @param setup - The context and status.
+ * @param scope - Its end signal and watches.
+ * @param attach - The session's Studio state and parts.
+ * @param prepared - The prepared place, when Studio is requested.
+ * @returns The existing Studio's open wait, when it exists.
+ */
+function followPreparedStudio(
+	setup: StudioSetup,
+	scope: SessionScope,
+	attach: AttachParts,
+	prepared: PreparedStudio | undefined,
+): undefined | { open: Promise<void>; place: string } {
+	const opened = prepared?.attached;
+	return opened === undefined
+		? undefined
+		: { ...followSessionStudio(setup, scope, attach, opened), place: opened.place };
+}
+
+/**
  * Open or attach Studio for an attach request, and follow it.
  *
  * @param setup - The config, context, and status.
  * @param scope - Its end signal; tracks the follow.
  * @param attach - The parts, the Studio state, and the steps context.
- * @param options - Whether to build, and the Studio path.
- * @returns The place and whether Studio has it open yet, or `undefined`
- *   once the session is ending.
+ * @param options - The prepared place and Studio path.
+ * @returns The place and whether Studio has it open yet.
+ * @rejects A build or launch failure, after stopping Rojo without a Studio.
  */
 async function attachAsync(
 	setup: StudioSetup,
 	scope: SessionScope,
 	attach: AttachParts,
-	options: Pick<OpenOptions, "build" | "studioPath">,
-): Promise<undefined | { open: Promise<void>; place: string }> {
-	const opened = await openStudioAsync(setup, attach.steps, { ...options, signal: scope.signal });
-	if (opened === undefined) {
-		return undefined;
+	options: Pick<OpenOptions, "studioPath"> & { prepared: PreparedStudio },
+): Promise<{ open: Promise<void>; place: string }> {
+	try {
+		const opened = await openStudioAsync(
+			setup,
+			attach.steps,
+			{ ...options, signal: scope.signal },
+			options.prepared,
+		);
+		const { open } = followSessionStudio(setup, scope, attach, opened);
+		return { open, place: opened.place };
+	} catch (err) {
+		attach.parts.stop("rojo");
+		throw err;
 	}
-
-	const { open } = followSessionStudio(setup, scope, attach, opened);
-	return { open, place: opened.place };
 }
 
 /**
@@ -356,6 +405,7 @@ function planAttach(
  * @param parts - Starts and stops Rojo.
  * @param rojo - Rojo on the session's port.
  * @returns Whether it started Rojo.
+ * @rejects {ForgeError} `process_failed` when Rojo stops before listening.
  */
 async function serveRojoAsync(
 	setup: StudioSetup,
@@ -370,6 +420,13 @@ async function serveRojoAsync(
 		return false;
 	}
 
-	await waitForRojoAsync(setup, scope, parts, running);
+	const isReady = await waitForRojoAsync(setup, scope, parts, running);
+	if (!isReady && !hasEnded(scope)) {
+		throw new ForgeError(
+			"process_failed",
+			`Rojo did not become ready on port ${rojo.port}; Studio was not launched.`,
+		);
+	}
+
 	return true;
 }
