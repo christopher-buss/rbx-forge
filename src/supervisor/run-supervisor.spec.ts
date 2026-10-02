@@ -37,7 +37,7 @@ import { STUDIO_OPEN_BOUND_MS } from "../session/studio-part.ts";
 import { FILE_POLL_MS } from "../session/worker-context.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
 import type { SessionRequest } from "./channel.ts";
-import { endpointFor } from "./endpoint.ts";
+import { endpointFor, endpointKey } from "./endpoint.ts";
 import { runSupervisorAsync } from "./run-supervisor.ts";
 import type { IdentityRecord } from "./session-files.ts";
 
@@ -206,7 +206,10 @@ function startCommand({
 	rojoPort = 4000,
 	writePrivateFile,
 }: StartSetup = {}): StartRun {
-	const memory = createMemoryFileSystem(files);
+	const memory = createMemoryFileSystem({
+		"default.project.json": '{"name":"Example","tree":{"$className":"DataModel"}}',
+		...files,
+	});
 	const clock = createManualClock(Date.UTC(2026, 0, 1));
 	const fake = createFakeReaper({ autoExit: oneShot, ...reaper });
 	const signals = createFakeSignals();
@@ -364,6 +367,71 @@ function spawnedIds(fake: FakeReaper): Array<string> {
 }
 
 describe(runSupervisorAsync, () => {
+	it("should serve a wrapper that identifies the worktree without adding an instance", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			files: {
+				...TOOL_FILES,
+				"default.project.json": '{"name":"Example","tree":{"$className":"DataModel"}}',
+			},
+		});
+		await flushAsync();
+		const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		assert(typeof wrapper === "string", "expected a wrapper project");
+
+		expect(JSON.parse(wrapper)).toStrictEqual({
+			name: `Example@${endpointKey(PROJECT, "game.rbxl")}`,
+			tree: { $path: path.join(PROJECT, "default.project.json") },
+		});
+		expect(run.fake.spawned.find(({ id }) => id === "rojo")!.args).toStrictEqual([
+			"serve",
+			path.join(SESSION, "rojo.project.json"),
+			"--port",
+			"4000",
+		]);
+	});
+
+	it("should copy only root serve fields explicitly set in the user's project", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			files: {
+				...TOOL_FILES,
+				"default.project.json": JSON.stringify({
+					name: "Example",
+					emitLegacyScripts: false,
+					gameId: 40,
+					globIgnorePaths: ["*.ignored"],
+					placeId: 30,
+					serveAddress: "0.0.0.0",
+					servePlaceIds: [10, 20],
+					servePort: 1234,
+					tree: { $className: "DataModel" },
+				}),
+			},
+		});
+		await flushAsync();
+		const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		assert(typeof wrapper === "string");
+
+		expect(JSON.parse(wrapper)).toStrictEqual({
+			name: `Example@${endpointKey(PROJECT, "game.rbxl")}`,
+			gameId: 40,
+			placeId: 30,
+			serveAddress: "0.0.0.0",
+			servePlaceIds: [10, 20],
+			servePort: 1234,
+			tree: { $path: path.join(PROJECT, "default.project.json") },
+		});
+	});
+
 	it("should compile, build, open, then serve Rojo and watch, all through the reaper", async () => {
 		expect.assertions(3);
 
@@ -373,7 +441,7 @@ describe(runSupervisorAsync, () => {
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: ",
 			"start-2: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"compiler: -w",
 		]);
 		expect(run.fake.calls[0]).toBe("go");
@@ -430,7 +498,7 @@ describe(runSupervisorAsync, () => {
 		expect(run.fake.spawned).toStrictEqual([
 			{
 				id: "rojo",
-				args: ["serve", "default.project.json", "--port", "4000"],
+				args: ["serve", path.join(SESSION, "rojo.project.json"), "--port", "4000"],
 				cwd: PROJECT,
 				env: { PATH: TOOLS },
 				file: path.join(TOOLS, "rojo"),
@@ -551,7 +619,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 		]);
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
@@ -600,7 +668,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"compiler: watch",
 		]);
 	});
@@ -678,7 +746,7 @@ describe(runSupervisorAsync, () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: ",
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"compiler: -w",
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
@@ -1197,7 +1265,7 @@ describe(runSupervisorAsync, () => {
 
 		await expect(run.result).resolves.toMatchObject({ data: { port: FREE_PORT } });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve default.project.json --port ${FREE_PORT}`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
 		]);
 	});
 
@@ -1300,7 +1368,7 @@ describe("forge start hooks and syncback", () => {
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 		]);
 	});
 
@@ -2248,7 +2316,7 @@ describe("forge up parts", () => {
 
 		expect(answer).toStrictEqual({ added: ["compiler"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"compiler: -w",
 		]);
 		expect([before, after]).toMatchObject([
@@ -2380,7 +2448,7 @@ describe("forge up --studio", () => {
 		expect(answer).toStrictEqual({ added: ["studio", "rojo"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 		]);
 		expect(run.studioLauncher).toHaveBeenCalledExactlyOnceWith(
 			expect.objectContaining({ place: PLACE, studioPath: "/opt/Studio" }),
@@ -2410,7 +2478,7 @@ describe("forge up --studio", () => {
 
 		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
@@ -2466,10 +2534,39 @@ describe("forge up --studio", () => {
 
 		expect([first, repair]).toStrictEqual([{ added: ["studio", "rojo"] }, { added: ["rojo"] }]);
 		expect(spawnedIds(run.fake).filter((id) => id.startsWith("rojo"))).toStrictEqual([
-			`rojo: serve default.project.json --port ${FREE_PORT}`,
-			`rojo: serve default.project.json --port ${FREE_PORT}`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
 		]);
 		expect(result.data).toMatchObject({ port: FREE_PORT });
+	});
+
+	it("should refresh root serve fields only when Rojo starts again", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...ATTACHED });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(
+			path.join(PROJECT, "default.project.json"),
+			JSON.stringify({
+				name: "Example",
+				gameId: 60,
+				servePlaceIds: [50],
+				tree: { $className: "DataModel" },
+			}),
+		);
+		const before = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		run.fake.exit("rojo", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const repair = await askAddAsync(run, { parts: [] });
+		const after = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		assert(typeof before === "string" && typeof after === "string");
+
+		expect(JSON.parse(before)).not.toHaveProperty("gameId");
+		expect(JSON.parse(after)).toMatchObject({ gameId: 60, servePlaceIds: [50] });
+		expect(repair).toStrictEqual({ added: ["rojo"] });
 	});
 
 	it("should add nothing while Studio and its Rojo run", async () => {
@@ -2715,7 +2812,7 @@ describe("forge sync control channel", () => {
 		});
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"syncback-1: syncback --help",
 			"syncback-2: syncback default.project.json --input game.rbxl --non-interactive",
 			"syncback-3: -c lint",
@@ -3622,7 +3719,7 @@ describe("forge restart control channel", () => {
 		expect(spawnedIds(run.fake).slice(before)).toStrictEqual([
 			"compiler: -w",
 			"start-1: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 		]);
 		await expect(answer).resolves.toMatchObject({
 			added: ["compiler", "studio", "rojo"],
