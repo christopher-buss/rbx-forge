@@ -94,10 +94,15 @@ export async function openStudioAsync(
 		return undefined;
 	}
 
+	if (attached !== undefined) {
+		return attached;
+	}
+
 	// The build above wrote the place `open` would build.
 	const isBuilt =
 		build && config.open.buildOutputPath === undefined && config.open.projectPath === undefined;
-	return attached ?? (await openPlaceAsync(steps, config, { isBuilt, studioPath }));
+	const { place, studio } = await openPlaceAsync(steps, config, { isBuilt, studioPath });
+	return { origin: "forge", place, studio };
 }
 
 /**
@@ -125,7 +130,7 @@ export function followSessionStudio(
 		letGo.abort();
 	};
 
-	setup.status.studio("opening", opened.place, opened.studio);
+	setup.status.studio("opening", opened.place, opened.studio, opened.origin);
 	const open = Promise.withResolvers<void>();
 	const signal = AbortSignal.any([scope.signal, letGo.signal]);
 	scope.track(followAsync(setup, { signal }, follow, { ...opened, onOpen: open.resolve }));
@@ -225,7 +230,7 @@ async function watchStudioAsync(
 	scope: Pick<SessionScope, "signal">,
 	opened: OpenedStudio & { onOpen: () => void },
 ): Promise<boolean> {
-	const { place, studio } = opened;
+	const { origin, place, studio } = opened;
 	const options = watchOptions(context, scope);
 	const followed = new AbortController();
 	const saves = watchSaves(
@@ -238,7 +243,7 @@ async function watchStudioAsync(
 	const lock = { path: studioLockPath(place), pid: studio?.pid };
 	try {
 		return await waitForStudioCloseAsync(options, lock, () => {
-			status.studio("open", place, studio);
+			status.studio("open", place, studio, origin);
 			context.reporter.emit({ message: `Roblox Studio has ${place} open.`, type: "info" });
 			opened.onOpen();
 		});
@@ -263,7 +268,7 @@ async function followAsync(
 	opened: OpenedStudio & { onOpen: () => void },
 ): Promise<void> {
 	const { status } = setup;
-	const { place, studio } = opened;
+	const { origin, place, studio } = opened;
 	const isClosed = await watchStudioAsync(setup, scope, opened);
 	opened.onOpen();
 	if (!isClosed) {
@@ -272,7 +277,7 @@ async function followAsync(
 
 	state.isAttached = false;
 	state.letGo = undefined;
-	status.studio("closed", place, studio);
+	status.studio("closed", place, studio, origin);
 	if (status.snapshot().services.studio.owner === null) {
 		parts.stop("rojo");
 	}

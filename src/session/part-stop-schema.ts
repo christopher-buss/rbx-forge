@@ -50,7 +50,7 @@ const studioOutcome = type.or(
 	{ place: "string", stop: studioStop },
 );
 
-const kept = type({ owner: "'start'", part: PART }).array();
+const kept = type({ owner: "'start' | null", part: PART }).array();
 
 const stopsResult: Type<PartStops> = type({
 	"ending": "boolean",

@@ -483,7 +483,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(run.reporter.events).toStrictEqual([
 			{
-				message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it.`,
+				message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it. forge did not open this Studio, so only --force closes it.`,
 				type: "info",
 			},
 			{ message: `Roblox Studio has ${PLACE} open.`, type: "info" },
@@ -700,7 +700,7 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(run.reporter.events).toContainEqual({
-			message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it.`,
+			message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it. forge did not open this Studio, so only --force closes it.`,
 			type: "info",
 		});
 	});
@@ -1790,6 +1790,7 @@ describe("forge up control channel", () => {
 				compiler: { building: false, owner: null, status: "off" },
 				rojo: { owner: null, port: 4000, status: "ready" },
 				studio: {
+					origin: "found",
 					owner: null,
 					pid: STUDIO_PID,
 					place: PLACE,
@@ -2359,10 +2360,33 @@ async function attachAsync(
 		studio: { pid: LAUNCHED_PID, startTime: "900" },
 		type: "launched",
 	});
+	const launches = run.studioLauncher.mock.calls.length;
 	const answer = askAddAsync(run, parameters);
-	await passAsync(run, FILE_POLL_MS);
+	// A lock file before the launch would make it a found Studio.
+	for (let poll = 0; poll < 20 && run.studioLauncher.mock.calls.length === launches; poll++) {
+		await passAsync(run, FILE_POLL_MS);
+	}
+
 	run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
 	await passAsync(run, FILE_POLL_MS);
+	return answer;
+}
+
+/**
+ * Attach the Studio that has the place open (`ATTACHED`): a found Studio.
+ *
+ * @param run - The session.
+ * @returns The add's answer.
+ */
+async function attachFoundAsync(run: StartRun): Promise<unknown> {
+	let isAnswered = false;
+	const answer = askAddAsync(run, STUDIO).finally(() => {
+		isAnswered = true;
+	});
+	await vi.waitFor(async () => {
+		await passAsync(run, FILE_POLL_MS);
+		assert(isAnswered, "the add answered");
+	});
 	return answer;
 }
 
@@ -2942,6 +2966,53 @@ describe("forge down control channel", () => {
 	});
 });
 
+describe("forge down and a found Studio", () => {
+	it("should let a found Studio go, open, stop its Rojo, and end", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({ ...ATTACHED, flags: UP });
+		await flushAsync();
+		await attachFoundAsync(run);
+		const attached = stateOf(run);
+		const answer = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await vi.waitFor(async () => {
+			await passAsync(run, OUTPUT_POLL_MS);
+			assert(run.fake.calls.includes("stop rojo 3000"), "Rojo is asked to stop");
+		});
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		expect(attached).toMatchObject({
+			services: { studio: { origin: "found", pid: STUDIO_PID, status: "open" } },
+		});
+		await expect(answer).resolves.toStrictEqual({
+			ending: true,
+			kept: [{ owner: null, part: "studio" }],
+			stopped: ["rojo"],
+		});
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
+		expect(run.native.processes.get(STUDIO_PID)).toMatchObject({ alive: true });
+	});
+
+	it("should report a Studio the session opened as its own", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		await attachAsync(run);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(state).toMatchObject({
+			services: { studio: { origin: "forge", pid: LAUNCHED_PID, status: "open" } },
+		});
+	});
+});
+
 describe("forge down and syncback", () => {
 	it("should sync back a save Studio made just before a down closed it, then end", async () => {
 		expect.assertions(2);
@@ -3229,6 +3300,32 @@ describe("forge start owners", () => {
 		expect(closed).toStrictEqual(left);
 	});
 
+	it("should keep a found Studio found once a joined start gives it back", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...ATTACHED, flags: UP });
+		await flushAsync();
+		await attachFoundAsync(run);
+		const owned = await joinAsync(run, ["studio"]);
+		const taken = stateOf(run);
+		await letGoAsync(owned, run);
+		const released = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(owned.joined).toStrictEqual({
+			added: [],
+			sessionId: "session-1",
+			taken: ["studio", "rojo"],
+		});
+		expect(taken).toMatchObject({
+			services: { studio: { origin: "found", owner: "start", status: "open" } },
+		});
+		expect(released).toMatchObject({
+			services: { studio: { origin: "found", owner: null, status: "open" } },
+		});
+	});
+
 	it("should give back what a join took when its add fails, and let the next start join", async () => {
 		expect.assertions(3);
 
@@ -3430,6 +3527,28 @@ describe("idle timeout", () => {
 		expect(isEnded()).toBeTrue();
 	});
 
+	it("should let a found Studio go, open, stop its Rojo, and end the up session", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...IDLE_UP, ...ATTACHED });
+		await flushAsync();
+		await attachFoundAsync(run);
+		await jumpAsync(run, MINUTE_MS);
+		await vi.waitFor(async () => {
+			await passAsync(run, OUTPUT_POLL_MS);
+			assert(run.fake.calls.includes("stop rojo 3000"), "Rojo is asked to stop");
+		});
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
+		expect(run.native.processes.get(STUDIO_PID)).toMatchObject({ alive: true });
+		expect(run.reporter.events).toContainEqual({
+			message: "No activity for 1 min: stopped rojo.",
+			type: "info",
+		});
+	});
+
 	it("should start the time again on each Studio save, then close Studio", async () => {
 		expect.assertions(2);
 
@@ -3529,6 +3648,84 @@ describe("forge restart control channel", () => {
 		});
 	});
 
+	it("should keep a found Studio, and restart the compiler, then Rojo on its port", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...ATTACHED, flags: UP, projectType: "rbxts" });
+		const compilerLog = path.join(SESSION, "output", "compiler.log");
+		const built = "Found 0 errors. Watching for file changes.\n";
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(compilerLog, built);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await attachFoundAsync(run);
+		const before = spawnedIds(run.fake).length;
+		const answer = askRestartAsync(run);
+		await exitOnStopAsync(run, "rojo");
+		await exitOnStopAsync(run, "compiler");
+		await passAsync(run, 2 * FILE_POLL_MS);
+		run.memory.fileSystem.writeFileSync(compilerLog, built);
+		await passAsync(run, 2 * FILE_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(spawnedIds(run.fake).slice(before)).toStrictEqual([
+			"compiler: -w",
+			"rojo: serve default.project.json --port 4000",
+		]);
+		await expect(answer).resolves.toStrictEqual({
+			added: ["compiler", "rojo"],
+			kept: [{ owner: null, part: "studio" }],
+			stopped: ["rojo", "compiler"],
+		});
+		expect(state).toMatchObject({
+			phase: "ready",
+			services: {
+				compiler: { status: "ready" },
+				rojo: { port: 4000, status: "ready" },
+				studio: { origin: "found", pid: STUDIO_PID, status: "open" },
+			},
+		});
+	});
+
+	it("should close a found Studio with force, and open the place again", async () => {
+		expect.assertions(2);
+
+		const found: FakeProcess = {
+			alive: true,
+			executablePath: "/opt/RobloxStudio",
+			startTime: "0",
+		};
+		const run = startCommand({ ...ATTACHED, flags: UP, processes: { [STUDIO_PID]: found } });
+		found.onClose = () => {
+			run.memory.fileSystem.rmSync(LOCK);
+		};
+
+		await flushAsync();
+		await attachFoundAsync(run);
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: RELAUNCHED_PID, startTime: "901" },
+			type: "launched",
+		});
+		const answer = askRestartAsync(run, { force: true });
+		await exitOnStopAsync(run, "rojo");
+		await passAsync(run, FILE_POLL_MS);
+		run.memory.fileSystem.writeFileSync(LOCK, RELAUNCHED_LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		await expect(answer).resolves.toMatchObject({
+			added: ["studio", "rojo"],
+			kept: [],
+			stopped: ["studio", "rojo"],
+		});
+		expect(state).toMatchObject({
+			services: { studio: { origin: "forge", pid: RELAUNCHED_PID, status: "open" } },
+		});
+	});
+
 	it("should start nothing again when the compiler's tree left processes", async () => {
 		expect.assertions(3);
 
@@ -3621,7 +3818,7 @@ describe("forge restart control channel", () => {
 		expect(beforeBuild).toStrictEqual(["compiler: -w"]);
 		expect(spawnedIds(run.fake).slice(before)).toStrictEqual([
 			"compiler: -w",
-			"start-1: build default.project.json --output game.rbxl",
+			"start-2: build default.project.json --output game.rbxl",
 			"rojo: serve default.project.json --port 4000",
 		]);
 		await expect(answer).resolves.toMatchObject({

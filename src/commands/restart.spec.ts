@@ -203,6 +203,23 @@ describe(runRestartAsync, () => {
 			" It left Studio, Rojo, and the compiler alone: they have an owner, the forge start terminal.",
 			"kept",
 		],
+		[
+			[{ owner: null, part: "studio" }],
+			["compiler", "rojo"],
+			"Restarted the compiler and Rojo of session s1",
+			" Roblox Studio stays open: it already had the place open when the session attached it, so only --force closes it.",
+			"kept",
+		],
+		[
+			[
+				{ owner: null, part: "studio" },
+				{ owner: "start", part: "compiler" },
+			],
+			["rojo"],
+			"Restarted Rojo of session s1",
+			" It left the compiler alone: it has an owner, the forge start terminal. Roblox Studio stays open: it already had the place open when the session attached it, so only --force closes it.",
+			"kept",
+		],
 	] as const)(
 		"should name the owned parts it left alone: %j",
 		async ([kept, added, start, end, studio]) => {

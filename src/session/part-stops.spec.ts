@@ -76,6 +76,7 @@ function servicesWith(
 const READY: Partial<ServicePart> = { owner: null, status: "ready" };
 const OPEN: Partial<SessionStudio> = { owner: null, place: PLACE, status: "open" };
 const OWNED: Pick<ServicePart, "owner"> = { owner: "start" };
+const FOUND: Partial<SessionStudio> = { ...OPEN, origin: "found" };
 
 describe(planStops, () => {
 	it.for<[string, Services, StopPartsRequest, StopPlan]>([
@@ -175,6 +176,42 @@ describe(planStops, () => {
 			STOP,
 			{ kept: [{ owner: "start", part: "studio" }], stop: [] },
 		],
+		[
+			"Rojo and the compiler, not a found Studio, for down",
+			servicesWith({ compiler: READY, rojo: READY, studio: FOUND }),
+			DOWN,
+			{ kept: [{ owner: null, part: "studio" }], stop: ["rojo", "compiler"] },
+		],
+		[
+			"Rojo and the compiler, not a found Studio, for restart",
+			servicesWith({ compiler: READY, rojo: READY, studio: FOUND }),
+			{ ...DOWN, scope: "restart" },
+			{ kept: [{ owner: null, part: "studio" }], stop: ["rojo", "compiler"] },
+		],
+		[
+			"neither a found Studio nor its Rojo for stop",
+			servicesWith({ rojo: READY, studio: FOUND }),
+			STOP,
+			{ kept: [{ owner: null, part: "studio" }], stop: [] },
+		],
+		[
+			"a found Studio with force",
+			servicesWith({ rojo: READY, studio: FOUND }),
+			{ ...STOP, force: true },
+			{ kept: [], stop: ["studio", "rojo"] },
+		],
+		[
+			"no found Studio that has an owner, which keeps it",
+			servicesWith({ studio: { ...FOUND, ...OWNED } }),
+			DOWN,
+			{ kept: [{ owner: "start", part: "studio" }], stop: [] },
+		],
+		[
+			"a Studio the session opened",
+			servicesWith({ studio: { ...OPEN, origin: "forge" } }),
+			DOWN,
+			{ kept: [], stop: ["studio"] },
+		],
 	])("should stop %s", ([, services, request, plan]) => {
 		expect.assertions(1);
 
@@ -238,6 +275,8 @@ interface StopWorld {
 	services: Services;
 	stopped: Array<ServiceId>;
 	stopper: StopperParts;
+	/** Each time the session let go of its Studio. */
+	studioLeft: ReturnType<typeof vi.fn<StatusStore["studioLeft"]>>;
 }
 
 function makeWorld(services: Services, running: Array<ServiceId> = []): StopWorld {
@@ -279,6 +318,7 @@ function makeWorld(services: Services, running: Array<ServiceId> = []): StopWorl
 			},
 			state: { isAttached: services.studio.status !== "off" },
 		},
+		studioLeft: vi.fn<StatusStore["studioLeft"]>(),
 	};
 	return world;
 }
@@ -339,6 +379,7 @@ async function stopAsync(world: StopWorld, request: StopPartsRequest): Promise<P
 				phase: world.phase,
 				snapshot: () => ({ ...makeStatus(), services: world.services }),
 				studio: world.recorded,
+				studioLeft: world.studioLeft,
 			},
 		},
 		{
@@ -460,6 +501,69 @@ describe(createPartStopper, () => {
 			alive: false,
 			ended: [],
 		});
+	});
+
+	it("should let a found Studio go for down, open, stop its Rojo, and end the session", async () => {
+		expect.assertions(3);
+
+		const world = makeWorld(servicesWith({ compiler: READY, rojo: READY, studio: FOUND }), [
+			"compiler",
+			"rojo",
+		]);
+		const studio = openStudio(world);
+
+		await expect(stopAsync(world, DOWN)).resolves.toStrictEqual({
+			ending: true,
+			kept: [{ owner: null, part: "studio" }],
+			stopped: ["rojo", "compiler"],
+		});
+		expect(studio.closeRequests).toBeUndefined();
+		expect({
+			isAttached: world.stopper.state.isAttached,
+			left: world.studioLeft.mock.calls.length,
+			recorded: world.recorded.mock.calls,
+		}).toStrictEqual({ isAttached: false, left: 1, recorded: [] });
+	});
+
+	it("should let a found Studio go for the idle stop, and go on for an owned compiler", async () => {
+		expect.assertions(2);
+
+		const world = makeWorld(
+			servicesWith({ compiler: { ...READY, ...OWNED }, rojo: READY, studio: FOUND }),
+			["compiler", "rojo"],
+		);
+		openStudio(world);
+
+		await expect(stopAsync(world, IDLE_STOP)).resolves.toStrictEqual({
+			ending: false,
+			kept: [
+				{ owner: null, part: "studio" },
+				{ owner: "start", part: "compiler" },
+			],
+			stopped: ["rojo"],
+		});
+		expect(world.studioLeft).toHaveBeenCalledOnce();
+	});
+
+	it("should keep a found Studio attached for restart, and stop the services", async () => {
+		expect.assertions(3);
+
+		const world = makeWorld(servicesWith({ compiler: READY, rojo: READY, studio: FOUND }), [
+			"compiler",
+			"rojo",
+		]);
+		const studio = openStudio(world);
+
+		await expect(stopAsync(world, { ...DOWN, scope: "restart" })).resolves.toStrictEqual({
+			ending: false,
+			kept: [{ owner: null, part: "studio" }],
+			stopped: ["rojo", "compiler"],
+		});
+		expect(studio.alive).toBeTrue();
+		expect({
+			isAttached: world.stopper.state.isAttached,
+			left: world.studioLeft.mock.calls.length,
+		}).toStrictEqual({ isAttached: true, left: 0 });
 	});
 
 	it("should keep a session whose only part is an owned Studio", async () => {

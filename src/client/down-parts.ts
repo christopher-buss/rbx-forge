@@ -12,6 +12,10 @@ import type { StudioEnd, StudioStop } from "../studio/close-studio.ts";
 import type { KnownSession } from "./session.ts";
 import { stopPartsAsync } from "./session.ts";
 
+/** What a summary says of a found Studio that stays open. */
+export const FOUND_SENTENCE =
+	"Roblox Studio stays open: it already had the place open when the session attached it, so only --force closes it.";
+
 /**
  * What `down` did with the session's Studio:
  *
@@ -20,7 +24,8 @@ import { stopPartsAsync } from "./session.ts";
  *   forge did with its auto-recovery files; `null` when it ended none.
  * - `failed`: forge could not verify or end it (the error's `code` and
  *   `message`); Studio may still be open.
- * - `kept`: `--keep-studio` left it as it is, or it has an owner.
+ * - `kept`: `--keep-studio` left it as it is, it has an owner, or it is a
+ *   found Studio (in `parts.kept` with no owner).
  * - `none`: the session has no Studio open.
  * - `unknown`: the supervisor did not answer, or was stopping, so forge
  *   cannot tell which Studio is the session's; it touched none.
