@@ -122,6 +122,11 @@ To add a Studio, with its Rojo, to a running session as parts. A Studio that
 already has the place open is attached as it is, never opened a second time.\
 _Avoid_: connect, join
 
+**Found Studio**:\
+A Studio that already had the place open when the session attached it. Only
+`--force` closes it; otherwise the session lets it go, open.\
+_Avoid_: user Studio, external Studio
+
 **Snapshot**:\
 A copy of the place that `forge open` builds and opens, outside every session
 and with no Rojo. forge keeps the newest five.\
