@@ -33,7 +33,7 @@ AutoSaves folder, so the next launch does not offer to recover a place forge
 builds anyway. forge closes only a Studio that it can verify, never another one.
 See [docs/studio.md](./docs/studio.md).
 
-forge is a fork of [rbxts-build](https://github.com/roblox-ts/rbxts-build) by
+forge is a fork of [rbxts-build](https://github.com/osyrisrblx/rbxts-build) by
 osyrisrblx, rewritten.
 
 ## Install
