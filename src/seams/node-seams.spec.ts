@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import { REAPER_PATH } from "../../test/helpers/real-native.ts";
@@ -23,6 +23,25 @@ function makeSeams(nativeDirectory?: string): ReturnType<typeof createNodeSeams>
 }
 
 describe(createNodeSeams, () => {
+	it("should observe real directory edits", async () => {
+		expect.assertions(1);
+
+		const directory = makeTemporaryDirectory();
+		const { fileSystem } = makeSeams();
+		const watcher = fileSystem.watch(directory);
+		onTestFinished(() => {
+			watcher.close();
+		});
+		const changed = new Promise<string>((resolve) => {
+			watcher.once("change", (_event: string, filename: string) => {
+				resolve(filename);
+			});
+		});
+		fileSystem.writeFileSync(path.join(directory, "note.txt"), "hello");
+
+		await expect(changed).resolves.toBe("note.txt");
+	});
+
 	it("should read and write the real disk", () => {
 		expect.assertions(1);
 

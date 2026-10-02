@@ -363,7 +363,9 @@ async function serveRojoAsync(
 	parts: ServiceParts,
 	rojo: RojoService,
 ): Promise<boolean> {
-	const running = parts.isRunning("rojo") ? undefined : await startRojoAsync(setup, parts, rojo);
+	const running = parts.isRunning("rojo")
+		? undefined
+		: await startRojoAsync(setup, scope, parts, rojo);
 	if (running === undefined) {
 		return false;
 	}

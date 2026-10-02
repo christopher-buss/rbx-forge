@@ -243,7 +243,7 @@ async function runServicesAsync(
 ): Promise<undefined | { port: number | undefined }> {
 	const { parts } = state;
 	const rojo = session.plan.open
-		? await startRojoAsync(session, parts, await resolveRojoAsync(session))
+		? await startRojoAsync(session, scope, parts, await resolveRojoAsync(session))
 		: undefined;
 	if (session.compiler !== undefined) {
 		await startCompilerAsync(session, parts, session.compiler);

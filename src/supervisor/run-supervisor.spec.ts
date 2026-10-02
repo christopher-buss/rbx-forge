@@ -1,3 +1,5 @@
+import { fromAny } from "@total-typescript/shoehorn";
+
 import path from "node:path";
 import { assert, describe, expect, it, vi } from "vitest";
 
@@ -367,6 +369,196 @@ function spawnedIds(fake: FakeReaper): Array<string> {
 }
 
 describe(runSupervisorAsync, () => {
+	it("should release a stopped Rojo's cancellation listener before the session ends", async () => {
+		expect.assertions(1);
+
+		const run = startCommand();
+		await flushAsync();
+		const watcher: ReturnType<MemoryFileSystem["fileSystem"]["watch"]> = fromAny(
+			vi.mocked(run.memory.watch.watch).mock.results[0]!.value,
+		);
+		const close = vi.spyOn(watcher, "close");
+		run.fake.exit("rojo", EXITED);
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(close).toHaveBeenCalledOnce();
+	});
+
+	it("should start no project watch when the session ends while Rojo starts", async () => {
+		expect.assertions(1);
+
+		const run: StartRun = startCommand({
+			reaper: {
+				onSpawn: onSpawnOf("rojo", () => {
+					run.signals.fire("SIGINT");
+				}),
+			},
+		});
+		const watch = vi.spyOn(run.memory.fileSystem, "watch");
+		await run.result;
+
+		expect(watch).not.toHaveBeenCalled();
+	});
+
+	it("should keep Rojo ready with a warning when its project watch cannot start", async () => {
+		expect.assertions(2);
+
+		const run = startCommand();
+		vi.spyOn(run.memory.fileSystem, "watch").mockImplementation(() => {
+			throw new Error("watch denied");
+		});
+		await flushAsync();
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(state).toMatchObject({ services: { rojo: { status: "ready" } } });
+		expect(run.reporter.events).toContainEqual({
+			message: `Cannot reload Rojo project ${path.join(PROJECT, "default.project.json")}: Error: watch denied.`,
+			type: "warning",
+		});
+	});
+
+	it("should warn on a wrapper write failure and reload on a later project edit", async () => {
+		expect.assertions(3);
+
+		const run = startCommand();
+		await flushAsync();
+		const wrapper = path.join(SESSION, "rojo.project.json");
+		const write = vi.spyOn(run.memory.fileSystem, "writeFileSync");
+		write.mockImplementationOnce(() => {
+			throw new Error("write denied");
+		});
+
+		expect(() => {
+			run.memory.watch.change(PROJECT, "default.project.json");
+		}).not.toThrow();
+
+		run.memory.setModifiedTime(wrapper, 1);
+		run.memory.watch.change(PROJECT, "default.project.json");
+		const modified = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(modified).toBeGreaterThan(1);
+		expect(run.reporter.events).toContainEqual({
+			message: `Cannot reload Rojo project ${path.join(PROJECT, "default.project.json")}: Error: write denied.`,
+			type: "warning",
+		});
+	});
+
+	it("should warn and keep the session alive when the project watch fails", async () => {
+		expect.assertions(3);
+
+		const run = startCommand();
+		await flushAsync();
+
+		expect(() => {
+			run.memory.watch.error(PROJECT, new Error("watch lost"));
+		}).not.toThrow();
+
+		const active = run.memory.watch.activeDirectories();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(active).toStrictEqual([]);
+		expect(run.reporter.events).toContainEqual({
+			message: `Cannot reload Rojo project ${path.join(PROJECT, "default.project.json")}: Error: watch lost.`,
+			type: "warning",
+		});
+	});
+
+	it("should reload after atomic project replacement and filename-less events, ignoring unrelated files", async () => {
+		expect.assertions(3);
+
+		const run = startCommand();
+		await flushAsync();
+		const wrapper = path.join(SESSION, "rojo.project.json");
+		run.memory.setModifiedTime(wrapper, 1);
+		run.memory.watch.change(PROJECT, "unrelated.lua");
+		const unrelated = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+		run.memory.fileSystem.writeFileSync(
+			path.join(PROJECT, "replacement.json"),
+			'{"name":"Replaced","tree":{"$className":"DataModel"}}',
+		);
+		run.memory.fileSystem.renameSync(
+			path.join(PROJECT, "replacement.json"),
+			path.join(PROJECT, "default.project.json"),
+		);
+		run.memory.watch.change(PROJECT, "default.project.json", "rename");
+		const replaced = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+		run.memory.setModifiedTime(wrapper, 1);
+		run.memory.watch.change(PROJECT, null);
+		const unnamed = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(unrelated).toBe(1);
+		expect(replaced).toBeGreaterThan(1);
+		expect(unnamed).toBeGreaterThan(1);
+	});
+
+	it("should stop watching the project when Rojo exits and watch again after it restarts", async () => {
+		expect.assertions(4);
+
+		const run = startCommand(ATTACHED);
+		await flushAsync();
+
+		expect(run.memory.watch.activeDirectories()).toStrictEqual([PROJECT]);
+
+		run.fake.exit("rojo", EXITED);
+		await flushAsync();
+
+		expect(run.memory.watch.activeDirectories()).toStrictEqual([]);
+
+		await callSessionAsync(run.ipc, CONTROL_TARGET, "addParts", {
+			params: { parts: ["studio"] },
+		});
+
+		expect(run.memory.watch.activeDirectories()).toStrictEqual([PROJECT]);
+
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(run.memory.watch.activeDirectories()).toStrictEqual([]);
+	});
+
+	it("should close the project watch as soon as the session ends", async () => {
+		expect.assertions(1);
+
+		const run = startCommand();
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		const active = run.memory.watch.activeDirectories();
+		await run.result;
+
+		expect(active).toStrictEqual([]);
+	});
+
+	it("should reload the served tree on project edits without replacing the wrapper's root fields", async () => {
+		expect.assertions(2);
+
+		const run = startCommand();
+		await flushAsync();
+		const wrapper = path.join(SESSION, "rojo.project.json");
+		const original = run.memory.fileSystem.readFileSync(wrapper, "utf8");
+		run.memory.setModifiedTime(wrapper, 1);
+		run.memory.fileSystem.writeFileSync(
+			path.join(PROJECT, "default.project.json"),
+			'{"name":"Renamed","servePlaceIds":[99],"tree":{"$className":"DataModel","Content":{"$className":"Folder"}}}',
+		);
+		run.memory.watch.change(PROJECT, "default.project.json");
+		const modified = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+		const current = run.memory.fileSystem.readFileSync(wrapper, "utf8");
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(modified).toBeGreaterThan(1);
+		expect(current).toBe(original);
+	});
+
 	it("should serve a wrapper that identifies the worktree without adding an instance", async () => {
 		expect.assertions(2);
 

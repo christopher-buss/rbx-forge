@@ -2,9 +2,9 @@ import nodeFs from "node:fs";
 
 /**
  * The file system calls forge makes. Unit tests pass a memfs volume
- * (`test/helpers/memory-file-system.ts`) and assert on its state. Widen the
- * member list when a caller needs another call; keep it a `Pick` of `node:fs`
- * so the real module is the default with no adapter.
+ * (`test/helpers/seams.ts`) and assert on its state. Widen the
+ * member list when a caller needs another call. Directory watches expand
+ * short Windows paths before libuv reads them.
  */
 export type FileSystem = Pick<
 	typeof nodeFs,
@@ -20,6 +20,9 @@ export type FileSystem = Pick<
 	| "rmSync"
 	| "statSync"
 	| "writeFileSync"
->;
+> & { watch: (directory: string) => nodeFs.FSWatcher };
 
-export const nodeFileSystem: FileSystem = nodeFs;
+export const nodeFileSystem: FileSystem = {
+	...nodeFs,
+	watch: (directory) => nodeFs.watch(nodeFs.realpathSync.native(directory)),
+};
