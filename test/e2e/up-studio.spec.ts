@@ -110,9 +110,9 @@ describe("forge up --studio", () => {
 			(line) => !line.startsWith("rojo build"),
 		);
 
-		// Studio starts first, but the stand-in may log after Rojo.
 		expect({ attached: attached.toSorted(), compiler }).toStrictEqual({
 			attached: [
+				"rojo plugin install",
 				`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
 				expect.stringMatching(/^studio /),
 			],

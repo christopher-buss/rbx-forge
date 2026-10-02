@@ -6,6 +6,7 @@ test/fixtures/rbxtsc/*.txt -text
 # Roblox places and models that Studio or Rojo wrote: binary.
 *.rbxl binary
 *.rbxm binary
+*.rbxm.gz binary
 
 # Images, fonts, and documents: binary.
 *.png binary

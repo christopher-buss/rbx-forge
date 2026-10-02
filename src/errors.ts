@@ -6,6 +6,8 @@ import {
 	EXIT_INTERRUPTED,
 	EXIT_NEEDS_CONFIRMATION,
 	EXIT_NOT_RUNNING,
+	EXIT_PLUGIN_PROTOCOL_MISMATCH,
+	EXIT_PLUGIN_WRITE_FAILED,
 	EXIT_USAGE,
 } from "./exit-codes.ts";
 
@@ -39,6 +41,8 @@ export type ForgeErrorCode =
 	| "needs_confirmation"
 	| "not_running"
 	| "place_not_found"
+	| "plugin_protocol_mismatch"
+	| "plugin_write_failed"
 	| "port_in_use"
 	| "previous_generation_alive"
 	| "process_failed"
@@ -131,6 +135,14 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	place_not_found: {
 		exitCode: EXIT_FAILURE,
 		text: "The place file to open does not exist, and it was not built.",
+	},
+	plugin_protocol_mismatch: {
+		exitCode: EXIT_PLUGIN_PROTOCOL_MISMATCH,
+		text: "The managed Rojo plugin protocol differs from the running server.",
+	},
+	plugin_write_failed: {
+		exitCode: EXIT_PLUGIN_WRITE_FAILED,
+		text: "The managed Rojo plugin sources could not be replaced.",
 	},
 	port_in_use: { exitCode: EXIT_FAILURE, text: "The fixed Rojo port is busy." },
 	previous_generation_alive: {

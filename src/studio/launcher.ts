@@ -18,6 +18,11 @@ export const LAUNCHER_WAIT_MS = 10_000;
 
 /** One place to open in Roblox Studio. */
 export interface StudioLaunch {
+	/**
+	 * Prepare a session plugin after discovery, immediately before direct
+	 * launch.
+	 */
+	beforeLaunch?: (() => Promise<void>) | undefined;
 	cwd: string;
 	env: Environment;
 	/** The absolute path of the place file. */
@@ -287,6 +292,7 @@ async function launchDirectAsync(
 	launch: StudioLaunch,
 	executable: string,
 ): Promise<StudioLaunchOutcome> {
+	await launch.beforeLaunch?.();
 	const started =
 		backend.host.platform === "win32"
 			? startBreakingAway(backend, launch, executable)

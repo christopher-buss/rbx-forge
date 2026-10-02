@@ -1,0 +1,14 @@
+Rojo plugin App and ServeSession sources
+
+The bundled stock sources come from Rojo 7.7.1 and also match Rojo 7.7.0.
+These sources, including the modified App.lua and ServeSession.lua shipped in
+dist/rojo-plugin/, are covered by the Mozilla Public License 2.0. See LICENSE.txt
+alongside this notice. Forge adds a version/hash comment when preparing the
+managed plugin. The independent TypeScript code remains under the root MIT license.
+
+The exact current patched sources are distributed in readable App.lua and
+ServeSession.lua files alongside this notice. The original stock sources are
+available in stock.json here and src/studio/rojo-plugin/stock.json in the forge
+repository at https://github.com/christopher-buss/rbx-forge.
+Upstream source files are available at:
+https://github.com/rojo-rbx/rojo/tree/v7.7.1/plugin/src

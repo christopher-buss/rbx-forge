@@ -187,7 +187,7 @@ describe(createStudioLauncher, () => {
 	});
 
 	it("should use the platform launcher when the job forbids breakaway", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const spawner = spawnerExiting(0);
 		const { native } = windowsNative(null);
@@ -197,11 +197,75 @@ describe(createStudioLauncher, () => {
 			native,
 			platform: "win32",
 		});
+		const beforeLaunch = vi.fn<() => Promise<void>>(async () => {});
 
 		await expect(
-			launch({ ...launchOf(WINDOWS_PLACE), runScript: "C:\\Session\\marker.lua" }),
+			launch({
+				...launchOf(WINDOWS_PLACE),
+				beforeLaunch,
+				runScript: "C:\\Session\\marker.lua",
+			}),
 		).resolves.toStrictEqual({ type: "launched" });
 		expect(spawner.calls[0]!.options).toMatchObject({ windowsVerbatimArguments: true });
+		expect(beforeLaunch).toHaveBeenCalledOnce();
+	});
+
+	it("should finish plugin preparation before attempting a direct spawn", async () => {
+		expect.assertions(2);
+
+		const { native, spawns } = windowsNative();
+		const { launch } = makeLauncher({ files: { [STUDIO_EXE]: "" }, native, platform: "win32" });
+		let spawnsBeforePreparation: number | undefined;
+		await launch({
+			...launchOf(WINDOWS_PLACE),
+			beforeLaunch: async () => {
+				spawnsBeforePreparation = spawns.length;
+			},
+		});
+
+		expect(spawnsBeforePreparation).toBe(0);
+		expect(spawns).toHaveLength(1);
+	});
+
+	it("should prevent direct spawn when plugin preparation fails", async () => {
+		expect.assertions(2);
+
+		const { native, spawns } = windowsNative();
+		const { launch } = makeLauncher({ files: { [STUDIO_EXE]: "" }, native, platform: "win32" });
+
+		await expect(
+			launch({
+				...launchOf(WINDOWS_PLACE),
+				beforeLaunch: async () => {
+					throw new Error("plugin write failed");
+				},
+			}),
+		).rejects.toThrow("plugin write failed");
+		expect(spawns).toStrictEqual([]);
+	});
+
+	it("should bypass plugin preparation when no executable can be discovered", async () => {
+		expect.assertions(2);
+
+		const { launch } = makeLauncher({ childProcess: spawnerExiting(0).runner });
+		const beforeLaunch = vi.fn<() => Promise<void>>(async () => {});
+
+		await expect(launch({ ...launchOf(), beforeLaunch })).resolves.toStrictEqual({
+			type: "launched",
+		});
+		expect(beforeLaunch).not.toHaveBeenCalled();
+	});
+
+	it("should bypass plugin preparation for an invalid Studio override", async () => {
+		expect.assertions(2);
+
+		const { launch } = makeLauncher();
+		const beforeLaunch = vi.fn<() => Promise<void>>(async () => {});
+
+		await expect(
+			launch({ ...launchOf(), beforeLaunch, studioPath: "/missing-studio" }),
+		).resolves.toMatchObject({ type: "failed" });
+		expect(beforeLaunch).not.toHaveBeenCalled();
 	});
 
 	it("should use the platform launcher when the addon cannot start a detached process", async () => {

@@ -39,8 +39,8 @@ interface Restarted {
 /**
  * Wait until the long-running leaders that started after a point have all
  * logged their start, and each one but Studio its grandchild: a part is
- * ready before the fixture logs it, and a one-shot `rojo build` is no
- * leader.
+ * ready before the fixture logs it. One-shot Rojo builds and plugin installs
+ * have no process tree to follow.
  *
  * @param project - Where the session runs.
  * @param old - The records at that point.
@@ -56,7 +56,12 @@ async function treesSinceAsync(
 	return waitForAsync(() => {
 		const records = readWorkerLog(project.log);
 		const started = records.filter(({ args, pid, role }) => {
-			return role !== "grandchild" && !args.includes("build") && !oldPids.has(pid);
+			return (
+				role !== "grandchild" &&
+				!args.includes("build") &&
+				!args.includes("plugin") &&
+				!oldPids.has(pid)
+			);
 		});
 		const isComplete = started
 			.filter(({ role }) => role !== "studio")

@@ -116,6 +116,12 @@ marker script identifying that Rojo; see
 and Studio has the place open. When that Studio closes the place, only its Rojo
 stops; the compiler runs on.
 
+Before a new direct session launch, forge prepares the managed Rojo plugin by
+default. Rojo 7.7.0 and 7.7.1 share the supported stock sources; other versions
+are preserved when their sources are unrecognized. Restore the stock plugin with
+the project's `rojo plugin install`. See
+[Managed Rojo plugin](./docs/studio.md#managed-rojo-plugin).
+
 `down` acts only on parts with no owner. A part that a `forge start` terminal
 owns keeps running, and so does the session: `down` names it in
 `data.parts.kept` and still succeeds. `down` takes `--timeout <seconds>`

@@ -52,6 +52,39 @@ that a `start` owns, nothing then stops; for a Studio with no owner, only its
 Rojo stops. The end of `start` never closes Studio: a Studio it opened leaves
 the session and stays open.
 
+## Managed Rojo plugin
+
+After a successful place build, immediately before attempting a new direct
+session launch, forge prepares `RojoManagedPlugin.rbxm` in the Studio Plugins
+folder. Windows uses `%USERPROFILE%\AppData\Local\Roblox\Plugins`; macOS uses
+`~/Documents/Roblox/Plugins`. A missing managed plugin is installed with the
+project's Rojo command. Forge supports Rojo 7.7 and later; the recognized stock
+sources of 7.7.0 and 7.7.1 share one patch. Unknown or manually edited sources,
+unreadable sources, and newer forge patches are preserved with manual connection
+guidance. Upstream launch-marker support is preserved too; its confirmation
+dialog may still need accepting in Studio.
+
+Both script sources are replaced atomically. A current coherent pair is left
+alone, because writing the file can reload the plugin in an open Studio. The
+initial lifecycle patch marks the stock sources; it does not yet implement
+automatic connection. A plugin/server protocol mismatch fails with
+`plugin_protocol_mismatch` (exit 7); an atomic write failure uses
+`plugin_write_failed` (exit 8).
+
+The patch is on by default, with no config option or restore command. Run the
+project's `rojo plugin install` to restore the stock plugin. Creator Store
+plugins are outside this managed file and are not patched. Existing attached
+Studios, `forge open` snapshots, and launches with no discoverable executable
+do not prepare the plugin. If Windows denies breakaway after the direct launch
+attempt, the plugin may already be prepared; the platform fallback receives no
+marker and needs manual connection.
+
+Sessions serve only their generated `.forge/sessions/<id>/rojo.project.json`
+wrapper, which names the worktree and points at the original project with
+`$path`. Changes to that project file reload while Rojo runs. The wrapper's name
+and root serve fields stay frozen while Rojo runs and are regenerated when Rojo
+starts again.
+
 ## Closing Studio
 
 `down`, `stop`, and `restart` close Studio the same way. forge sends a close

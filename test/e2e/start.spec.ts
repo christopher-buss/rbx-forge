@@ -5,6 +5,8 @@
  *
  * Real Roblox Studio never opens. The stand-in or the test owns the lock file.
  */
+import { fromAny } from "@total-typescript/shoehorn";
+
 import { readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -155,6 +157,7 @@ describe("forge start", () => {
 			`rojo build default.project.json --output ${PLACE}`,
 			`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
 			"rbxtsc -w",
+			"rojo plugin install",
 			`rojo syncback default.project.json --input ${PLACE} --non-interactive`,
 			"hook",
 		]);
@@ -323,6 +326,16 @@ describe("forge start --no-compiler", () => {
 			{ name: "rojo build", status: "started", type: "step" },
 			{ name: "rojo build", status: "succeeded", type: "step" },
 			{ name: "open Roblox Studio", status: "started", type: "step" },
+			{ name: "rojo plugin", status: "started", type: "step" },
+			{ name: "rojo plugin", status: "succeeded", type: "step" },
+			{
+				message: fromAny(
+					expect.stringContaining(
+						"Auto-connect is off; connect to Rojo manually in Studio.",
+					),
+				),
+				type: "warning",
+			},
 			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
 			{
 				message: `Rojo serves default.project.json on port ${fixture.port}. Press Ctrl+C to stop.`,

@@ -9,6 +9,7 @@ import { createFakeReaper, createFakeSignals } from "../../test/helpers/fake-rea
 import type { FakeReaper, FakeReaperOptions, FakeSignals } from "../../test/helpers/fake-reaper.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { ManualClock } from "../../test/helpers/manual-clock.ts";
+import { configureModelSources } from "../../test/helpers/model-sources.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import type { FakeNative, FakeProcess } from "../../test/helpers/native.ts";
 import {
@@ -21,6 +22,7 @@ import {
 } from "../../test/helpers/seams.ts";
 import type { MemoryFileSystem, RecordingReporter } from "../../test/helpers/seams.ts";
 import type { FlagValues } from "../cli/flags.ts";
+import type { CommandContext } from "../commands/context.ts";
 import { ForgeError } from "../errors.ts";
 import { callSessionAsync, ownSessionAsync } from "../ipc/client.ts";
 import type { OwnedSession } from "../ipc/client.ts";
@@ -38,6 +40,7 @@ import { createStopSource } from "../session/stop-source.ts";
 import { STUDIO_OPEN_BOUND_MS } from "../session/studio-part.ts";
 import { FILE_POLL_MS } from "../session/worker-context.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
+import stockPlugin from "../studio/rojo-plugin/stock.json" with { type: "json" };
 import type { SessionRequest } from "./channel.ts";
 import { endpointFor, endpointKey } from "./endpoint.ts";
 import { runSupervisorAsync } from "./run-supervisor.ts";
@@ -82,6 +85,7 @@ const ATTACHED = {
 const WITH_OLD = { ...TOOL_FILES, ".forge/sessions/old/supervisor.id": "{}" };
 
 interface StartSetup {
+	env?: CommandContext["env"];
 	/** The config file's content besides `projectType`. */
 	file?: object;
 	files?: Record<string, string>;
@@ -103,6 +107,7 @@ interface StartSetup {
 	pause?: (stop: StopSource) => Pause;
 	/** The host OS; Linux by default. */
 	platform?: NodeJS.Platform;
+	pluginSources?: Array<string>;
 	/** More processes in the fake process table, such as a Studio. */
 	processes?: Record<number, FakeProcess>;
 	projectType?: "luau" | "rbxts";
@@ -137,43 +142,339 @@ const SYNCBACK: StartSetup = {
 	flags: { compiler: false, open: false, syncback: true },
 };
 
+describe("managed Rojo plugin lifecycle", () => {
+	it("should patch both stock scripts before launching a new Studio", async () => {
+		expect.assertions(2);
+
+		const sources = [
+			stockPlugin.App,
+			stockPlugin.ServeSession,
+			"return { protocolVersion = 5 }",
+		];
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			platform: "darwin",
+			pluginSources: sources,
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(sources[0]).toContain(
+			"-- rbx-forge patch 1 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+		);
+		expect(sources[1]).toContain(
+			"-- rbx-forge patch 1 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+		);
+	});
+
+	it.for([
+		{ name: "older forge sources", version: 0 },
+		{ name: "a partial previous patch", version: 1 },
+	])("should repair $name coherently", async ({ version }) => {
+		expect.assertions(2);
+
+		const sources = stockPluginSources();
+		sources[0] = `-- rbx-forge patch ${version} stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`;
+		const run = startPluginSession(sources);
+		await endPluginSessionAsync(run);
+
+		expect(sources[0].split("\n", 1)[0]).toBe(
+			"-- rbx-forge patch 1 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+		);
+		expect(sources[1]!.split("\n", 1)[0]).toBe(
+			"-- rbx-forge patch 1 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+		);
+	});
+
+	it("should preserve a coherent current pair without rewriting the model", async () => {
+		expect.assertions(2);
+
+		const sources = stockPluginSources();
+		const first = startPluginSession(sources);
+		await endPluginSessionAsync(first);
+		const previous = [...sources];
+		const second = startPluginSession(sources);
+		const write = vi.spyOn(second.native.addon, "writeModelScriptSources");
+		await endPluginSessionAsync(second);
+
+		expect(sources).toStrictEqual(previous);
+		expect(write).not.toHaveBeenCalled();
+	});
+
+	it.for([
+		{ reason: "unknown sources", source: "return 'manually changed'" },
+		{
+			reason: "newer forge sources",
+			source: `-- rbx-forge patch 9 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`,
+		},
+		{
+			reason: "unknown forge stock hash",
+			source: `-- rbx-forge patch 1 stock ${"a".repeat(64)}\n${stockPlugin.App}`,
+		},
+		{
+			reason: "manually changed marked sources",
+			source: "-- rbx-forge patch 1 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\nreturn 'changed'",
+		},
+	])("should preserve $reason and explain manual connection", async ({ source }) => {
+		expect.assertions(3);
+
+		const sources = stockPluginSources();
+		sources[0] = source;
+		const previous = [...sources];
+		const run = startPluginSession(sources);
+		await endPluginSessionAsync(run);
+
+		expect(sources).toStrictEqual(previous);
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"The managed Rojo plugin has unsupported or manually changed sources. Auto-connect is off; connect to Rojo manually in Studio.",
+			type: "warning",
+		});
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+	});
+
+	it("should preserve upstream launch-marker support", async () => {
+		expect.assertions(3);
+
+		const sources = [
+			"function App:checkForRojoOpen() local name = 'ROJO_OPEN_' end",
+			"local expectedSessionId = true",
+			"return { protocolVersion = 5 }",
+		];
+		const run = startPluginSession(sources);
+		const write = vi.spyOn(run.native.addon, "writeModelScriptSources");
+		await endPluginSessionAsync(run);
+
+		expect(write).not.toHaveBeenCalled();
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"The Rojo plugin handles launch markers upstream; confirm the sync in Studio if prompted. Forge cannot acknowledge its initial sync.",
+			type: "warning",
+		});
+	});
+
+	it("should resolve the Windows managed path with case-insensitive environment names", async () => {
+		expect.assertions(2);
+
+		const sources = stockPluginSources();
+		const run = startCommand({
+			env: { HOME: "/other-home", userprofile: PROJECT },
+			files: {
+				"AppData/Local/Roblox/Plugins/RojoManagedPlugin.rbxm": "model",
+				"tools/rojo.exe": "",
+			},
+			platform: "win32",
+			pluginSources: sources,
+			writePrivateFile: () => {},
+		});
+		await endPluginSessionAsync(run);
+
+		expect(run.fake.spawned.map(({ args }) => args)).not.toContainEqual(["plugin", "install"]);
+		expect(sources[0]).toStartWith("-- rbx-forge patch 1");
+	});
+
+	it.for(["", undefined])(
+		"should avoid plugin I/O when the home is unavailable (%s)",
+		async (home) => {
+			expect.assertions(1);
+
+			const run = startPluginSession(stockPluginSources(), { env: { HOME: home } });
+			const read = vi.spyOn(run.native.addon, "readModelScriptSources");
+			await endPluginSessionAsync(run);
+
+			expect(read).not.toHaveBeenCalled();
+		},
+	);
+
+	it("should avoid patching when cancellation occurs during source reading", async () => {
+		expect.assertions(1);
+
+		const sources = stockPluginSources();
+		const previous = [...sources];
+		const run = startPluginSession(sources);
+		run.native.addon.readModelScriptSources = () => {
+			run.signals.fire("SIGINT");
+			return [...sources];
+		};
+
+		await run.result;
+
+		expect(sources).toStrictEqual(previous);
+	});
+
+	it("should preserve plugins on an unsupported platform", async () => {
+		expect.assertions(1);
+
+		const run = startPluginSession(stockPluginSources(), { platform: "linux" });
+		const read = vi.spyOn(run.native.addon, "readModelScriptSources");
+		await endPluginSessionAsync(run);
+
+		expect(read).not.toHaveBeenCalled();
+	});
+
+	it("should avoid reading or patching after cancellation during plugin installation", async () => {
+		expect.assertions(1);
+
+		const run: StartRun = startPluginSession(stockPluginSources(), {
+			files: TOOL_FILES,
+			reaper: {
+				onSpawn: onSpawnOf("start-2", () => {
+					run.signals.fire("SIGINT");
+				}),
+			},
+		});
+		const read = vi.spyOn(run.native.addon, "readModelScriptSources");
+		await run.result;
+
+		expect(read).not.toHaveBeenCalled();
+	});
+
+	it.for([
+		{ app: "ROJO_OPEN_", session: "unknown" },
+		{ app: "unknown", session: "expectedSessionId" },
+		{
+			app: "-- rbx-forge patch 1 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\nROJO_OPEN_",
+			session: "expectedSessionId",
+		},
+	])(
+		"should preserve partial or manually changed marker support as manual",
+		async ({ app, session }) => {
+			expect.assertions(1);
+
+			const run = startPluginSession([app, session, "protocolVersion = 5,"]);
+			await endPluginSessionAsync(run);
+
+			expect(run.reporter.events).toContainEqual({
+				message:
+					"The managed Rojo plugin has unsupported or manually changed sources. Auto-connect is off; connect to Rojo manually in Studio.",
+				type: "warning",
+			});
+		},
+	);
+
+	it("should install a missing plugin with the project's Rojo before patching", async () => {
+		expect.assertions(2);
+
+		const sources = stockPluginSources();
+		const run = startCommand({
+			file: { rojoAlias: "custom-rojo" },
+			files: { "tools/custom-rojo": "" },
+			platform: "darwin",
+			pluginSources: sources,
+		});
+		await endPluginSessionAsync(run);
+
+		expect(run.fake.spawned).toContainEqual(
+			expect.objectContaining({
+				args: ["plugin", "install"],
+				file: path.join(TOOLS, "custom-rojo"),
+			}),
+		);
+		expect(sources[0]).toStartWith("-- rbx-forge patch 1");
+	});
+
+	it("should fail on a protocol mismatch before changing the plugin or launching", async () => {
+		expect.assertions(3);
+
+		const sources = stockPluginSources();
+		sources[2] = "return { protocolVersion = 6 }";
+		const previous = [...sources];
+		const run = startPluginSession(sources);
+
+		await expect(run.result).rejects.toMatchObject({
+			code: "plugin_protocol_mismatch",
+			exitCode: 7,
+			hint: "Restore the plugin with the project's rojo plugin install.",
+			message: "Rojo plugin protocol 6 differs from server protocol 5.",
+		});
+		expect(sources).toStrictEqual(previous);
+		expect(run.fake.spawned.map(({ args }) => args)).not.toContainEqual(["plugin", "install"]);
+	});
+
+	it("should report a distinct error when the atomic plugin write fails", async () => {
+		expect.assertions(1);
+
+		const run = startPluginSession(stockPluginSources());
+		run.native.addon.writeModelScriptSources = () => {
+			throw new Error("access denied");
+		};
+
+		await expect(run.result).rejects.toMatchObject({
+			cause: new Error("access denied"),
+			code: "plugin_write_failed",
+			exitCode: 8,
+			hint: "Check permissions on RojoManagedPlugin.rbxm and retry.",
+			message: "Could not patch the managed Rojo plugin: access denied",
+		});
+	});
+
+	it("should preserve an unreadable plugin and continue with manual connection", async () => {
+		expect.assertions(2);
+
+		const run = startPluginSession(stockPluginSources());
+		run.native.addon.readModelScriptSources = () => {
+			throw new Error("missing App path");
+		};
+
+		const write = vi.spyOn(run.native.addon, "writeModelScriptSources");
+		await endPluginSessionAsync(run);
+
+		expect(write).not.toHaveBeenCalled();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Could not read the managed Rojo plugin: missing App path. Auto-connect is off; connect to Rojo manually in Studio.",
+			type: "warning",
+		});
+	});
+
+	it("should preserve a plugin with an unrecognized protocol declaration", async () => {
+		expect.assertions(2);
+
+		const sources = stockPluginSources();
+		sources[2] = "return unknownConfiguration";
+		const run = startPluginSession(sources);
+		const write = vi.spyOn(run.native.addon, "writeModelScriptSources");
+		await endPluginSessionAsync(run);
+
+		expect(write).not.toHaveBeenCalled();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Could not identify the managed Rojo plugin protocol. Auto-connect is off; connect to Rojo manually in Studio.",
+			type: "warning",
+		});
+	});
+
+	it.for([
+		{ name: "an existing Studio", setup: ATTACHED },
+		{ name: "a compiler-only session", setup: { flags: { compiler: false, open: false } } },
+		{ name: "a failed place build", setup: { oneShot: () => EXITED } },
+		{
+			name: "a cancelled place build",
+			setup: { oneShot: oneShotsWith({ "start-1": "hold" }) },
+		},
+	])("should preserve the plugin for $name", async ({ setup }) => {
+		expect.assertions(1);
+
+		const sources = stockPluginSources();
+		const previous = [...sources];
+		const run = startPluginSession(sources, setup);
+		const result = run.result.catch(() => {});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await result;
+
+		expect(sources).toStrictEqual(previous);
+	});
+});
+
+function stockPluginSources(): Array<string> {
+	return [stockPlugin.App, stockPlugin.ServeSession, "return { protocolVersion = 5 }"];
+}
+
 function succeedOneShots(worker: WorkerSpec): undefined | WorkerReport {
 	return SERVICES.has(worker.id) ? undefined : OK;
-}
-
-/**
- * One-shot runs succeed, except the named ones: they end with the given
- * report, or stay running (`hold`) until the test ends them.
- *
- * @param overrides - Reports by worker id.
- * @returns The fake reaper's `autoExit`.
- */
-function oneShotsWith(
-	overrides: Readonly<Record<string, "hold" | WorkerReport>>,
-): (worker: WorkerSpec) => undefined | WorkerReport {
-	return (worker) => {
-		const override = overrides[worker.id];
-		if (override === "hold") {
-			return;
-		}
-
-		return override ?? succeedOneShots(worker);
-	};
-}
-
-/**
- * Call `action` when the worker with this id is spawned.
- *
- * @param id - The worker id.
- * @param action - What to do, such as send a stop signal.
- * @returns The fake reaper's `onSpawn`.
- */
-function onSpawnOf(id: string, action: () => void): (worker: WorkerSpec) => void {
-	return (worker) => {
-		if (worker.id === id) {
-			action();
-		}
-	};
 }
 
 /**
@@ -192,6 +493,7 @@ function requestFor(flags: FlagValues): SessionRequest {
 }
 
 function startCommand({
+	env,
 	file = {},
 	files = TOOL_FILES,
 	flags = NO_COMPILER,
@@ -211,6 +513,7 @@ function startCommand({
 	owned = false,
 	pause = () => neverPauseAsync,
 	platform = "linux",
+	pluginSources,
 	processes = {},
 	projectType = "luau",
 	reaper = {},
@@ -238,13 +541,34 @@ function startCommand({
 	const isPortFreeAsync = vi.fn<Network["isPortFreeAsync"]>().mockResolvedValue(isPortFree);
 	const isListeningAsync = vi.fn<Network["isListeningAsync"]>(isListening);
 	const freePortAsync = vi.fn<Network["freePortAsync"]>().mockResolvedValue(FREE_PORT);
-	const studioLauncher = vi.fn<StudioLauncher>().mockResolvedValue({ type: "launched" });
+	const studioLauncher = vi.fn<StudioLauncher>(async (launch) => {
+		await launch.beforeLaunch?.();
+		return { type: "launched" };
+	});
+	if (pluginSources !== undefined) {
+		configureModelSources(
+			native.addon,
+			pluginSources,
+			path.join(
+				PROJECT,
+				...(platform === "win32" ? ["AppData", "Local"] : ["Documents"]),
+				"Roblox",
+				"Plugins",
+				"RojoManagedPlugin.rbxm",
+			),
+		);
+	}
+
 	const configLoader = vi.fn<ConfigLoader>().mockResolvedValue({
 		path: path.join(PROJECT, "rbx-forge.config.ts"),
 		value: { projectType, ...(rojoPort === "unset" ? {} : { rojoPort }), ...file },
 	});
 	const context = createCommandContext({
-		env: { PATH: TOOLS },
+		env: {
+			PATH: TOOLS,
+			...(pluginSources === undefined ? {} : { HOME: PROJECT, userprofile: PROJECT }),
+			...env,
+		},
 		reporter,
 		seams: createTestSeams({
 			clock: clock.clock,
@@ -291,6 +615,62 @@ function startCommand({
 		signals,
 		stop,
 		studioLauncher,
+	};
+}
+
+function startPluginSession(sources: Array<string>, setup: StartSetup = {}): StartRun {
+	return startCommand({
+		files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+		platform: "darwin",
+		pluginSources: sources,
+		...setup,
+	});
+}
+
+async function flushAsync(): Promise<void> {
+	await new Promise((resolve) => {
+		setImmediate(resolve);
+	});
+}
+
+async function endPluginSessionAsync(run: StartRun): Promise<void> {
+	await flushAsync();
+	run.signals.fire("SIGINT");
+	await run.result;
+}
+
+/**
+ * One-shot runs succeed, except the named ones: they end with the given
+ * report, or stay running (`hold`) until the test ends them.
+ *
+ * @param overrides - Reports by worker id.
+ * @returns The fake reaper's `autoExit`.
+ */
+function oneShotsWith(
+	overrides: Readonly<Record<string, "hold" | WorkerReport>>,
+): (worker: WorkerSpec) => undefined | WorkerReport {
+	return (worker) => {
+		const override = overrides[worker.id];
+		if (override === "hold") {
+			return;
+		}
+
+		return override ?? succeedOneShots(worker);
+	};
+}
+
+/**
+ * Call `action` when the worker with this id is spawned.
+ *
+ * @param id - The worker id.
+ * @param action - What to do, such as send a stop signal.
+ * @returns The fake reaper's `onSpawn`.
+ */
+function onSpawnOf(id: string, action: () => void): (worker: WorkerSpec) => void {
+	return (worker) => {
+		if (worker.id === id) {
+			action();
+		}
 	};
 }
 
@@ -350,12 +730,6 @@ function stateOf(run: StartRun): unknown {
 	const text = run.memory.files()[".forge/sessions/session-1/state.json"];
 	assert(typeof text === "string", "expected state.json");
 	return JSON.parse(text);
-}
-
-async function flushAsync(): Promise<void> {
-	await new Promise((resolve) => {
-		setImmediate(resolve);
-	});
 }
 
 /**
@@ -756,6 +1130,7 @@ describe(runSupervisorAsync, () => {
 		]);
 		expect(run.fake.calls[0]).toBe("go");
 		expect(run.studioLauncher).toHaveBeenCalledExactlyOnceWith({
+			beforeLaunch: fromAny(expect.any(Function)),
 			cwd: PROJECT,
 			env: { PATH: TOOLS },
 			place: PLACE,

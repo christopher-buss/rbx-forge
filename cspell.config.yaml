@@ -3,6 +3,10 @@
 version: "0.2"
 language: en
 
+ignorePaths:
+  - src/studio/rojo-plugin/LICENSE.txt
+  - src/studio/rojo-plugin/stock.json
+
 words:
   - DACL
   - FILETIME

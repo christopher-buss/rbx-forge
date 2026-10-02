@@ -8,6 +8,8 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
+import { prepareRojoPluginAsync } from "../studio/rojo-plugin.ts";
+import type { PluginCapabilities } from "../studio/rojo-plugin.ts";
 import { writeSessionMarkerAsync } from "../studio/session-marker.ts";
 import type { OpenedStudio } from "./attach.ts";
 import { attachStudio } from "./attach.ts";
@@ -116,11 +118,33 @@ export async function openStudioAsync(
 	steps: CommandContext,
 	{ signal, studioPath }: Pick<OpenOptions, "signal" | "studioPath">,
 	{ isBuilt }: Pick<PreparedStudio, "isBuilt">,
-): Promise<OpenedStudio> {
+): Promise<OpenedStudio & { plugin: PluginCapabilities }> {
 	const { port } = status.snapshot().services.rojo;
 	assert(port !== undefined);
-	const runScript = await writeSessionMarkerAsync(steps, directory, port, signal);
-	return openPlaceAsync(steps, config, { isBuilt, runScript, signal, studioPath });
+	const { info, runScript } = await writeSessionMarkerAsync(steps, directory, port, signal);
+	let plugin: PluginCapabilities = {
+		autoConnect: false,
+		source: "manual",
+		syncAcknowledgement: false,
+	};
+	const opened = await openPlaceAsync(steps, config, {
+		beforeLaunch: async () => {
+			signal.throwIfAborted();
+			plugin = await prepareRojoPluginAsync(steps, config, info.protocolVersion, signal);
+			signal.throwIfAborted();
+		},
+		isBuilt,
+		runScript,
+		signal,
+		studioPath,
+	});
+	return {
+		...opened,
+		plugin:
+			opened.studio === null
+				? { autoConnect: false, source: "manual", syncAcknowledgement: false }
+				: plugin,
+	};
 }
 
 /**
