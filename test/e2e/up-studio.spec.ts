@@ -99,7 +99,7 @@ describe("forge up --studio", () => {
 				services: {
 					compiler: { status: "ready" },
 					rojo: { port: fixture.port, status: "ready" },
-					studio: { owner: null, place: fixture.place, status: "open" },
+					studio: { origin: "forge", owner: null, place: fixture.place, status: "open" },
 				},
 				started: false,
 			},
