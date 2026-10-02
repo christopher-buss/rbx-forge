@@ -34,8 +34,7 @@ GitHub Issues via `gh`; see `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Mapped to Linear workflow states (`Triage`, `Todo`, `Canceled`) plus three
-labels (`NeedsInfo`, `Agent`, `PRD`). See `docs/agents/triage-labels.md`.
+Default label strings, one per triage role. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
