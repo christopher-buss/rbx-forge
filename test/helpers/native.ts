@@ -105,7 +105,13 @@ export function createFakeNative(
 			...processMembers(table),
 			isLockFree: (path) => !locks.has(path),
 			nativeVersion: () => "0.0.0",
+			readModelScriptSources: () => {
+				throw new Error("model script sources are not configured");
+			},
 			tryLockFile: (path, mode) => lockIn(locks, path, mode),
+			writeModelScriptSources: () => {
+				throw new Error("model script sources are not configured");
+			},
 			...(registry === undefined
 				? {}
 				: { readUserRegistryDefault: (key) => readFrom(values, key) }),

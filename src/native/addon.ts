@@ -167,6 +167,12 @@ export interface CleanupReport {
 	unverifiable: Array<number>;
 }
 
+/** One script's replacement source, addressed from the model root. */
+export interface ModelScriptSource {
+	path: Array<string>;
+	source: string;
+}
+
 /** The addon's exports. */
 export interface NativeAddon {
 	/**
@@ -212,6 +218,11 @@ export interface NativeAddon {
 	 */
 	processStartTime: (pid: number) => null | string;
 	/**
+	 * Read sources in request order, using instance names from the model root.
+	 * Missing, ambiguous, and non-script paths throw.
+	 */
+	readModelScriptSources: (path: string, scriptPaths: Array<Array<string>>) => Array<string>;
+	/**
 	 * Windows only: the default value of `HKEY_CURRENT_USER\<key>`, or
 	 * `null` when the key or value is missing.
 	 *
@@ -239,6 +250,10 @@ export interface NativeAddon {
 	 * @returns The lock, or `null` when another holder's lock conflicts.
 	 */
 	tryLockFile: (path: string, mode: LockMode) => FileLock | null;
+	/**
+	 * Replace only these sources atomically; failures keep the original file.
+	 */
+	writeModelScriptSources: (path: string, scripts: Array<ModelScriptSource>) => void;
 	/**
 	 * Windows only: create a new file that only the current user can open,
 	 * holding `contents`. It never exists with another DACL.
