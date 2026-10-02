@@ -201,29 +201,29 @@ See [docs/config.md](./docs/config.md) for every option.
 
 ## For agents
 
-With `--json`, or when stdout is not a terminal, forge writes NDJSON and ends
-with one `result` line. A run that cannot prompt never prompts. Error codes are
-stable, and each maps to one exit code. The loop:
+forge is built for AI agents too. Every command has `--json` output, never
+prompts when it cannot ask, and ends with a stable error code and exit code (see
+[docs/json-output.md](./docs/json-output.md)).
 
-1. `forge up --json` starts the compiler in a background session. On a running
-   session, it starts the compiler again if it failed. `forge restart --json`
-   restarts every part with no owner, such as after a deleted output folder.
-2. Edit code.
-3. `forge status --json --wait` gives the compile errors with file, line, and
-   column. `--wait` waits for the compile of your edit, so the result is never
-   the build before it.
-4. To play, `forge up --studio --json` attaches Studio and Rojo to the session;
-   read the console with the Roblox Studio MCP. For a one-time look,
-   `forge open --json` opens a snapshot outside the session. `forge stop --json`
-   closes Studio and its Rojo, and the snapshot Studios; the compiler runs on.
-5. `forge sync --json` pulls Studio edits into the project.
-6. `forge down --json` stops the parts with no owner, and the session once none
-   is left. It never fails because a `forge start` terminal owns a part. A
-   forgotten session stops the same way after `session.idleTimeout` minutes (30
-   by default) with no activity.
+The `rbx-forge` skill teaches an agent the dev loop. Install it in your project:
 
-See [docs/json-output.md](./docs/json-output.md) for the result fields and exit
-codes.
+```bash
+npx skills add christopher-buss/rbx-forge
+```
+
+With the skill, an agent:
+
+- Starts a background session with only the compiler (`forge up`), and reads the
+  build of each edit with `forge status --wait` instead of compiling itself.
+- Opens Studio only to verify or debug: a snapshot with `forge open` for a
+  one-time look, or `forge up --studio` to work in Studio with Rojo. It closes
+  each Studio it opens.
+- Runs `forge sync` after you save the place in Studio.
+- Leaves the parts of your `forge start` terminal alone, and stops only the
+  session it started.
+
+A session that no one uses stops after `session.idleTimeout` minutes, so a
+forgotten agent session does not stay open.
 
 ## Contributing
 

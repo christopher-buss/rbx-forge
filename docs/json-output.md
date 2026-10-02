@@ -33,39 +33,38 @@ takes a safe default or fails with `needs_confirmation`.
 Error codes are stable: a code is never renamed or reused. The full list is in
 [`src/errors.ts`](../src/errors.ts).
 
-## Agent loop
+## Session results
 
-1. `forge up --json`: start a session with the watch-mode compiler alone, or
-   find the running one (`data.started`). On a running session, it starts the
-   parts it asks for that are `off` or `failed`, and never touches a part that
-   runs. `data.added` names the parts this `up` started (`[]` when none).
-   Returns when no part is `starting`: the first compile is done, or the part
-   failed (see [Parts](#parts)). A project with no compiler gets a session with
-   no part. `forge restart --json` restarts every part with no owner, the
-   compiler first (see [The `restart` result](#the-restart-result)).
-2. Edit code.
-3. `forge status --json --wait`: `data.services.compiler.lastBuild` has `errors`
-   and `diagnostics` (`file`, `line`, `column`, `code`, `message`, `severity`),
-   and `startedAt` and `at` (when the compile started and ended). `--wait` makes
-   it the build of your edit; see below. `data.services.studio` has `status`
-   (`opening`, `open`, `closed`, `off`), `place`, and, for a Studio forge
-   started or attached, `pid` and `startTime`.
-4. To play, `forge up --studio --json` attaches Studio and Rojo to the session
-   (`data.added` names `studio` and `rojo` when it started them), and returns
-   once Rojo listens and Studio has the place open; read the console with the
-   Roblox Studio MCP. A Studio that has the place open already is used. A busy
-   configured `rojoPort` fails with `port_in_use`; with none set, the session
-   picks a port, in `data.services.rojo.port`. `forge open --json` builds a
-   snapshot and opens it outside the session, for a one-time look: `data.place`
-   is the snapshot, `data.pruned` the old snapshots it deleted.
-5. `forge sync --json`: pull Studio edits into the project, with the syncback
-   hooks. It waits for a running save-triggered run, then runs once more.
-   Failures keep their code, with hook results in `error.details.hooks`.
-6. `forge down --json`: stop the parts with no owner, and the session once none
-   is left. See below for its result. A session no command talks to, with no
-   compile start and no Studio save, does the same by itself after
-   [`session.idleTimeout`](./config.md#sessionidletimeout) minutes (30 by
-   default).
+The fields of the session commands. The agent workflow is in the
+[`rbx-forge` skill](../skills/rbx-forge/SKILL.md).
+
+- `forge up --json`: `data.started` is `true` when this `up` started the
+  session. On a running session, `up` starts the parts it asks for that are
+  `off` or `failed`, and never touches a part that runs. `data.added` names the
+  parts this `up` started (`[]` when none). It returns when no part is
+  `starting`: the first compile is done, or the part failed (see
+  [Parts](#parts)). A project with no compiler gets a session with no part.
+- `forge status --json --wait`: `data.services.compiler.lastBuild` has `errors`
+  and `diagnostics` (`file`, `line`, `column`, `code`, `message`, `severity`),
+  and `startedAt` and `at` (when the compile started and ended). `--wait` makes
+  it the build of the last edit; see below. `data.services.studio` has `status`
+  (`opening`, `open`, `closed`, `off`), `place`, and, for a Studio forge started
+  or attached, `pid` and `startTime`.
+- `forge up --studio --json`: `data.added` names `studio` and `rojo` when it
+  started them. It returns once Rojo listens and Studio has the place open. A
+  Studio that has the place open already is used. A busy configured `rojoPort`
+  fails with `port_in_use`; with none set, the session picks a port, in
+  `data.services.rojo.port`.
+- `forge open --json`: `data.place` is the snapshot, `data.pruned` the old
+  snapshots it deleted.
+- `forge sync --json`: it waits for a running save-triggered run, then runs once
+  more. Failures keep their code, with hook results in `error.details.hooks`.
+- `forge restart --json`: see [The `restart` result](#the-restart-result).
+- `forge down --json`: see
+  [The `down` and `stop` result](#the-down-and-stop-result). A session no
+  command talks to, with no compile start and no Studio save, stops the same way
+  after [`session.idleTimeout`](./config.md#sessionidletimeout) minutes (30 by
+  default).
 
 Exit 6 means processes still live or the supervisor does not answer: retry with
 `--force`. Exit 5 means forge could not verify a process, so it killed nothing.
