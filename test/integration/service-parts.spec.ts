@@ -59,7 +59,9 @@ async function crashAsync(role: string) {
 	while (status?.services[part].status !== "failed") {
 		assert(Date.now() < deadline, `the ${part} part never failed`);
 		await sleep(POLL_MS);
-		status = parseStatus(await callSessionAsync(transport, target, "status"));
+		status = parseStatus(
+			await callSessionAsync(transport, target, "status", { responseTimeoutMs: WAIT_MS }),
+		);
 	}
 
 	const alive = workersOf(project, session.identity.sessionId)
