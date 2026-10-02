@@ -1,3 +1,27 @@
 {
-	"includeCoAuthoredBy": true
+	"includeCoAuthoredBy": true,
+	"hooks": {
+		"WorktreeCreate": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node scripts/worktree/create.ts",
+						"timeout": 600
+					}
+				]
+			}
+		],
+		"WorktreeRemove": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node scripts/worktree/remove.ts",
+						"timeout": 120
+					}
+				]
+			}
+		]
+	}
 }

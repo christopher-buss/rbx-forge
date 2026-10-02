@@ -32,7 +32,7 @@ export default isentinel(
 		// Process entries, like `src/cli.ts`: the config exempts that one by
 		// name.
 		name: "project/process-entries",
-		files: ["src/supervisor.ts"],
+		files: ["src/supervisor.ts", "scripts/worktree/{create,remove}.ts"],
 		rules: { "antfu/no-top-level-await": "off" },
 	},
 	{
