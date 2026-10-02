@@ -12,7 +12,7 @@ import { parseStatus } from "../../src/session/status.ts";
 import { openStudioStandInAsync, pidOf } from "../helpers/real-native.ts";
 import { readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { holdPortAsync, makeFixtureAsync } from "./session-fixture.ts";
+import { holdPortAsync, makeFixtureAsync, pidsOf } from "./session-fixture.ts";
 import type { UpRun } from "./up-fixture.ts";
 import { runForgeAsync, UP, WATCH_COMMAND } from "./up-fixture.ts";
 
@@ -45,19 +45,6 @@ function rojoOf({ result }: UpRun): SessionStatus["services"]["rojo"] {
  */
 function processes(fixture: Fixture): Array<string> {
 	return readWorkerLog(fixture.log).map(({ args, role }) => [role, ...args].join(" "));
-}
-
-/**
- * The PIDs of the fixture processes with this role.
- *
- * @param fixture - The project.
- * @param role - Such as `rojo`.
- * @returns Their PIDs, in start order.
- */
-function pidsOf(fixture: Fixture, role: string): Array<number> {
-	return readWorkerLog(fixture.log)
-		.filter((record) => record.role === role && record.args[0] !== "build")
-		.map(({ pid }) => pid);
 }
 
 /**
@@ -99,7 +86,7 @@ describe("forge up --studio", () => {
 				services: {
 					compiler: { status: "ready" },
 					rojo: { port: fixture.port, status: "ready" },
-					studio: { owner: null, place: fixture.place, status: "open" },
+					studio: { origin: "forge", owner: null, place: fixture.place, status: "open" },
 				},
 				started: false,
 			},

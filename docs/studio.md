@@ -43,6 +43,14 @@ that a `start` owns, nothing then stops; for a Studio with no owner, only its
 Rojo stops. The end of `start` never closes Studio: a Studio it opened leaves
 the session and stays open.
 
+A Studio that the session attached this way is a found Studio:
+`data.services.studio.origin` is `found` (`forge` for a Studio the session
+opened), also after a `start` took it and gave it back. Only `stop --force` and
+`restart --force` close a found Studio. `down` and the idle timeout stop its
+Rojo and let it go, open, and touch none of its auto-recovery files; `restart`
+keeps it, and starts the compiler and Rojo again on the same port; `stop` fails
+with `studio_found`.
+
 ## Closing Studio
 
 `down`, `stop`, and `restart` close Studio the same way. forge sends a close
@@ -78,8 +86,9 @@ snapshot with a lock file, verified as above. When the session reports Studio as
 `opening` (started, the place not open yet), the session waits up to 60 seconds
 for it to be `open`, then closes it. A session with no part left ends, once a
 syncback run for a last save is done. A Studio that a `forge start` terminal
-owns stays: `stop` fails with `studio_owned`, and `stop --force` closes it.
-`--force` does not change how Studio closes.
+owns stays: `stop` fails with `studio_owned`, and `stop --force` closes it. A
+found Studio stays too: `stop` fails with `studio_found`, and `stop --force`
+closes it. `--force` does not change how Studio closes.
 
 ## Auto-recovery
 

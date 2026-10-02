@@ -155,6 +155,26 @@ describe(createPartRestarter, () => {
 		expect(add).not.toHaveBeenCalled();
 	});
 
+	it("should start Rojo again for a found Studio that stays", async () => {
+		expect.assertions(2);
+
+		const { add, restart } = makeRestarter({
+			ending: false,
+			foundStudio: true,
+			kept: [],
+			stopped: ["rojo"],
+		});
+		add.mockResolvedValueOnce(["rojo"]);
+
+		await expect(restart({ force: false })).resolves.toStrictEqual({
+			added: ["rojo"],
+			foundStudio: true,
+			kept: [],
+			stopped: ["rojo"],
+		});
+		expect(add).toHaveBeenCalledExactlyOnceWith({ parts: [], studioPath: undefined });
+	});
+
 	it("should start a failed compiler with no owner again", async () => {
 		expect.assertions(1);
 

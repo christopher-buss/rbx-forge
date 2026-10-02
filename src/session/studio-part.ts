@@ -94,10 +94,15 @@ export async function openStudioAsync(
 		return undefined;
 	}
 
+	if (attached !== undefined) {
+		return attached;
+	}
+
 	// The build above wrote the place `open` would build.
 	const isBuilt =
 		build && config.open.buildOutputPath === undefined && config.open.projectPath === undefined;
-	return attached ?? (await openPlaceAsync(steps, config, { isBuilt, studioPath }));
+	const { place, studio } = await openPlaceAsync(steps, config, { isBuilt, studioPath });
+	return { origin: "forge", place, studio };
 }
 
 /**
@@ -125,7 +130,7 @@ export function followSessionStudio(
 		letGo.abort();
 	};
 
-	setup.status.studio("opening", opened.place, opened.studio);
+	setup.status.studio("opening", opened.place, opened.studio, opened.origin);
 	const open = Promise.withResolvers<void>();
 	const signal = AbortSignal.any([scope.signal, letGo.signal]);
 	scope.track(followAsync(setup, { signal }, follow, { ...opened, onOpen: open.resolve }));

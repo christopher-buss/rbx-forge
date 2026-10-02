@@ -49,6 +49,7 @@ export type ForgeErrorCode =
 	| "session_running"
 	| "session_stopping"
 	| "sourcemap_invalid"
+	| "studio_found"
 	| "studio_launch_failed"
 	| "studio_owned"
 	| "supervisor_unresponsive"
@@ -162,6 +163,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	sourcemap_invalid: {
 		exitCode: EXIT_FAILURE,
 		text: "Rojo's sourcemap is missing, or is not the sourcemap of a place.",
+	},
+	studio_found: {
+		exitCode: EXIT_FAILURE,
+		text: "The Studio already had the place open when the session attached it; only --force closes it.",
 	},
 	studio_launch_failed: {
 		exitCode: EXIT_FAILURE,

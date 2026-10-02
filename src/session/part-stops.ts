@@ -21,6 +21,7 @@ import type {
 	StatusStore,
 } from "./status.ts";
 import type { StudioState } from "./studio-part.ts";
+import { leaveStudio } from "./studio-part.ts";
 
 /**
  * Who asks to stop parts: `down` (every part), `stop` (Studio and its
@@ -56,6 +57,8 @@ export type StudioOutcome =
 export interface PartStops {
 	/** The session ends: no part is left. */
 	ending: boolean;
+	/** It left the session's found Studio open, as only `force` closes it. */
+	foundStudio?: true;
 	kept: Array<KeptPart>;
 	/** The parts it stopped, in order. */
 	stopped: Array<PartId>;
@@ -66,8 +69,10 @@ export interface PartStops {
 /** Stops the parts a request may stop. */
 export type PartStopper = (request: StopPartsRequest) => Promise<PartStops>;
 
-/** Which parts a stop acts on, and which it leaves to their owner. */
+/** Which parts a stop acts on, and which it leaves. */
 export interface StopPlan {
+	/** It leaves the session's found Studio. */
+	foundStudio?: true;
 	kept: Array<KeptPart>;
 	stop: Array<PartId>;
 }
@@ -102,7 +107,7 @@ export interface StopperSetup {
 	config: Pick<ResolvedConfig, "studio">;
 	/** The seams, environment, and project root. */
 	context: CommandContext;
-	status: Pick<StatusStore, "phase" | "snapshot" | "studio">;
+	status: Pick<StatusStore, "phase" | "snapshot" | "studio" | "studioLeft">;
 }
 
 /** The session state a stop changes. */
@@ -131,9 +136,10 @@ export function isPartRunning(services: SessionStatus["services"], part: PartId)
 }
 
 /**
- * Decide which running parts a request stops: those with no owner, and with
- * `force` the owned ones too. The rest it keeps, with their owner. Rojo
- * stops with its Studio in the `stop` scope, so it stays when Studio does.
+ * Decide which running parts a request stops: those with no owner, except a
+ * found Studio, and with `force` all of them. The rest it keeps, with their
+ * owner, and it leaves a found Studio. Rojo stops with its Studio in the
+ * `stop` scope, so it stays when Studio does.
  *
  * @param services - The parts' status and owners.
  * @param request - The scope, place, `force`, and `keepStudio`.
@@ -150,10 +156,14 @@ export function planStops(
 			continue;
 		}
 
-		if (owner !== null && !request.force) {
+		if (request.force || (owner === null && !isFoundPart(services, part))) {
+			if (part !== "rojo" || request.scope !== "stop" || plan.stop.includes("studio")) {
+				plan.stop.push(part);
+			}
+		} else if (owner === null) {
+			plan.foundStudio = true;
+		} else {
 			plan.kept.push({ owner, part });
-		} else if (part !== "rojo" || request.scope !== "stop" || plan.stop.includes("studio")) {
-			plan.stop.push(part);
 		}
 	}
 
@@ -192,6 +202,7 @@ export function sessionStudioTarget({
  *    ({@link planStops}), once a Studio in its scope is past `opening`.
  * 2. Close Studio (`closeStudioAsync`: a close request, then a kill, with
  *    its auto-recovery files handled), or let it go with `keepStudio`.
+ *    `down` lets a found Studio go, open.
  * 3. Stop Rojo and the compiler, and wait until each tree is gone.
  * 4. End the session once no part is left, after the syncback of a save
  *    just before Studio closed.
@@ -208,12 +219,12 @@ export function createPartStopper(
 ): PartStopper {
 	return async (request) => {
 		const services = await servicesForAsync(setup, request);
-		const { kept, stop } = planStops(services, request);
+		const { foundStudio: hasFoundStudio, kept, stop } = planStops(services, request);
 		const studio = stop.includes("studio")
 			? await stopStudioAsync(setup, stopper, request, services)
 			: undefined;
-		if (request.keepStudio && request.scope === "down") {
-			stopper.state.isAttached = false;
+		if (request.scope === "down") {
+			letGoForDown(setup, stopper, { isFound: hasFoundStudio === true, ...request });
 		}
 
 		const isStudioGone = studio?.isGone === true;
@@ -230,11 +241,16 @@ export function createPartStopper(
 		});
 		return {
 			ending: isEnding,
+			...(hasFoundStudio === undefined ? {} : { foundStudio: hasFoundStudio }),
 			kept,
 			stopped,
 			...(studio?.outcome === undefined ? {} : { studio: studio.outcome }),
 		};
 	};
+}
+
+function isFoundPart(services: SessionStatus["services"], part: PartId): boolean {
+	return part === "studio" && services.studio.origin === "found";
 }
 
 /**
@@ -256,6 +272,30 @@ function partsInScope(
 	}
 
 	return place === undefined || studio.place === place ? ["studio", "rojo"] : [];
+}
+
+/**
+ * Let go of the session's Studio for `down`, which leaves it open: with
+ * `keepStudio`, and a found Studio.
+ *
+ * @param setup - The status.
+ * @param stopper - The Studio state.
+ * @param leave - Whether `keepStudio`, and whether the Studio is found.
+ * @param leave.isFound - The stop left a found Studio.
+ * @param leave.keepStudio - The caller asked to leave Studio open.
+ */
+function letGoForDown(
+	setup: StopperSetup,
+	stopper: StopperParts,
+	{ isFound, keepStudio }: { isFound: boolean; keepStudio: boolean },
+): void {
+	if (keepStudio) {
+		stopper.state.isAttached = false;
+	}
+
+	if (isFound) {
+		leaveStudio(stopper.state, setup.status);
+	}
 }
 
 /**
