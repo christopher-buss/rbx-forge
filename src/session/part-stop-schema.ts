@@ -50,10 +50,11 @@ const studioOutcome = type.or(
 	{ place: "string", stop: studioStop },
 );
 
-const kept = type({ owner: "'start' | null", part: PART }).array();
+const kept = type({ owner: "'start'", part: PART }).array();
 
 const stopsResult: Type<PartStops> = type({
 	"ending": "boolean",
+	"foundStudio?": "true",
 	kept,
 	"stopped": PARTS,
 	"studio?": studioOutcome,
@@ -67,6 +68,7 @@ const restartRequest = type({
 
 const restartResult: Type<PartRestarts> = type({
 	"added": PARTS,
+	"foundStudio?": "true",
 	kept,
 	"stopped": PARTS,
 	"studio?": studioOutcome,

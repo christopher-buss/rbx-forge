@@ -158,13 +158,18 @@ describe(createPartRestarter, () => {
 	it("should start Rojo again for a found Studio that stays", async () => {
 		expect.assertions(2);
 
-		const kept: PartStops["kept"] = [{ owner: null, part: "studio" }];
-		const { add, restart } = makeRestarter({ ending: false, kept, stopped: ["rojo"] });
+		const { add, restart } = makeRestarter({
+			ending: false,
+			foundStudio: true,
+			kept: [],
+			stopped: ["rojo"],
+		});
 		add.mockResolvedValueOnce(["rojo"]);
 
 		await expect(restart({ force: false })).resolves.toStrictEqual({
 			added: ["rojo"],
-			kept,
+			foundStudio: true,
+			kept: [],
 			stopped: ["rojo"],
 		});
 		expect(add).toHaveBeenCalledExactlyOnceWith({ parts: [], studioPath: undefined });

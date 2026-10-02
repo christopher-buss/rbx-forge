@@ -114,13 +114,14 @@ the place, only its Rojo stops; the compiler runs on.
 
 A Studio that already had the place open when the session attached it is a found
 Studio (`origin: "found"` in `status`; a Studio the session opened is `forge`).
-Only `--force` closes it: `down` and the idle timeout stop its Rojo and leave it
-open, `restart` keeps it, and `stop` fails with `studio_found` (exit 1).
+Only `stop --force` and `restart --force` close it: `down` and the idle timeout
+stop its Rojo and leave it open, `restart` keeps it, and `stop` fails with
+`studio_found` (exit 1).
 
 `down` acts only on parts with no owner. A part that a `forge start` terminal
 owns keeps running, and so does the session: `down` names it in
-`data.parts.kept` and still succeeds. A found Studio stays open: `down` names it
-in `data.parts.kept` with no owner, and reports Studio `kept`. `down` takes
+`data.parts.kept` and still succeeds. A found Studio stays open, also with
+`--force`: `down` reports Studio `kept`, with `found: true`. `down` takes
 `--timeout <seconds>` (default 15), `--force` (kill a supervisor that does not
 stop, and what is left of its session, each verified), `--keep-studio` (leave
 the session's Studio open), and `--recovery <mode>` (see

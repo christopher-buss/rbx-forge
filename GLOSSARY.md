@@ -17,7 +17,8 @@ _Avoid_: component, piece
 
 **Owner**:\
 The `start` terminal that owns a part. Only its owner stops an owned part; any
-client, and the idle timeout, can stop a part with no owner.\
+client, and the idle timeout, can stop a part with no owner, except a found
+Studio.\
 _Avoid_: holder, creator
 
 **Idle timeout**:\

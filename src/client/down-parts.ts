@@ -14,7 +14,7 @@ import { stopPartsAsync } from "./session.ts";
 
 /** What a summary says of a found Studio that stays open. */
 export const FOUND_SENTENCE =
-	"Roblox Studio stays open: it already had the place open when the session attached it, so only --force closes it.";
+	"Roblox Studio stays open: it already had the place open when the session attached it.";
 
 /**
  * What `down` did with the session's Studio:
@@ -24,8 +24,9 @@ export const FOUND_SENTENCE =
  *   forge did with its auto-recovery files; `null` when it ended none.
  * - `failed`: forge could not verify or end it (the error's `code` and
  *   `message`); Studio may still be open.
- * - `kept`: `--keep-studio` left it as it is, it has an owner, or it is a
- *   found Studio (in `parts.kept` with no owner).
+ * - `kept`: `--keep-studio` left it as it is, or it has an owner. `found`:
+ *   it is a found Studio, which only `stop --force` and `restart --force`
+ *   close.
  * - `none`: the session has no Studio open.
  * - `unknown`: the supervisor did not answer, or was stopping, so forge
  *   cannot tell which Studio is the session's; it touched none.
@@ -40,6 +41,7 @@ export type DownStudio =
 			recovery: null | RecoveryReport;
 			status: "closed";
 	  }
+	| { found: true; status: "kept" }
 	| { status: "kept" | "none" | "unknown" };
 
 /**
@@ -117,7 +119,7 @@ export async function askPartStopsAsync(
  * @returns What happened to Studio.
  */
 export function downStudio(
-	stops: Pick<PartStops, "kept" | "studio"> | undefined,
+	stops: Pick<PartStops, "foundStudio" | "kept" | "studio"> | undefined,
 	keepStudio: boolean,
 ): DownStudio {
 	if (stops === undefined) {
@@ -125,6 +127,10 @@ export function downStudio(
 	}
 
 	const { studio } = stops;
+	if (stops.foundStudio === true) {
+		return { found: true, status: "kept" };
+	}
+
 	if (studio === undefined) {
 		const isKept = keepStudio || stops.kept.some(({ part }) => part === "studio");
 		return { status: isKept ? "kept" : "none" };

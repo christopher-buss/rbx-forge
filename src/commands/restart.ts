@@ -12,7 +12,6 @@ import type { CommandResult } from "../seams/reporter.ts";
 import { listParts } from "../session/part-names.ts";
 import type { PartRestarts, RestartRequest } from "../session/part-restarts.ts";
 import { restartWaitMs } from "../session/part-restarts.ts";
-import { isFoundStudio } from "../session/part-stops.ts";
 import type { SessionStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
 import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
@@ -122,17 +121,19 @@ function restartRequest(
  * @param restarts - What it stopped, kept, and started.
  * @returns What it restarted, where each part is, and what it kept.
  */
-function restartSummary(status: SessionStatus, { added, kept }: PartRestarts): string {
+function restartSummary(
+	status: SessionStatus,
+	{ added, foundStudio: hasFoundStudio, kept }: PartRestarts,
+): string {
 	const restarted = added.length === 0 ? "no part" : listParts(added);
-	const owned = kept.filter(({ owner }) => owner !== null);
-	const pronoun = owned.length === 1 ? "it has" : "they have";
-	const names = listParts(owned.map(({ part }) => part));
-	const ownedSentence =
-		owned.length === 0
+	const pronoun = kept.length === 1 ? "it has" : "they have";
+	const names = listParts(kept.map(({ part }) => part));
+	const owned =
+		kept.length === 0
 			? ""
 			: ` It left ${names} alone: ${pronoun} an owner, the forge start terminal.`;
-	const found = kept.some(isFoundStudio) ? ` ${FOUND_SENTENCE}` : "";
-	return `Restarted ${restarted} of session ${status.sessionId}: ${describeParts(status)}.${ownedSentence}${found}`;
+	const found = hasFoundStudio === true ? ` ${FOUND_SENTENCE}` : "";
+	return `Restarted ${restarted} of session ${status.sessionId}: ${describeParts(status)}.${owned}${found}`;
 }
 
 /**

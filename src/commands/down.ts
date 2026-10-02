@@ -1,6 +1,6 @@
 import type { FlagDefinition, FlagValues } from "../cli/flags.ts";
 import { readCountFlag } from "../cli/flags.ts";
-import type { DownParts, DownStudio } from "../client/down-parts.ts";
+import type { DownStudio } from "../client/down-parts.ts";
 import { FOUND_SENTENCE } from "../client/down-parts.ts";
 import type { DownReport, StoppedBy } from "../client/down.ts";
 import { DOWN_TIMEOUT_MS, stopSessionAsync } from "../client/down.ts";
@@ -13,7 +13,6 @@ import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { listParts } from "../session/part-names.ts";
 import type { KeptPart } from "../session/part-stops.ts";
-import { isFoundStudio } from "../session/part-stops.ts";
 import type { StudioEnd } from "../studio/close-studio.ts";
 import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
@@ -65,8 +64,8 @@ const HOW: Readonly<Record<StoppedBy, string>> = {
  * (a `forge start` terminal) keep running, and so does the session: `down`
  * reports them in `parts.kept` and never fails because of them. A found
  * Studio (one that already had the place open when the session attached
- * it) stays open: `down` stops its Rojo, lets it go, and reports it in
- * `parts.kept` with no owner. It reports
+ * it) stays open: `down` stops its Rojo, lets it go, and reports Studio
+ * `kept` and `found`. It reports
  * `stopped` only once the session's supervisor has exited and none of its
  * processes is left. It escalates from a shutdown request to a forced one;
  * with `--force`, it then kills the supervisor through a pinned,
@@ -108,17 +107,16 @@ export async function runDownAsync(
 /**
  * Say which parts stay, and who owns them.
  *
- * @param kept - The parts it kept.
+ * @param kept - The parts with an owner.
  * @returns The end of the sentence that says the session goes on.
  */
 function keptSentence(kept: ReadonlyArray<KeptPart>): string {
-	const owned = kept.filter(({ owner }) => owner !== null);
-	if (owned.length === 0) {
+	if (kept.length === 0) {
 		return ".";
 	}
 
-	const verb = owned.length === 1 ? "has" : "have";
-	const names = listParts(owned.map(({ part }) => part));
+	const verb = kept.length === 1 ? "has" : "have";
+	const names = listParts(kept.map(({ part }) => part));
 	return `: ${names} ${verb} an owner, the forge start terminal.`;
 }
 
@@ -126,12 +124,10 @@ function keptSentence(kept: ReadonlyArray<KeptPart>): string {
  * The sentence the summary gives Studio.
  *
  * @param studio - What `down` did with the session's Studio.
- * @param parts - What it stopped and kept; a found Studio is kept with no
- *   owner.
  * @returns The sentence, with a leading space; empty when there is nothing
  *   to say.
  */
-function studioSentence(studio: DownStudio, parts: DownParts): string {
+function studioSentence(studio: DownStudio): string {
 	switch (studio.status) {
 		case "closed": {
 			return studio.end === "exited" || studio.end === "lock_released"
@@ -142,8 +138,7 @@ function studioSentence(studio: DownStudio, parts: DownParts): string {
 			return ` Roblox Studio may still have ${studio.place} open: ${studio.message}`;
 		}
 		case "kept": {
-			const isFound = parts?.kept.some(isFoundStudio) === true;
-			return isFound ? ` ${FOUND_SENTENCE}` : " Roblox Studio stays open.";
+			return "found" in studio ? ` ${FOUND_SENTENCE}` : " Roblox Studio stays open.";
 		}
 		case "none":
 		case "unknown": {
@@ -162,12 +157,12 @@ function downSummary(report: DownReport): string {
 	const { sessionId } = report;
 	if (report.status === "stopped") {
 		const empty = report.parts?.stopped.length === 0 ? " It had no part to stop." : "";
-		return `${HOW[report.stoppedBy]} ${sessionId}; every process of it is gone.${empty}${studioSentence(report.studio, report.parts)}`;
+		return `${HOW[report.stoppedBy]} ${sessionId}; every process of it is gone.${empty}${studioSentence(report.studio)}`;
 	}
 
 	const { parts } = report;
 	const stopped = parts.stopped.length === 0 ? "no part" : listParts(parts.stopped);
-	return `Stopped ${stopped} of session ${sessionId}. It goes on${keptSentence(parts.kept)}${studioSentence(report.studio, parts)}`;
+	return `Stopped ${stopped} of session ${sessionId}. It goes on${keptSentence(parts.kept)}${studioSentence(report.studio)}`;
 }
 
 /**

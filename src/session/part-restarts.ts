@@ -23,6 +23,8 @@ export interface RestartRequest {
 export interface PartRestarts {
 	/** The parts it started again, in order. */
 	added: Array<PartId>;
+	/** It left the session's found Studio open, as only `force` closes it. */
+	foundStudio?: true;
 	kept: Array<KeptPart>;
 	/** The parts it stopped, in order. */
 	stopped: Array<PartId>;
@@ -120,6 +122,7 @@ export function createPartRestarter(
 		const added = hasWork ? await restart.add({ parts, studioPath }) : [];
 		return {
 			added,
+			...(stops.foundStudio === undefined ? {} : { foundStudio: stops.foundStudio }),
 			kept: stops.kept,
 			stopped: stops.stopped,
 			...(stops.studio === undefined ? {} : { studio: stops.studio }),

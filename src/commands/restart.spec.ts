@@ -203,23 +203,6 @@ describe(runRestartAsync, () => {
 			" It left Studio, Rojo, and the compiler alone: they have an owner, the forge start terminal.",
 			"kept",
 		],
-		[
-			[{ owner: null, part: "studio" }],
-			["compiler", "rojo"],
-			"Restarted the compiler and Rojo of session s1",
-			" Roblox Studio stays open: it already had the place open when the session attached it, so only --force closes it.",
-			"kept",
-		],
-		[
-			[
-				{ owner: null, part: "studio" },
-				{ owner: "start", part: "compiler" },
-			],
-			["rojo"],
-			"Restarted Rojo of session s1",
-			" It left the compiler alone: it has an owner, the forge start terminal. Roblox Studio stays open: it already had the place open when the session attached it, so only --force closes it.",
-			"kept",
-		],
 	] as const)(
 		"should name the owned parts it left alone: %j",
 		async ([kept, added, start, end, studio]) => {
@@ -235,6 +218,20 @@ describe(runRestartAsync, () => {
 			});
 		},
 	);
+
+	it("should say a found Studio stays open, besides the owned parts it left alone", async () => {
+		expect.assertions(1);
+
+		const run = makeRestart();
+		const kept = [{ owner: "start", part: "compiler" }] as const;
+		await serveAsync(run, { added: ["rojo"], foundStudio: true, kept, stopped: ["rojo"] });
+		const result = await restartAsync(run);
+
+		expect(result).toMatchObject({
+			data: { added: ["rojo"], kept, studio: { found: true, status: "kept" } },
+			summary: `Restarted Rojo of session s1: the compiler is ready, Rojo serves on port 34872, Studio has ${PLACE} open. It left the compiler alone: it has an owner, the forge start terminal. Roblox Studio stays open: it already had the place open when the session attached it.`,
+		});
+	});
 
 	it("should give the session as long to answer as its stop and adds may take", async () => {
 		expect.assertions(1);

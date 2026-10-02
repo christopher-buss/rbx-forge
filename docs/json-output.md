@@ -151,13 +151,12 @@ build with errors fails with `compile_failed` and the same fields in
 
 `down` and `stop` act only on parts with no owner. `data.parts` names what they
 did: `stopped` (the parts, Studio first) and `kept` (each part with its `owner`,
-left because a `forge start` terminal owns it; or the session's Studio with
-`owner: null`, a found Studio, which only `--force` closes). It is `null` when
-no session said: for `down`, the session did not answer or was stopping, and
-`down` stopped it whole; for `stop`, no session runs. A session that is still
-starting answers once it started its parts. `down` never stops a session whole
-while a `forge start` terminal owns a part of it: when that session does not
-answer, `down` fails (such as with `supervisor_unresponsive`), unless `--force`.
+left because a `forge start` terminal owns it). It is `null` when no session
+said: for `down`, the session did not answer or was stopping, and `down` stopped
+it whole; for `stop`, no session runs. A session that is still starting answers
+once it started its parts. `down` never stops a session whole while a
+`forge start` terminal owns a part of it: when that session does not answer,
+`down` fails (such as with `supervisor_unresponsive`), unless `--force`.
 
 `down` never fails because of an owner. `data.status` is `stopped` once the
 session is gone (an `up` session with no part left ends), or `running` when
@@ -167,7 +166,8 @@ owned parts keep it. `data.stoppedBy` (only with `stopped`) is `shutdown`,
 `data.studio.status` is one of:
 
 - `closed`
-- `kept` (`--keep-studio`, Studio has an owner, or it is a found Studio)
+- `kept` (`--keep-studio`, or Studio has an owner); with `found: true` for a
+  found Studio, which `down` never closes
 - `none` (no Studio open)
 - `unknown` (the supervisor did not answer, so forge touched no Studio)
 - `failed`, with the error's `code` and `message`. Studio may still be open; the
@@ -204,9 +204,9 @@ with:
 - `stopped`: the parts it stopped, Studio first.
 - `added`: the parts it started again, the compiler first, then Studio and Rojo.
 - `kept`: each running part with its `owner`, left because a `forge start`
-  terminal owns it, and a found Studio with `owner: null`, which stays open
-  while its Rojo restarts on the same port. With `--force` it is empty, and the
-  restarted parts keep their owner.
+  terminal owns it. With `--force` it is empty, and the restarted parts keep
+  their owner. A found Studio stays open (`studio` is `kept` with `found: true`)
+  while its Rojo restarts on the same port.
 - `studio`: what closing the old Studio did, as `data.studio` of `down`:
   `closed` (with `end`, `forced`, `pid`, `place`, `recovery`), `kept`, or
   `none`. `data.services.studio` is the new Studio.

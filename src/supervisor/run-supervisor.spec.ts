@@ -483,7 +483,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(run.reporter.events).toStrictEqual([
 			{
-				message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it. forge did not open this Studio, so only --force closes it.`,
+				message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it as a found Studio: only stop --force and restart --force close it.`,
 				type: "info",
 			},
 			{ message: `Roblox Studio has ${PLACE} open.`, type: "info" },
@@ -700,7 +700,7 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(run.reporter.events).toContainEqual({
-			message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it. forge did not open this Studio, so only --force closes it.`,
+			message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it as a found Studio: only stop --force and restart --force close it.`,
 			type: "info",
 		});
 	});
@@ -2363,9 +2363,10 @@ async function attachAsync(
 	const launches = run.studioLauncher.mock.calls.length;
 	const answer = askAddAsync(run, parameters);
 	// A lock file before the launch would make it a found Studio.
-	for (let poll = 0; poll < 20 && run.studioLauncher.mock.calls.length === launches; poll++) {
+	await vi.waitFor(async () => {
 		await passAsync(run, FILE_POLL_MS);
-	}
+		assert(run.studioLauncher.mock.calls.length > launches, "Studio is launched");
+	});
 
 	run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
 	await passAsync(run, FILE_POLL_MS);
@@ -2990,7 +2991,8 @@ describe("forge down and a found Studio", () => {
 		});
 		await expect(answer).resolves.toStrictEqual({
 			ending: true,
-			kept: [{ owner: null, part: "studio" }],
+			foundStudio: true,
+			kept: [],
 			stopped: ["rojo"],
 		});
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
@@ -3675,7 +3677,8 @@ describe("forge restart control channel", () => {
 		]);
 		await expect(answer).resolves.toStrictEqual({
 			added: ["compiler", "rojo"],
-			kept: [{ owner: null, part: "studio" }],
+			foundStudio: true,
+			kept: [],
 			stopped: ["rojo", "compiler"],
 		});
 		expect(state).toMatchObject({

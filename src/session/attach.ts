@@ -35,7 +35,7 @@ export function attachStudio(
 	}
 
 	context.reporter.emit({
-		message: `Roblox Studio (PID ${studio.pid}) already has ${place} open, so the session uses it. forge did not open this Studio, so only --force closes it.`,
+		message: `Roblox Studio (PID ${studio.pid}) already has ${place} open, so the session uses it as a found Studio: only stop --force and restart --force close it.`,
 		type: "info",
 	});
 	return { origin: "found", place, studio };

@@ -180,19 +180,19 @@ describe(planStops, () => {
 			"Rojo and the compiler, not a found Studio, for down",
 			servicesWith({ compiler: READY, rojo: READY, studio: FOUND }),
 			DOWN,
-			{ kept: [{ owner: null, part: "studio" }], stop: ["rojo", "compiler"] },
+			{ foundStudio: true, kept: [], stop: ["rojo", "compiler"] },
 		],
 		[
 			"Rojo and the compiler, not a found Studio, for restart",
 			servicesWith({ compiler: READY, rojo: READY, studio: FOUND }),
 			{ ...DOWN, scope: "restart" },
-			{ kept: [{ owner: null, part: "studio" }], stop: ["rojo", "compiler"] },
+			{ foundStudio: true, kept: [], stop: ["rojo", "compiler"] },
 		],
 		[
 			"neither a found Studio nor its Rojo for stop",
 			servicesWith({ rojo: READY, studio: FOUND }),
 			STOP,
-			{ kept: [{ owner: null, part: "studio" }], stop: [] },
+			{ foundStudio: true, kept: [], stop: [] },
 		],
 		[
 			"a found Studio with force",
@@ -514,7 +514,8 @@ describe(createPartStopper, () => {
 
 		await expect(stopAsync(world, DOWN)).resolves.toStrictEqual({
 			ending: true,
-			kept: [{ owner: null, part: "studio" }],
+			foundStudio: true,
+			kept: [],
 			stopped: ["rojo", "compiler"],
 		});
 		expect(studio.closeRequests).toBeUndefined();
@@ -536,10 +537,8 @@ describe(createPartStopper, () => {
 
 		await expect(stopAsync(world, IDLE_STOP)).resolves.toStrictEqual({
 			ending: false,
-			kept: [
-				{ owner: null, part: "studio" },
-				{ owner: "start", part: "compiler" },
-			],
+			foundStudio: true,
+			kept: [{ owner: "start", part: "compiler" }],
 			stopped: ["rojo"],
 		});
 		expect(world.studioLeft).toHaveBeenCalledOnce();
@@ -556,7 +555,8 @@ describe(createPartStopper, () => {
 
 		await expect(stopAsync(world, { ...DOWN, scope: "restart" })).resolves.toStrictEqual({
 			ending: false,
-			kept: [{ owner: null, part: "studio" }],
+			foundStudio: true,
+			kept: [],
 			stopped: ["rojo", "compiler"],
 		});
 		expect(studio.alive).toBeTrue();

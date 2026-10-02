@@ -42,12 +42,9 @@ export interface StopPartsRequest {
 	readonly scope: StopScope;
 }
 
-/**
- * A part a stop left running: it has an owner, or it is a found Studio
- * (`owner` `null`), which only `force` closes.
- */
+/** A part a stop left running, because it has an owner. */
 export interface KeptPart {
-	owner: null | PartOwner;
+	owner: PartOwner;
 	part: PartId;
 }
 
@@ -60,6 +57,8 @@ export type StudioOutcome =
 export interface PartStops {
 	/** The session ends: no part is left. */
 	ending: boolean;
+	/** It left the session's found Studio open, as only `force` closes it. */
+	foundStudio?: true;
 	kept: Array<KeptPart>;
 	/** The parts it stopped, in order. */
 	stopped: Array<PartId>;
@@ -70,8 +69,10 @@ export interface PartStops {
 /** Stops the parts a request may stop. */
 export type PartStopper = (request: StopPartsRequest) => Promise<PartStops>;
 
-/** Which parts a stop acts on, and which it leaves to their owner. */
+/** Which parts a stop acts on, and which it leaves. */
 export interface StopPlan {
+	/** It leaves the session's found Studio. */
+	foundStudio?: true;
 	kept: Array<KeptPart>;
 	stop: Array<PartId>;
 }
@@ -135,20 +136,10 @@ export function isPartRunning(services: SessionStatus["services"], part: PartId)
 }
 
 /**
- * Whether a kept part is a found Studio: it is kept with no owner.
- *
- * @param kept - A part a stop kept.
- * @returns Whether it is.
- */
-export function isFoundStudio({ owner, part }: KeptPart): boolean {
-	return part === "studio" && owner === null;
-}
-
-/**
  * Decide which running parts a request stops: those with no owner, except a
  * found Studio, and with `force` all of them. The rest it keeps, with their
- * owner. Rojo stops with its Studio in the `stop` scope, so it stays when
- * Studio does.
+ * owner, and it leaves a found Studio. Rojo stops with its Studio in the
+ * `stop` scope, so it stays when Studio does.
  *
  * @param services - The parts' status and owners.
  * @param request - The scope, place, `force`, and `keepStudio`.
@@ -165,10 +156,14 @@ export function planStops(
 			continue;
 		}
 
-		if (!request.force && (owner !== null || isFound(services, part))) {
+		if (request.force || (owner === null && !isFoundPart(services, part))) {
+			if (part !== "rojo" || request.scope !== "stop" || plan.stop.includes("studio")) {
+				plan.stop.push(part);
+			}
+		} else if (owner === null) {
+			plan.foundStudio = true;
+		} else {
 			plan.kept.push({ owner, part });
-		} else if (part !== "rojo" || request.scope !== "stop" || plan.stop.includes("studio")) {
-			plan.stop.push(part);
 		}
 	}
 
@@ -224,12 +219,12 @@ export function createPartStopper(
 ): PartStopper {
 	return async (request) => {
 		const services = await servicesForAsync(setup, request);
-		const { kept, stop } = planStops(services, request);
+		const { foundStudio: hasFoundStudio, kept, stop } = planStops(services, request);
 		const studio = stop.includes("studio")
 			? await stopStudioAsync(setup, stopper, request, services)
 			: undefined;
 		if (request.scope === "down") {
-			letGoForDown(setup, stopper, request, kept);
+			letGoForDown(setup, stopper, { isFound: hasFoundStudio === true, ...request });
 		}
 
 		const isStudioGone = studio?.isGone === true;
@@ -246,6 +241,7 @@ export function createPartStopper(
 		});
 		return {
 			ending: isEnding,
+			...(hasFoundStudio === undefined ? {} : { foundStudio: hasFoundStudio }),
 			kept,
 			stopped,
 			...(studio?.outcome === undefined ? {} : { studio: studio.outcome }),
@@ -253,7 +249,7 @@ export function createPartStopper(
 	};
 }
 
-function isFound(services: SessionStatus["services"], part: PartId): boolean {
+function isFoundPart(services: SessionStatus["services"], part: PartId): boolean {
 	return part === "studio" && services.studio.origin === "found";
 }
 
@@ -280,24 +276,24 @@ function partsInScope(
 
 /**
  * Let go of the session's Studio for `down`, which leaves it open: with
- * `keepStudio`, and a found Studio it kept.
+ * `keepStudio`, and a found Studio.
  *
  * @param setup - The status.
  * @param stopper - The Studio state.
- * @param request - Whether `keepStudio`.
- * @param kept - The parts it kept.
+ * @param leave - Whether `keepStudio`, and whether the Studio is found.
+ * @param leave.isFound - The stop left a found Studio.
+ * @param leave.keepStudio - The caller asked to leave Studio open.
  */
 function letGoForDown(
 	setup: StopperSetup,
 	stopper: StopperParts,
-	request: StopPartsRequest,
-	kept: ReadonlyArray<KeptPart>,
+	{ isFound, keepStudio }: { isFound: boolean; keepStudio: boolean },
 ): void {
-	if (request.keepStudio) {
+	if (keepStudio) {
 		stopper.state.isAttached = false;
 	}
 
-	if (kept.some(isFoundStudio)) {
+	if (isFound) {
 		leaveStudio(stopper.state, setup.status);
 	}
 }

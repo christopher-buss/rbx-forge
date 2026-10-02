@@ -45,10 +45,11 @@ the session and stays open.
 
 A Studio that the session attached this way is a found Studio:
 `data.services.studio.origin` is `found` (`forge` for a Studio the session
-opened), also after a `start` took it and gave it back. Only `--force` closes a
-found Studio. `down` and the idle timeout stop its Rojo and let it go, open, and
-touch none of its auto-recovery files; `restart` keeps it, and starts the
-compiler and Rojo again on the same port; `stop` fails with `studio_found`.
+opened), also after a `start` took it and gave it back. Only `stop --force` and
+`restart --force` close a found Studio. `down` and the idle timeout stop its
+Rojo and let it go, open, and touch none of its auto-recovery files; `restart`
+keeps it, and starts the compiler and Rojo again on the same port; `stop` fails
+with `studio_found`.
 
 ## Closing Studio
 

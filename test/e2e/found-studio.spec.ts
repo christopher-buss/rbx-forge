@@ -60,9 +60,9 @@ describe("a found Studio", () => {
 			services: { studio: { origin: "found", owner: null, pid: studio, status: "open" } },
 		});
 		expect(down.result.data).toMatchObject({
-			parts: { kept: [{ owner: null, part: "studio" }], stopped: ["rojo", "compiler"] },
+			parts: { kept: [], stopped: ["rojo", "compiler"] },
 			status: "stopped",
-			studio: { status: "kept" },
+			studio: { found: true, status: "kept" },
 		});
 		expect(isProcessAlive(studio)).toBeTrue();
 		await expect(waitForDeathAsync(rojo, REAP_MS)).resolves.toStrictEqual([]);
@@ -76,13 +76,13 @@ describe("a found Studio", () => {
 
 		expect(restart.result.data).toMatchObject({
 			added: ["compiler", "rojo"],
-			kept: [{ owner: null, part: "studio" }],
+			kept: [],
 			services: {
 				rojo: { port: fixture.port, status: "ready" },
 				studio: { origin: "found", pid: studio, status: "open" },
 			},
 			stopped: ["rojo", "compiler"],
-			studio: { status: "kept" },
+			studio: { found: true, status: "kept" },
 		});
 		expect(isProcessAlive(studio)).toBeTrue();
 		expect(pidsOf(fixture, "studio")).toStrictEqual([]);
