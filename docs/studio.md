@@ -10,8 +10,13 @@ auto-recovery files.
 a new Studio. If Rojo fails to listen, forge reports its failure and launches no
 Studio. A Studio that already has the place open is attached as before.
 
-`open`, `start`, and `up --studio` start the Studio executable directly, with
-the place as its only argument, as a double-click on the place does. Studio runs
+`open`, `start`, and `up --studio` start the Studio executable directly. A new
+session Studio uses `--task RunScript --localPlaceFile <place> --runScriptFile
+<script>` to create a non-archivable `ROJO_OPEN_<UserId>` configuration under
+`game`. Its attributes identify the session's Rojo host, port, session id, and
+worktree project name. Forge checks that Rojo serves the generated wrapper before
+writing the script. The stock Rojo plugin ignores this marker. A snapshot opens
+with the place as its only argument, as a double-click on the place does. Studio runs
 outside every process group and job of forge, so it outlives forge. The session
 records the Studio process's PID and start time, so `stop` and `down` can verify
 it later. forge finds the executable in this order:
@@ -28,7 +33,7 @@ A path from 1 or 2 that is not a file fails with `studio_launch_failed`.
 When forge finds no executable, or the terminal's job forbids breakaway
 (Windows), it opens the place through the platform launcher (`start`, `open`,
 `xdg-open`). The session then has no PID for Studio, and finds it only through
-the place's lock file.
+the place's lock file. The platform launcher passes no marker script.
 
 `open` builds a snapshot, a copy of the place, into
 `.forge/snapshots/<time>_<place>` and opens it, with no session and no Rojo. A

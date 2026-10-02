@@ -110,8 +110,10 @@ it uses the Studio that has the place open (verified as `stop` does), or builds
 the place and opens it (`--studio-path <path>` names the executable). Rojo
 serves on the session's port (see [`rojoPort`](./docs/config.md#rojoport)) and
 must listen before forge launches a new Studio. If Rojo fails to listen, forge
-reports its failure and launches no Studio. It returns when Rojo listens and
-Studio has the place open. When that Studio closes the place, only its Rojo
+reports its failure and launches no Studio. A direct session launch runs a
+marker script identifying that Rojo; see
+[Opening Studio](./docs/studio.md#opening-studio). It returns when Rojo listens
+and Studio has the place open. When that Studio closes the place, only its Rojo
 stops; the compiler runs on.
 
 `down` acts only on parts with no owner. A part that a `forge start` terminal

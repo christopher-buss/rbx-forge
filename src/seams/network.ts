@@ -1,5 +1,23 @@
+import { decode } from "@msgpack/msgpack";
+
+import { type } from "arktype";
 import type { AddressInfo } from "node:net";
 import { connect, createServer } from "node:net";
+
+/** The identity advertised by Rojo's msgpack API. */
+export interface RojoServerInfo {
+	projectName: string;
+	protocolVersion: number;
+	serverVersion: string;
+	sessionId: string;
+}
+
+const ROJO_INFO = type({
+	projectName: "string",
+	protocolVersion: "number",
+	serverVersion: "string",
+	sessionId: "string",
+});
 
 /** Local network checks. Unit tests pass a fake. */
 export interface Network {
@@ -9,6 +27,11 @@ export interface Network {
 	 * @rejects When no server can listen at all.
 	 */
 	freePortAsync: () => Promise<number>;
+	/**
+	 * Read the local Rojo server identity; rejects invalid or failed
+	 * responses.
+	 */
+	getRojoInfoAsync: (port: number, signal?: AbortSignal) => Promise<RojoServerInfo>;
 	/**
 	 * Whether a server listens on `port` of `127.0.0.1`, where Rojo serves
 	 * by default: a connection to it succeeds.
@@ -36,6 +59,19 @@ export const nodeNetwork: Network = {
 				});
 			});
 		});
+	},
+	getRojoInfoAsync: async (port, signal) => {
+		const response = await fetch(`http://127.0.0.1:${port}/api/rojo`, {
+			signal: AbortSignal.any([
+				AbortSignal.timeout(10_000),
+				...(signal === undefined ? [] : [signal]),
+			]),
+		});
+		if (!response.ok) {
+			throw new Error(`Rojo server info returned HTTP ${response.status}.`);
+		}
+
+		return ROJO_INFO.assert(decode(new Uint8Array(await response.arrayBuffer())));
 	},
 	isListeningAsync: async (port) => {
 		return new Promise((resolve) => {

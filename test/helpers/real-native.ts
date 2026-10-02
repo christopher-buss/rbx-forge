@@ -96,21 +96,6 @@ export function spawnSleeper(executable: string = process.execPath): ChildProces
 }
 
 /**
- * An executable the OS reports as Roblox Studio: a copy of the Node
- * executable named `RobloxStudioBeta.exe` (Windows) or `RobloxStudio`
- * (macOS, Linux), in a directory removed when the test ends.
- *
- * @returns Its path.
- */
-export function makeStudioExecutable(): string {
-	const name = process.platform === "win32" ? "RobloxStudioBeta.exe" : "RobloxStudio";
-	const executable = path.join(makeTemporaryDirectory(), name);
-	copyFileSync(process.execPath, executable);
-	chmodSync(executable, 0o755);
-	return executable;
-}
-
-/**
  * A native Studio stand-in that accepts RunScript and plain-place launches.
  *
  * @returns Its temporary executable path.
@@ -212,4 +197,19 @@ export function pidOf(child: ChildProcess): number {
 	}
 
 	return child.pid;
+}
+
+/**
+ * An executable the OS reports as Roblox Studio: a copy of the Node
+ * executable named `RobloxStudioBeta.exe` (Windows) or `RobloxStudio`
+ * (macOS, Linux), in a directory removed when the test ends.
+ *
+ * @returns Its path.
+ */
+function makeStudioExecutable(): string {
+	const name = process.platform === "win32" ? "RobloxStudioBeta.exe" : "RobloxStudio";
+	const executable = path.join(makeTemporaryDirectory(), name);
+	copyFileSync(process.execPath, executable);
+	chmodSync(executable, 0o755);
+	return executable;
 }

@@ -182,7 +182,7 @@ fs.writeFileSync(directory + '/watched.txt', 'content');`;
 	});
 
 	it("should preserve the root serve fields and tree while advertising the worktree name", async () => {
-		expect.assertions(4);
+		expect.assertions(5);
 
 		const port = await nodeNetwork.freePortAsync();
 		const cwd = makeTemporaryDirectory({
@@ -233,6 +233,12 @@ fs.writeFileSync(directory + '/watched.txt', 'content');`;
 		}
 
 		const info = await readApiAsync(port, "rojo");
+
+		await expect(nodeNetwork.getRojoInfoAsync(port)).resolves.toMatchObject({
+			projectName: `Wrapper test@${endpointKey(cwd, "game.rbxl")}`,
+			protocolVersion: 5,
+			sessionId: info["sessionId"],
+		});
 
 		expect(info).toMatchObject({
 			gameId: 1011,

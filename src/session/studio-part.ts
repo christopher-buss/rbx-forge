@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import path from "node:path";
 
 import { buildAsync } from "../commands/build.ts";
@@ -7,6 +8,7 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
+import { writeSessionMarkerAsync } from "../studio/session-marker.ts";
 import type { OpenedStudio } from "./attach.ts";
 import { attachStudio } from "./attach.ts";
 import type { BuildWatch } from "./build-watch.ts";
@@ -110,12 +112,15 @@ export async function prepareStudioAsync(
  * @returns The launched Studio.
  */
 export async function openStudioAsync(
-	{ config }: Pick<StudioSetup, "config">,
+	{ config, directory, status }: Pick<StudioSetup, "config" | "directory" | "status">,
 	steps: CommandContext,
 	{ signal, studioPath }: Pick<OpenOptions, "signal" | "studioPath">,
 	{ isBuilt }: Pick<PreparedStudio, "isBuilt">,
 ): Promise<OpenedStudio> {
-	return openPlaceAsync(steps, config, { isBuilt, signal, studioPath });
+	const { port } = status.snapshot().services.rojo;
+	assert(port !== undefined);
+	const runScript = await writeSessionMarkerAsync(steps, directory, port, signal);
+	return openPlaceAsync(steps, config, { isBuilt, runScript, signal, studioPath });
 }
 
 /**

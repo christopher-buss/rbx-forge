@@ -1,9 +1,8 @@
 /**
  * A `forge start` session as a real process, for e2e tests: a temporary
- * project with fake Rojo, compiler, hook, and Studio
- * (`test/fixtures/bin/fake-worker.ts`) on PATH, the real reaper, and a
- * Studio stand-in that forge starts directly, so real Roblox Studio never
- * opens.
+ * project with fake Rojo, compiler, and hooks on PATH, the real reaper, and a
+ * native Studio stand-in that forge starts directly, so real Roblox Studio
+ * never opens.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { spawn } from "node:child_process";
@@ -19,7 +18,11 @@ import { findSession } from "../../src/client/session.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
 import { createFixtureBinDirectory } from "../helpers/fixture-bin.ts";
-import { makeStudioExecutable, NATIVE_DIRECTORY, studioVariables } from "../helpers/real-native.ts";
+import {
+	makeRunScriptStudioExecutable,
+	NATIVE_DIRECTORY,
+	studioVariables,
+} from "../helpers/real-native.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { killWorkers, readWorkerLog } from "../helpers/worker-log.ts";
 import { BIN, makeProject } from "./run-bin.ts";
@@ -56,8 +59,7 @@ export function closedOnRequest(fields: Record<string, unknown>): unknown {
 }
 
 /**
- * The place every session builds. It holds the stand-in's bootstrap
- * (`studioPlaceContent`), which Node, started as Studio, runs.
+ * The place every session builds, also usable by Node-based snapshot fixtures.
  */
 export const PLACE = "My Places/game.rbxl";
 
@@ -66,8 +68,8 @@ export interface FixtureOptions {
 	/**
 	 * Behave as Studio: run as a Studio executable, write the place's lock
 	 * file, and close on a close request
-	 * (`test/fixtures/bin/studio-stand-in.ts`). Otherwise it is plain Node
-	 * that only stays alive, and a test writes the lock file.
+	 * (`reaper/src/bin/studio-fixture.rs`). Otherwise the stand-in stays
+	 * alive and a test writes the lock file.
 	 */
 	studio?: boolean;
 }
@@ -158,7 +160,7 @@ export async function makeFixtureAsync(
 	const project = makeProject();
 	const place = writeProjectFiles(project, { rojoPort: port, ...config });
 	const bin = createFixtureBinDirectory(path.join(project, "fixture-bin"));
-	const studio = options.studio === true ? makeStudioExecutable() : undefined;
+	const studio = makeRunScriptStudioExecutable();
 	const log = path.join(project, "workers.ndjson");
 	onTestFinished(() => {
 		killWorkers(readWorkerLog(log));
@@ -171,8 +173,8 @@ export async function makeFixtureAsync(
 				...base,
 				FIXTURE_LOG: log,
 				FIXTURE_PLACE_CONTENT: studioPlaceContent(),
-				RBX_FORGE_STUDIO_PATH: process.execPath,
-				...(studio === undefined ? {} : studioVariables(studio)),
+				...studioVariables(studio),
+				FIXTURE_STUDIO_LOCK: options.studio === true ? "1" : "0",
 				PATH: bin,
 				RBX_FORGE_NATIVE_DIR: NATIVE_DIRECTORY,
 				...variables,
@@ -329,6 +331,7 @@ function baseEnvironment(): NodeJS.ProcessEnv {
 	const base: NodeJS.ProcessEnv = {
 		...process.env,
 		CI: undefined,
+		FIXTURE_STUDIO_NATIVE: "1",
 		RBX_FORGE_HOOK_STACK: undefined,
 	};
 	for (const key of Object.keys(base)) {

@@ -86,6 +86,7 @@ interface StartSetup {
 	file?: object;
 	files?: Record<string, string>;
 	flags?: FlagValues;
+	getRojoInfo?: Network["getRojoInfoAsync"];
 	/** Makes the control endpoint's transport; in memory by default. */
 	ipc?: () => MemoryTransport;
 	/** Whether Rojo listens on its port, each time the session looks. */
@@ -194,6 +195,14 @@ function startCommand({
 	file = {},
 	files = TOOL_FILES,
 	flags = NO_COMPILER,
+	getRojoInfo = async () => {
+		return {
+			projectName: `Example@${endpointKey(PROJECT, "game.rbxl")}`,
+			protocolVersion: 5,
+			serverVersion: "7.7.1",
+			sessionId: "rojo-session",
+		};
+	},
 	ipc: makeTransport = createMemoryTransport,
 	isListening = async () => true,
 	isPortFree = true,
@@ -249,7 +258,12 @@ function startCommand({
 					...(writePrivateFile === undefined ? {} : { writePrivateFile }),
 				};
 			},
-			network: { freePortAsync, isListeningAsync, isPortFreeAsync },
+			network: {
+				freePortAsync,
+				getRojoInfoAsync: vi.fn<Network["getRojoInfoAsync"]>(getRojoInfo),
+				isListeningAsync,
+				isPortFreeAsync,
+			},
 			randomId: () => "session-1",
 			reaper: fake.launch,
 			studioLauncher,
@@ -559,6 +573,107 @@ describe(runSupervisorAsync, () => {
 		expect(current).toBe(original);
 	});
 
+	it("should preserve cancellation when a pending Rojo identity request fails", async () => {
+		expect.assertions(2);
+
+		const identity = Promise.withResolvers<Awaited<ReturnType<Network["getRojoInfoAsync"]>>>();
+		const run = startCommand({ getRojoInfo: async () => identity.promise });
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		identity.reject(new Error("request cancelled"));
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+	});
+
+	it("should report a Rojo identity failure without opening Studio", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			getRojoInfo: async () => {
+				throw new Error("HTTP 503");
+			},
+		});
+
+		await expect(run.result).rejects.toMatchObject({
+			code: "process_failed",
+			message: "Could not read Rojo identity on port 4000: HTTP 503",
+		});
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+	});
+
+	it("should escape Rojo identity strings for Lua without adding marker attributes", async () => {
+		expect.assertions(1);
+
+		const name = 'A "quoted" project\\name\\u1234\u0001雪';
+		const run = startCommand({
+			files: {
+				...TOOL_FILES,
+				"default.project.json": JSON.stringify({ name, tree: { $className: "DataModel" } }),
+			},
+			getRojoInfo: async () => {
+				return {
+					projectName: `${name}@${endpointKey(PROJECT, "game.rbxl")}`,
+					protocolVersion: 5,
+					serverVersion: "7.7.1",
+					sessionId: 'id"\\\n',
+				};
+			},
+		});
+		await flushAsync();
+		const marker = run.memory.files()[".forge/sessions/session-1/studio-marker.lua"];
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(marker).toContain(
+			`m:SetAttribute("ProjectName","A \\\"quoted\\\" project\\\\name\\\\u1234\\u{0001}雪@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("SessionId","id\\\"\\\\\\n")`,
+		);
+	});
+
+	it("should avoid launching Studio if the session ends while reading Rojo identity", async () => {
+		expect.assertions(2);
+
+		const identity = Promise.withResolvers<Awaited<ReturnType<Network["getRojoInfoAsync"]>>>();
+		const run = startCommand({ getRojoInfo: async () => identity.promise });
+		const writes = vi.spyOn(run.memory.fileSystem, "writeFileSync");
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		identity.resolve({
+			projectName: `Example@${endpointKey(PROJECT, "game.rbxl")}`,
+			protocolVersion: 5,
+			serverVersion: "7.7.1",
+			sessionId: "rojo-session",
+		});
+		await run.result.catch(ignoreFailure);
+
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+		expect(writes.mock.calls.map(([file]) => file)).not.toContain(
+			path.join(SESSION, "studio-marker.lua"),
+		);
+	});
+
+	it("should refuse to launch Studio against a different Rojo project", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({
+			getRojoInfo: async () => {
+				return {
+					projectName: "Other project",
+					protocolVersion: 5,
+					serverVersion: "7.7.1",
+					sessionId: "other",
+				};
+			},
+		});
+
+		await expect(run.result).rejects.toMatchObject({
+			code: "process_failed",
+			message: `Rojo on port 4000 serves Other project, expected Example@${endpointKey(PROJECT, "game.rbxl")}.`,
+		});
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+		expect(run.memory.files()[".forge/sessions/session-1/studio-marker.lua"]).toBeUndefined();
+	});
+
 	it("should serve a wrapper that identifies the worktree without adding an instance", async () => {
 		expect.assertions(2);
 
@@ -625,9 +740,12 @@ describe(runSupervisorAsync, () => {
 	});
 
 	it("should compile and build, then serve Rojo and watch before opening Studio", async () => {
-		expect.assertions(3);
+		expect.assertions(4);
 
-		const run = await stoppedAsync({ flags: {}, projectType: "rbxts" });
+		const run = startCommand({ flags: {}, projectType: "rbxts" });
+		await flushAsync();
+		const marker = run.memory.files()[".forge/sessions/session-1/studio-marker.lua"];
+		run.signals.fire("SIGINT");
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
@@ -641,7 +759,11 @@ describe(runSupervisorAsync, () => {
 			cwd: PROJECT,
 			env: { PATH: TOOLS },
 			place: PLACE,
+			runScript: path.join(SESSION, "studio-marker.lua"),
 		});
+		expect(marker).toBe(
+			`local m=Instance.new("Configuration");m.Name="ROJO_OPEN_"..game:GetService("StudioService"):GetUserId();m.Archivable=false;m:SetAttribute("Host","127.0.0.1");m:SetAttribute("Port","4000");m:SetAttribute("ProjectName","Example@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("SessionId","rojo-session");m.Parent=game\n`,
+		);
 	});
 
 	it("should give every worker the project, the environment, and an output file", async () => {
@@ -672,9 +794,10 @@ describe(runSupervisorAsync, () => {
 	});
 
 	it("should serve only Rojo with no compiler and the Studio that has the place open", async () => {
-		expect.assertions(4);
+		expect.assertions(5);
 
-		const run = await stoppedAsync({ ...ATTACHED, projectType: "rbxts" });
+		const getRojoInfo = vi.fn<Network["getRojoInfoAsync"]>();
+		const run = await stoppedAsync({ ...ATTACHED, getRojoInfo, projectType: "rbxts" });
 
 		await expect(run.result).resolves.toStrictEqual({
 			data: { port: 4000, reason: "SIGINT", reports: [] },
@@ -698,6 +821,7 @@ describe(runSupervisorAsync, () => {
 			},
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
+		expect(getRojoInfo).not.toHaveBeenCalled();
 	});
 
 	it("should run no part with --no-open --no-compiler", async () => {

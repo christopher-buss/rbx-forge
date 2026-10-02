@@ -1,11 +1,9 @@
 /**
- * `forge start` as a real process, with fake Rojo, compiler, hook, and
- * Studio (`test/fixtures/bin/fake-worker.ts`) on PATH and the real reaper.
+ * `forge start` as a real process, with fake Rojo, compiler, and hooks on
+ * PATH, a native Studio stand-in, and the real reaper.
  * The process table is the oracle: every worker and grandchild must be gone.
  *
- * Real Roblox Studio never opens: the place is always the stand-in of
- * `open.spec.ts` (a batch file on Windows, where `start` picks the app by
- * file type), and the tests make and remove Studio's lock file themselves.
+ * Real Roblox Studio never opens. The stand-in or the test owns the lock file.
  */
 import { readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -274,14 +272,16 @@ describe("forge start --no-compiler", () => {
 	});
 
 	it("should write a worktree wrapper while building the original project", async () => {
-		expect.assertions(2);
+		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
 		const session = startSession(fixture, START_STUDIO);
 		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
 		const wrapper: unknown = JSON.parse(readFileSync(wrapperPath(fixture), "utf8"));
 		const workers = readWorkerLog(fixture.log);
-		await waitForRoleAsync(fixture.log, "studio");
+		const studio = await waitForRoleAsync(fixture.log, "studio");
+		const markerFile = path.join(path.dirname(wrapperPath(fixture)), "studio-marker.lua");
+		const marker = readFileSync(markerFile, "utf8");
 		session.child.kill("SIGKILL");
 		await session.closed;
 
@@ -294,6 +294,17 @@ describe("forge start --no-compiler", () => {
 				args: ["build", "default.project.json", "--output", PLACE],
 				role: "rojo",
 			}),
+		);
+		expect(studio.args).toStrictEqual([
+			"--task",
+			"RunScript",
+			"--localPlaceFile",
+			fixture.place,
+			"--runScriptFile",
+			markerFile,
+		]);
+		expect(marker).toContain(
+			`m:SetAttribute("ProjectName","fixture@${endpointKey(fixture.project, PLACE)}")`,
 		);
 	});
 

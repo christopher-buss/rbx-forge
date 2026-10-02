@@ -52,6 +52,8 @@ export interface OpenedPlace {
 export interface OpenOptions {
 	/** The caller already built this place, so it is opened as it is. */
 	isBuilt: boolean;
+	/** A session's marker script; snapshots do not use one. */
+	runScript?: string | undefined;
 	/**
 	 * A session's end, checked just before launching Studio outside its
 	 * reaper.
@@ -107,7 +109,7 @@ export async function openPlaceAsync(
 			? null
 			: await prepareAsync(context, config, { output, place });
 		options.signal?.throwIfAborted();
-		const studio = await launchAsync(context, place, options.studioPath);
+		const studio = await launchAsync(context, place, options.studioPath, options.runScript);
 		return { built, studio };
 	});
 
@@ -227,9 +229,16 @@ async function launchAsync(
 	{ cwd, env, reporter, seams }: CommandContext,
 	place: string,
 	studioPath: string | undefined,
+	runScript?: string,
 ): Promise<null | StudioProcess> {
 	reporter.emit({ name: STEP, status: "started", type: "step" });
-	const outcome = await seams.studioLauncher({ cwd, env, place, studioPath });
+	const outcome = await seams.studioLauncher({
+		cwd,
+		env,
+		place,
+		studioPath,
+		...(runScript === undefined ? {} : { runScript }),
+	});
 	reporter.emit({
 		name: STEP,
 		status: outcome.type === "launched" ? "succeeded" : "failed",

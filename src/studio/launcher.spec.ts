@@ -155,6 +155,23 @@ describe(studioLaunchInvocation, () => {
 });
 
 describe(createStudioLauncher, () => {
+	it("should pass the session RunScript arguments to Studio on Windows", async () => {
+		expect.assertions(1);
+
+		const { native, spawns } = windowsNative();
+		const { launch } = makeLauncher({ files: { [STUDIO_EXE]: "" }, native, platform: "win32" });
+		await launch({ ...launchOf(WINDOWS_PLACE), runScript: "C:\\Session\\marker.lua" });
+
+		expect(spawns[0]!.args).toStrictEqual([
+			"--task",
+			"RunScript",
+			"--localPlaceFile",
+			WINDOWS_PLACE,
+			"--runScriptFile",
+			"C:\\Session\\marker.lua",
+		]);
+	});
+
 	it("should start Studio directly on Windows, out of the job, and pin it", async () => {
 		expect.assertions(2);
 
@@ -181,7 +198,9 @@ describe(createStudioLauncher, () => {
 			platform: "win32",
 		});
 
-		await expect(launch(launchOf(WINDOWS_PLACE))).resolves.toStrictEqual({ type: "launched" });
+		await expect(
+			launch({ ...launchOf(WINDOWS_PLACE), runScript: "C:\\Session\\marker.lua" }),
+		).resolves.toStrictEqual({ type: "launched" });
 		expect(spawner.calls[0]!.options).toMatchObject({ windowsVerbatimArguments: true });
 	});
 

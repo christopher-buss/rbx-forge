@@ -1,8 +1,89 @@
+import { encode } from "@msgpack/msgpack";
+
+import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createServer } from "node:net";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { nodeNetwork } from "./network.ts";
+
+describe("rojo server identity", () => {
+	it("should reject a failed API response", async () => {
+		expect.assertions(1);
+
+		const server = createHttpServer((_request, response) => {
+			response.writeHead(503);
+			response.end();
+		});
+		await new Promise<void>((resolve) => {
+			server.listen(0, "127.0.0.1", resolve);
+		});
+		onTestFinished(() => {
+			server.close();
+		});
+		// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- listening HTTP server has an address
+		const { port } = server.address() as AddressInfo;
+		const { signal } = new AbortController();
+
+		await expect(nodeNetwork.getRojoInfoAsync(port, signal)).rejects.toThrow(
+			"Rojo server info returned HTTP 503.",
+		);
+	});
+
+	it("should reject a response without a complete Rojo identity", async () => {
+		expect.assertions(1);
+
+		const server = createHttpServer((_request, response) => {
+			response.end(encode({ projectName: "Foreign server" }));
+		});
+		await new Promise<void>((resolve) => {
+			server.listen(0, "127.0.0.1", resolve);
+		});
+		onTestFinished(() => {
+			server.close();
+		});
+		// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- listening HTTP server has an address
+		const { port } = server.address() as AddressInfo;
+
+		await expect(nodeNetwork.getRojoInfoAsync(port)).rejects.toThrow(
+			"sessionId must be a string",
+		);
+	});
+
+	it("should cancel a server identity request when its session ends", async () => {
+		expect.assertions(1);
+
+		await expect(nodeNetwork.getRojoInfoAsync(1, AbortSignal.abort())).rejects.toMatchObject({
+			name: "AbortError",
+		});
+	});
+
+	it("should decode the msgpack identity from the local Rojo API", async () => {
+		expect.assertions(2);
+
+		const info = {
+			projectName: "Game@worktree",
+			protocolVersion: 5,
+			serverVersion: "7.7.1",
+			sessionId: "abc123",
+		};
+		const server = createHttpServer((request, response) => {
+			expect(request.url).toBe("/api/rojo");
+
+			response.end(encode(info));
+		});
+		await new Promise<void>((resolve) => {
+			server.listen(0, "127.0.0.1", resolve);
+		});
+		onTestFinished(() => {
+			server.close();
+		});
+		// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- listening HTTP server has an address
+		const { port } = server.address() as AddressInfo;
+
+		await expect(nodeNetwork.getRojoInfoAsync(port)).resolves.toStrictEqual(info);
+	});
+});
 
 /**
  * Listen on a free port of `127.0.0.1` until the test ends.

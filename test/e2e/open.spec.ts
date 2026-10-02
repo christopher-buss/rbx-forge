@@ -12,7 +12,7 @@ import { parseOpened, parseResult } from "../helpers/output.ts";
 import { NATIVE_DIRECTORY, waitForFileAsync } from "../helpers/real-native.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
-import { makeFixtureAsync } from "./session-fixture.ts";
+import { makeFixtureAsync, wrapperPath } from "./session-fixture.ts";
 import { runForgeAsync, WATCH_COMMAND } from "./up-fixture.ts";
 
 const IS_WINDOWS = process.platform === "win32";
@@ -173,7 +173,19 @@ describe("forge open", () => {
 			readWorkerLog(fixture.log)
 				.filter(({ role }) => role === "studio")
 				.map(({ args, pid }) => ({ args, pid })),
-		).toMatchObject([{ args: [fixture.place] }, { args: [place], pid: studio!.pid }]);
+		).toMatchObject([
+			{
+				args: [
+					"--task",
+					"RunScript",
+					"--localPlaceFile",
+					fixture.place,
+					"--runScriptFile",
+					path.join(path.dirname(wrapperPath(fixture)), "studio-marker.lua"),
+				],
+			},
+			{ args: [place], pid: studio!.pid },
+		]);
 	});
 
 	it("should sync a snapshot back with syncback --input", async () => {
