@@ -1,0 +1,20 @@
+# Worktrunk project hooks. They run when a worktree is made: by `wt switch
+# --create`, by the Claude Code WorktreeCreate hook (scripts/worktree/create.ts),
+# and by the T3 Code setup script (t3.json).
+
+[[pre-start]]
+mise = "mise trust"
+
+[[pre-start]]
+mise-install = "mise install"
+
+# Keys in one block run at the same time: pnpm writes node_modules, and copy
+# copies only .worktreeinclude files, never node_modules.
+[[pre-start]]
+deps = "pnpm install --frozen-lockfile"
+copy = "git wt step copy-ignored --require-include"
+
+# Runs in the background. Integration and e2e tests need the native build.
+# Keep the [[post-start]] header: a bare key here joins the block above.
+[[post-start]]
+build = "pnpm build:all"

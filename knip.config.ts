@@ -4,6 +4,8 @@ export default {
 	entry: [
 		// Fixture binaries run as processes, never imported.
 		"test/fixtures/bin/*.ts",
+		// Claude Code worktree hooks (`.claude/settings.json`).
+		"scripts/worktree/{create,remove}.ts",
 	],
 	ignore: [".agents/**"],
 	// Windows tools the opt-in real Studio test runs.

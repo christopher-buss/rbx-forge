@@ -67,15 +67,17 @@ pnpm mutation          # Stryker; the floor only moves up
 cargo test --manifest-path reaper/Cargo.toml
 ```
 
-A fresh worktree needs `pnpm build:all` before integration or e2e tests.
-`pnpm test:other-user` runs only in the CI job that creates a second local user.
-Before a task is done, lint, typecheck, knip, and every test project must pass.
+A fresh worktree needs `pnpm build:all` before integration or e2e tests; a
+worktree from `wt`, Claude Code, or T3 Code starts it in the background
+(`.config/wt.toml`). `pnpm test:other-user` runs only in the CI job that creates
+a second local user. Before a task is done, lint, typecheck, knip, and every
+test project must pass.
 
 ## Test levels
 
-- **Unit** (`src/**/*.spec.ts`): through a use-case with injected seams
-  (`createTestSeams`, `test/helpers/seams.ts`; memfs for files). Never spawns a
-  process. `src/cli.ts` and `src/supervisor.ts` are excluded.
+- **Unit** (`src/**/*.spec.ts`, `scripts/**/*.spec.ts`): through a use-case with
+  injected seams (`createTestSeams`, `test/helpers/seams.ts`; memfs for files).
+  Never spawns a process. `src/cli.ts` and `src/supervisor.ts` are excluded.
 - **Integration** (`test/integration/`): the supervisor, reaper, addon, locks,
   and IPC through their Node APIs, with real processes. `session-harness.ts`
   builds projects and stages old sessions.

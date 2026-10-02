@@ -7,6 +7,18 @@
 3. `hk install --global --mise` to install the git hooks
    (<https://hk.jdx.dev/mise_integration.html#make-tools-available-to-git>)
 
+## Worktrees
+
+New worktrees come from [worktrunk](https://worktrunk.dev) (`wt`). Its project
+hooks (`.config/wt.toml`) trust and install the mise tools, run `pnpm install`,
+copy the `.worktreeinclude` files, then run `pnpm build:all` in the background.
+
+- `wt switch --create <branch>` runs them directly.
+- Claude Code runs them through its `WorktreeCreate` and `WorktreeRemove` hooks
+  (`.claude/settings.json`, `scripts/worktree/`). The new branch starts from the
+  fetched `origin` default branch.
+- T3 Code runs them through its setup script (`t3.json`).
+
 ## Scripts
 
 | Script                        | What it runs                                    |

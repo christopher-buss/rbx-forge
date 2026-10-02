@@ -1,0 +1,5 @@
+# Gitignored files `wt step copy-ignored` copies into a new worktree.
+.env
+.claude/settings.local.json
+# Seeds Stryker's incremental run.
+reports/stryker-incremental.json

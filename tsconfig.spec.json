@@ -15,5 +15,11 @@
 			"path": "./tsconfig.lib.json"
 		}
 	],
-	"include": ["src/**/*.spec.ts", "src/**/*.spec-d.ts", "test/**/*.ts", "*.config.ts"]
+	"include": [
+		"src/**/*.spec.ts",
+		"src/**/*.spec-d.ts",
+		"test/**/*.ts",
+		"scripts/**/*.ts",
+		"*.config.ts"
+	]
 }
