@@ -40,6 +40,7 @@ export function writeRojoWrapper(
 	};
 	// Rojo reads these fields from the root project only.
 	for (const field of ["servePort", "serveAddress", "servePlaceIds", "placeId", "gameId"]) {
+		// Stryker disable next-line ConditionalExpression: JSON drops undefined
 		if (Object.hasOwn(project, field)) {
 			wrapper[field] = project[field];
 		}
@@ -47,6 +48,7 @@ export function writeRojoWrapper(
 
 	seams.fileSystem.writeFileSync(
 		rojoWrapperPath(directory),
+		// Stryker disable next-line StringLiteral: equivalent formatting
 		`${JSON.stringify(wrapper, undefined, "\t")}\n`,
 	);
 }
