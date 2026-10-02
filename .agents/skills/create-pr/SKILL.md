@@ -55,34 +55,30 @@ GOOD
 
 ## 4. Body
 
-Prefer a project template if one exists — `.github/PULL_REQUEST_TEMPLATE.md`, `.github/pull_request_template.md`, or a file under `.github/PULL_REQUEST_TEMPLATE/`. Fill it from the diff. Otherwise build the body from these sections:
+Call the Skill tool with "pr" for the body template. Write the body for a
+reviewer who has not read the conversation, applying these repository rules to
+its sections:
+
+- **Evidence** — name the command or artifact and the revision it covers. Reuse
+  valid results; report skipped checks and gaps honestly. When only
+  after-change evidence exists, say what it demonstrates and what is missing.
+- **Merge Danger** — for a one-way door, state the rollback condition, such as
+  a coordinated consumer change or a migrated config. Blast radius names the
+  actual affected users, commands, or workflows, including `--json` output,
+  error codes, config, and processes left running.
+
+After the `pr` sections, add the references:
 
 ```markdown
-## Summary
-
-[2–5 specific sentences: what changed and why.]
-
 ## References
 
 Closes #NNN
 Parent: #NNN
 ```
 
-- **Summary** — open with the problem in the user's own framing, then the
-  solution in a line. Concrete, not generic:
-
-  BAD
-  > ❌ Removed implicit workspace carry-over from every "new thread" entry
-  > point (cmd+n, sidebar buttons, command palette). Deleted
-  > `buildContextualThreadOptions` and the v1 sidebar's seed-context machinery.
-
-  GOOD
-  > ✅ My "new worktree" default was ignored when starting new threads on
-  > existing worktrees. Super unintuitive. Now your preferences always apply.
-
-  Keep the implementation inventory out of the opening.
-- **Manual verification** — add this section *only* for checks CI can't run. Omit it when there is nothing manual to report. Never restate automated test, coverage, or lint results — CI owns those.
-- **References** — `Closes #NNN` for each issue the PR resolves. Link a parent PRD with `Parent: #NNN`, or `Closes #NNN` when this is its final slice.
+`Closes #NNN` for each issue the PR resolves. Link a parent PRD with
+`Parent: #NNN`, or `Closes #NNN` when this is its final slice. Omit the section
+when there are no references.
 
 **Done when** every commit-referenced issue is accounted for in the body.
 
@@ -94,8 +90,10 @@ scope; do not create new labels.
 ## 6. Create
 
 ```bash
-gh pr create --title "<title>" --body "<body>" --base <base> --label "<name>"
+gh pr create --title "<title>" --body-file <body-file> --base <base> --label "<name>"
 ```
+
+Write the exact body to a temporary file first.
 
 Base is the detected default branch. Open ready-for-review unless the changes are clearly WIP or the user asked for a draft, in which case add `--draft`. Honor any base or title the user supplied.
 
