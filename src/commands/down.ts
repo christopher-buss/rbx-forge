@@ -13,6 +13,7 @@ import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { listParts } from "../session/part-names.ts";
 import type { KeptPart } from "../session/part-stops.ts";
+import { isFoundStudio } from "../session/part-stops.ts";
 import type { StudioEnd } from "../studio/close-studio.ts";
 import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
@@ -141,10 +142,8 @@ function studioSentence(studio: DownStudio, parts: DownParts): string {
 			return ` Roblox Studio may still have ${studio.place} open: ${studio.message}`;
 		}
 		case "kept": {
-			const isFound = parts?.kept.some(
-				({ owner, part }) => owner === null && part === "studio",
-			);
-			return isFound === true ? ` ${FOUND_SENTENCE}` : " Roblox Studio stays open.";
+			const isFound = parts?.kept.some(isFoundStudio) === true;
+			return isFound ? ` ${FOUND_SENTENCE}` : " Roblox Studio stays open.";
 		}
 		case "none":
 		case "unknown": {

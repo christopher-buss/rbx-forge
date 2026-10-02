@@ -10,9 +10,15 @@ import { describe, expect, it } from "vitest";
 import { EXIT_FAILURE } from "../../src/exit-codes.ts";
 import { openStudioStandInAsync, pidOf, waitForFileAsync } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
-import { isProcessAlive, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
+import { isProcessAlive, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { IS_MACOS, IS_WINDOWS, makeFixtureAsync } from "./session-fixture.ts";
+import {
+	autoSavesUnder,
+	IS_MACOS,
+	IS_WINDOWS,
+	makeFixtureAsync,
+	pidsOf,
+} from "./session-fixture.ts";
 import type { UpRun } from "./up-fixture.ts";
 import { runForgeAsync, WATCH_COMMAND } from "./up-fixture.ts";
 
@@ -40,30 +46,6 @@ async function upFoundAsync(variables: Record<string, string> = {}): Promise<Fou
 	const studio = pidOf(await openStudioStandInAsync(fixture.place, variables));
 	const up = await runForgeAsync(fixture, UP_STUDIO, variables);
 	return { fixture, studio, up };
-}
-
-/**
- * The PIDs of the fixture processes with this role, builds left out.
- *
- * @param fixture - The project.
- * @param role - Such as `rojo`.
- * @returns Their PIDs, in start order.
- */
-function pidsOf(fixture: Fixture, role: string): Array<number> {
-	return readWorkerLog(fixture.log)
-		.filter((record) => record.role === role && record.args[0] !== "build")
-		.map(({ pid }) => pid);
-}
-
-/**
- * The AutoSaves folder the stand-in writes to, under a scratch home.
- *
- * @param home - `LOCALAPPDATA` (Windows) or `HOME` (macOS).
- * @returns The folder.
- */
-function autoSavesUnder(home: string): string {
-	const root = IS_WINDOWS ? home : path.join(home, "Library", "Application Support");
-	return path.join(root, "Roblox", "RobloxStudio", "AutoSaves");
 }
 
 describe("a found Studio", () => {

@@ -10,7 +10,7 @@ import { ForgeError } from "../errors.ts";
 import type { IpcTransport } from "../ipc/transport.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { PartStops } from "../session/part-stops.ts";
-import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
+import { isFoundStudio, STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
 import type { SessionStudio } from "../session/status.ts";
 import type { RecoveryOptions, StudioEnd, StudioStop } from "../studio/close-studio.ts";
 import { closeStudioAsync, STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
@@ -122,7 +122,7 @@ export async function runStopAsync(
 	}
 
 	if (answer !== undefined) {
-		requireUnowned(answer);
+		requireNotKept(answer);
 	}
 
 	const place =
@@ -302,7 +302,7 @@ async function askSessionAsync(
  * @param answer - What the session did, and its Studio before.
  * @throws {ForgeError} `studio_owned`, naming the owner; `studio_found`.
  */
-function requireUnowned({ session, stops, studio }: SessionAnswer): void {
+function requireNotKept({ session, stops, studio }: SessionAnswer): void {
 	const kept = stops.kept.find(({ part }) => part === "studio");
 	if (kept === undefined) {
 		return;
@@ -316,7 +316,7 @@ function requireUnowned({ session, stops, studio }: SessionAnswer): void {
 		sessionId,
 	};
 	const hint = 'Close it in Studio, or run "forge stop --force".';
-	if (kept.owner === null) {
+	if (isFoundStudio(kept)) {
 		throw new ForgeError(
 			"studio_found",
 			`Roblox Studio${pid} of session ${sessionId} already had the place open when the session attached it, so forge leaves it open.`,

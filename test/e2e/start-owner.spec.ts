@@ -11,11 +11,12 @@ import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import { parseResult } from "../helpers/output.ts";
-import { isProcessAlive, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
+import { isProcessAlive, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
 import {
 	IS_WINDOWS,
 	makeFixtureAsync,
+	pidsOf,
 	startReadyAsync,
 	waitForRoleAsync,
 } from "./session-fixture.ts";
@@ -50,19 +51,6 @@ async function waitForStatusAsync(
 		assert(Date.now() < deadline, "the status never came");
 		await sleep(100);
 	}
-}
-
-/**
- * The PIDs of the long-running fixture processes with this role.
- *
- * @param fixture - The project.
- * @param role - Such as `rojo`.
- * @returns Their PIDs, in start order.
- */
-function pidsOf(fixture: Fixture, role: string): Array<number> {
-	return readWorkerLog(fixture.log)
-		.filter((record) => record.role === role && record.args[0] !== "build")
-		.map(({ pid }) => pid);
 }
 
 function ownersOf({ services }: SessionStatus): Record<string, unknown> {

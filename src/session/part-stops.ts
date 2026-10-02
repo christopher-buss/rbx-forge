@@ -135,6 +135,16 @@ export function isPartRunning(services: SessionStatus["services"], part: PartId)
 }
 
 /**
+ * Whether a kept part is a found Studio: it is kept with no owner.
+ *
+ * @param kept - A part a stop kept.
+ * @returns Whether it is.
+ */
+export function isFoundStudio({ owner, part }: KeptPart): boolean {
+	return part === "studio" && owner === null;
+}
+
+/**
  * Decide which running parts a request stops: those with no owner, except a
  * found Studio, and with `force` all of them. The rest it keeps, with their
  * owner. Rojo stops with its Studio in the `stop` scope, so it stays when
@@ -266,10 +276,6 @@ function partsInScope(
 	}
 
 	return place === undefined || studio.place === place ? ["studio", "rojo"] : [];
-}
-
-function isFoundStudio({ owner, part }: KeptPart): boolean {
-	return part === "studio" && owner === null;
 }
 
 /**

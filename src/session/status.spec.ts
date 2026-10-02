@@ -94,6 +94,21 @@ describe(createStatusStore, () => {
 		expect(onChange).toHaveBeenCalledTimes(5);
 	});
 
+	it("should keep the origin of the session's Studio until it is given again", () => {
+		expect.assertions(1);
+
+		const { store } = makeStore(START);
+		store.studio("opening", "/p/game.rbxl", null, "found");
+		store.studio("closed", "/p/game.rbxl", null);
+		const closed = store.snapshot().services.studio;
+		store.studio("opening", "/p/game.rbxl", null, "forge");
+
+		expect([closed, store.snapshot().services.studio]).toMatchObject([
+			{ origin: "found", status: "closed" },
+			{ origin: "forge", status: "opening" },
+		]);
+	});
+
 	it("should show a Studio the session let go of as off, with no owner or place", () => {
 		expect.assertions(2);
 

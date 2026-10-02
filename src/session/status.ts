@@ -157,7 +157,7 @@ export interface StatusRecorder {
 	/**
 	 * Studio was launched with the place, has it open, or closed it.
 	 * `process`: the Studio forge started directly, if it did. `origin`:
-	 * whether the session opened it or found it.
+	 * whether the session opened it or found it; it stays when unset.
 	 */
 	studio: (
 		status: Exclude<StudioStatus, "off">,
