@@ -14,7 +14,7 @@ blocks already in the file are sediment, not a standard to match.
 
 ## Living documents
 
-All project docs (`AGENTS.md`, `CONTEXT.md`, ADRs) are read cold and edited in
+All project docs (`AGENTS.md`, `GLOSSARY.md`, ADRs) are read cold and edited in
 place. Write in present tense; no amendments or change-history sections. Keep it
 tight.
 
@@ -39,7 +39,7 @@ labels (`NeedsInfo`, `Agent`, `PRD`). See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context: CONTEXT.md + docs/adr/ at the repo root (created lazily). See
+Single-context: GLOSSARY.md + docs/adr/ at the repo root (created lazily). See
 docs/agents/domain.md.
 
 ### Git and PRs
