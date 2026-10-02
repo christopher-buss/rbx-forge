@@ -1,6 +1,6 @@
 //! `@rbx-forge/native`: the Node addon half of the crate.
 //!
-//! A thin napi layer over [`os`]: every export converts types and errors and
+//! A thin napi layer over [`os`] and [`model`]: exports convert types and errors and
 //! holds no logic. The TypeScript side of this surface is
 //! `src/native/addon.ts`; change both together.
 //!
@@ -8,6 +8,7 @@
 //! error. "Not there" outcomes (a lock held by someone else, a PID with no
 //! live process) are `null`, not errors.
 
+mod model;
 #[allow(dead_code, reason = "the worker layer serves only the reaper binary")]
 mod os;
 #[cfg(windows)]
@@ -30,6 +31,42 @@ fn to_napi(context: &str, err: &std::io::Error) -> Error {
 #[must_use]
 pub fn native_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
+}
+
+/// Read script sources in request order, using instance-name paths from the model root.
+///
+/// # Errors
+///
+/// When the model cannot be read or a path does not identify one script.
+#[napi]
+pub fn read_model_script_sources(
+    path: String,
+    script_paths: Vec<Vec<String>>,
+) -> Result<Vec<String>> {
+    model::read_sources(Path::new(&path), &script_paths)
+        .map_err(|err| to_napi(&format!("read script sources in {path}"), &err))
+}
+
+/// One script's replacement source, addressed from the model root.
+#[napi(object)]
+pub struct ModelScriptSource {
+    pub path: Vec<String>,
+    pub source: String,
+}
+
+/// Replace only the requested script sources, atomically preserving the original on failure.
+///
+/// # Errors
+///
+/// When a path does not identify one script or the model cannot be read or replaced.
+#[napi]
+pub fn write_model_script_sources(path: String, scripts: Vec<ModelScriptSource>) -> Result<()> {
+    let scripts: Vec<_> = scripts
+        .into_iter()
+        .map(|script| (script.path, script.source))
+        .collect();
+    model::write_sources(Path::new(&path), &scripts)
+        .map_err(|err| to_napi(&format!("write script sources in {path}"), &err))
 }
 
 /// Start time of a live process as a decimal string, or `null` when no live
