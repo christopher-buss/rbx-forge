@@ -1,4 +1,7 @@
 //! Studio's launch arguments, lock, and close behavior without opening Studio.
+//! A marker's ReadyUrl receives one GET after the place lock exists.
+//! FIXTURE_STUDIO_ACK=none omits the GET; wrong sends an invalid token.
+//! FIXTURE_STUDIO_ACK_DELAY_MS delays the GET from the lock's creation.
 
 #[allow(
     dead_code,
@@ -11,7 +14,8 @@ mod os;
 
 use std::env;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -24,8 +28,16 @@ fn main() -> io::Result<()> {
         .map(|pair| pair[1].as_str())
         .or_else(|| args.first().map(String::as_str))
         .ok_or_else(|| io::Error::other("missing place"))?;
-    if let Some(script) = args.windows(2).find(|pair| pair[0] == "--runScriptFile") {
-        fs::read(&script[1])?;
+    let mut ready_url = args
+        .windows(2)
+        .find(|pair| pair[0] == "--runScriptFile")
+        .map(|script| fs::read_to_string(&script[1]))
+        .transpose()?
+        .and_then(|script| marker_ready_url(&script));
+    if env::var("FIXTURE_STUDIO_ACK").as_deref() == Ok("none") {
+        ready_url = None;
+    } else if env::var("FIXTURE_STUDIO_ACK").as_deref() == Ok("wrong") {
+        ready_url = ready_url.map(|url| url.replacen("/ready/", "/ready/wrong-", 1));
     }
     let window = open_main_window(place)?;
     install_close_handler();
@@ -37,6 +49,13 @@ fn main() -> io::Result<()> {
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(0);
     let mut lock_pending = env::var("FIXTURE_STUDIO_LOCK").as_deref() == Ok("1");
+    let ack_delay = Duration::from_millis(
+        env::var("FIXTURE_STUDIO_ACK_DELAY_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0),
+    );
+    let mut locked_at = None;
     if lock_pending && env::var("FIXTURE_STUDIO_AUTOSAVE").as_deref() == Ok("1") {
         write_autosave(Path::new(place))?;
     }
@@ -52,6 +71,7 @@ fn main() -> io::Result<()> {
                 ),
             )?;
             lock_pending = false;
+            locked_at = Some(Instant::now());
         }
         let requests = close_requests();
         if requests > handled_close {
@@ -68,8 +88,51 @@ fn main() -> io::Result<()> {
                 }
             }
         }
+        if locked_at.is_some_and(|opened: Instant| opened.elapsed() >= ack_delay)
+            && Path::new(&lock).exists()
+            && let Some(url) = ready_url.take()
+        {
+            // Callback transport cannot stall the Studio close loop.
+            thread::spawn(move || {
+                let _ = acknowledge(&url);
+            });
+        }
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn marker_ready_url(script: &str) -> Option<String> {
+    script.split(":SetAttribute(").find_map(|setter| {
+        let (name, value) = setter.split_once(',')?;
+        if name.trim() != "\"ReadyUrl\"" {
+            return None;
+        }
+        serde_json::Deserializer::from_str(value.trim_start())
+            .into_iter::<String>()
+            .next()?
+            .ok()
+    })
+}
+
+fn acknowledge(url: &str) -> io::Result<()> {
+    let (port, target) = url
+        .strip_prefix("http://127.0.0.1:")
+        .and_then(|address| address.split_once('/'))
+        .ok_or_else(|| io::Error::other("ReadyUrl must be loopback HTTP"))?;
+    let address: SocketAddr = format!("127.0.0.1:{port}")
+        .parse()
+        .map_err(io::Error::other)?;
+    let timeout = Duration::from_secs(2);
+    let mut socket = TcpStream::connect_timeout(&address, timeout)?;
+    socket.set_write_timeout(Some(timeout))?;
+    socket.set_read_timeout(Some(timeout))?;
+    write!(
+        socket,
+        "GET /{target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    )?;
+    let mut response = [0; 1];
+    socket.read_exact(&mut response)?;
+    Ok(())
 }
 
 fn write_autosave(place: &Path) -> io::Result<()> {

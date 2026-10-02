@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -41,7 +42,156 @@ function startStudio(args: Array<string>, variables: Record<string, string> = {}
 	return child;
 }
 
+async function makeReadyServerAsync(place: string, holdResponse = false) {
+	const receivedAt: Array<number> = [];
+	const requests: Array<{
+		locked: boolean;
+		method: string | undefined;
+		target: string | undefined;
+	}> = [];
+	const server = createServer((request, response) => {
+		receivedAt.push(Date.now());
+		requests.push({
+			locked: existsSync(`${place}.lock`),
+			method: request.method,
+			target: request.url,
+		});
+		if (!holdResponse) {
+			response.writeHead(204).end();
+		}
+	});
+	await new Promise<void>((resolve) => {
+		server.listen({ host: "127.0.0.1", port: 0 }, resolve);
+	});
+	onTestFinished(async () => {
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => {
+			server.close(() => {
+				resolve();
+			});
+		});
+	});
+	const address = server.address();
+	assert(address !== null && typeof address !== "string");
+	const target =
+		"/ready/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?projectName=My%20worktree%26place&sessionId=one%20two";
+	return { receivedAt, requests, target, url: `http://127.0.0.1:${address.port}${target}` };
+}
+
+function startStudioWithReadyUrl(
+	place: string,
+	url: string,
+	variables: Record<string, string> = {},
+) {
+	const marker = path.join(path.dirname(place), "marker.lua");
+	writeFileSync(
+		marker,
+		`local m=Instance.new("Configuration");m:SetAttribute("ReadyUrl",${JSON.stringify(url)});m.Parent=game\n`,
+	);
+	return startStudio(
+		["--task", "RunScript", "--localPlaceFile", place, "--runScriptFile", marker],
+		variables,
+	);
+}
+
 describe("native Studio fixture", () => {
+	it("should acknowledge the exact marker URL after opening the place", async () => {
+		expect.assertions(1);
+
+		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
+		const { requests, target, url } = await makeReadyServerAsync(place);
+		startStudioWithReadyUrl(place, url);
+
+		await expect
+			.poll(() => requests, { timeout: 5000 })
+			.toStrictEqual([{ locked: true, method: "GET", target }]);
+	});
+
+	it("should keep an opened place alive without acknowledging when configured", async () => {
+		expect.assertions(2);
+
+		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
+		const { requests, url } = await makeReadyServerAsync(place);
+		const child = startStudioWithReadyUrl(place, url, { FIXTURE_STUDIO_ACK: "none" });
+		await waitForFileAsync(`${place}.lock`);
+		await sleep(250);
+		const pin = loadRealNative().pinProcess(pidOf(child));
+		assert(pin !== null);
+
+		expect(requests).toStrictEqual([]);
+		expect(pin.isAlive()).toBeTrue();
+	});
+
+	it("should send an invalid acknowledgement token when configured", async () => {
+		expect.assertions(1);
+
+		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
+		const { requests, url } = await makeReadyServerAsync(place);
+		startStudioWithReadyUrl(place, url, { FIXTURE_STUDIO_ACK: "wrong" });
+
+		await expect
+			.poll(() => requests[0]!.target, { timeout: 5000 })
+			.toStartWith("/ready/wrong-0123456789abcdef");
+	});
+
+	it("should delay acknowledgement after the place lock appears", async () => {
+		expect.assertions(3);
+
+		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
+		const { receivedAt, requests, url } = await makeReadyServerAsync(place);
+		startStudioWithReadyUrl(place, url, { FIXTURE_STUDIO_ACK_DELAY_MS: "1000" });
+		await waitForFileAsync(`${place}.lock`);
+		const openedAt = statSync(`${place}.lock`).mtimeMs;
+
+		expect(requests).toStrictEqual([]);
+
+		await expect.poll(() => requests, { timeout: 5000 }).toHaveLength(1);
+
+		const [acknowledgedAt] = receivedAt;
+		assert(acknowledgedAt !== undefined);
+
+		expect(acknowledgedAt - openedAt).toBeGreaterThanOrEqual(900);
+	});
+
+	it("should accept native close while the callback response is stalled", async () => {
+		expect.assertions(4);
+
+		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
+		const { requests, url } = await makeReadyServerAsync(place, true);
+		const child = startStudioWithReadyUrl(place, url);
+
+		await expect.poll(() => requests, { timeout: 5000 }).toHaveLength(1);
+
+		const pin = loadRealNative().pinProcess(pidOf(child));
+		assert(pin !== null);
+
+		expect(pin.requestClose()).toBeTrue();
+		expect(pin.waitForExit(500)).toBeTrue();
+
+		await waitForExitAsync(child);
+
+		expect(child.exitCode).toBe(0);
+	});
+
+	it("should accept native close before a delayed acknowledgement is sent", async () => {
+		expect.assertions(3);
+
+		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
+		const { requests, url } = await makeReadyServerAsync(place);
+		const child = startStudioWithReadyUrl(place, url, { FIXTURE_STUDIO_ACK_DELAY_MS: "1000" });
+		await waitForFileAsync(`${place}.lock`);
+		const pin = loadRealNative().pinProcess(pidOf(child));
+		assert(pin !== null);
+
+		expect(pin.requestClose()).toBeTrue();
+		expect(pin.waitForExit(500)).toBeTrue();
+
+		await waitForExitAsync(child);
+		await sleep(1100);
+
+		expect(requests).toStrictEqual([]);
+	});
+
 	it("should open the RunScript place under its own pinned identity and close it", async () => {
 		expect.assertions(5);
 
