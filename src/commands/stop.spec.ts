@@ -184,7 +184,7 @@ async function serveSessionAsync(
 	project: StopProject,
 	studio: () => Pick<
 		SessionStatus["services"]["studio"],
-		"pid" | "place" | "startTime" | "status"
+		"origin" | "pid" | "place" | "startTime" | "status"
 	>,
 	owner: null | PartOwner = null,
 ): Promise<Array<Record<string, unknown>>> {
@@ -220,6 +220,7 @@ async function serveSessionAsync(
 				phase: vi.fn<StatusStore["phase"]>(),
 				snapshot: status,
 				studio: vi.fn<StatusStore["studio"]>(),
+				studioLeft: vi.fn<StatusStore["studioLeft"]>(),
 			},
 		},
 		{ end: vi.fn<SessionScope["end"]>() },
@@ -774,6 +775,49 @@ describe(runStopAsync, () => {
 			details: { owner: "start", sessionId: "s1" },
 			message: "Roblox Studio of session s1 has an owner: the forge start terminal.",
 		});
+	});
+
+	it("should fail with studio_found for a found Studio, and touch it not", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		await serveSessionAsync(project, () => {
+			return {
+				origin: "found",
+				pid: STUDIO_PID,
+				place: PLACE,
+				startTime: String(STUDIO_PID),
+				status: "open",
+			};
+		});
+
+		await expect(stopAsync(project)).rejects.toMatchObject({
+			code: "studio_found",
+			details: { pid: STUDIO_PID, place: PLACE, sessionId: "s1" },
+			hint: 'Close it in Studio, or run "forge stop --force".',
+			message: `Roblox Studio (PID ${STUDIO_PID}) of session s1 already had the place open when the session attached it, so forge leaves it open.`,
+		});
+		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
+	});
+
+	it("should close a found Studio with --force", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
+		});
+		await serveSessionAsync(project, () => {
+			return { origin: "found", place: PLACE, status: "open" };
+		});
+
+		await expect(
+			runStopAsync(project.context, { config: {}, flags: { force: true } }),
+		).resolves.toMatchObject({ data: { stopped: true } });
+		expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
 	});
 
 	it("should close an owned Studio with --force", async () => {

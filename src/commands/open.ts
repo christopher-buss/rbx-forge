@@ -50,8 +50,17 @@ export interface OpenedPlace {
 
 /** How the open step runs. */
 export interface OpenOptions {
+	/** Prepare a session plugin immediately before a direct launch attempt. */
+	beforeLaunch?: (() => Promise<void>) | undefined;
 	/** The caller already built this place, so it is opened as it is. */
 	isBuilt: boolean;
+	/** A session's marker script; snapshots do not use one. */
+	runScript?: string | undefined;
+	/**
+	 * A session's end, checked just before launching Studio outside its
+	 * reaper.
+	 */
+	signal?: AbortSignal;
 	/** The `--studio-path` flag, resolved. */
 	studioPath?: string | undefined;
 }
@@ -101,7 +110,8 @@ export async function openPlaceAsync(
 		const built = options.isBuilt
 			? null
 			: await prepareAsync(context, config, { output, place });
-		const studio = await launchAsync(context, place, options.studioPath);
+		options.signal?.throwIfAborted();
+		const studio = await launchAsync(context, place, options);
 		return { built, studio };
 	});
 
@@ -143,11 +153,9 @@ export async function runOpenAsync(
 			reporter.emit({ message, type: "warning" });
 		}
 
-		const studio = await launchAsync(
-			context,
-			place,
-			typeof studioPath === "string" ? path.resolve(cwd, studioPath) : undefined,
-		);
+		const studio = await launchAsync(context, place, {
+			studioPath: typeof studioPath === "string" ? path.resolve(cwd, studioPath) : undefined,
+		});
 		return { build: { ...build.value, hooks: build.hooks }, pruned, studio };
 	});
 	const opened: OpenedSnapshot = { ...value, hooks, place };
@@ -220,10 +228,21 @@ async function prepareAsync(
 async function launchAsync(
 	{ cwd, env, reporter, seams }: CommandContext,
 	place: string,
-	studioPath: string | undefined,
+	{
+		beforeLaunch,
+		runScript,
+		studioPath,
+	}: Pick<OpenOptions, "beforeLaunch" | "runScript" | "studioPath">,
 ): Promise<null | StudioProcess> {
 	reporter.emit({ name: STEP, status: "started", type: "step" });
-	const outcome = await seams.studioLauncher({ cwd, env, place, studioPath });
+	const outcome = await seams.studioLauncher({
+		cwd,
+		env,
+		place,
+		studioPath,
+		...(runScript === undefined ? {} : { runScript }),
+		...(beforeLaunch === undefined ? {} : { beforeLaunch }),
+	});
 	reporter.emit({
 		name: STEP,
 		status: outcome.type === "launched" ? "succeeded" : "failed",

@@ -18,6 +18,8 @@
 //! It compiles the same `os` module tree as the addon, without napi, so the
 //! `os` tests run through this target (`cargo test`).
 
+#[cfg(test)]
+mod model;
 #[allow(dead_code, reason = "the addon uses the rest of the os layer")]
 mod os;
 mod protocol;

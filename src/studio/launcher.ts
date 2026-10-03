@@ -18,10 +18,17 @@ export const LAUNCHER_WAIT_MS = 10_000;
 
 /** One place to open in Roblox Studio. */
 export interface StudioLaunch {
+	/**
+	 * Prepare a session plugin after discovery, immediately before direct
+	 * launch.
+	 */
+	beforeLaunch?: (() => Promise<void>) | undefined;
 	cwd: string;
 	env: Environment;
 	/** The absolute path of the place file. */
 	place: string;
+	/** A session marker script, run after Studio opens the place. */
+	runScript?: string | undefined;
 	/** The `--studio-path` flag: the Studio executable to start. */
 	studioPath?: string | undefined;
 }
@@ -46,7 +53,8 @@ export type StudioLaunchOutcome =
  * Opens a place in Roblox Studio, so Studio is never a child of forge and
  * never in a process group or job that forge ends. With a Studio executable
  * found ({@link findStudioExecutable}), forge starts it directly with the
- * place as its only argument; else the platform launcher opens the place.
+ * place, optionally using RunScript; else the platform launcher opens the
+ * place.
  */
 export type StudioLauncher = (launch: StudioLaunch) => Promise<StudioLaunchOutcome>;
 
@@ -107,8 +115,8 @@ export function studioLaunchInvocation(
 /**
  * The {@link StudioLauncher} of forge.
  *
- * - Direct: Studio starts with the place as its only argument, as the
- *   registered open command does. Windows: through the addon, out of this
+ * - Direct: Studio starts with the place, or a session's RunScript task.
+ *   Windows: through the addon, out of this
  *   process's job, with no console and no inherited handles; a job that
  *   forbids breakaway falls back to the platform launcher. POSIX: detached
  *   in its own session, with no pipes. The process is pinned at once, so
@@ -203,6 +211,12 @@ function definedOnly(environment: Environment): Record<string, string> {
 	return defined;
 }
 
+function studioArguments({ place, runScript }: StudioLaunch): Array<string> {
+	return runScript === undefined
+		? [place]
+		: ["--task", "RunScript", "--localPlaceFile", place, "--runScriptFile", runScript];
+}
+
 /**
  * Windows: start Studio through the addon, out of this process's job.
  *
@@ -213,13 +227,18 @@ function definedOnly(environment: Environment): Record<string, string> {
  */
 function startBreakingAway(
 	backend: Pick<StudioLaunchBackend, "native">,
-	{ cwd, env, place }: StudioLaunch,
+	launch: StudioLaunch,
 	executable: string,
 ): number | undefined {
 	const { spawnDetached } = backend.native();
+	const { cwd, env } = launch;
 	return (
-		spawnDetached?.({ args: [place], cwd, env: definedOnly(env), program: executable }) ??
-		undefined
+		spawnDetached?.({
+			args: studioArguments(launch),
+			cwd,
+			env: definedOnly(env),
+			program: executable,
+		}) ?? undefined
 	);
 }
 
@@ -239,10 +258,11 @@ async function waitForErrorAsync(child: ChildProcess): Promise<NodeJS.ErrnoExcep
  */
 async function startInSessionAsync(
 	backend: Pick<StudioLaunchBackend, "childProcess">,
-	{ cwd, env, place }: StudioLaunch,
+	launch: StudioLaunch,
 	executable: string,
 ): Promise<number | string> {
-	const child = backend.childProcess.spawn(executable, [place], {
+	const { cwd, env } = launch;
+	const child = backend.childProcess.spawn(executable, studioArguments(launch), {
 		cwd,
 		detached: true,
 		env,
@@ -272,6 +292,7 @@ async function launchDirectAsync(
 	launch: StudioLaunch,
 	executable: string,
 ): Promise<StudioLaunchOutcome> {
+	await launch.beforeLaunch?.();
 	const started =
 		backend.host.platform === "win32"
 			? startBreakingAway(backend, launch, executable)

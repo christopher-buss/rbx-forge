@@ -4,6 +4,7 @@ import { type } from "arktype";
 import type { Diagnostic } from "../compiler/diagnostics.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
+import { createPartRecorder, createStudioRecorder } from "./status-recorders.ts";
 
 /**
  * The state contract of a session: what `forge status --json`
@@ -17,7 +18,7 @@ import type { StudioProcess } from "../studio/launcher.ts";
  *     "compiler": { "status": "ready", "owner": null, "building": false,
  *                   "lastBuild": { "startedAt": "…", "at": "…", "errors": 0, "diagnostics": [] } },
  *     "syncback": { "status": "idle", "lastRun": { "at": "…", "ok": true, "durationMs": 812, "hooks": [] } },
- *     "studio":   { "status": "open", "owner": null, "place": "…", "pid": 5678, "startTime": "…" }
+ *     "studio":   { "status": "open", "owner": null, "origin": "forge", "place": "…", "pid": 5678, "startTime": "…" }
  *   }
  * }
  * ```
@@ -89,8 +90,12 @@ export interface LastSyncback extends SyncbackRun {
  */
 export type StudioStatus = "closed" | "off" | "open" | "opening";
 
+/** `forge`: the session opened its Studio; `found`: it had the place open. */
+export type StudioOrigin = "forge" | "found";
+
 /** The Studio of a session. */
 export interface SessionStudio {
+	origin?: StudioOrigin;
 	owner: null | PartOwner;
 	pid?: number;
 	place?: string;
@@ -151,12 +156,14 @@ export interface StatusRecorder {
 	started: () => void;
 	/**
 	 * Studio was launched with the place, has it open, or closed it.
-	 * `process`: the Studio forge started directly, if it did.
+	 * `process`: the Studio forge started directly, if it did. `origin`:
+	 * whether the session opened it or found it; it stays when unset.
 	 */
 	studio: (
 		status: Exclude<StudioStatus, "off">,
 		place: string,
 		process: null | StudioProcess,
+		origin?: StudioOrigin,
 	) => void;
 	/**
 	 * The session let go of its Studio, which stays open: `off`, with no
@@ -280,76 +287,6 @@ function initialStatus(start: StatusStart): SessionStatus {
 }
 
 /**
- * Set a part's status; a failure's fields stay only with `failed`.
- *
- * @param part - The part, changed in place.
- * @param next - Its new status, and the failure for `failed`.
- */
-function setPart(
-	part: ServicePart,
-	next: Partial<PartFailure> & Pick<ServicePart, "status">,
-): void {
-	delete part.exitCode;
-	delete part.outputTail;
-	Object.assign(part, next);
-}
-
-/**
- * The service half of a recorder.
- *
- * @param status - The status it changes.
- * @param changed - Called after each change.
- * @returns What records a service's part.
- */
-function createPartRecorder(
-	status: SessionStatus,
-	changed: () => void,
-): Pick<StatusRecorder, "owner" | "rojoPort" | "service" | "serviceFailed"> {
-	return {
-		owner: (part, owner) => {
-			status.services[part].owner = owner;
-			changed();
-		},
-		rojoPort: (port) => {
-			status.services.rojo.port = port;
-			changed();
-		},
-		service: (id, partStatus) => {
-			setPart(status.services[id], { status: partStatus });
-			changed();
-		},
-		serviceFailed: (id, failure) => {
-			setPart(status.services[id], { ...failure, status: "failed" });
-			changed();
-		},
-	};
-}
-
-/**
- * The Studio half of a recorder.
- *
- * @param status - The status it changes.
- * @param changed - Called after each change.
- * @returns What records the session's Studio.
- */
-function createStudioRecorder(
-	status: SessionStatus,
-	changed: () => void,
-): Pick<StatusRecorder, "studio" | "studioLeft"> {
-	return {
-		studio: (studioStatus, place, process) => {
-			const { owner } = status.services.studio;
-			status.services.studio = { ...process, owner, place, status: studioStatus };
-			changed();
-		},
-		studioLeft: () => {
-			status.services.studio = { owner: null, status: "off" };
-			changed();
-		},
-	};
-}
-
-/**
  * The recorder half of a store: each call changes `status` in place.
  *
  * @param status - The status it changes.
@@ -441,6 +378,7 @@ const statusSchema: Type<SessionStatus> = type({
 		}),
 		rojo: servicePart.and({ "port?": INTEGER }),
 		studio: {
+			"origin?": "'forge' | 'found'",
 			"owner": OWNER,
 			"pid?": INTEGER,
 			"place?": TEXT,

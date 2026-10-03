@@ -6,8 +6,9 @@ experimental = true
 http_retries = 3
 
 [tools]
-"github:rojo-rbx/rojo" = "7.7.0"
+"github:rojo-rbx/rojo" = "7.7.1"
 hk = "2.2.0"
+luau = "0.740"
 node = "26.5.0"
 pkl = "0.31.1"
 pnpm = "12.6.0"

@@ -1,12 +1,16 @@
-import path from "node:path";
-import { assert, describe, expect, it, vi } from "vitest";
+import { fromAny } from "@total-typescript/shoehorn";
 
+import path from "node:path";
+import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
+
+import previousPlugin from "../../test/fixtures/rojo-plugin-v2.json" with { type: "json" };
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createFakeReaper, createFakeSignals } from "../../test/helpers/fake-reaper.ts";
 import type { FakeReaper, FakeReaperOptions, FakeSignals } from "../../test/helpers/fake-reaper.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { ManualClock } from "../../test/helpers/manual-clock.ts";
+import { configureModelSources } from "../../test/helpers/model-sources.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import type { FakeNative, FakeProcess } from "../../test/helpers/native.ts";
 import {
@@ -19,11 +23,13 @@ import {
 } from "../../test/helpers/seams.ts";
 import type { MemoryFileSystem, RecordingReporter } from "../../test/helpers/seams.ts";
 import type { FlagValues } from "../cli/flags.ts";
+import type { CommandContext } from "../commands/context.ts";
 import { ForgeError } from "../errors.ts";
 import { callSessionAsync, ownSessionAsync } from "../ipc/client.ts";
 import type { OwnedSession } from "../ipc/client.ts";
 import type { WorkerReport, WorkerSpec } from "../reaper/protocol.ts";
 import type { ReaperEnd } from "../reaper/reaper-client.ts";
+import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
@@ -36,8 +42,9 @@ import { createStopSource } from "../session/stop-source.ts";
 import { STUDIO_OPEN_BOUND_MS } from "../session/studio-part.ts";
 import { FILE_POLL_MS } from "../session/worker-context.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
+import stockPlugin from "../studio/rojo-plugin/stock.json" with { type: "json" };
 import type { SessionRequest } from "./channel.ts";
-import { endpointFor } from "./endpoint.ts";
+import { endpointFor, endpointKey } from "./endpoint.ts";
 import { runSupervisorAsync } from "./run-supervisor.ts";
 import type { IdentityRecord } from "./session-files.ts";
 
@@ -80,16 +87,20 @@ const ATTACHED = {
 const WITH_OLD = { ...TOOL_FILES, ".forge/sessions/old/supervisor.id": "{}" };
 
 interface StartSetup {
+	env?: CommandContext["env"];
 	/** The config file's content besides `projectType`. */
 	file?: object;
 	files?: Record<string, string>;
 	flags?: FlagValues;
+	getRojoInfo?: Network["getRojoInfoAsync"];
 	/** Makes the control endpoint's transport; in memory by default. */
 	ipc?: () => MemoryTransport;
 	/** Whether Rojo listens on its port, each time the session looks. */
 	isListening?: Network["isListeningAsync"];
 	/** Whether the Rojo port is free. */
 	isPortFree?: boolean;
+	launchedStudio?: boolean;
+	listenForStudioReady?: Network["listenForStudioReadyAsync"];
 	/** How a one-shot run ends; services never end on their own. */
 	oneShot?: (worker: WorkerSpec) => undefined | WorkerReport;
 	/** Gets the supervisor's ready call. */
@@ -100,6 +111,7 @@ interface StartSetup {
 	pause?: (stop: StopSource) => Pause;
 	/** The host OS; Linux by default. */
 	platform?: NodeJS.Platform;
+	pluginSources?: Array<string>;
 	/** More processes in the fake process table, such as a Studio. */
 	processes?: Record<number, FakeProcess>;
 	projectType?: "luau" | "rbxts";
@@ -134,8 +146,907 @@ const SYNCBACK: StartSetup = {
 	flags: { compiler: false, open: false, syncback: true },
 };
 
+function pendingStudio(setup: StartSetup = {}) {
+	const ready = Promise.withResolvers<boolean>();
+	const close = vi.fn<() => void>();
+	const onReady = vi.fn<() => void>();
+	const run: StartRun = startCommand({
+		files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+		launchedStudio: true,
+		listenForStudioReady: async () => {
+			return { close, ready: ready.promise, url: "http://127.0.0.1:50001/ready/token" };
+		},
+		onReady,
+		platform: "darwin",
+		pluginSources: stockPluginSources(),
+		processes: {
+			1: {
+				alive: true,
+				executablePath: "/opt/RobloxStudio",
+				onClose: () => {
+					run.memory.fileSystem.rmSync(LOCK);
+				},
+				startTime: "0",
+			},
+		},
+		...setup,
+	});
+	return { close, onReady, ready, run };
+}
+
+function holdStudioPoll(original: Clock["sleep"], until: Promise<void>): Clock["sleep"] {
+	return async (ms, signal) => {
+		if (ms !== FILE_POLL_MS) {
+			return original(ms, signal);
+		}
+
+		await until;
+		signal?.throwIfAborted();
+	};
+}
+
+describe("managed Rojo plugin lifecycle", () => {
+	it("should wait for a manual launch's lock observation before closing it", async () => {
+		expect.assertions(2);
+
+		const { run } = pendingStudio({ platform: "linux" });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		const stopped = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await flushAsync();
+
+		expect(run.fake.calls).not.toContain("stop rojo 3000");
+
+		await passAsync(run, FILE_POLL_MS);
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await stopped;
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should finish the Studio follow before returning from cancelled startup", async () => {
+		expect.assertions(3);
+
+		const gate = Promise.withResolvers<void>();
+		onTestFinished(() => {
+			gate.resolve();
+		});
+		const { close, run } = pendingStudio();
+		run.clock.clock.sleep = holdStudioPoll(run.clock.clock.sleep, gate.promise);
+		let isFinished = false;
+		const result = run.result.then((value) => {
+			isFinished = true;
+			return value;
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await flushAsync();
+
+		expect(isFinished).toBeFalse();
+		expect(close).toHaveBeenCalledOnce();
+
+		gate.resolve();
+
+		await expect(result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it.for([
+		{
+			name: "foreign place",
+			owned: false,
+			request: { keepStudio: true, place: "/foreign.rbxl", scope: "stop" },
+		},
+		{ name: "owned Studio", owned: true, request: { keepStudio: true, scope: "down" } },
+	])(
+		"should preserve pending synchronization for a refused $name stop",
+		async ({ owned, request }) => {
+			expect.assertions(4);
+
+			const { close, onReady, ready, run } = pendingStudio({ owned });
+			await flushAsync();
+			run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+			await passAsync(run, FILE_POLL_MS);
+			await callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", { params: request });
+
+			expect(close).not.toHaveBeenCalled();
+			expect(onReady).not.toHaveBeenCalled();
+
+			ready.resolve(true);
+			await flushAsync();
+
+			expect(stateOf(run)).toMatchObject({ services: { studio: { status: "open" } } });
+
+			run.signals.fire("SIGINT");
+
+			await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+		},
+	);
+
+	it("should close a managed locked Studio immediately when a permitted down interrupts synchronization", async () => {
+		expect.assertions(3);
+
+		const { close, run } = pendingStudio();
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		const stopped = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await flushAsync();
+
+		expect(run.fake.calls).toContain("stop rojo 3000");
+		expect(close).toHaveBeenCalledOnce();
+
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await stopped;
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should cancel synchronization when forced down leaves an owned Studio open", async () => {
+		expect.assertions(2);
+
+		const { close, run } = pendingStudio({ owned: true });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		const stopped = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { force: true, keepStudio: true, scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await flushAsync();
+
+		expect(close).toHaveBeenCalledOnce();
+
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await stopped;
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should report a callback that closes without acknowledging initial sync", async () => {
+		expect.assertions(3);
+
+		const close = vi.fn<() => void>();
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			launchedStudio: true,
+			listenForStudioReady: async () => {
+				return {
+					close,
+					ready: Promise.resolve(false),
+					url: "http://127.0.0.1:50001/ready/token",
+				};
+			},
+			platform: "darwin",
+			pluginSources: stockPluginSources(),
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(state).toMatchObject({ services: { studio: { status: "opening" } } });
+		expect(close).toHaveBeenCalledOnce();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Studio did not acknowledge its initial Rojo synchronization before the readiness deadline.",
+			type: "warning",
+		});
+	});
+
+	it("should bound missing sync acknowledgements and ignore a late callback", async () => {
+		expect.assertions(5);
+
+		const ready = Promise.withResolvers<boolean>();
+		const close = vi.fn<() => void>();
+		const onReady = vi.fn<() => void>();
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			launchedStudio: true,
+			listenForStudioReady: async () => {
+				return {
+					close,
+					ready: ready.promise,
+					url: "http://127.0.0.1:50001/ready/token",
+				};
+			},
+			onReady,
+			platform: "darwin",
+			pluginSources: stockPluginSources(),
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, STUDIO_OPEN_BOUND_MS);
+
+		expect(close).toHaveBeenCalledOnce();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Studio did not acknowledge its initial Rojo synchronization before the readiness deadline.",
+			type: "warning",
+		});
+
+		ready.resolve(true);
+		await flushAsync();
+
+		expect(stateOf(run)).toMatchObject({ services: { studio: { status: "opening" } } });
+		expect(onReady).not.toHaveBeenCalled();
+
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should close the callback listener when Studio closes before acknowledging sync", async () => {
+		expect.assertions(4);
+
+		const ready = Promise.withResolvers<boolean>();
+		const close = vi.fn<() => void>();
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			launchedStudio: true,
+			listenForStudioReady: async () => {
+				return {
+					close,
+					ready: ready.promise,
+					url: "http://127.0.0.1:50001/ready/token",
+				};
+			},
+			platform: "darwin",
+			pluginSources: stockPluginSources(),
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+		run.memory.fileSystem.rmSync(LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		ready.resolve(true);
+		await flushAsync();
+
+		expect(stateOf(run)).toMatchObject({ services: { studio: { status: "closed" } } });
+		expect(close).toHaveBeenCalledOnce();
+		expect(run.reporter.events).not.toContainEqual({
+			message:
+				"Studio did not acknowledge its initial Rojo synchronization before the readiness deadline.",
+			type: "warning",
+		});
+
+		run.fake.exit("rojo", OK);
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should let down interrupt an up that is waiting for sync acknowledgement", async () => {
+		expect.assertions(4);
+
+		const ready = Promise.withResolvers<boolean>();
+		const close = vi.fn<() => void>();
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			flags: { compiler: false, open: false },
+			launchedStudio: true,
+			listenForStudioReady: async () => {
+				return {
+					close,
+					ready: ready.promise,
+					url: "http://127.0.0.1:50001/ready/token",
+				};
+			},
+			platform: "darwin",
+			pluginSources: stockPluginSources(),
+		});
+		await flushAsync();
+		const up = askAddAsync(run, { parts: ["studio"] });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+		const down = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { keepStudio: true, scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await flushAsync();
+
+		expect(close).toHaveBeenCalledOnce();
+		expect(run.fake.calls).toContain("stop rojo 3000");
+
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await down;
+
+		await expect(up).resolves.toMatchObject({ code: "studio_launch_failed" });
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should keep Studio opening after its lock arrives until sync is acknowledged", async () => {
+		expect.assertions(4);
+
+		const ready = Promise.withResolvers<boolean>();
+		const close = vi.fn<() => void>();
+		const onReady = vi.fn<() => void>();
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			launchedStudio: true,
+			listenForStudioReady: async () => {
+				return {
+					close,
+					ready: ready.promise,
+					url: "http://127.0.0.1:50001/ready/token?projectName=Example&sessionId=rojo-session",
+				};
+			},
+			onReady,
+			platform: "darwin",
+			pluginSources: stockPluginSources(),
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+
+		expect({ readyCalls: onReady.mock.calls.length, state: stateOf(run) }).toMatchObject({
+			readyCalls: 0,
+			state: { services: { studio: { status: "opening" } } },
+		});
+		expect(
+			run.memory.fileSystem.readFileSync(path.join(SESSION, "studio-marker.lua"), "utf8"),
+		).toContain(
+			'm:SetAttribute("ReadyUrl","http://127.0.0.1:50001/ready/token?projectName=Example&sessionId=rojo-session")',
+		);
+
+		ready.resolve(true);
+		await flushAsync();
+
+		expect({
+			closedCalls: close.mock.calls.length,
+			readyCalls: onReady.mock.calls.length,
+			state: stateOf(run),
+		}).toMatchObject({
+			closedCalls: 1,
+			readyCalls: 1,
+			state: { services: { studio: { status: "open" } } },
+		});
+
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
+	it("should patch both stock scripts before launching a new Studio", async () => {
+		expect.assertions(2);
+
+		const sources = [
+			stockPlugin.App,
+			stockPlugin.ServeSession,
+			"return { protocolVersion = 5 }",
+		];
+		const run = startCommand({
+			files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+			platform: "darwin",
+			pluginSources: sources,
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(sources[0]).toContain(
+			"-- rbx-forge patch 3 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+		);
+		expect(sources[1]).toContain(
+			"-- rbx-forge patch 3 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+		);
+	});
+
+	it.for([
+		{ name: "older forge sources", version: 0 },
+		{ name: "a partial previous patch", version: 1 },
+	])("should repair $name coherently", async ({ version }) => {
+		expect.assertions(2);
+
+		const sources = stockPluginSources();
+		sources[0] = `-- rbx-forge patch ${version} stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`;
+		const run = startPluginSession(sources);
+		await endPluginSessionAsync(run);
+
+		expect(sources[0].split("\n", 1)[0]).toBe(
+			"-- rbx-forge patch 3 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+		);
+		expect(sources[1]!.split("\n", 1)[0]).toBe(
+			"-- rbx-forge patch 3 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+		);
+	});
+
+	it("should upgrade the genuine preceding plugin sources coherently", async () => {
+		expect.assertions(2);
+
+		const sources = [
+			`-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${previousPlugin.App}`,
+			`-- rbx-forge patch 2 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a\n${previousPlugin.ServeSession}`,
+			"return { protocolVersion = 5 }",
+		];
+		const run = startPluginSession(sources);
+		await endPluginSessionAsync(run);
+
+		expect(sources[0]).toContain("-- rbx-forge patch 3 stock");
+		expect(sources[1]).toContain("-- rbx-forge patch 3 stock");
+	});
+
+	it("should preserve a coherent current pair without rewriting the model", async () => {
+		expect.assertions(2);
+
+		const sources = stockPluginSources();
+		const first = startPluginSession(sources);
+		await endPluginSessionAsync(first);
+		const previous = [...sources];
+		const second = startPluginSession(sources);
+		const write = vi.spyOn(second.native.addon, "writeModelScriptSources");
+		await endPluginSessionAsync(second);
+
+		expect(sources).toStrictEqual(previous);
+		expect(write).not.toHaveBeenCalled();
+	});
+
+	it.for([
+		{ reason: "unknown sources", source: "return 'manually changed'" },
+		{
+			reason: "newer forge sources",
+			source: `-- rbx-forge patch 9 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`,
+		},
+		{
+			reason: "unknown forge stock hash",
+			source: `-- rbx-forge patch 1 stock ${"a".repeat(64)}\n${stockPlugin.App}`,
+		},
+		{
+			reason: "manually changed marked sources",
+			source: "-- rbx-forge patch 1 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\nreturn 'changed'",
+		},
+		{
+			reason: "changed preceding patch sources",
+			source: `-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${previousPlugin.App}\n-- changed`,
+		},
+		{
+			reason: "stock bodies with a preceding patch header",
+			source: `-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`,
+		},
+	])("should preserve $reason and explain manual connection", async ({ source }) => {
+		expect.assertions(3);
+
+		const sources = stockPluginSources();
+		sources[0] = source;
+		const previous = [...sources];
+		const run = startPluginSession(sources);
+		await endPluginSessionAsync(run);
+
+		expect(sources).toStrictEqual(previous);
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"The managed Rojo plugin has unsupported or manually changed sources. Auto-connect is off; connect to Rojo manually in Studio.",
+			type: "warning",
+		});
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+	});
+
+	it("should preserve upstream launch-marker support", async () => {
+		expect.assertions(3);
+
+		const sources = [
+			"function App:checkForRojoOpen() local name = 'ROJO_OPEN_' end",
+			"local expectedSessionId = true",
+			"return { protocolVersion = 5 }",
+		];
+		const run = startPluginSession(sources);
+		const write = vi.spyOn(run.native.addon, "writeModelScriptSources");
+		await endPluginSessionAsync(run);
+
+		expect(write).not.toHaveBeenCalled();
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"The Rojo plugin handles launch markers upstream; confirm the sync in Studio if prompted. Forge cannot acknowledge its initial sync.",
+			type: "warning",
+		});
+	});
+
+	it("should resolve the Windows managed path with case-insensitive environment names", async () => {
+		expect.assertions(2);
+
+		const sources = stockPluginSources();
+		const run = startCommand({
+			env: { HOME: "/other-home", userprofile: PROJECT },
+			files: {
+				"AppData/Local/Roblox/Plugins/RojoManagedPlugin.rbxm": "model",
+				"tools/rojo.exe": "",
+			},
+			platform: "win32",
+			pluginSources: sources,
+			writePrivateFile: () => {},
+		});
+		await endPluginSessionAsync(run);
+
+		expect(run.fake.spawned.map(({ args }) => args)).not.toContainEqual(["plugin", "install"]);
+		expect(sources[0]).toStartWith("-- rbx-forge patch 3");
+	});
+
+	it.for(["", undefined])(
+		"should avoid plugin I/O when the home is unavailable (%s)",
+		async (home) => {
+			expect.assertions(1);
+
+			const run = startPluginSession(stockPluginSources(), { env: { HOME: home } });
+			const read = vi.spyOn(run.native.addon, "readModelScriptSources");
+			await endPluginSessionAsync(run);
+
+			expect(read).not.toHaveBeenCalled();
+		},
+	);
+
+	it("should avoid patching when cancellation occurs during source reading", async () => {
+		expect.assertions(1);
+
+		const sources = stockPluginSources();
+		const previous = [...sources];
+		const run = startPluginSession(sources);
+		run.native.addon.readModelScriptSources = () => {
+			run.signals.fire("SIGINT");
+			return [...sources];
+		};
+
+		await run.result;
+
+		expect(sources).toStrictEqual(previous);
+	});
+
+	it("should preserve plugins on an unsupported platform", async () => {
+		expect.assertions(1);
+
+		const run = startPluginSession(stockPluginSources(), { platform: "linux" });
+		const read = vi.spyOn(run.native.addon, "readModelScriptSources");
+		await endPluginSessionAsync(run);
+
+		expect(read).not.toHaveBeenCalled();
+	});
+
+	it("should avoid reading or patching after cancellation during plugin installation", async () => {
+		expect.assertions(1);
+
+		const run: StartRun = startPluginSession(stockPluginSources(), {
+			files: TOOL_FILES,
+			reaper: {
+				onSpawn: onSpawnOf("start-2", () => {
+					run.signals.fire("SIGINT");
+				}),
+			},
+		});
+		const read = vi.spyOn(run.native.addon, "readModelScriptSources");
+		await run.result;
+
+		expect(read).not.toHaveBeenCalled();
+	});
+
+	it.for([
+		{ app: "ROJO_OPEN_", session: "unknown" },
+		{ app: "unknown", session: "expectedSessionId" },
+		{
+			app: "-- rbx-forge patch 1 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\nROJO_OPEN_",
+			session: "expectedSessionId",
+		},
+	])(
+		"should preserve partial or manually changed marker support as manual",
+		async ({ app, session }) => {
+			expect.assertions(1);
+
+			const run = startPluginSession([app, session, "protocolVersion = 5,"]);
+			await endPluginSessionAsync(run);
+
+			expect(run.reporter.events).toContainEqual({
+				message:
+					"The managed Rojo plugin has unsupported or manually changed sources. Auto-connect is off; connect to Rojo manually in Studio.",
+				type: "warning",
+			});
+		},
+	);
+
+	it("should install a missing plugin with the project's Rojo before patching", async () => {
+		expect.assertions(2);
+
+		const sources = stockPluginSources();
+		const run = startCommand({
+			file: { rojoAlias: "custom-rojo" },
+			files: { "tools/custom-rojo": "" },
+			platform: "darwin",
+			pluginSources: sources,
+		});
+		await endPluginSessionAsync(run);
+
+		expect(run.fake.spawned).toContainEqual(
+			expect.objectContaining({
+				args: ["plugin", "install"],
+				file: path.join(TOOLS, "custom-rojo"),
+			}),
+		);
+		expect(sources[0]).toStartWith("-- rbx-forge patch 3");
+	});
+
+	it("should fail on a protocol mismatch before changing the plugin or launching", async () => {
+		expect.assertions(3);
+
+		const sources = stockPluginSources();
+		sources[2] = "return { protocolVersion = 6 }";
+		const previous = [...sources];
+		const run = startPluginSession(sources);
+
+		await expect(run.result).rejects.toMatchObject({
+			code: "plugin_protocol_mismatch",
+			exitCode: 7,
+			hint: "Restore the plugin with the project's rojo plugin install.",
+			message: "Rojo plugin protocol 6 differs from server protocol 5.",
+		});
+		expect(sources).toStrictEqual(previous);
+		expect(run.fake.spawned.map(({ args }) => args)).not.toContainEqual(["plugin", "install"]);
+	});
+
+	it("should report a distinct error when the atomic plugin write fails", async () => {
+		expect.assertions(1);
+
+		const run = startPluginSession(stockPluginSources());
+		run.native.addon.writeModelScriptSources = () => {
+			throw new Error("access denied");
+		};
+
+		await expect(run.result).rejects.toMatchObject({
+			cause: new Error("access denied"),
+			code: "plugin_write_failed",
+			exitCode: 8,
+			hint: "Check permissions on RojoManagedPlugin.rbxm and retry.",
+			message: "Could not patch the managed Rojo plugin: access denied",
+		});
+	});
+
+	it("should preserve an unreadable plugin and continue with manual connection", async () => {
+		expect.assertions(2);
+
+		const run = startPluginSession(stockPluginSources());
+		run.native.addon.readModelScriptSources = () => {
+			throw new Error("missing App path");
+		};
+
+		const write = vi.spyOn(run.native.addon, "writeModelScriptSources");
+		await endPluginSessionAsync(run);
+
+		expect(write).not.toHaveBeenCalled();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Could not read the managed Rojo plugin: missing App path. Auto-connect is off; connect to Rojo manually in Studio.",
+			type: "warning",
+		});
+	});
+
+	it("should preserve a plugin with an unrecognized protocol declaration", async () => {
+		expect.assertions(2);
+
+		const sources = stockPluginSources();
+		sources[2] = "return unknownConfiguration";
+		const run = startPluginSession(sources);
+		const write = vi.spyOn(run.native.addon, "writeModelScriptSources");
+		await endPluginSessionAsync(run);
+
+		expect(write).not.toHaveBeenCalled();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Could not identify the managed Rojo plugin protocol. Auto-connect is off; connect to Rojo manually in Studio.",
+			type: "warning",
+		});
+	});
+
+	it.for([
+		{ name: "an existing Studio", setup: ATTACHED },
+		{ name: "a compiler-only session", setup: { flags: { compiler: false, open: false } } },
+		{ name: "a failed place build", setup: { oneShot: () => EXITED } },
+		{
+			name: "a cancelled place build",
+			setup: { oneShot: oneShotsWith({ "start-1": "hold" }) },
+		},
+	])("should preserve the plugin for $name", async ({ setup }) => {
+		expect.assertions(1);
+
+		const sources = stockPluginSources();
+		const previous = [...sources];
+		const run = startPluginSession(sources, setup);
+		const result = run.result.catch(() => {});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await result;
+
+		expect(sources).toStrictEqual(previous);
+	});
+});
+
+function stockPluginSources(): Array<string> {
+	return [stockPlugin.App, stockPlugin.ServeSession, "return { protocolVersion = 5 }"];
+}
+
 function succeedOneShots(worker: WorkerSpec): undefined | WorkerReport {
 	return SERVICES.has(worker.id) ? undefined : OK;
+}
+
+/**
+ * The session request `forge start` sends for these flags.
+ *
+ * @param flags - The parsed flags.
+ * @returns The request; `--syncback` sets `syncback.runOnStart`.
+ */
+function requestFor(flags: FlagValues): SessionRequest {
+	return {
+		compiler: flags["compiler"] !== false,
+		config: flags["syncback"] === true ? { syncback: { runOnStart: true } } : {},
+		open: flags["open"] !== false,
+		...(flags["force"] === true ? { force: true } : {}),
+	};
+}
+
+function startCommand({
+	env,
+	file = {},
+	files = TOOL_FILES,
+	flags = NO_COMPILER,
+	getRojoInfo = async () => {
+		return {
+			projectName: `Example@${endpointKey(PROJECT, "game.rbxl")}`,
+			protocolVersion: 5,
+			serverVersion: "7.7.1",
+			sessionId: "rojo-session",
+		};
+	},
+	ipc: makeTransport = createMemoryTransport,
+	isListening = async () => true,
+	isPortFree = true,
+	launchedStudio = false,
+	listenForStudioReady = async () => {
+		return {
+			close: () => {},
+			ready: Promise.resolve(true),
+			url: "http://127.0.0.1:50001/ready/test?projectName=Example&sessionId=rojo-session",
+		};
+	},
+	oneShot = succeedOneShots,
+	onReady,
+	owned = false,
+	pause = () => neverPauseAsync,
+	platform = "linux",
+	pluginSources,
+	processes = {},
+	projectType = "luau",
+	reaper = {},
+	rojoPort = 4000,
+	writePrivateFile,
+}: StartSetup = {}): StartRun {
+	const memory = createMemoryFileSystem({
+		"default.project.json": '{"name":"Example","tree":{"$className":"DataModel"}}',
+		...files,
+	});
+	const clock = createManualClock(Date.UTC(2026, 0, 1));
+	const fake = createFakeReaper({ autoExit: oneShot, ...reaper });
+	const signals = createFakeSignals();
+	const stop = createStopSource();
+	signals.onStop(stop.request);
+	const owner = createStopSource();
+	const onReleased = vi.fn<(result: CommandResult) => void>();
+	const ipc = makeTransport();
+	const seams = createTestSeams();
+	const native = createFakeNative({
+		4242: { alive: true, executablePath: "/node" },
+		...processes,
+	});
+	const reporter = createRecordingReporter();
+	const isPortFreeAsync = vi.fn<Network["isPortFreeAsync"]>().mockResolvedValue(isPortFree);
+	const isListeningAsync = vi.fn<Network["isListeningAsync"]>(isListening);
+	const freePortAsync = vi.fn<Network["freePortAsync"]>().mockResolvedValue(FREE_PORT);
+	const studioLauncher = vi.fn<StudioLauncher>(async (launch) => {
+		await launch.beforeLaunch?.();
+		return {
+			type: "launched",
+			...(launchedStudio ? { studio: { pid: 1, startTime: "0" } } : {}),
+		};
+	});
+	if (pluginSources !== undefined) {
+		configureModelSources(
+			native.addon,
+			pluginSources,
+			path.join(
+				PROJECT,
+				...(platform === "win32" ? ["AppData", "Local"] : ["Documents"]),
+				"Roblox",
+				"Plugins",
+				"RojoManagedPlugin.rbxm",
+			),
+		);
+	}
+
+	const configLoader = vi.fn<ConfigLoader>().mockResolvedValue({
+		path: path.join(PROJECT, "rbx-forge.config.ts"),
+		value: { projectType, ...(rojoPort === "unset" ? {} : { rojoPort }), ...file },
+	});
+	const context = createCommandContext({
+		env: {
+			PATH: TOOLS,
+			...(pluginSources === undefined ? {} : { HOME: PROJECT, userprofile: PROJECT }),
+			...env,
+		},
+		reporter,
+		seams: createTestSeams({
+			clock: clock.clock,
+			configLoader,
+			fileSystem: memory.fileSystem,
+			host: { ...seams.host, platform },
+			ipc,
+			native: () => {
+				return {
+					...native.addon,
+					...(writePrivateFile === undefined ? {} : { writePrivateFile }),
+				};
+			},
+			network: {
+				freePortAsync,
+				getRojoInfoAsync: vi.fn<Network["getRojoInfoAsync"]>(getRojoInfo),
+				isListeningAsync,
+				isPortFreeAsync,
+				listenForStudioReadyAsync: listenForStudioReady,
+			},
+			randomId: () => "session-1",
+			reaper: fake.launch,
+			studioLauncher,
+		}),
+	});
+
+	return {
+		clock,
+		fake,
+		ipc,
+		isListeningAsync,
+		isPortFreeAsync,
+		memory,
+		native,
+		onReleased,
+		owner,
+		reporter,
+		result: runSupervisorAsync(context, requestFor(flags), {
+			onReady,
+			owner: owned ? { onEnd: owner.onStop, onReleased } : undefined,
+			pause: pause(stop),
+			stop,
+			version: "9.9.9",
+		}),
+		signals,
+		stop,
+		studioLauncher,
+	};
+}
+
+function startPluginSession(sources: Array<string>, setup: StartSetup = {}): StartRun {
+	return startCommand({
+		files: { ...TOOL_FILES, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model" },
+		platform: "darwin",
+		pluginSources: sources,
+		...setup,
+	});
+}
+
+async function flushAsync(): Promise<void> {
+	await new Promise((resolve) => {
+		setImmediate(resolve);
+	});
+}
+
+async function endPluginSessionAsync(run: StartRun): Promise<void> {
+	await flushAsync();
+	run.signals.fire("SIGINT");
+	await run.result;
 }
 
 /**
@@ -170,108 +1081,6 @@ function onSpawnOf(id: string, action: () => void): (worker: WorkerSpec) => void
 		if (worker.id === id) {
 			action();
 		}
-	};
-}
-
-/**
- * The session request `forge start` sends for these flags.
- *
- * @param flags - The parsed flags.
- * @returns The request; `--syncback` sets `syncback.runOnStart`.
- */
-function requestFor(flags: FlagValues): SessionRequest {
-	return {
-		compiler: flags["compiler"] !== false,
-		config: flags["syncback"] === true ? { syncback: { runOnStart: true } } : {},
-		open: flags["open"] !== false,
-		...(flags["force"] === true ? { force: true } : {}),
-	};
-}
-
-function startCommand({
-	file = {},
-	files = TOOL_FILES,
-	flags = NO_COMPILER,
-	ipc: makeTransport = createMemoryTransport,
-	isListening = async () => true,
-	isPortFree = true,
-	oneShot = succeedOneShots,
-	onReady,
-	owned = false,
-	pause = () => neverPauseAsync,
-	platform = "linux",
-	processes = {},
-	projectType = "luau",
-	reaper = {},
-	rojoPort = 4000,
-	writePrivateFile,
-}: StartSetup = {}): StartRun {
-	const memory = createMemoryFileSystem(files);
-	const clock = createManualClock(Date.UTC(2026, 0, 1));
-	const fake = createFakeReaper({ autoExit: oneShot, ...reaper });
-	const signals = createFakeSignals();
-	const stop = createStopSource();
-	signals.onStop(stop.request);
-	const owner = createStopSource();
-	const onReleased = vi.fn<(result: CommandResult) => void>();
-	const ipc = makeTransport();
-	const seams = createTestSeams();
-	const native = createFakeNative({
-		4242: { alive: true, executablePath: "/node" },
-		...processes,
-	});
-	const reporter = createRecordingReporter();
-	const isPortFreeAsync = vi.fn<Network["isPortFreeAsync"]>().mockResolvedValue(isPortFree);
-	const isListeningAsync = vi.fn<Network["isListeningAsync"]>(isListening);
-	const freePortAsync = vi.fn<Network["freePortAsync"]>().mockResolvedValue(FREE_PORT);
-	const studioLauncher = vi.fn<StudioLauncher>().mockResolvedValue({ type: "launched" });
-	const configLoader = vi.fn<ConfigLoader>().mockResolvedValue({
-		path: path.join(PROJECT, "rbx-forge.config.ts"),
-		value: { projectType, ...(rojoPort === "unset" ? {} : { rojoPort }), ...file },
-	});
-	const context = createCommandContext({
-		env: { PATH: TOOLS },
-		reporter,
-		seams: createTestSeams({
-			clock: clock.clock,
-			configLoader,
-			fileSystem: memory.fileSystem,
-			host: { ...seams.host, platform },
-			ipc,
-			native: () => {
-				return {
-					...native.addon,
-					...(writePrivateFile === undefined ? {} : { writePrivateFile }),
-				};
-			},
-			network: { freePortAsync, isListeningAsync, isPortFreeAsync },
-			randomId: () => "session-1",
-			reaper: fake.launch,
-			studioLauncher,
-		}),
-	});
-
-	return {
-		clock,
-		fake,
-		ipc,
-		isListeningAsync,
-		isPortFreeAsync,
-		memory,
-		native,
-		onReleased,
-		owner,
-		reporter,
-		result: runSupervisorAsync(context, requestFor(flags), {
-			onReady,
-			owner: owned ? { onEnd: owner.onStop, onReleased } : undefined,
-			pause: pause(stop),
-			stop,
-			version: "9.9.9",
-		}),
-		signals,
-		stop,
-		studioLauncher,
 	};
 }
 
@@ -333,12 +1142,6 @@ function stateOf(run: StartRun): unknown {
 	return JSON.parse(text);
 }
 
-async function flushAsync(): Promise<void> {
-	await new Promise((resolve) => {
-		setImmediate(resolve);
-	});
-}
-
 /**
  * Let time pass in steps, so each poll runs and what it started settles.
  *
@@ -364,24 +1167,535 @@ function spawnedIds(fake: FakeReaper): Array<string> {
 }
 
 describe(runSupervisorAsync, () => {
-	it("should compile, build, open, then serve Rojo and watch, all through the reaper", async () => {
+	it("should release a stopped Rojo's cancellation listener before the session ends", async () => {
+		expect.assertions(1);
+
+		const run = startCommand();
+		await flushAsync();
+		const watcher: ReturnType<MemoryFileSystem["fileSystem"]["watch"]> = fromAny(
+			vi.mocked(run.memory.watch.watch).mock.results[0]!.value,
+		);
+		const close = vi.spyOn(watcher, "close");
+		run.fake.exit("rojo", EXITED);
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(close).toHaveBeenCalledOnce();
+	});
+
+	it("should start no project watch when the session ends while Rojo starts", async () => {
+		expect.assertions(1);
+
+		const run: StartRun = startCommand({
+			reaper: {
+				onSpawn: onSpawnOf("rojo", () => {
+					run.signals.fire("SIGINT");
+				}),
+			},
+		});
+		const watch = vi.spyOn(run.memory.fileSystem, "watch");
+		await run.result;
+
+		expect(watch).not.toHaveBeenCalled();
+	});
+
+	it("should keep Rojo ready with a warning when its project watch cannot start", async () => {
+		expect.assertions(2);
+
+		const run = startCommand();
+		vi.spyOn(run.memory.fileSystem, "watch").mockImplementation(() => {
+			throw new Error("watch denied");
+		});
+		await flushAsync();
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(state).toMatchObject({ services: { rojo: { status: "ready" } } });
+		expect(run.reporter.events).toContainEqual({
+			message: `Cannot reload Rojo project ${path.join(PROJECT, "default.project.json")}: Error: watch denied.`,
+			type: "warning",
+		});
+	});
+
+	it("should warn on a wrapper write failure and reload on a later project edit", async () => {
 		expect.assertions(3);
 
-		const run = await stoppedAsync({ flags: {}, projectType: "rbxts" });
+		const run = startCommand();
+		await flushAsync();
+		const wrapper = path.join(SESSION, "rojo.project.json");
+		const write = vi.spyOn(run.memory.fileSystem, "writeFileSync");
+		write.mockImplementationOnce(() => {
+			throw new Error("write denied");
+		});
+
+		expect(() => {
+			run.memory.watch.change(PROJECT, "default.project.json");
+		}).not.toThrow();
+
+		run.memory.setModifiedTime(wrapper, 1);
+		run.memory.watch.change(PROJECT, "default.project.json");
+		const modified = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(modified).toBeGreaterThan(1);
+		expect(run.reporter.events).toContainEqual({
+			message: `Cannot reload Rojo project ${path.join(PROJECT, "default.project.json")}: Error: write denied.`,
+			type: "warning",
+		});
+	});
+
+	it("should warn and keep the session alive when the project watch fails", async () => {
+		expect.assertions(3);
+
+		const run = startCommand();
+		await flushAsync();
+
+		expect(() => {
+			run.memory.watch.error(PROJECT, new Error("watch lost"));
+		}).not.toThrow();
+
+		const active = run.memory.watch.activeDirectories();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(active).toStrictEqual([]);
+		expect(run.reporter.events).toContainEqual({
+			message: `Cannot reload Rojo project ${path.join(PROJECT, "default.project.json")}: Error: watch lost.`,
+			type: "warning",
+		});
+	});
+
+	it.for([
+		{
+			filename: "default.project.json",
+			platform: "win32" as const,
+			projectPath: "DEFAULT.project.json",
+			reloads: true,
+		},
+		{
+			filename: "DeFaUlT.project.json",
+			platform: "win32" as const,
+			projectPath: "DEFAULT.project.json",
+			reloads: true,
+		},
+		{
+			filename: "default.project.json",
+			platform: "linux" as const,
+			projectPath: "DEFAULT.project.json",
+			reloads: false,
+		},
+		{
+			filename: "default.project.json",
+			platform: "darwin" as const,
+			projectPath: "DEFAULT.project.json",
+			reloads: false,
+		},
+		{
+			filename: "DEFAULT.project.json",
+			platform: "linux" as const,
+			projectPath: "DEFAULT.project.json",
+			reloads: true,
+		},
+		{
+			filename: "aß.project.json",
+			platform: "win32" as const,
+			projectPath: "Aß.project.json",
+			reloads: true,
+		},
+		{
+			filename: "ass.project.json",
+			platform: "win32" as const,
+			projectPath: "Aß.project.json",
+			reloads: false,
+		},
+	])(
+		"should respect $platform project filename casing for $filename",
+		async ({ filename, platform, projectPath, reloads }) => {
+			expect.assertions(1);
+
+			const run = startCommand({
+				file: { rojoProjectPath: projectPath },
+				files: {
+					...TOOL_FILES,
+					[projectPath]: '{"name":"Example","tree":{"$className":"DataModel"}}',
+					"tools/rojo.exe": "",
+				},
+				platform,
+				writePrivateFile: () => {},
+			});
+			await flushAsync();
+			const wrapper = path.join(SESSION, "rojo.project.json");
+			run.memory.setModifiedTime(wrapper, 1);
+			run.memory.watch.change(PROJECT, filename);
+			const modified = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+			run.signals.fire("SIGINT");
+			await run.result;
+
+			expect(modified !== 1).toBe(reloads);
+		},
+	);
+
+	it("should reload after atomic project replacement and filename-less events, ignoring unrelated files", async () => {
+		expect.assertions(3);
+
+		const run = startCommand();
+		await flushAsync();
+		const wrapper = path.join(SESSION, "rojo.project.json");
+		run.memory.setModifiedTime(wrapper, 1);
+		run.memory.watch.change(PROJECT, "unrelated.lua");
+		const unrelated = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+		run.memory.fileSystem.writeFileSync(
+			path.join(PROJECT, "replacement.json"),
+			'{"name":"Replaced","tree":{"$className":"DataModel"}}',
+		);
+		run.memory.fileSystem.renameSync(
+			path.join(PROJECT, "replacement.json"),
+			path.join(PROJECT, "default.project.json"),
+		);
+		run.memory.watch.change(PROJECT, "default.project.json", "rename");
+		const replaced = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+		run.memory.setModifiedTime(wrapper, 1);
+		run.memory.watch.change(PROJECT, null);
+		const unnamed = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(unrelated).toBe(1);
+		expect(replaced).toBeGreaterThan(1);
+		expect(unnamed).toBeGreaterThan(1);
+	});
+
+	it("should stop watching the project when Rojo exits and watch again after it restarts", async () => {
+		expect.assertions(4);
+
+		const run = startCommand(ATTACHED);
+		await flushAsync();
+
+		expect(run.memory.watch.activeDirectories()).toStrictEqual([PROJECT]);
+
+		run.fake.exit("rojo", EXITED);
+		await flushAsync();
+
+		expect(run.memory.watch.activeDirectories()).toStrictEqual([]);
+
+		await callSessionAsync(run.ipc, CONTROL_TARGET, "addParts", {
+			params: { parts: ["studio"] },
+		});
+
+		expect(run.memory.watch.activeDirectories()).toStrictEqual([PROJECT]);
+
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(run.memory.watch.activeDirectories()).toStrictEqual([]);
+	});
+
+	it("should close the project watch as soon as the session ends", async () => {
+		expect.assertions(1);
+
+		const run = startCommand();
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		const active = run.memory.watch.activeDirectories();
+		await run.result;
+
+		expect(active).toStrictEqual([]);
+	});
+
+	it("should reload the served tree on project edits without replacing the wrapper's root fields", async () => {
+		expect.assertions(2);
+
+		const run = startCommand();
+		await flushAsync();
+		const wrapper = path.join(SESSION, "rojo.project.json");
+		const original = run.memory.fileSystem.readFileSync(wrapper, "utf8");
+		run.memory.setModifiedTime(wrapper, 1);
+		run.memory.fileSystem.writeFileSync(
+			path.join(PROJECT, "default.project.json"),
+			'{"name":"Renamed","servePlaceIds":[99],"tree":{"$className":"DataModel","Content":{"$className":"Folder"}}}',
+		);
+		run.memory.watch.change(PROJECT, "default.project.json");
+		const modified = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+		const current = run.memory.fileSystem.readFileSync(wrapper, "utf8");
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(modified).toBeGreaterThan(1);
+		expect(current).toBe(original);
+	});
+
+	it("should preserve cancellation when a pending Rojo identity request fails", async () => {
+		expect.assertions(2);
+
+		const identity = Promise.withResolvers<Awaited<ReturnType<Network["getRojoInfoAsync"]>>>();
+		const run = startCommand({ getRojoInfo: async () => identity.promise });
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		identity.reject(new Error("request cancelled"));
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+	});
+
+	it("should report a Rojo identity failure without opening Studio", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			getRojoInfo: async () => {
+				throw new Error("HTTP 503");
+			},
+		});
+
+		await expect(run.result).rejects.toMatchObject({
+			code: "process_failed",
+			message: "Could not read Rojo identity on port 4000: HTTP 503",
+		});
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+	});
+
+	it("should escape Rojo identity strings for Lua without adding marker attributes", async () => {
+		expect.assertions(1);
+
+		const name = 'A "quoted" project\\name\\u1234\u0001雪';
+		const run = startCommand({
+			files: {
+				...TOOL_FILES,
+				"default.project.json": JSON.stringify({ name, tree: { $className: "DataModel" } }),
+			},
+			getRojoInfo: async () => {
+				return {
+					projectName: `${name}@${endpointKey(PROJECT, "game.rbxl")}`,
+					protocolVersion: 5,
+					serverVersion: "7.7.1",
+					sessionId: 'id"\\\n',
+				};
+			},
+		});
+		await flushAsync();
+		const marker = run.memory.files()[".forge/sessions/session-1/studio-marker.lua"];
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(marker).toContain(
+			`m:SetAttribute("ProjectName","A \\\"quoted\\\" project\\\\name\\\\u1234\\u{0001}雪@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("ReadyUrl","http://127.0.0.1:50001/ready/test?projectName=Example&sessionId=rojo-session");m:SetAttribute("SessionId","id\\\"\\\\\\n")`,
+		);
+	});
+
+	it("should avoid launching Studio if the session ends while reading Rojo identity", async () => {
+		expect.assertions(2);
+
+		const identity = Promise.withResolvers<Awaited<ReturnType<Network["getRojoInfoAsync"]>>>();
+		const run = startCommand({ getRojoInfo: async () => identity.promise });
+		const writes = vi.spyOn(run.memory.fileSystem, "writeFileSync");
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		identity.resolve({
+			projectName: `Example@${endpointKey(PROJECT, "game.rbxl")}`,
+			protocolVersion: 5,
+			serverVersion: "7.7.1",
+			sessionId: "rojo-session",
+		});
+		await run.result.catch(ignoreFailure);
+
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+		expect(writes.mock.calls.map(([file]) => file)).not.toContain(
+			path.join(SESSION, "studio-marker.lua"),
+		);
+	});
+
+	it("should refuse to launch Studio against a different Rojo project", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({
+			getRojoInfo: async () => {
+				return {
+					projectName: "Other project",
+					protocolVersion: 5,
+					serverVersion: "7.7.1",
+					sessionId: "other",
+				};
+			},
+		});
+
+		await expect(run.result).rejects.toMatchObject({
+			code: "process_failed",
+			message: `Rojo on port 4000 serves Other project, expected Example@${endpointKey(PROJECT, "game.rbxl")}.`,
+		});
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+		expect(run.memory.files()[".forge/sessions/session-1/studio-marker.lua"]).toBeUndefined();
+	});
+
+	it.for(["default.project.json", "default.project.jsonc"])(
+		"should serve a commented %s project with trailing commas",
+		async (projectPath) => {
+			expect.assertions(1);
+
+			const run = startCommand({
+				file: { rojoProjectPath: projectPath },
+				files: {
+					...TOOL_FILES,
+					[projectPath]:
+						'{/* project */ "name":"Example // literal", "servePlaceIds":[10,20,], "tree":{"$className":"DataModel",}, // root\n}',
+				},
+				getRojoInfo: async () => {
+					return {
+						projectName: `Example // literal@${endpointKey(PROJECT, "game.rbxl")}`,
+						protocolVersion: 5,
+						serverVersion: "7.7.1",
+						sessionId: "launch",
+					};
+				},
+			});
+			await flushAsync();
+			const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+			run.signals.fire("SIGINT");
+			await run.result;
+			assert(typeof wrapper === "string");
+
+			expect(JSON.parse(wrapper)).toStrictEqual({
+				name: `Example // literal@${endpointKey(PROJECT, "game.rbxl")}`,
+				servePlaceIds: [10, 20],
+				tree: { $path: path.join(PROJECT, projectPath) },
+			});
+		},
+	);
+
+	it.for<{ expectedName: string; name?: null | string; projectPath: string }>([
+		{ expectedName: path.basename(PROJECT), projectPath: "default.project.json" },
+		{ expectedName: path.basename(PROJECT), projectPath: "default.project.jsonc" },
+		{ expectedName: "nested", projectPath: "nested/default.project.jsonc" },
+		{ expectedName: "named", projectPath: "nested/named.project.json" },
+		{ expectedName: "named", projectPath: "nested/named.project.jsonc" },
+		{ expectedName: "my.game", projectPath: "nested/my.game.project.jsonc" },
+		{ expectedName: "Default", projectPath: "nested/Default.project.json" },
+		{ name: null, expectedName: "nested", projectPath: "nested/default.project.json" },
+		{ name: "", expectedName: "", projectPath: "nested/default.project.jsonc" },
+	])(
+		"should infer the Rojo name for $projectPath",
+		async ({ name, expectedName, projectPath }) => {
+			expect.assertions(1);
+
+			const run = startCommand({
+				file: { rojoProjectPath: projectPath },
+				files: {
+					...TOOL_FILES,
+					[projectPath]: JSON.stringify({ name, tree: { $className: "DataModel" } }),
+				},
+				getRojoInfo: async () => {
+					return {
+						projectName: `${expectedName}@${endpointKey(PROJECT, "game.rbxl")}`,
+						protocolVersion: 5,
+						serverVersion: "7.7.1",
+						sessionId: "launch",
+					};
+				},
+			});
+			await flushAsync();
+			const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+			run.signals.fire("SIGINT");
+			await run.result;
+			assert(typeof wrapper === "string");
+
+			expect(JSON.parse(wrapper)).toMatchObject({
+				name: `${expectedName}@${endpointKey(PROJECT, "game.rbxl")}`,
+			});
+		},
+	);
+
+	it("should serve a wrapper that identifies the worktree without adding an instance", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			files: {
+				...TOOL_FILES,
+				"default.project.json": '{"name":"Example","tree":{"$className":"DataModel"}}',
+			},
+		});
+		await flushAsync();
+		const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		assert(typeof wrapper === "string", "expected a wrapper project");
+
+		expect(JSON.parse(wrapper)).toStrictEqual({
+			name: `Example@${endpointKey(PROJECT, "game.rbxl")}`,
+			tree: { $path: path.join(PROJECT, "default.project.json") },
+		});
+		expect(run.fake.spawned.find(({ id }) => id === "rojo")!.args).toStrictEqual([
+			"serve",
+			path.join(SESSION, "rojo.project.json"),
+			"--port",
+			"4000",
+		]);
+	});
+
+	it("should copy only root serve fields explicitly set in the user's project", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			files: {
+				...TOOL_FILES,
+				"default.project.json": JSON.stringify({
+					name: "Example",
+					emitLegacyScripts: false,
+					gameId: 40,
+					globIgnorePaths: ["*.ignored"],
+					placeId: 30,
+					serveAddress: "0.0.0.0",
+					servePlaceIds: [10, 20],
+					servePort: 1234,
+					tree: { $className: "DataModel" },
+				}),
+			},
+		});
+		await flushAsync();
+		const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		assert(typeof wrapper === "string");
+
+		expect(JSON.parse(wrapper)).toStrictEqual({
+			name: `Example@${endpointKey(PROJECT, "game.rbxl")}`,
+			gameId: 40,
+			placeId: 30,
+			serveAddress: "0.0.0.0",
+			servePlaceIds: [10, 20],
+			servePort: 1234,
+			tree: { $path: path.join(PROJECT, "default.project.json") },
+		});
+	});
+
+	it("should compile and build, then serve Rojo and watch before opening Studio", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({ flags: {}, projectType: "rbxts" });
+		await flushAsync();
+		const marker = run.memory.files()[".forge/sessions/session-1/studio-marker.lua"];
+		run.signals.fire("SIGINT");
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: ",
 			"start-2: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"compiler: -w",
 		]);
 		expect(run.fake.calls[0]).toBe("go");
 		expect(run.studioLauncher).toHaveBeenCalledExactlyOnceWith({
+			beforeLaunch: fromAny(expect.any(Function)),
 			cwd: PROJECT,
 			env: { PATH: TOOLS },
 			place: PLACE,
+			runScript: path.join(SESSION, "studio-marker.lua"),
 		});
+		expect(marker).toBe(
+			`local m=Instance.new("Configuration");m.Name="ROJO_OPEN_"..game:GetService("StudioService"):GetUserId();m.Archivable=false;m:SetAttribute("Host","127.0.0.1");m:SetAttribute("Port","4000");m:SetAttribute("ProjectName","Example@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("ReadyUrl","http://127.0.0.1:50001/ready/test?projectName=Example&sessionId=rojo-session");m:SetAttribute("SessionId","rojo-session");m.Parent=game\n`,
+		);
 	});
 
 	it("should give every worker the project, the environment, and an output file", async () => {
@@ -412,9 +1726,10 @@ describe(runSupervisorAsync, () => {
 	});
 
 	it("should serve only Rojo with no compiler and the Studio that has the place open", async () => {
-		expect.assertions(4);
+		expect.assertions(5);
 
-		const run = await stoppedAsync({ ...ATTACHED, projectType: "rbxts" });
+		const getRojoInfo = vi.fn<Network["getRojoInfoAsync"]>();
+		const run = await stoppedAsync({ ...ATTACHED, getRojoInfo, projectType: "rbxts" });
 
 		await expect(run.result).resolves.toStrictEqual({
 			data: { port: 4000, reason: "SIGINT", reports: [] },
@@ -430,7 +1745,7 @@ describe(runSupervisorAsync, () => {
 		expect(run.fake.spawned).toStrictEqual([
 			{
 				id: "rojo",
-				args: ["serve", "default.project.json", "--port", "4000"],
+				args: ["serve", path.join(SESSION, "rojo.project.json"), "--port", "4000"],
 				cwd: PROJECT,
 				env: { PATH: TOOLS },
 				file: path.join(TOOLS, "rojo"),
@@ -438,6 +1753,7 @@ describe(runSupervisorAsync, () => {
 			},
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
+		expect(getRojoInfo).not.toHaveBeenCalled();
 	});
 
 	it("should run no part with --no-open --no-compiler", async () => {
@@ -483,8 +1799,13 @@ describe(runSupervisorAsync, () => {
 
 		expect(run.reporter.events).toStrictEqual([
 			{
-				message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it.`,
+				message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it as a found Studio: only stop --force and restart --force close it.`,
 				type: "info",
+			},
+			{
+				message:
+					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+				type: "warning",
 			},
 			{ message: `Roblox Studio has ${PLACE} open.`, type: "info" },
 			{ name: "rojo serve", status: "started", type: "step" },
@@ -492,22 +1813,28 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should never open Studio after a stop signal during the build", async () => {
-		expect.assertions(2);
+	it.for<[boolean, string]>([
+		[true, "start-2"],
+		[false, "start-1"],
+	])(
+		"should never open Studio after a stop during the build (compiler: %s)",
+		async ([compiler, build]) => {
+			expect.assertions(2);
 
-		const run: StartRun = startCommand({
-			flags: {},
-			projectType: "rbxts",
-			reaper: {
-				onSpawn: onSpawnOf("start-2", () => {
-					run.signals.fire("SIGINT");
-				}),
-			},
-		});
+			const run: StartRun = startCommand({
+				flags: { compiler },
+				projectType: "rbxts",
+				reaper: {
+					onSpawn: onSpawnOf(build, () => {
+						run.signals.fire("SIGINT");
+					}),
+				},
+			});
 
-		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
-		expect(run.studioLauncher).not.toHaveBeenCalled();
-	});
+			await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
+			expect(run.studioLauncher).not.toHaveBeenCalled();
+		},
+	);
 
 	it("should leave no timer behind once the session ended", async () => {
 		expect.assertions(1);
@@ -529,12 +1856,17 @@ describe(runSupervisorAsync, () => {
 			{ name: "rbxtsc", status: "succeeded", type: "step" },
 			{ name: "rojo build", status: "started", type: "step" },
 			{ name: "rojo build", status: "succeeded", type: "step" },
-			{ name: "open Roblox Studio", status: "started", type: "step" },
-			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
 			{ name: "rojo serve", status: "started", type: "step" },
 			{ name: "rojo serve", status: "succeeded", type: "step" },
 			{ name: "rbxtsc watch", status: "started", type: "step" },
 			{ name: "rbxtsc watch", status: "succeeded", type: "step" },
+			{ name: "open Roblox Studio", status: "started", type: "step" },
+			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
+			{
+				message:
+					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+				type: "warning",
+			},
 			{
 				message:
 					"Rojo serves default.project.json on port 4000. The compiler watches your code. Press Ctrl+C to stop.",
@@ -550,8 +1882,8 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"start-1: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
 		]);
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
@@ -600,7 +1932,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"compiler: watch",
 		]);
 	});
@@ -634,8 +1966,8 @@ describe(runSupervisorAsync, () => {
 		});
 		expect(run.fake.calls).toStrictEqual([
 			"go",
-			"spawn start-1",
 			"spawn rojo",
+			"spawn start-1",
 			"terminate 3000",
 		]);
 	});
@@ -678,7 +2010,7 @@ describe(runSupervisorAsync, () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: ",
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"compiler: -w",
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
@@ -690,7 +2022,7 @@ describe(runSupervisorAsync, () => {
 	});
 
 	it("should say it uses the Studio that has the place open", async () => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const run = await stoppedAsync({
 			files: { ...TOOL_FILES, "game.rbxl.lock": STUDIO_LOCK },
@@ -700,8 +2032,13 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(run.reporter.events).toContainEqual({
-			message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it.`,
+			message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it as a found Studio: only stop --force and restart --force close it.`,
 			type: "info",
+		});
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+			type: "warning",
 		});
 	});
 
@@ -832,12 +2169,13 @@ describe(runSupervisorAsync, () => {
 	});
 
 	it("should keep Rojo starting until its port listens, then report it ready", async () => {
-		expect.assertions(3);
+		expect.assertions(5);
 
 		const answers = [false, false, true];
 		const run = startCommand({ isListening: async () => answers.shift()! });
 		await flushAsync();
 		const before = stateOf(run);
+		const launchesBeforeListening = run.studioLauncher.mock.calls.length;
 		// Each pass wakes the check once.
 		await passAsync(run, 2 * OUTPUT_POLL_MS);
 		const after = stateOf(run);
@@ -853,6 +2191,8 @@ describe(runSupervisorAsync, () => {
 			services: { rojo: { status: "ready" } },
 		});
 		expect(run.isListeningAsync).toHaveBeenCalledWith(4000);
+		expect(launchesBeforeListening).toBe(0);
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
 
 	it("should not report Rojo ready when a stop signal came while it checked the port", async () => {
@@ -917,11 +2257,17 @@ describe(runSupervisorAsync, () => {
 		const state = stateOf(run);
 		run.signals.fire("SIGINT");
 
-		expect(stopped.at(-1)).toBe("stop rojo 3000");
+		expect([stopped.at(-1), run.studioLauncher.mock.calls]).toStrictEqual([
+			"stop rojo 3000",
+			[],
+		]);
 		expect(state).toMatchObject({
 			phase: "ready",
 			running: true,
-			services: { rojo: { exitCode: null, outputTail: [], status: "failed" } },
+			services: {
+				rojo: { exitCode: null, outputTail: [], status: "failed" },
+				studio: { status: "off" },
+			},
 		});
 		expect(run.reporter.events).toContainEqual({
 			message: `rojo did not listen on port 4000 within 60 s; the session goes on without it. Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
@@ -1197,7 +2543,7 @@ describe(runSupervisorAsync, () => {
 
 		await expect(run.result).resolves.toMatchObject({ data: { port: FREE_PORT } });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve default.project.json --port ${FREE_PORT}`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
 		]);
 	});
 
@@ -1222,7 +2568,13 @@ describe(runSupervisorAsync, () => {
 		const { data } = await run.result;
 
 		expect(Object.keys(data)).not.toContain("escalation");
-		expect(run.reporter.events.filter(({ type }) => type === "warning")).toStrictEqual([]);
+		expect(run.reporter.events.filter(({ type }) => type === "warning")).toStrictEqual([
+			{
+				message:
+					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+				type: "warning",
+			},
+		]);
 	});
 
 	it.for([
@@ -1300,7 +2652,7 @@ describe("forge start hooks and syncback", () => {
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 		]);
 	});
 
@@ -1790,6 +3142,7 @@ describe("forge up control channel", () => {
 				compiler: { building: false, owner: null, status: "off" },
 				rojo: { owner: null, port: 4000, status: "ready" },
 				studio: {
+					origin: "found",
 					owner: null,
 					pid: STUDIO_PID,
 					place: PLACE,
@@ -2248,7 +3601,7 @@ describe("forge up parts", () => {
 
 		expect(answer).toStrictEqual({ added: ["compiler"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"compiler: -w",
 		]);
 		expect([before, after]).toMatchObject([
@@ -2359,15 +3712,132 @@ async function attachAsync(
 		studio: { pid: LAUNCHED_PID, startTime: "900" },
 		type: "launched",
 	});
+	const launches = run.studioLauncher.mock.calls.length;
 	const answer = askAddAsync(run, parameters);
-	await passAsync(run, FILE_POLL_MS);
+	// A lock file before the launch would make it a found Studio.
+	await vi.waitFor(async () => {
+		await passAsync(run, FILE_POLL_MS);
+		assert(run.studioLauncher.mock.calls.length > launches, "Studio is launched");
+	});
+
 	run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
 	await passAsync(run, FILE_POLL_MS);
 	return answer;
 }
 
+/**
+ * Attach the Studio that has the place open (`ATTACHED`): a found Studio.
+ *
+ * @param run - The session.
+ * @returns The add's answer.
+ */
+async function attachFoundAsync(run: StartRun): Promise<unknown> {
+	let isAnswered = false;
+	const answer = askAddAsync(run, STUDIO).finally(() => {
+		isAnswered = true;
+	});
+	await vi.waitFor(async () => {
+		await passAsync(run, FILE_POLL_MS);
+		assert(isAnswered, "the add answered");
+	});
+	return answer;
+}
+
 describe("forge up --studio", () => {
-	it("should build the place, open Studio, and serve Rojo, then answer once both are ready", async () => {
+	it("should stop the Rojo it starts when Studio cannot launch", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		run.studioLauncher.mockResolvedValue({ message: "Studio is missing", type: "failed" });
+		const answer = await askAddAsync(run, STUDIO);
+		const callsAfterFailure = [...run.fake.calls];
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toMatchObject({ code: "studio_launch_failed" });
+		expect(callsAfterFailure).toContain("stop rojo 3000");
+		expect(state).toMatchObject({
+			services: { rojo: { status: "off" }, studio: { status: "off" } },
+		});
+	});
+
+	it("should wait for the initial Studio launch when an attach arrives while Rojo starts", async () => {
+		expect.assertions(3);
+
+		const listening = Promise.withResolvers<boolean>();
+		const run = startCommand({ isListening: async () => listening.promise });
+		await flushAsync();
+		const answer = askAddAsync(run, STUDIO);
+		await flushAsync();
+		const launchesBeforeListening = run.studioLauncher.mock.calls.length;
+		listening.resolve(true);
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(launchesBeforeListening).toBe(0);
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+		await expect(answer).resolves.toStrictEqual({ added: [] });
+	});
+
+	it("should report a Rojo failure without launching Studio when Rojo never listens", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ flags: UP, isListening: async () => false });
+		await flushAsync();
+		const answer = askAddAsync(run, STUDIO);
+		await flushAsync();
+		await passAsync(run, ROJO_LISTEN_BOUND_MS);
+		run.fake.exit("rojo", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+		await expect(answer).resolves.toMatchObject({
+			code: "process_failed",
+			message: "Rojo did not become ready on port 4000; Studio was not launched.",
+		});
+		expect(run.reporter.events).toContainEqual(
+			expect.objectContaining({
+				message: `rojo did not listen on port 4000 within 60 s; the session goes on without it. Its output is in ${path.join(PROJECT, ".forge", "logs", "rojo.log")}.`,
+				type: "warning",
+			}),
+		);
+	});
+
+	it("should launch Studio only after its Rojo listens", async () => {
+		expect.assertions(3);
+
+		const listening = Promise.withResolvers<boolean>();
+		const run = startCommand({ flags: UP, isListening: async () => listening.promise });
+		await flushAsync();
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: LAUNCHED_PID, startTime: "900" },
+			type: "launched",
+		});
+		const answer = askAddAsync(run, STUDIO);
+		await flushAsync();
+		const launchesBeforeListening = run.studioLauncher.mock.calls.length;
+		listening.resolve(true);
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(launchesBeforeListening).toBe(0);
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
+	});
+
+	it("should serve Rojo before building and opening Studio, then answer once both are ready", async () => {
 		expect.assertions(4);
 
 		const run = startCommand({ flags: UP });
@@ -2379,8 +3849,8 @@ describe("forge up --studio", () => {
 
 		expect(answer).toStrictEqual({ added: ["studio", "rojo"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"start-1: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
 		]);
 		expect(run.studioLauncher).toHaveBeenCalledExactlyOnceWith(
 			expect.objectContaining({ place: PLACE, studioPath: "/opt/Studio" }),
@@ -2410,7 +3880,7 @@ describe("forge up --studio", () => {
 
 		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			"rojo: serve default.project.json --port 4000",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
@@ -2466,10 +3936,39 @@ describe("forge up --studio", () => {
 
 		expect([first, repair]).toStrictEqual([{ added: ["studio", "rojo"] }, { added: ["rojo"] }]);
 		expect(spawnedIds(run.fake).filter((id) => id.startsWith("rojo"))).toStrictEqual([
-			`rojo: serve default.project.json --port ${FREE_PORT}`,
-			`rojo: serve default.project.json --port ${FREE_PORT}`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
 		]);
 		expect(result.data).toMatchObject({ port: FREE_PORT });
+	});
+
+	it("should refresh root serve fields only when Rojo starts again", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...ATTACHED });
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(
+			path.join(PROJECT, "default.project.json"),
+			JSON.stringify({
+				name: "Example",
+				gameId: 60,
+				servePlaceIds: [50],
+				tree: { $className: "DataModel" },
+			}),
+		);
+		const before = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		run.fake.exit("rojo", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		const repair = await askAddAsync(run, { parts: [] });
+		const after = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		assert(typeof before === "string" && typeof after === "string");
+
+		expect(JSON.parse(before)).not.toHaveProperty("gameId");
+		expect(JSON.parse(after)).toMatchObject({ gameId: 60, servePlaceIds: [50] });
+		expect(repair).toStrictEqual({ added: ["rojo"] });
 	});
 
 	it("should add nothing while Studio and its Rojo run", async () => {
@@ -2533,6 +4032,24 @@ describe("forge up --studio", () => {
 		});
 	});
 
+	it("should warn that an existing Studio attached to a running supervisor needs manual synchronization", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...ATTACHED, flags: UP });
+		await flushAsync();
+		const answer = await askAddAsync(run, STUDIO);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: ["studio", "rojo"] });
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+			type: "warning",
+		});
+	});
+
 	it("should attach Studio to a session whose Rojo runs, and start no second Rojo", async () => {
 		expect.assertions(2);
 
@@ -2563,7 +4080,7 @@ describe("forge up --studio", () => {
 
 		await expect(answer).resolves.toMatchObject({
 			code: "studio_launch_failed",
-			hint: 'The session keeps waiting for it; check "forge status".',
+			hint: 'Check "forge status" and Studio\'s Rojo connection.',
 			message: `Roblox Studio did not open ${PLACE} within 180 s.`,
 		});
 		expect(state).toMatchObject({
@@ -2714,8 +4231,8 @@ describe("forge sync control channel", () => {
 			project: "default.project.json",
 		});
 		expect(spawnedIds(run.fake)).toStrictEqual([
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 			"start-1: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
 			"syncback-1: syncback --help",
 			"syncback-2: syncback default.project.json --input game.rbxl --non-interactive",
 			"syncback-3: -c lint",
@@ -2939,6 +4456,54 @@ describe("forge down control channel", () => {
 
 		await expect(answer).resolves.toMatchObject({ ending: true, stopped: ["studio", "rojo"] });
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
+	});
+});
+
+describe("forge down and a found Studio", () => {
+	it("should let a found Studio go, open, stop its Rojo, and end", async () => {
+		expect.assertions(4);
+
+		const run = startCommand({ ...ATTACHED, flags: UP });
+		await flushAsync();
+		await attachFoundAsync(run);
+		const attached = stateOf(run);
+		const answer = callSessionAsync(run.ipc, CONTROL_TARGET, "stopParts", {
+			params: { scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await vi.waitFor(async () => {
+			await passAsync(run, OUTPUT_POLL_MS);
+			assert(run.fake.calls.includes("stop rojo 3000"), "Rojo is asked to stop");
+		});
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		expect(attached).toMatchObject({
+			services: { studio: { origin: "found", pid: STUDIO_PID, status: "open" } },
+		});
+		await expect(answer).resolves.toStrictEqual({
+			ending: true,
+			foundStudio: true,
+			kept: [],
+			stopped: ["rojo"],
+		});
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
+		expect(run.native.processes.get(STUDIO_PID)).toMatchObject({ alive: true });
+	});
+
+	it("should report a Studio the session opened as its own", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		await attachAsync(run);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(state).toMatchObject({
+			services: { studio: { origin: "forge", pid: LAUNCHED_PID, status: "open" } },
+		});
 	});
 });
 
@@ -3229,6 +4794,32 @@ describe("forge start owners", () => {
 		expect(closed).toStrictEqual(left);
 	});
 
+	it("should keep a found Studio found once a joined start gives it back", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...ATTACHED, flags: UP });
+		await flushAsync();
+		await attachFoundAsync(run);
+		const owned = await joinAsync(run, ["studio"]);
+		const taken = stateOf(run);
+		await letGoAsync(owned, run);
+		const released = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(owned.joined).toStrictEqual({
+			added: [],
+			sessionId: "session-1",
+			taken: ["studio", "rojo"],
+		});
+		expect(taken).toMatchObject({
+			services: { studio: { origin: "found", owner: "start", status: "open" } },
+		});
+		expect(released).toMatchObject({
+			services: { studio: { origin: "found", owner: null, status: "open" } },
+		});
+	});
+
 	it("should give back what a join took when its add fails, and let the next start join", async () => {
 		expect.assertions(3);
 
@@ -3430,6 +5021,28 @@ describe("idle timeout", () => {
 		expect(isEnded()).toBeTrue();
 	});
 
+	it("should let a found Studio go, open, stop its Rojo, and end the up session", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...IDLE_UP, ...ATTACHED });
+		await flushAsync();
+		await attachFoundAsync(run);
+		await jumpAsync(run, MINUTE_MS);
+		await vi.waitFor(async () => {
+			await passAsync(run, OUTPUT_POLL_MS);
+			assert(run.fake.calls.includes("stop rojo 3000"), "Rojo is asked to stop");
+		});
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
+		expect(run.native.processes.get(STUDIO_PID)).toMatchObject({ alive: true });
+		expect(run.reporter.events).toContainEqual({
+			message: "No activity for 1 min: stopped rojo.",
+			type: "info",
+		});
+	});
+
 	it("should start the time again on each Studio save, then close Studio", async () => {
 		expect.assertions(2);
 
@@ -3529,6 +5142,85 @@ describe("forge restart control channel", () => {
 		});
 	});
 
+	it("should keep a found Studio, and restart the compiler, then Rojo on its port", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...ATTACHED, flags: UP, projectType: "rbxts" });
+		const compilerLog = path.join(SESSION, "output", "compiler.log");
+		const built = "Found 0 errors. Watching for file changes.\n";
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(compilerLog, built);
+		await passAsync(run, OUTPUT_POLL_MS);
+		await attachFoundAsync(run);
+		const before = spawnedIds(run.fake).length;
+		const answer = askRestartAsync(run);
+		await exitOnStopAsync(run, "rojo");
+		await exitOnStopAsync(run, "compiler");
+		await passAsync(run, 2 * FILE_POLL_MS);
+		run.memory.fileSystem.writeFileSync(compilerLog, built);
+		await passAsync(run, 2 * FILE_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(spawnedIds(run.fake).slice(before)).toStrictEqual([
+			"compiler: -w",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+		]);
+		await expect(answer).resolves.toStrictEqual({
+			added: ["compiler", "rojo"],
+			foundStudio: true,
+			kept: [],
+			stopped: ["rojo", "compiler"],
+		});
+		expect(state).toMatchObject({
+			phase: "ready",
+			services: {
+				compiler: { status: "ready" },
+				rojo: { port: 4000, status: "ready" },
+				studio: { origin: "found", pid: STUDIO_PID, status: "open" },
+			},
+		});
+	});
+
+	it("should close a found Studio with force, and open the place again", async () => {
+		expect.assertions(2);
+
+		const found: FakeProcess = {
+			alive: true,
+			executablePath: "/opt/RobloxStudio",
+			startTime: "0",
+		};
+		const run = startCommand({ ...ATTACHED, flags: UP, processes: { [STUDIO_PID]: found } });
+		found.onClose = () => {
+			run.memory.fileSystem.rmSync(LOCK);
+		};
+
+		await flushAsync();
+		await attachFoundAsync(run);
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: RELAUNCHED_PID, startTime: "901" },
+			type: "launched",
+		});
+		const answer = askRestartAsync(run, { force: true });
+		await exitOnStopAsync(run, "rojo");
+		await passAsync(run, FILE_POLL_MS);
+		run.memory.fileSystem.writeFileSync(LOCK, RELAUNCHED_LOCK);
+		await passAsync(run, FILE_POLL_MS);
+		const state = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		await expect(answer).resolves.toMatchObject({
+			added: ["studio", "rojo"],
+			kept: [],
+			stopped: ["studio", "rojo"],
+		});
+		expect(state).toMatchObject({
+			services: { studio: { origin: "forge", pid: RELAUNCHED_PID, status: "open" } },
+		});
+	});
+
 	it("should start nothing again when the compiler's tree left processes", async () => {
 		expect.assertions(3);
 
@@ -3621,8 +5313,8 @@ describe("forge restart control channel", () => {
 		expect(beforeBuild).toStrictEqual(["compiler: -w"]);
 		expect(spawnedIds(run.fake).slice(before)).toStrictEqual([
 			"compiler: -w",
-			"start-1: build default.project.json --output game.rbxl",
-			"rojo: serve default.project.json --port 4000",
+			"start-2: build default.project.json --output game.rbxl",
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
 		]);
 		await expect(answer).resolves.toMatchObject({
 			added: ["compiler", "studio", "rojo"],

@@ -15,6 +15,7 @@ import {
 	makeFixtureAsync,
 	startReadyAsync,
 	startSession,
+	STUDIO_PLUGIN_INSTALL,
 	waitForOutputAsync,
 } from "./session-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
@@ -64,11 +65,12 @@ describe("attach an open Studio", () => {
 		const place = JSON.stringify(fixture.place).slice(1, -1);
 
 		expect(second.stdout()).toContain(
-			`Roblox Studio (PID ${studio!.pid}) already has ${place} open, so the session uses it.`,
+			`Roblox Studio (PID ${studio!.pid}) already has ${place} open, so the session uses it as a found Studio`,
 		);
-		// One build and one Studio, both from the first start.
+		// Only the first start builds, installs the plugin, and launches Studio.
 		expect(rolesOf(fixture).filter((role) => !role.startsWith("rojo serve"))).toStrictEqual([
 			expect.stringMatching(/^rojo build /),
+			...STUDIO_PLUGIN_INSTALL,
 			expect.stringMatching(/^studio/),
 		]);
 	});

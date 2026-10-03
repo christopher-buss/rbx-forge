@@ -25,6 +25,8 @@ import type { Signals } from "../../src/seams/signals.ts";
 import type { StudioLauncher } from "../../src/studio/launcher.ts";
 import type { DetachedLauncher } from "../../src/supervisor/detached-launcher.ts";
 import type { SupervisorLauncher } from "../../src/supervisor/launcher.ts";
+import { createFakeFileWatch } from "./fake-file-watch.ts";
+import type { FakeFileWatch } from "./fake-file-watch.ts";
 
 /** The project directory of every in-memory test project. */
 export const PROJECT: string = path.resolve("/project");
@@ -39,6 +41,7 @@ export interface MemoryFileSystem {
 	fileSystem: FileSystem;
 	/** Set a file's modification time, in milliseconds since the Unix epoch. */
 	setModifiedTime: (file: string, mtimeMs: number) => void;
+	watch: FakeFileWatch;
 }
 
 /** A reporter that records every call. */
@@ -58,15 +61,17 @@ export interface RecordingReporter extends Reporter {
 export function createMemoryFileSystem(files: Record<string, string> = {}): MemoryFileSystem {
 	const { fs, vol } = memfs(files, PROJECT);
 	vol.mkdirSync(PROJECT, { recursive: true });
+	const watch = createFakeFileWatch();
 
 	return {
 		files: () => vol.toJSON(PROJECT, {}, true),
 		// memfs implements the members the seam picks; its typings lag
 		// `@types/node` under `exactOptionalPropertyTypes`.
-		fileSystem: fromAny(fs),
+		fileSystem: fromAny({ ...fs, watch: watch.watch }),
 		setModifiedTime: (file, mtimeMs) => {
 			vol.utimesSync(path.resolve(PROJECT, file), mtimeMs / 1000, mtimeMs / 1000);
 		},
+		watch,
 	};
 }
 
@@ -161,8 +166,12 @@ function unreachable(seam: string): () => never {
 function unreachableNetwork(): Network {
 	return {
 		freePortAsync: vi.fn<Network["freePortAsync"]>(unreachable("network")),
+		getRojoInfoAsync: vi.fn<Network["getRojoInfoAsync"]>(unreachable("network")),
 		isListeningAsync: vi.fn<Network["isListeningAsync"]>(unreachable("network")),
 		isPortFreeAsync: vi.fn<Network["isPortFreeAsync"]>(unreachable("network")),
+		listenForStudioReadyAsync: vi.fn<Network["listenForStudioReadyAsync"]>(
+			unreachable("network"),
+		),
 	};
 }
 

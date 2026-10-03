@@ -220,6 +220,9 @@ catalogs:
       specifier: 3.10.5
       version: 3.10.5
   runtime:
+    '@msgpack/msgpack':
+      specifier: 3.1.3
+      version: 3.1.3
     arktype:
       specifier: 2.2.3
       version: 2.2.3
@@ -229,6 +232,9 @@ catalogs:
     jiti:
       specifier: 2.7.0
       version: 2.7.0
+    strip-json-comments:
+      specifier: 5.0.3
+      version: 5.0.3
   test:
     '@total-typescript/shoehorn':
       specifier: 0.1.2
@@ -279,6 +285,9 @@ importers:
 
   .:
     dependencies:
+      '@msgpack/msgpack':
+        specifier: catalog:runtime
+        version: 3.1.3
       arktype:
         specifier: catalog:runtime
         version: 2.2.3
@@ -288,6 +297,9 @@ importers:
       jiti:
         specifier: catalog:runtime
         version: 2.7.0
+      strip-json-comments:
+        specifier: catalog:runtime
+        version: 5.0.3
     devDependencies:
       '@isentinel/eslint-config':
         specifier: catalog:lint
@@ -372,6 +384,10 @@ importers:
         version: 5.0.1(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(vite@8.3.0)
 
 packages:
+
+  '@msgpack/msgpack@3.1.3':
+    resolution: {integrity: sha512-47XIizs9XZXvuJgoaJUIE2lFoID8ugvc0jzSHP+Ptfk8nTbnR8g788wv48N03Kx0UkAv559HWRQ3yzOgzlRNUA==}
+    engines: {node: '>= 18'}
 
   '@altano/repository-tools@2.1.1':
     resolution: {integrity: sha512-YFVhwoSjwkERQoopw3lX/TaPIDud0m6ac/Z51FoQ3YEPf0OaxFxpofbcHO0E2mTJ0lvmuRArIMUP9Pz2jpTMhg==}
@@ -5181,6 +5197,8 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@msgpack/msgpack@3.1.3': {}
 
   '@altano/repository-tools@2.1.1': {}
 

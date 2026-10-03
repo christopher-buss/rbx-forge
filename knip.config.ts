@@ -8,8 +8,8 @@ export default {
 		"scripts/worktree/{create,remove}.ts",
 	],
 	ignore: [".agents/**"],
-	// Windows tools the opt-in real Studio test runs.
-	ignoreBinaries: ["tasklist"],
+	// External tools exercised by integration and opt-in Studio tests.
+	ignoreBinaries: ["luau", "rojo", "tasklist"],
 	ignoreDependencies: [
 		// Ambient lib replacement through `libReplacement`.
 		"better-typescript-lib",

@@ -24,7 +24,7 @@ export const STOP_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
 		name: "force",
 		kind: "boolean",
-		text: "Close a Studio that a forge start terminal owns too.",
+		text: "Close a Studio that a forge start terminal owns, or that already had the place open when the session attached it, too.",
 	},
 	{
 		name: "place",
@@ -63,8 +63,10 @@ interface SessionAnswer {
  * it asks the session to close its Studio (waiting while it is still
  * opening) and stop that Studio's Rojo; the compiler keeps running, and a
  * session with no part left ends. A Studio that a `forge start` terminal
- * owns stays, unless `--force`. With no session Studio (or another place
- * in `--place`), it closes the Studio the place's lock file names. Studio
+ * owns stays, unless `--force`; so does a found Studio, one that already
+ * had the place open when the session attached it. With no session Studio
+ * (or another place in `--place`), it closes the Studio the place's lock
+ * file names. Studio
  * gets a close request; forge ends it once it closed the place, at once
  * when a dialog blocks it, and else after {@link STUDIO_CLOSE_MS}, without
  * a save (`closeStudioAsync`). It acts only on a Studio its identity check
@@ -81,6 +83,7 @@ interface SessionAnswer {
  *   stopped and kept (`null` with no session), and the same for each
  *   snapshot Studio (`snapshots`).
  * @rejects `studio_owned` when a `forge start` terminal owns the Studio;
+ *   `studio_found` when the session's Studio is a found Studio;
  *   `session_stopping` when the session stops while `stop` asks it, and
  *   the failure of a session that does not answer the stop (such as
  *   `supervisor_unresponsive`): a Studio then may be the session's;
@@ -119,7 +122,7 @@ export async function runStopAsync(
 	}
 
 	if (answer !== undefined) {
-		requireUnowned(answer);
+		requireNotKept(answer);
 	}
 
 	const place =
@@ -293,31 +296,38 @@ async function askSessionAsync(
 }
 
 /**
- * Fail when the session kept its Studio because it has an owner.
+ * Fail when the session kept its Studio: it has an owner, or it is a found
+ * Studio.
  *
  * @param answer - What the session did, and its Studio before.
- * @throws {ForgeError} `studio_owned`, naming the owner.
+ * @throws {ForgeError} `studio_owned`, naming the owner; `studio_found`.
  */
-function requireUnowned({ session, stops, studio }: SessionAnswer): void {
-	const owned = stops.kept.find(({ part }) => part === "studio");
-	if (owned === undefined) {
+function requireNotKept({ session, stops, studio }: SessionAnswer): void {
+	const kept = stops.kept.find(({ part }) => part === "studio");
+	if (kept === undefined && stops.foundStudio !== true) {
 		return;
 	}
 
 	const { sessionId } = session.identity;
 	const pid = studio.pid === undefined ? "" : ` (PID ${studio.pid})`;
+	const details = {
+		...(studio.pid === undefined ? {} : { pid: studio.pid }),
+		...(studio.place === undefined ? {} : { place: studio.place }),
+		sessionId,
+	};
+	const hint = 'Close it in Studio, or run "forge stop --force".';
+	if (kept === undefined) {
+		throw new ForgeError(
+			"studio_found",
+			`Roblox Studio${pid} of session ${sessionId} already had the place open when the session attached it, so forge leaves it open.`,
+			{ details, hint },
+		);
+	}
+
 	throw new ForgeError(
 		"studio_owned",
-		`Roblox Studio${pid} of session ${sessionId} has an owner: the forge ${owned.owner} terminal.`,
-		{
-			details: {
-				owner: owned.owner,
-				...(studio.pid === undefined ? {} : { pid: studio.pid }),
-				...(studio.place === undefined ? {} : { place: studio.place }),
-				sessionId,
-			},
-			hint: 'Close it in Studio, or run "forge stop --force".',
-		},
+		`Roblox Studio${pid} of session ${sessionId} has an owner: the forge ${kept.owner} terminal.`,
+		{ details: { owner: kept.owner, ...details }, hint },
 	);
 }
 

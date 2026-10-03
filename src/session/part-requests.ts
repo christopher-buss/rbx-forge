@@ -25,6 +25,8 @@ export type PartAdder = (request: PartRequest) => Promise<Array<PartId>>;
 /** What the session body adds, stops, and hands over parts with. */
 export interface PartHandlers extends OwnerHandlers {
 	add: PartAdder;
+	/** Interrupt a readiness wait before a stop enters the serialized queue. */
+	beforeStop?: (request: Parameters<PartStopper>[0]) => void;
 	restart: PartRestarter;
 	stop: PartStopper;
 }
@@ -140,7 +142,15 @@ export function createPartRequests(): PartRequests {
 		restartAsync: async (request) => {
 			return whenAttachedAsync(link, async ({ restart }) => restart(request));
 		},
-		stopAsync: async (request) => whenAttachedAsync(link, async ({ stop }) => stop(request)),
+		stopAsync: async (request) => {
+			if (link.isClosed) {
+				throw stopping();
+			}
+
+			const handlers = link.handlers ?? (await waitForHandlersAsync(link.attached, link));
+			handlers.beforeStop?.(request);
+			return whenAttachedAsync(link, async ({ stop }) => stop(request));
+		},
 	};
 }
 

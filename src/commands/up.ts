@@ -19,6 +19,7 @@ import type { ForgeFiles } from "../supervisor/session-files.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 import { START_FLAGS } from "./start.ts";
+import { isStudioReady, studioCancelled } from "./up-studio.ts";
 
 export const UP_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
@@ -69,6 +70,7 @@ interface UpState {
 	/** The parts a session added for this `up`; unset until it asked. */
 	added: Array<PartId> | undefined;
 	deadline: number;
+	hasRequestedStudio: boolean;
 	/** When a session last answered, or when `up` began to wait for one. */
 	lastAnswer: number;
 	launched: Launched | undefined;
@@ -145,6 +147,7 @@ export async function runUpAsync(
 	const state: UpState = {
 		added: undefined,
 		deadline: now + UP_TIMEOUT_MS,
+		hasRequestedStudio: false,
 		lastAnswer: now,
 		launched:
 			found === undefined ? launch(context, forgeFiles(context.cwd), request) : undefined,
@@ -276,7 +279,7 @@ function checkLaunched(context: CommandContext, state: UpState): void {
 	if (result === undefined) {
 		if (!isAlive) {
 			forget(context, launched);
-			throw crashed(context);
+			throw state.hasRequestedStudio ? studioCancelled() : crashed(context);
 		}
 
 		return;
@@ -324,6 +327,7 @@ async function addOnceAsync(
 
 	try {
 		// The session answers once its own parts started: a whole startup.
+		state.hasRequestedStudio = state.wanted.parts.includes("studio");
 		state.added = await addPartsAsync(context.seams.ipc, session, state.wanted, UP_TIMEOUT_MS);
 	} catch (err) {
 		// The session ended meanwhile: wait for the next one, as for silence.
@@ -354,7 +358,11 @@ async function probeReadyAsync(
 	}
 
 	state.lastAnswer = context.seams.clock.now();
-	if ((await addOnceAsync(context, state, found)) || !isReady(found.status)) {
+	if (
+		(await addOnceAsync(context, state, found)) ||
+		!isReady(found.status) ||
+		!isStudioReady(found.status, state.wanted)
+	) {
 		return undefined;
 	}
 

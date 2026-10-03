@@ -19,6 +19,7 @@ import {
 } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
 import {
+	autoSavesUnder,
 	closedOnRequest,
 	IS_MACOS,
 	IS_WINDOWS,
@@ -38,17 +39,6 @@ const REAP_MS = 2000;
  * limit.
  */
 const BLOCKED_END = IS_WINDOWS ? "dialog" : "timeout";
-
-/**
- * The AutoSaves folder the stand-in writes to, under a scratch home.
- *
- * @param home - `LOCALAPPDATA` (Windows) or `HOME` (macOS).
- * @returns The folder.
- */
-function autoSavesUnder(home: string): string {
-	const root = IS_WINDOWS ? home : path.join(home, "Library", "Application Support");
-	return path.join(root, "Roblox", "RobloxStudio", "AutoSaves");
-}
 
 /**
  * The session files left in the project.

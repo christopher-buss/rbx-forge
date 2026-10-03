@@ -76,10 +76,11 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { createServer } from "node:net";
+import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
 
+import { fixtureRojoInfo } from "./rojo-info.ts";
 import { launchStudio, runStudio } from "./studio-stand-in.ts";
 import { runWatchCompiler } from "./watch-compiler.ts";
 
@@ -322,8 +323,8 @@ function listenOnPort(): void {
 
 	setTimeout(
 		() => {
-			const server = createServer((socket) => {
-				socket.destroy();
+			const server = createServer((_request, response) => {
+				response.end(fixtureRojoInfo(ARGS[1] ?? "", ROJO_VERSION));
 			});
 			server.on("error", (err) => {
 				process.stderr.write(`listen failed: ${err.message}\n`);

@@ -14,6 +14,6 @@
 		"isolatedDeclarations": true,
 		"rewriteRelativeImportExtensions": true
 	},
-	"include": ["src/**/*.ts", "package.json"],
+	"include": ["src/**/*.ts", "src/**/*.json", "package.json"],
 	"exclude": ["src/**/*.spec.ts", "src/**/*.spec-d.ts"]
 }

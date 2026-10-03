@@ -41,7 +41,10 @@ export function readWorkerLog(logFile: string): Array<WorkerRecord> {
 		return [];
 	}
 
-	return readFileSync(logFile, "utf8")
+	const content = readFileSync(logFile, "utf8");
+	// A live append becomes a record only at its terminating newline.
+	return content
+		.slice(0, content.lastIndexOf("\n") + 1)
 		.split("\n")
 		.filter((line) => line.length > 0)
 		.map((line) => {

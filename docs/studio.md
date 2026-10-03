@@ -6,9 +6,19 @@ auto-recovery files.
 
 ## Opening Studio
 
-`open`, `start`, and `up --studio` start the Studio executable directly, with
-the place as its only argument, as a double-click on the place does. Studio runs
-outside every process group and job of forge, so it outlives forge. The session
+`start` and `up --studio` start Rojo and wait until it listens before launching
+a new Studio. If Rojo fails to listen, forge reports its failure and launches no
+Studio. A Studio that already has the place open is attached as before.
+
+`open`, `start`, and `up --studio` start the Studio executable directly. A new
+session Studio uses `--task RunScript --localPlaceFile <place> --runScriptFile
+<script>` to create a non-archivable `ROJO_OPEN_<UserId>` configuration under
+`game`. Its attributes identify the session's Rojo host, port, session id, and
+worktree project name, plus a temporary loopback readiness callback. Forge checks
+that Rojo serves the generated wrapper before writing the script. The managed
+plugin consumes the marker and connects without a confirmation dialog. A snapshot
+opens with the place as its only argument, as a double-click on the place does.
+Studio runs outside every process group and job of forge, so it outlives forge. The session
 records the Studio process's PID and start time, so `stop` and `down` can verify
 it later. forge finds the executable in this order:
 
@@ -24,7 +34,7 @@ A path from 1 or 2 that is not a file fails with `studio_launch_failed`.
 When forge finds no executable, or the terminal's job forbids breakaway
 (Windows), it opens the place through the platform launcher (`start`, `open`,
 `xdg-open`). The session then has no PID for Studio, and finds it only through
-the place's lock file.
+the place's lock file. The platform launcher passes no marker script.
 
 `open` builds a snapshot, a copy of the place, into
 `.forge/snapshots/<time>_<place>` and opens it, with no session and no Rojo. A
@@ -42,6 +52,74 @@ closed the place when the lock file goes or names another process. For a Studio
 that a `start` owns, nothing then stops; for a Studio with no owner, only its
 Rojo stops. The end of `start` never closes Studio: a Studio it opened leaves
 the session and stays open.
+
+A Studio that the session attached this way is a found Studio:
+`data.services.studio.origin` is `found` (`forge` for a Studio the session
+opened), also after a `start` took it and gave it back. Only `stop --force` and
+`restart --force` close a found Studio. `down` and the idle timeout stop its
+Rojo and let it go, open, and touch none of its auto-recovery files; `restart`
+keeps it, and starts the compiler and Rojo again on the same port; `stop` fails
+with `studio_found`.
+
+## Managed Rojo plugin
+
+After a successful place build, immediately before attempting a new direct
+session launch, forge prepares `RojoManagedPlugin.rbxm` in the Studio Plugins
+folder. Windows uses `%USERPROFILE%\AppData\Local\Roblox\Plugins`; macOS uses
+`~/Documents/Roblox/Plugins`. A missing managed plugin is installed with the
+project's Rojo command. Forge supports Rojo 7.7 and later; the recognized stock
+sources of 7.7.0 and 7.7.1 share one patch. Unknown or manually edited sources,
+unreadable sources, and newer forge patches are preserved with manual connection
+guidance. Upstream launch-marker support is preserved too; its confirmation
+dialog may still need accepting in Studio.
+
+Both script sources are replaced atomically. A current coherent pair is left
+alone, because writing the file can reload the plugin in an open Studio. The
+patch connects only when the server's project name and initial session id match
+the launch marker. It accepts that project's initial patch and renames `game`
+to the wrapper name, as stock Rojo does. A plugin/server protocol mismatch fails with
+`plugin_protocol_mismatch` (exit 7); an atomic write failure uses
+`plugin_write_failed` (exit 8).
+
+After an unexpected disconnect, the patch keeps the launch marker's host, port,
+and worktree project name and polls that same address every second. A restarted
+Rojo with the expected project name reconnects without a dialog, using its fresh
+session id; initial synchronization includes edits made while Rojo was down. A
+different project is refused before any data applies, with one notice per server
+session id while polling continues. Editing the widget's address does not retarget
+this reconnect. A manual Disconnect stops polling, including during downtime or
+a pending request.
+
+The patch is on by default, with no config option or restore command. Run the
+project's `rojo plugin install` to restore the stock plugin. Creator Store
+plugins are outside this managed file and are not patched. Existing attached
+Studios, `forge open` snapshots, and launches with no discoverable executable
+do not prepare the plugin. If Windows denies breakaway after the direct launch
+attempt, the plugin may already be prepared; the platform fallback receives no
+marker and needs manual connection.
+
+Sessions serve only their generated `.forge/sessions/<id>/rojo.project.json`
+wrapper, which names the worktree and points at the original project with
+`$path`. Changes to that project file reload while Rojo runs. The wrapper's name
+and root serve fields stay frozen while Rojo runs and are regenerated when Rojo
+starts again.
+
+For a managed launch, Studio stays `opening` until its place lock names the
+launched process and the plugin acknowledges both completed initial synchronization
+and an open synchronization stream. The temporary callback uses a random launch
+token and the expected Rojo identity. It closes on success, cancellation, Studio
+close, failure, or the readiness deadline. `down` and `stop` remain responsive
+while synchronization is pending. If synchronization is not acknowledged before
+the deadline, forge reports the failure; a late callback cannot make Studio ready.
+The callback certifies only the original launch session. If that connection fails
+before acknowledgement, reconnecting to a fresh Rojo session cannot satisfy the
+original readiness wait.
+
+An unknown or upstream plugin, an existing Studio, and a platform fallback need
+manual connection. Their `open` status confirms only the place lock. The managed
+plugin leaves a Studio opened without a launch marker disconnected until a manual
+Connect; saved edit-mode endpoints do not connect automatically. Manual controls
+and playtest connections retain their stock behavior.
 
 ## Closing Studio
 
@@ -75,11 +153,13 @@ closes it and stops its Rojo. `stop` falls back to the lock file of the
 configured place (or of `--place <path>`) when the session has no Studio of that
 place. With no `--place`, `stop` first closes every snapshot Studio: each
 snapshot with a lock file, verified as above. When the session reports Studio as
-`opening` (started, the place not open yet), the session waits up to 60 seconds
-for it to be `open`, then closes it. A session with no part left ends, once a
+`opening`, a managed synchronization wait does not delay closing a place already
+locked by its Studio. While the place has no matching lock, the session waits up
+to 60 seconds for the lock, then closes Studio. A session with no part left ends, once a
 syncback run for a last save is done. A Studio that a `forge start` terminal
-owns stays: `stop` fails with `studio_owned`, and `stop --force` closes it.
-`--force` does not change how Studio closes.
+owns stays: `stop` fails with `studio_owned`, and `stop --force` closes it. A
+found Studio stays too: `stop` fails with `studio_found`, and `stop --force`
+closes it. `--force` does not change how Studio closes.
 
 ## Auto-recovery
 

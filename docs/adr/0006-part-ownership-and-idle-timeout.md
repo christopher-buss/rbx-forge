@@ -22,7 +22,7 @@ the caller: `start` owns, `up` does not.
   owner stops an owned part (Ctrl+C or a closed terminal). `down`, `stop`,
   `restart`, and the idle timeout act only on parts with no owner;
   `stop --force` and `restart --force` also act on owned parts. `down` never
-  fails because of ownership: it reports what it stopped.
+  fails because of ownership: it reports what it stopped and kept.
 - **`up` adds.** `up` starts the compiler, and `up --studio` also attaches
   Studio and Rojo. A second `up` starts only the parts that are missing or
   failed, and never removes one. Parts that `up` starts have no owner.
@@ -38,6 +38,13 @@ the caller: `start` owns, `up` does not.
   Studio that `start` owns stops nothing. `start`, `up --studio`, and `restart`
   attach a Studio that already has the place open (after the identity check of
   `stop`) and never open a second one.
+- **A found Studio stays open.** forge cannot tell a human from an agent, but it
+  knows whether it opened a Studio. A Studio that already had the place open
+  when the session attached it is a found Studio; the state contract reports its
+  origin. Only `--force` closes it. `down` and the idle timeout stop its Rojo
+  and let it go, open; `restart` keeps it and restarts the compiler and Rojo. A
+  Studio that the session opened stays closable, so the Studios of forgotten
+  agent sessions do not pile up.
 - **A part fails alone.** A service's exit stops only its part, which is then
   `failed`. Nothing restarts it by itself. `up`, `start`, or `restart` starts it
   again: the compiler first, then Rojo, which needs the compiler's output. When
@@ -45,8 +52,8 @@ the caller: `start` owns, `up` does not.
 - **Idle timeout.** Activity is a client request, a compile start, or a Studio
   save. After `session.idleTimeout` minutes (default 30, 0 turns it off) with no
   activity, the session stops its parts with no owner, Studio included (its
-  auto-recovery files are handled as for `stop`). An `up` session with no parts
-  left ends.
+  auto-recovery files are handled as for `stop`), and lets a found Studio go. An
+  `up` session with no parts left ends.
 - **One compiler.** `forge compile` never compiles while a session runs; it
   waits for the session's fresh build, as `status --wait` does.
 - **`open` is outside sessions.** `forge open` builds a snapshot into
@@ -56,6 +63,14 @@ the caller: `start` owns, `up` does not.
 - **Rojo port.** A `rojoPort` in the config is fixed, and a busy port fails.
   With none, forge tries 34872, then takes a free port. A restart of Rojo keeps
   its port.
+- **Studio launch.** `start` and `up --studio` wait until Rojo listens before
+  launching a new Studio. A Rojo that fails to listen leaves Studio unopened; an
+  already-open Studio is attached as it is. Managed launches stay `opening`
+  until the place lock and a launch-token acknowledgement confirm completed
+  initial sync and an open stream. Readiness waits run alongside the Studio
+  follow; control handlers remain available, and a permitted stop interrupts the
+  wait before entering the part-request queue. Manual attachments confirm only
+  the place lock.
 
 ## Considered options
 
@@ -83,6 +98,8 @@ the caller: `start` owns, `up` does not.
 - The supervisor gets an IPC request to add parts and a path to stop one part
   without ending the session; the reaper's admission already stays open until
   shutdown (ADR 0002).
+- The acknowledgement listener is temporary and closes on every completion path.
+  Its readiness deadline is a tuning surface.
 - `start` must connect as the owner of a supervisor that already runs, not only
   of one it spawned.
 - An agent that disobeys its skill and uses `--force` can still close a human's

@@ -1,6 +1,7 @@
 import type { FlagDefinition, FlagValues } from "../cli/flags.ts";
 import { readCountFlag } from "../cli/flags.ts";
 import type { DownStudio } from "../client/down-parts.ts";
+import { FOUND_SENTENCE } from "../client/down-parts.ts";
 import type { DownReport, StoppedBy } from "../client/down.ts";
 import { DOWN_TIMEOUT_MS, stopSessionAsync } from "../client/down.ts";
 import { findSession } from "../client/session.ts";
@@ -61,7 +62,10 @@ const HOW: Readonly<Record<StoppedBy, string>> = {
  * Studio first, unless `--keep-studio`; a Studio forge cannot close is
  * reported in `studio`, and the session still stops. Parts with an owner
  * (a `forge start` terminal) keep running, and so does the session: `down`
- * reports them in `parts.kept` and never fails because of them. It reports
+ * reports them in `parts.kept` and never fails because of them. A found
+ * Studio (one that already had the place open when the session attached
+ * it) stays open: `down` stops its Rojo, lets it go, and reports Studio
+ * `kept` and `found`. It reports
  * `stopped` only once the session's supervisor has exited and none of its
  * processes is left. It escalates from a shutdown request to a forced one;
  * with `--force`, it then kills the supervisor through a pinned,
@@ -134,7 +138,7 @@ function studioSentence(studio: DownStudio): string {
 			return ` Roblox Studio may still have ${studio.place} open: ${studio.message}`;
 		}
 		case "kept": {
-			return " Roblox Studio stays open.";
+			return "found" in studio ? ` ${FOUND_SENTENCE}` : " Roblox Studio stays open.";
 		}
 		case "none":
 		case "unknown": {

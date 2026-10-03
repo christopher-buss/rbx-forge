@@ -18,6 +18,10 @@ export const EXIT_NEEDS_CONFIRMATION = 4;
 export const EXIT_IDENTITY_UNVERIFIED = 5;
 /** Session processes still live, or the supervisor does not answer. */
 export const EXIT_CLEANUP_PENDING = 6;
+/** The managed Rojo plugin and server speak different protocols. */
+export const EXIT_PLUGIN_PROTOCOL_MISMATCH = 7;
+/** The managed Rojo plugin could not be written. */
+export const EXIT_PLUGIN_WRITE_FAILED = 8;
 /** Stopped by Ctrl+C or a termination signal. */
 export const EXIT_INTERRUPTED = 130;
 
@@ -28,6 +32,8 @@ export type ExitCode =
 	| typeof EXIT_INTERRUPTED
 	| typeof EXIT_NEEDS_CONFIRMATION
 	| typeof EXIT_NOT_RUNNING
+	| typeof EXIT_PLUGIN_PROTOCOL_MISMATCH
+	| typeof EXIT_PLUGIN_WRITE_FAILED
 	| typeof EXIT_SUCCESS
 	| typeof EXIT_USAGE;
 
@@ -40,5 +46,7 @@ export const EXIT_CODE_HELP: ReadonlyArray<readonly [ExitCode, string]> = [
 	[EXIT_NEEDS_CONFIRMATION, "needs confirmation, and the run cannot prompt"],
 	[EXIT_IDENTITY_UNVERIFIED, "cannot verify a process identity; nothing was killed"],
 	[EXIT_CLEANUP_PENDING, "cleanup in progress, or the supervisor does not respond"],
+	[EXIT_PLUGIN_PROTOCOL_MISMATCH, "Rojo plugin protocol differs from the server"],
+	[EXIT_PLUGIN_WRITE_FAILED, "cannot write the managed Rojo plugin"],
 	[EXIT_INTERRUPTED, "interrupted"],
 ];
