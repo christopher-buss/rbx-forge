@@ -15,7 +15,7 @@ import { parseStatus } from "../../src/session/status.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { isProcessAlive, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { makeFixtureAsync, startReadyAsync } from "./session-fixture.ts";
+import { makeFixtureAsync, startReadyAsync, wrapperPath } from "./session-fixture.ts";
 import type { UpRun } from "./up-fixture.ts";
 import { runForgeAsync, WATCH_COMMAND } from "./up-fixture.ts";
 
@@ -125,8 +125,8 @@ describe("forge restart", () => {
 		}).toStrictEqual({
 			compiler: 2,
 			rojo: [
-				`serve default.project.json --port ${fixture.port}`,
-				`serve default.project.json --port ${fixture.port}`,
+				`serve ${wrapperPath(fixture)} --port ${fixture.port}`,
+				`serve ${wrapperPath(fixture)} --port ${fixture.port}`,
 			],
 			studio: 2,
 		});

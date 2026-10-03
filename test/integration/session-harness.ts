@@ -31,7 +31,7 @@ import { makeFixtureProject } from "../helpers/fixture-project.ts";
 import { realTransport } from "../helpers/native-testing.ts";
 import {
 	loadRealNative,
-	makeStudioExecutable,
+	makeRunScriptStudioExecutable,
 	NATIVE_DIRECTORY,
 	REAPER_PATH,
 	studioVariables,
@@ -196,16 +196,16 @@ export function launchUnowned(
  */
 export function studioEnvironment(project: Project): Record<string, string> {
 	const home = makeTemporaryDirectory();
-	const executable = makeStudioExecutable();
+	const executable = makeRunScriptStudioExecutable();
 	onTestFinished(async () => {
 		await killLoggedWorkersAsync(project.log);
 	});
 	return {
 		FIXTURE_PLACE_CONTENT: studioPlaceContent(),
+		FIXTURE_STUDIO_NATIVE: "1",
 		HOME: home,
 		LOCALAPPDATA: path.join(home, "AppData", "Local"),
-		// With an `--import`, Node loads the place as ESM, and the stand-in
-		// does not run.
+		// Fixture tools run without inherited Node imports.
 		NODE_OPTIONS: "",
 		USERPROFILE: home,
 		...studioVariables(executable),

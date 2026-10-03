@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -95,16 +96,18 @@ export function spawnSleeper(executable: string = process.execPath): ChildProces
 }
 
 /**
- * An executable the OS reports as Roblox Studio: a copy of the Node
- * executable named `RobloxStudioBeta.exe` (Windows) or `RobloxStudio`
- * (macOS, Linux), in a directory removed when the test ends.
+ * A native Studio stand-in that accepts RunScript and plain-place launches.
  *
- * @returns Its path.
+ * @returns Its temporary executable path.
  */
-export function makeStudioExecutable(): string {
+export function makeRunScriptStudioExecutable(): string {
 	const name = process.platform === "win32" ? "RobloxStudioBeta.exe" : "RobloxStudio";
+	const source = path.join(
+		NATIVE_DIRECTORY,
+		process.platform === "win32" ? "forge-studio-fixture.exe" : "forge-studio-fixture",
+	);
 	const executable = path.join(makeTemporaryDirectory(), name);
-	copyFileSync(process.execPath, executable);
+	copyFileSync(source, executable);
 	chmodSync(executable, 0o755);
 	return executable;
 }
@@ -131,6 +134,7 @@ export function studioVariables(executable: string): Record<string, string> {
 	return {
 		FIXTURE_NATIVE_ADDON: realNativePath(),
 		FIXTURE_STUDIO_EXE: executable,
+		FIXTURE_STUDIO_HOSTNAME: os.hostname(),
 		FIXTURE_STUDIO_LOCK: "1",
 		RBX_FORGE_STUDIO_PATH: executable,
 	};
@@ -193,4 +197,19 @@ export function pidOf(child: ChildProcess): number {
 	}
 
 	return child.pid;
+}
+
+/**
+ * An executable the OS reports as Roblox Studio: a copy of the Node
+ * executable named `RobloxStudioBeta.exe` (Windows) or `RobloxStudio`
+ * (macOS, Linux), in a directory removed when the test ends.
+ *
+ * @returns Its path.
+ */
+function makeStudioExecutable(): string {
+	const name = process.platform === "win32" ? "RobloxStudioBeta.exe" : "RobloxStudio";
+	const executable = path.join(makeTemporaryDirectory(), name);
+	copyFileSync(process.execPath, executable);
+	chmodSync(executable, 0o755);
+	return executable;
 }

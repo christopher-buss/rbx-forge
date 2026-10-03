@@ -97,11 +97,15 @@ export function runStudio(place: string | undefined): void {
  */
 export function launchStudio(args: ReadonlyArray<string>): void {
 	const executable = env["FIXTURE_STUDIO_EXE"] ?? process.execPath;
-	const studio = spawn(executable, [FAKE_WORKER, "studio", ...args], {
-		detached: true,
-		stdio: "ignore",
-		windowsHide: true,
-	});
+	const studio = spawn(
+		executable,
+		env["FIXTURE_STUDIO_NATIVE"] === "1" ? [...args] : [FAKE_WORKER, "studio", ...args],
+		{
+			detached: true,
+			stdio: "ignore",
+			windowsHide: true,
+		},
+	);
 	studio.unref();
 }
 

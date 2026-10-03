@@ -30,6 +30,24 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(createPartRequests, () => {
+	it("should reject a stop after close without invoking its preflight", async () => {
+		expect.assertions(2);
+
+		const requests = createPartRequests();
+		const beforeStop = vi.fn<() => void>();
+		requests.attach({
+			add: vi.fn<PartAdder>(),
+			beforeStop,
+			restart: noRestart,
+			stop: noStop,
+			...NO_OWNER,
+		});
+		requests.close();
+
+		await expect(requests.stopAsync(DOWN)).rejects.toMatchObject({ code: "not_running" });
+		expect(beforeStop).not.toHaveBeenCalled();
+	});
+
 	it("should wait for the body's adder, then add through it", async () => {
 		expect.assertions(3);
 

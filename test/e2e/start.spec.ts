@@ -1,19 +1,19 @@
 /**
- * `forge start` as a real process, with fake Rojo, compiler, hook, and
- * Studio (`test/fixtures/bin/fake-worker.ts`) on PATH and the real reaper.
+ * `forge start` as a real process, with fake Rojo, compiler, and hooks on
+ * PATH, a native Studio stand-in, and the real reaper.
  * The process table is the oracle: every worker and grandchild must be gone.
  *
- * Real Roblox Studio never opens: the place is always the stand-in of
- * `open.spec.ts` (a batch file on Windows, where `start` picks the app by
- * file type), and the tests make and remove Studio's lock file themselves.
+ * Real Roblox Studio never opens. The stand-in or the test owns the lock file.
  */
-import { rmSync, utimesSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, expect, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
+import { endpointKey } from "../../src/supervisor/endpoint.ts";
 import { parseLines, parseResult } from "../helpers/output.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import {
@@ -32,10 +32,13 @@ import {
 	PLACE,
 	START_STUDIO,
 	startSession,
+	STUDIO_PLUGIN_INSTALL,
+	STUDIO_PLUGIN_OUTPUT,
 	STUDIO_PROJECT,
 	waitForOutputAsync,
 	waitForRoleAsync,
 	WORKER_ROLES,
+	wrapperPath,
 } from "./session-fixture.ts";
 
 function workersOf(log: string): Array<WorkerRecord> {
@@ -152,8 +155,9 @@ describe("forge start", () => {
 			"rojo syncback --help",
 			"rbxtsc",
 			`rojo build default.project.json --output ${PLACE}`,
-			`rojo serve default.project.json --port ${fixture.port}`,
+			`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
 			"rbxtsc -w",
+			...STUDIO_PLUGIN_INSTALL,
 			`rojo syncback default.project.json --input ${PLACE} --non-interactive`,
 			"hook",
 		]);
@@ -178,7 +182,10 @@ describe("forge start", () => {
 		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
 		const session = startSession(fixture, ["start", "--no-open", "--json"]);
 		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
-		const status = await waitForStatusAsync(fixture, () => true);
+		const status = await waitForStatusAsync(
+			fixture,
+			({ services }) => services.compiler.status === "ready",
+		);
 		const isListening = await isListeningAsync(fixture.port);
 		session.child.kill("SIGKILL");
 		await session.closed;
@@ -252,13 +259,14 @@ describe("forge start --no-compiler", () => {
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
 		const session = startSession(fixture, START_STUDIO, { FIXTURE_GRANDCHILDREN: "2" });
 		const records = await waitForRojoTreeAsync(fixture.log);
+		await waitForRoleAsync(fixture.log, "studio");
 		// A hard kill: no handler in forge runs. Only the reaper's stdin EOF
 		// is left to end the workers.
 		session.child.kill("SIGKILL");
 		await session.closed;
 
 		expect(records[0]).toMatchObject({
-			args: ["serve", "default.project.json", "--port", String(fixture.port)],
+			args: ["serve", wrapperPath(fixture), "--port", String(fixture.port)],
 			role: "rojo",
 		});
 		expect(records.map(({ markers }) => markers.worker)).toStrictEqual([
@@ -269,20 +277,67 @@ describe("forge start --no-compiler", () => {
 		await expect(waitForDeathAsync(records.map(({ pid }) => pid))).resolves.toStrictEqual([]);
 	});
 
+	it("should write a worktree wrapper while building the original project", async () => {
+		expect.assertions(4);
+
+		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
+		const session = startSession(fixture, START_STUDIO);
+		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
+		const wrapper: unknown = JSON.parse(readFileSync(wrapperPath(fixture), "utf8"));
+		const workers = readWorkerLog(fixture.log);
+		const studio = await waitForRoleAsync(fixture.log, "studio");
+		const markerFile = path.join(path.dirname(wrapperPath(fixture)), "studio-marker.lua");
+		const marker = readFileSync(markerFile, "utf8");
+		session.child.kill("SIGKILL");
+		await session.closed;
+
+		expect(wrapper).toStrictEqual({
+			name: `fixture@${endpointKey(fixture.project, PLACE)}`,
+			tree: { $path: path.join(fixture.project, "default.project.json") },
+		});
+		expect(workers).toContainEqual(
+			expect.objectContaining({
+				args: ["build", "default.project.json", "--output", PLACE],
+				role: "rojo",
+			}),
+		);
+		expect(studio.args).toStrictEqual([
+			"--task",
+			"RunScript",
+			"--localPlaceFile",
+			fixture.place,
+			"--runScriptFile",
+			markerFile,
+		]);
+		expect(marker).toContain(
+			`m:SetAttribute("ProjectName","fixture@${endpointKey(fixture.project, PLACE)}")`,
+		);
+	});
+
 	it("should report ready once Rojo runs", async () => {
 		expect.assertions(1);
 
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
 		const session = startSession(fixture, START_STUDIO);
 		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
+		await waitForOutputAsync(session, "Roblox Studio has ");
+		const output = parseLines(session.stdout());
+		await waitForRoleAsync(fixture.log, "studio");
 
-		expect(parseLines(session.stdout())).toStrictEqual([
+		expect(output).toIncludeSameMembers([
+			{ name: "rojo serve", status: "started", type: "step" },
+			{ name: "rojo serve", status: "succeeded", type: "step" },
 			{ name: "rojo build", status: "started", type: "step" },
 			{ name: "rojo build", status: "succeeded", type: "step" },
 			{ name: "open Roblox Studio", status: "started", type: "step" },
+			...STUDIO_PLUGIN_OUTPUT,
 			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
-			{ name: "rojo serve", status: "started", type: "step" },
-			{ name: "rojo serve", status: "succeeded", type: "step" },
+			{
+				message:
+					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+				type: "warning",
+			},
+			{ message: `Roblox Studio has ${fixture.place} open.`, type: "info" },
 			{
 				message: `Rojo serves default.project.json on port ${fixture.port}. Press Ctrl+C to stop.`,
 				type: "info",

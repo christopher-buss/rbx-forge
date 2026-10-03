@@ -12,7 +12,13 @@ import { parseStatus } from "../../src/session/status.ts";
 import { openStudioStandInAsync, pidOf } from "../helpers/real-native.ts";
 import { readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { holdPortAsync, makeFixtureAsync, pidsOf } from "./session-fixture.ts";
+import {
+	holdPortAsync,
+	makeFixtureAsync,
+	pidsOf,
+	STUDIO_PLUGIN_INSTALL,
+	wrapperPath,
+} from "./session-fixture.ts";
 import type { UpRun } from "./up-fixture.ts";
 import { runForgeAsync, UP, WATCH_COMMAND } from "./up-fixture.ts";
 
@@ -97,10 +103,10 @@ describe("forge up --studio", () => {
 			(line) => !line.startsWith("rojo build"),
 		);
 
-		// Studio starts first, but the stand-in may log after Rojo.
 		expect({ attached: attached.toSorted(), compiler }).toStrictEqual({
 			attached: [
-				`rojo serve default.project.json --port ${fixture.port}`,
+				...STUDIO_PLUGIN_INSTALL,
+				`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
 				expect.stringMatching(/^studio /),
 			],
 			compiler: "rbxtsc -w",
@@ -133,9 +139,9 @@ describe("forge up --studio", () => {
 		expect(up.result.data).toMatchObject({
 			services: { studio: { pid: studio, status: "open" } },
 		});
-		expect(processes(fixture)).toStrictEqual([
+		expect(processes(fixture)).toIncludeSameMembers([
 			"rbxtsc -w",
-			`rojo serve default.project.json --port ${fixture.port}`,
+			`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
 		]);
 	});
 
@@ -200,8 +206,8 @@ describe("forge up --studio", () => {
 			services: { rojo: { port, status: "ready" } },
 		});
 		expect(processes(fixture).filter((line) => line.startsWith("rojo serve"))).toStrictEqual([
-			`rojo serve default.project.json --port ${String(port)}`,
-			`rojo serve default.project.json --port ${String(port)}`,
+			`rojo serve ${wrapperPath(fixture)} --port ${String(port)}`,
+			`rojo serve ${wrapperPath(fixture)} --port ${String(port)}`,
 		]);
 	});
 });

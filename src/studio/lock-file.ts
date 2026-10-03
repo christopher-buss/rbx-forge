@@ -103,6 +103,29 @@ export function parseStudioLock(text: string): StudioLock | undefined {
 }
 
 /**
+ * Whether a place lock exists and names the expected Studio, when known.
+ *
+ * @param fileSystem - Reads the lock file.
+ * @param studio - The recorded place and optional launch PID.
+ * @returns Whether its lock matches the recorded Studio.
+ */
+export function hasStudioLock(
+	fileSystem: Pick<FileSystem, "readFileSync">,
+	{ pid, place }: { pid?: number; place?: string },
+): boolean {
+	if (place === undefined) {
+		return false;
+	}
+
+	const lock = readLockFile(fileSystem, studioLockPath(place));
+	if (lock === undefined) {
+		return false;
+	}
+
+	return pid === undefined || parseStudioLock(lock)?.pid === pid;
+}
+
+/**
  * Whether the computer a lock file names is this one. Compares without case
  * and only the first DNS label, and accepts a Windows NetBIOS name, which
  * stops at 15 characters.

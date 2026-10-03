@@ -38,11 +38,12 @@ export function resolveServices(
 	 * `rojo serve` on a port.
 	 *
 	 * @param port - Where Rojo serves.
+	 * @param project - The serve wrapper, or the original project during preflight.
 	 * @returns Its service.
 	 * @throws `rojo_missing`.
 	 */
-	function resolveRojo(port: number): ServiceInvocation {
-		const rojo = rojoInvocation(context, config, rojoServeArgs(config.rojoProjectPath, port));
+	function resolveRojo(port: number, project = config.rojoProjectPath): ServiceInvocation {
+		const rojo = rojoInvocation(context, config, rojoServeArgs(project, port));
 		return { ...rojo, id: "rojo", step: "rojo serve" };
 	}
 

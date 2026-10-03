@@ -18,7 +18,7 @@ const REMOVE_RETRY_MS = 100;
 export function makeTemporaryDirectory(files: Record<string, string> = {}): string {
 	// Canonical path: macOS `os.tmpdir()` is under the `/var` symlink, and
 	// tools such as c12 report `/private/var` paths.
-	const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), "rbx-forge-test-")));
+	const directory = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), "rbx-forge-test-")));
 	onTestFinished(async () => {
 		await removeAsync(directory);
 	});

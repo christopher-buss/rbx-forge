@@ -4,14 +4,12 @@ status: accepted
 
 # Sessions: one supervisor process, a singleton lock, and barriers
 
-> **Amended by [ADR 0006](./0006-part-ownership-and-idle-timeout.md).** A
-> session is a set of parts with an owner or none. A second `up`, or a `start`
-> while no other `start` owns the session, joins the running session instead of
-> failing or ignoring its flags; the end of the owner pipe stops only the parts
-> `start` owns and never closes Studio; a service's exit stops only its part;
-> `down` stops and closes only parts with no owner, and the session ends when
-> none is left. The singleton lock, barriers, and evidence rules below are
-> unchanged.
+A session is a set of parts with an owner or none
+([ADR 0006](./0006-part-ownership-and-idle-timeout.md)). A second `up`, or a
+`start` while no other `start` owns the session, joins the running session. The
+end of the owner pipe stops only the parts `start` owns and never closes Studio;
+a service's exit stops only its part. `down` stops only parts with no owner and
+leaves a found Studio open. The session ends when no part is left.
 
 Every session runs in its own supervisor process (`dist/supervisor.mjs`), also
 for `forge start`. There is no in-process session mode, and no forge command
@@ -57,24 +55,28 @@ in-process session cannot do.
   (only while the singleton lock is held), and forced cleanup when the barrier
   stays blocked. `down` acts only on the session id `.forge/current` named when
   it began; another session at the endpoint gives `session_replaced`.
-- **`down` closes the session's Studio first.** Studio is not a worker: it
+- **`down` closes a Studio the session opened first.** A found Studio stays open
+  while its Rojo stops, and the session lets it go. Studio is not a worker: it
   starts out of every job and group of the session (ADR 0001, "Studio"), so no
-  marker, lease, or job ties it to the session. The session records the Studio
-  it started (PID and start time, pinned at the start). `down` asks the session
-  for its Studio, waits up to 60 s while it is `opening`, and closes that pinned
-  Studio; the place's lock file, when there is one, must name the same process.
-  With no recorded Studio (the platform launcher opened the place), it closes
-  the Studio the lock file names, after the same identity check as `stop` (this
-  computer, the Studio executable, started before the lock file). It sends a
-  close request (`WM_CLOSE` to its main windows on Windows, `SIGTERM`
-  elsewhere), and ends Studio without a save at once when a modal dialog blocks
-  it (such as a save prompt, which an agent cannot answer), or after 15 s. It
-  ends Studio at once too when the lock file goes: the place is closed, and
-  Studio's own exit is slow. After a kill it deletes the lock file and handles
-  Studio's auto-recovery files. Then the session ends once syncback of a last
-  save is done (at most 30 s). `--keep-studio` leaves Studio open. A Studio that
-  `down` cannot verify or end is reported in `studio` and does not fail `down`.
-  `--force` does not change how Studio closes.
+  worker marker, lease, or job ties it to the session. The session records the
+  Studio it started (PID and start time, pinned at the start). `down` asks the
+  session for its Studio and closes that pinned Studio; the place's lock file,
+  when there is one, must name the same process. A permitted stop cancels
+  managed synchronization readiness before it queues behind an attach. A
+  matching managed place lock allows closing while Studio is `opening`;
+  otherwise it waits for the bounded opening observation before closing. With no
+  recorded Studio (the platform launcher opened the place), it closes the Studio
+  the lock file names, after the same identity check as `stop` (this computer,
+  the Studio executable, started before the lock file). It sends a close request
+  (`WM_CLOSE` to its main windows on Windows, `SIGTERM` elsewhere), and ends
+  Studio without a save at once when a modal dialog blocks it (such as a save
+  prompt, which an agent cannot answer), or after 15 s. It ends Studio at once
+  too when the lock file goes: the place is closed, and Studio's own exit is
+  slow. After a kill it deletes the lock file and handles Studio's auto-recovery
+  files. Then the session ends once syncback of a last save is done (at most 30
+  s). `--keep-studio` leaves Studio open. A Studio that `down` cannot verify or
+  end is reported in `studio` and does not fail `down`. `--force` does not
+  change how Studio closes.
 - **Evidence, not PIDs.** A process belongs to a session only by its marker, its
   lease descriptor (POSIX), its recorded job (Windows), or a recorded pin. Every
   kill goes through a pin and re-checks that evidence. An unverifiable process

@@ -38,5 +38,10 @@ export function attachStudio(
 		message: `Roblox Studio (PID ${studio.pid}) already has ${place} open, so the session uses it as a found Studio: only stop --force and restart --force close it.`,
 		type: "info",
 	});
+	context.reporter.emit({
+		message:
+			"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+		type: "warning",
+	});
 	return { origin: "found", place, studio };
 }

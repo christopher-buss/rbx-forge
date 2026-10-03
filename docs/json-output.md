@@ -28,6 +28,8 @@ takes a safe default or fails with `needs_confirmation`.
 | 4    | needs confirmation, and the run cannot prompt           | `needs_confirmation`                                                                              |
 | 5    | cannot verify a process identity; nothing was killed    | `identity_mismatch`, `cleanup_unverifiable`                                                       |
 | 6    | cleanup in progress, or the supervisor does not respond | `cleanup_in_progress`, `previous_generation_alive`, `session_stopping`, `supervisor_unresponsive` |
+| 7    | managed Rojo plugin protocol differs from the server    | `plugin_protocol_mismatch`                                                                        |
+| 8    | cannot write the managed Rojo plugin                    | `plugin_write_failed`                                                                             |
 | 130  | interrupted                                             | `interrupted`                                                                                     |
 
 Error codes are stable: a code is never renamed or reused. The full list is in

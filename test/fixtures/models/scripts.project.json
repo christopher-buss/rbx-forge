@@ -1,0 +1,18 @@
+{
+	"name": "NativeModelFixture",
+	"tree": {
+		"$className": "Folder",
+		"App": {
+			"$path": "app.luau"
+		},
+		"Unchanged": {
+			"$path": "unchanged.luau"
+		},
+		"Settings": {
+			"$className": "StringValue",
+			"$properties": {
+				"Value": "keep this property"
+			}
+		}
+	}
+}

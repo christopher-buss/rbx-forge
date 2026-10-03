@@ -207,13 +207,14 @@ Window states after `WM_CLOSE` to the main window:
   so a Node worker's descendants keep only the marker.
 - **Pipe security.** Explicit current-user DACL, reject remote clients,
   first-instance flag, token as the first message.
-- **Studio.** forge starts the Studio executable directly with the place as its
-  only argument: on Windows through the addon with the flags of **Detach** (a
-  job that forbids breakaway falls back to the platform launcher), on POSIX
-  detached in a new session. It pins the process at once. A close is a close
-  request, then a poll every 50 ms: the kill comes at once when the lock file
-  goes or a main window is disabled (a modal dialog), else after 15 s. A main
-  window is a visible, unowned, non-tool, non-console window; with none, a
+- **Studio.** forge starts the Studio executable directly with the place, or
+  with `--task RunScript --localPlaceFile <place> --runScriptFile <script>` for
+  a managed session launch. On Windows it uses the addon with the flags of
+  **Detach** (a job that forbids breakaway falls back to the platform launcher);
+  on POSIX it detaches in a new session. It pins the process at once. A close is
+  a close request, then a poll every 50 ms: the kill comes at once when the lock
+  file goes or a main window is disabled (a modal dialog), else after 15 s. A
+  main window is a visible, unowned, non-tool, non-console window; with none, a
   hidden unowned window titled `… - Roblox Studio` counts, so a Studio started
   hidden (the e2e stand-in) still gets the request.
 - **Remote-client test.** An integration test on Windows creates the real forge
