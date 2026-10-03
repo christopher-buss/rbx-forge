@@ -64,7 +64,7 @@ describe("attach an open Studio", () => {
 		const place = JSON.stringify(fixture.place).slice(1, -1);
 
 		expect(second.stdout()).toContain(
-			`Roblox Studio (PID ${studio!.pid}) already has ${place} open, so the session uses it.`,
+			`Roblox Studio (PID ${studio!.pid}) already has ${place} open, so the session uses it as a found Studio`,
 		);
 		// Only the first start builds, installs the plugin, and launches Studio.
 		expect(rolesOf(fixture).filter((role) => !role.startsWith("rojo serve"))).toStrictEqual([

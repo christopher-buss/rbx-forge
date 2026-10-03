@@ -12,6 +12,7 @@ import type { ReporterEvent } from "../../src/seams/reporter.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import { realTransport } from "../helpers/native-testing.ts";
+import { openStudioStandInAsync, pidOf } from "../helpers/real-native.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
 import type { Launched, Project } from "./session-harness.ts";
 import {
@@ -185,6 +186,31 @@ describe("idle timeout", () => {
 			expect(existsSync(`${place}.lock`)).toBeFalse();
 		},
 	);
+
+	it("should stop the Rojo of a found Studio, let it go open, and end an up session", async () => {
+		expect.assertions(4);
+
+		const project = await makeProjectAsync({ session: { idleTimeout: SHORT_TIMEOUT } });
+		const environment = studioEnvironment(project);
+		const place = path.join(project.project, "game.rbxl");
+		writeFileSync(place, environment["FIXTURE_PLACE_CONTENT"]!);
+		const studio = pidOf(await openStudioStandInAsync(place, environment));
+		const run = launchUnowned(project, START_STUDIO, environment);
+		const attached = await waitForStatusAsync(project, ({ services }) => {
+			return services.studio.status === "open";
+		});
+
+		await expect(idleEndAsync(run)).resolves.toBe("shutdown");
+		expect(run.events).toContainEqual({
+			message: `No activity for ${SHORT_TIMEOUT} min: stopped rojo.`,
+			type: "info",
+		});
+		expect(attached.services.studio).toMatchObject({ origin: "found", pid: studio });
+		expect({
+			lock: existsSync(`${place}.lock`),
+			running: isProcessAlive(studio),
+		}).toStrictEqual({ lock: true, running: true });
+	});
 
 	it("should never stop a part a start owns, nor end its session", async () => {
 		expect.assertions(3);

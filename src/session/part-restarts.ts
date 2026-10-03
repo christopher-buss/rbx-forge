@@ -23,6 +23,8 @@ export interface RestartRequest {
 export interface PartRestarts {
 	/** The parts it started again, in order. */
 	added: Array<PartId>;
+	/** It left the session's found Studio open, as only `force` closes it. */
+	foundStudio?: true;
 	kept: Array<KeptPart>;
 	/** The parts it stopped, in order. */
 	stopped: Array<PartId>;
@@ -97,7 +99,8 @@ export function restartedParts(
  *    not prove gone.
  * 3. Start the parts again through the adder: the compiler first, then
  *    Studio and Rojo once the compiler's first build is done. Each keeps
- *    the owner it had.
+ *    the owner it had. A Studio that stays (owned, or found) keeps its
+ *    place, and Rojo starts again on its port.
  *
  * @param setup - The status, read before the stop.
  * @param restart - The adder, the service parts, and the stopper.
@@ -114,9 +117,12 @@ export function createPartRestarter(
 		// A Studio it cannot close holds the restart: nothing starts again.
 		const isHeld = stops.studio !== undefined && "error" in stops.studio;
 		const parts = isHeld ? [] : restartedParts(services, stops.stopped, force);
-		const added = parts.length === 0 ? [] : await restart.add({ parts, studioPath });
+		// The adder starts Rojo again for a Studio that stays.
+		const hasWork = parts.length > 0 || stops.stopped.includes("rojo");
+		const added = hasWork ? await restart.add({ parts, studioPath }) : [];
 		return {
 			added,
+			...(stops.foundStudio === undefined ? {} : { foundStudio: stops.foundStudio }),
 			kept: stops.kept,
 			stopped: stops.stopped,
 			...(stops.studio === undefined ? {} : { studio: stops.studio }),

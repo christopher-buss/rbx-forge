@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import type { FlagDefinition } from "../cli/flags.ts";
-import { downStudio } from "../client/down-parts.ts";
+import { downStudio, FOUND_SENTENCE } from "../client/down-parts.ts";
 import type { KnownSession } from "../client/session.ts";
 import { fetchStatusAsync, findSession, restartPartsAsync } from "../client/session.ts";
 import { RECOVERY_FLAG } from "../client/studio.ts";
@@ -24,7 +24,7 @@ export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
 		name: "force",
 		kind: "boolean",
-		text: "Restart the parts that a forge start terminal owns too.",
+		text: "Restart the parts that a forge start terminal owns too, and close a Studio that already had the place open when the session attached it.",
 	},
 	RECOVERY_FLAG,
 	STUDIO_PATH_FLAG,
@@ -40,6 +40,9 @@ export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
  * Studio, and serves Rojo on the same port. A failed compiler starts again
  * too. Parts that a `forge start` terminal owns stay as they are, and are
  * named in `kept`; `--force` restarts them too, and they keep their owner.
+ * A found Studio (one that already had the place open when the session
+ * attached it) stays open, unless `--force`; Rojo starts again for it on
+ * the same port.
  * It returns once no part is starting.
  *
  * @param context - The run: project root, seams, and reporter.
@@ -118,7 +121,10 @@ function restartRequest(
  * @param restarts - What it stopped, kept, and started.
  * @returns What it restarted, where each part is, and what it kept.
  */
-function restartSummary(status: SessionStatus, { added, kept }: PartRestarts): string {
+function restartSummary(
+	status: SessionStatus,
+	{ added, foundStudio: hasFoundStudio, kept }: PartRestarts,
+): string {
 	const restarted = added.length === 0 ? "no part" : listParts(added);
 	const pronoun = kept.length === 1 ? "it has" : "they have";
 	const names = listParts(kept.map(({ part }) => part));
@@ -126,7 +132,8 @@ function restartSummary(status: SessionStatus, { added, kept }: PartRestarts): s
 		kept.length === 0
 			? ""
 			: ` It left ${names} alone: ${pronoun} an owner, the forge start terminal.`;
-	return `Restarted ${restarted} of session ${status.sessionId}: ${describeParts(status)}.${owned}`;
+	const found = hasFoundStudio === true ? ` ${FOUND_SENTENCE}` : "";
+	return `Restarted ${restarted} of session ${status.sessionId}: ${describeParts(status)}.${owned}${found}`;
 }
 
 /**

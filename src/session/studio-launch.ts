@@ -113,5 +113,5 @@ async function launchMarkedAsync(
 		signal,
 		studioPath,
 	});
-	return { ...opened, plugin: opened.studio === null ? MANUAL : plugin };
+	return { ...opened, origin: "forge", plugin: opened.studio === null ? MANUAL : plugin };
 }

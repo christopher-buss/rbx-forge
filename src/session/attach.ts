@@ -5,9 +5,11 @@ import { openPlacePath } from "../commands/open.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { findPlaceStudio } from "../studio/close-studio.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
+import type { StudioOrigin } from "./status.ts";
 
 /** The place the session opened, and the Studio it started or attached. */
 export interface OpenedStudio {
+	origin: StudioOrigin;
 	/** The absolute path of the place. */
 	place: string;
 	/** `null` when the platform launcher opened the place. */
@@ -33,7 +35,7 @@ export function attachStudio(
 	}
 
 	context.reporter.emit({
-		message: `Roblox Studio (PID ${studio.pid}) already has ${place} open, so the session uses it.`,
+		message: `Roblox Studio (PID ${studio.pid}) already has ${place} open, so the session uses it as a found Studio: only stop --force and restart --force close it.`,
 		type: "info",
 	});
 	context.reporter.emit({
@@ -41,5 +43,5 @@ export function attachStudio(
 			"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
 		type: "warning",
 	});
-	return { place, studio };
+	return { origin: "found", place, studio };
 }

@@ -289,6 +289,30 @@ export async function waitForRoleAsync(log: string, role: string): Promise<Worke
 }
 
 /**
+ * The PIDs of the fixture processes with this role, builds left out.
+ *
+ * @param fixture - The project.
+ * @param role - Such as `rojo`.
+ * @returns Their PIDs, in start order.
+ */
+export function pidsOf(fixture: Fixture, role: string): Array<number> {
+	return readWorkerLog(fixture.log)
+		.filter((record) => record.role === role && record.args[0] !== "build")
+		.map(({ pid }) => pid);
+}
+
+/**
+ * The AutoSaves folder the stand-in writes to, under a scratch home.
+ *
+ * @param home - `LOCALAPPDATA` (Windows) or `HOME` (macOS).
+ * @returns The folder.
+ */
+export function autoSavesUnder(home: string): string {
+	const root = IS_WINDOWS ? home : path.join(home, "Library", "Application Support");
+	return path.join(root, "Roblox", "RobloxStudio", "AutoSaves");
+}
+
+/**
  * Write the Rojo project, the config, and the place's folder.
  *
  * @param project - The project directory.

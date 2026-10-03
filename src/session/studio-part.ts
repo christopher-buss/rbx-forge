@@ -128,7 +128,7 @@ export function followSessionStudio(
 		letGo.abort();
 	};
 
-	setup.status.studio("opening", opened.place, opened.studio);
+	setup.status.studio("opening", opened.place, opened.studio, opened.origin);
 	const signal = AbortSignal.any([scope.signal, letGo.signal]);
 	const readiness = createStudioReadiness(setup, { ...scope, signal }, follow.state, opened);
 	const followed = followAsync(setup, { signal }, follow, {

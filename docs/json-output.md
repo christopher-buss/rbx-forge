@@ -50,8 +50,9 @@ Error codes are stable: a code is never renamed or reused. The full list is in
    and `diagnostics` (`file`, `line`, `column`, `code`, `message`, `severity`),
    and `startedAt` and `at` (when the compile started and ended). `--wait` makes
    it the build of your edit; see below. `data.services.studio` has `status`
-   (`opening`, `open`, `closed`, `off`), `place`, and, for a Studio forge
-   started or attached, `pid` and `startTime`.
+   (`opening`, `open`, `closed`, `off`), `place`, `origin` (`forge` when the
+   session opened it, `found` when it already had the place open), and, for a
+   Studio forge started or attached, `pid` and `startTime`.
 4. To play, `forge up --studio --json` attaches Studio and Rojo to the session
    (`data.added` names `studio` and `rojo` when it started them), and returns
    once Rojo listens and Studio has the place open; read the console with the
@@ -167,7 +168,8 @@ owned parts keep it. `data.stoppedBy` (only with `stopped`) is `shutdown`,
 `data.studio.status` is one of:
 
 - `closed`
-- `kept` (`--keep-studio`, or Studio has an owner)
+- `kept` (`--keep-studio`, or Studio has an owner); with `found: true` for a
+  found Studio, which `down` never closes
 - `none` (no Studio open)
 - `unknown` (the supervisor did not answer, so forge touched no Studio)
 - `failed`, with the error's `code` and `message`. Studio may still be open; the
@@ -188,11 +190,13 @@ and `snapshots`: the same fields for each snapshot Studio it closed (none with
 `--place`). It closes the session's Studio with its Rojo; the compiler keeps
 running. A Studio that a `forge start` terminal owns fails with `studio_owned`
 (exit 1, `details.owner`, `details.sessionId`, and `details.pid` and
-`details.place` when known); `stop --force` closes it. A session that stops
-while `stop` asks it fails with `session_stopping` (exit 6,
-`details.sessionId`): forge closes no Studio that may be the session's; run
-`stop` again once the session is gone. `--place <path>` selects the Studio of
-one place, such as a snapshot that `forge open` opened.
+`details.place` when known); a found Studio fails with `studio_found` (exit 1,
+`details.sessionId`, and `details.pid` and `details.place` when known);
+`stop --force` closes either. A session that stops while `stop` asks it fails
+with `session_stopping` (exit 6, `details.sessionId`): forge closes no Studio
+that may be the session's; run `stop` again once the session is gone.
+`--place <path>` selects the Studio of one place, such as a snapshot that
+`forge open` opened.
 
 ## The `restart` result
 
@@ -203,7 +207,8 @@ with:
 - `added`: the parts it started again, the compiler first, then Studio and Rojo.
 - `kept`: each running part with its `owner`, left because a `forge start`
   terminal owns it. With `--force` it is empty, and the restarted parts keep
-  their owner.
+  their owner. A found Studio stays open (`studio` is `kept` with `found: true`)
+  while its Rojo restarts on the same port.
 - `studio`: what closing the old Studio did, as `data.studio` of `down`:
   `closed` (with `end`, `forced`, `pid`, `place`, `recovery`), `kept`, or
   `none`. `data.services.studio` is the new Studio.

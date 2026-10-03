@@ -277,6 +277,46 @@ describe(runDownAsync, () => {
 		expect(requests).toMatchObject([{ keepStudio: true }]);
 	});
 
+	it("should say a found Studio stays open, and end the session", async () => {
+		expect.assertions(1);
+
+		const project = makeContext({ isSupervisorAlive: true });
+		await serveStopsAsync(project, {
+			ending: true,
+			foundStudio: true,
+			kept: [],
+			stopped: ["rojo"],
+		});
+
+		await expect(downAsync(project.context)).resolves.toMatchObject({
+			data: {
+				parts: { kept: [], stopped: ["rojo"] },
+				status: "stopped",
+				studio: { found: true, status: "kept" },
+			},
+			summary:
+				"Stopped session s1; every process of it is gone. Roblox Studio stays open: it already had the place open when the session attached it.",
+		});
+	});
+
+	it("should say a found Studio stays open while owned parts keep the session", async () => {
+		expect.assertions(1);
+
+		const project = makeContext({ isSupervisorAlive: true });
+		await serveStopsAsync(project, {
+			ending: false,
+			foundStudio: true,
+			kept: [{ owner: "start", part: "compiler" }],
+			stopped: ["rojo"],
+		});
+
+		await expect(downAsync(project.context)).resolves.toMatchObject({
+			data: { status: "running", studio: { found: true, status: "kept" } },
+			summary:
+				"Stopped Rojo of session s1. It goes on: the compiler has an owner, the forge start terminal. Roblox Studio stays open: it already had the place open when the session attached it.",
+		});
+	});
+
 	it.for([
 		[
 			["studio", "rojo", "compiler"],

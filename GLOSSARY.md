@@ -17,7 +17,8 @@ _Avoid_: component, piece
 
 **Owner**:\
 The `start` terminal that owns a part. Only its owner stops an owned part; any
-client, and the idle timeout, can stop a part with no owner.\
+client, and the idle timeout, can stop a part with no owner, except a found
+Studio.\
 _Avoid_: holder, creator
 
 **Idle timeout**:\
@@ -121,6 +122,11 @@ _Avoid_: autosave, backup
 To add a Studio, with its Rojo, to a running session as parts. A Studio that
 already has the place open is attached as it is, never opened a second time.\
 _Avoid_: connect, join
+
+**Found Studio**:\
+A Studio that already had the place open when the session attached it. Only
+`--force` closes it; otherwise the session lets it go, open.\
+_Avoid_: user Studio, external Studio
 
 **Snapshot**:\
 A copy of the place that `forge open` builds and opens, outside every session
