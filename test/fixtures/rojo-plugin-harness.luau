@@ -29,17 +29,6 @@ function Promise.new(executor)
 	end) end
 	return self
 end
-function Promise:resolve(value)
-	if self.state ~= "pending" then return end
-	if type(value) == "table" and value.andThen then value:andThen(function(result) self:resolve(result) end):catch(function(err) self:reject(err) end); return end
-	self.state = "resolved"; self.value = value
-	for _, callback in self.handlers do callback() end
-end
-function Promise:reject(value)
-	if self.state ~= "pending" then return end
-	self.state = "rejected"; self.value = value
-	for _, callback in self.handlers do callback() end
-end
 function Promise:andThen(success, failure)
 	local following = Promise.new()
 	local function run()
@@ -58,8 +47,6 @@ function Promise:cancel() self.state = "cancelled" end
 function Promise.try(callback) return Promise.new(function(resolve) resolve(callback()) end) end
 local function resolved(value) local promise = Promise.new(); promise:resolve(value); return promise end
 local function rejected(value) local promise = Promise.new(); promise:reject(value); return promise end
-Promise.resolve = resolved
-Promise.reject = rejected
 -- Resolve/reject are also instance methods; Lua dispatches both through this table.
 Promise.resolve = function(self, value)
 	if getmetatable(self) ~= Promise then return resolved(self) end
@@ -104,6 +91,8 @@ services.StudioService = {GetUserId = function() return 42 end, GetPropertyChang
 services.ChangeHistoryService.TryBeginRecording = function() return false end
 services.Selection.Get = function() return {} end
 services.Selection.Set = noop
+services.Players.GetPlayers = function() return {} end
+services.ServerStorage.FindFirstChild = function() return nil end
 world.GetService = function(_, name) return services[name] end
 local settings = {priorEndpoints = { ["0"] = {host = "old", port = "9", projectName = "Foreign"} }, autoReconnect = true, twoWaySync = false}
 local httpRequests = {}
@@ -115,7 +104,7 @@ local appClass
 local modules = {
 	Dictionary = {merge = function(left, right) local value = table.clone(left); for key, item in right do value[key] = item end; return value end},
 	Promise = Promise,
-	Roact = {Component = {extend = function() appClass = {}; return appClass end}, createElement = noop, createBinding = function(value)
+	Roact = {Component = {extend = function() appClass = {}; return appClass end}, createElement = function(component, props, children) return {component = component, props = props or {}, children = children or {}} end, createBinding = function(value)
 		local binding = {getValue = function() return value end}; return binding, function(nextValue) value = nextValue end
 	end},
 	Assets = {Images = {}},
@@ -124,7 +113,11 @@ local modules = {
 	t = {table = true, boolean = true, string = true, optional = function(value) return value end, strictInterface = function() return function() return true end end},
 	Settings = {get = function(_, key) return settings[key] end, set = function(_, key, value) settings[key] = value end, onChanged = function() return noop end},
 	preloadAssets = noop,
-	Version = {getUpdateMessage = noop},
+	Version = {getUpdateMessage = noop, display = function() return "7.7.1" end},
+	Theme = {StudioProvider = {}},
+	Tooltip = {Provider = {}},
+	StudioPluginContext = {Provider = {}},
+	timeUtil = {elapsedToText = function() return "one minute ago" end},
 	PatchSet = {newEmpty = function() return {added = {}, removed = {}, updated = {}} end, isEmpty = function(patch) return next(patch.added) == nil and next(patch.removed) == nil and next(patch.updated) == nil end},
 	PatchTree = {build = noop, updateMetadata = noop},
 	Timer = {start = noop, stop = noop},
@@ -144,7 +137,8 @@ local modules = {
 }
 local environment = setmetatable({game = world, workspace = {GetAttribute = function() return playtestUrl end, SetAttribute = noop}, script = scriptNode,
 	require = function(ref) return modules[ref.name] or {} end,
-	Enum = {WebStreamClientState = {Connecting = "Connecting", Open = "Open", Error = "Error", Closed = "Closed"}},
+	Enum = {WebStreamClientState = {Connecting = "Connecting", Open = "Open", Error = "Error", Closed = "Closed"}, InitialDockState = {Right = "Right"}, ZIndexBehavior = {Sibling = "Sibling"}},
+	Vector2 = {new = function(x, y) return {x, y} end},
 	task = tasks, os = {clock = function() return now end, time = function() return 123 end},
 	DateTime = {now = function() return {UnixTimestamp = 123, FormatLocalTime = function() return "12:00" end} end},
 	Instance = {new = function() return {Event = signal(), Destroy = noop} end},
@@ -186,7 +180,6 @@ local function app()
 	self.releaseSyncLock = noop
 	self.startSyncReminderPolling = noop
 	self.stopSyncReminderPolling = noop
-	self.checkSyncReminder = noop
 	self:init()
 	return self
 end
@@ -207,6 +200,7 @@ local function reset()
 	playtestUrl = nil; settings.autoConnectPlaytestServer = false
 	emptyDiff = false; settings.confirmationBehavior = "Initial"
 	settings.showNotifications = true
+	settings.syncReminderMode = "None"
 	settings.priorEndpoints = {["0"] = {host = "old", port = "9", projectName = "Foreign"}}
 end
 local function server(projectName, sessionId)
@@ -215,6 +209,67 @@ local function server(projectName, sessionId)
 end
 local function initialSync(value) apiRead:resolve({messageCursor = 1, instances = {probe = value or "initial"}}) end
 local function openStream() currentApi.__wsClient.ConnectionState = "Open"; advance(0.1) end
+
+local function disconnectAction(instance)
+	local function find(element)
+		if element.props.name == "RojoDisconnect" then return element.props.onTriggered end
+		for _, child in element.children do
+			local callback = find(child)
+			if callback then return callback end
+		end
+	end
+	local callback = find(instance:render())
+	assert(callback, "render must expose the Disconnect plugin action")
+	callback()
+end
+
+-- A saved foreign endpoint cannot display a reminder after managed readiness.
+reset(); settings.syncReminderMode = "Fullscreen"
+local reminder = Promise.new(); local managed = Promise.new(); connectQueue = {reminder, managed}
+local reminded = app(); world.ChildAdded:Fire(marker())
+managed:resolve({projectName = "Game@worktree", sessionId = "launch", rootInstanceId = "root"}); initialSync(); openStream()
+reminder:resolve({projectName = "Foreign", sessionId = "foreign"})
+assert(#httpRequests == 1 and reminded.serveSession:getStatus() == Session.Status.Connected)
+assert(reminded.dismissSyncReminder == nil, "stale reminder must not show a fullscreen Connect prompt after managed ready")
+reminded:willUnmount()
+
+-- A preexisting fullscreen reminder disappears as soon as a valid marker arrives.
+reset(); settings.syncReminderMode = "Fullscreen"; local warned = app()
+server("Foreign", "foreign")
+assert(warned.dismissSyncReminder ~= nil and reads == 0, "no-marker reminders retain manual Connect")
+apiConnect = Promise.new(); apiRead = Promise.new()
+world.ChildAdded:Fire(marker())
+assert(warned.dismissSyncReminder == nil, "marker arrival clears the old reminder before connection")
+for _, notification in warned.state.notifications do assert(not notification.isFullscreen, "old fullscreen reminder is removed") end
+warned:willUnmount()
+
+-- Late success/failure reminders cannot outlive disconnect, replacement, or unmount.
+for _, when in {"disconnect", "unmount", "replacement"} do
+	for _, outcome in {"success", "failure"} do
+		reset(); settings.syncReminderMode = "Fullscreen"
+		settings.priorEndpoints["0"].timestamp = 60
+		local staleReminder = Promise.new(); connectQueue = {staleReminder}
+		local instance = app()
+		if when == "unmount" then instance:willUnmount()
+		elseif when == "disconnect" then instance:endSession()
+		else world.ChildAdded:Fire(marker()) end
+		if outcome == "success" then staleReminder:resolve({projectName = "Foreign", sessionId = "foreign"}) else staleReminder:reject("offline") end
+		assert(instance.dismissSyncReminder == nil, "stale reminder callbacks cannot survive a generation change")
+		if when ~= "unmount" then instance:willUnmount() end
+	end
+end
+
+-- Managed downtime never probes a saved foreign endpoint for a reminder.
+reset(); existing = marker(); local withoutReminder = app(); server(); initialSync(); stream:reject("offline")
+settings.syncReminderMode = "Fullscreen"; local beforeReminder = connects; withoutReminder:checkSyncReminder()
+assert(connects == beforeReminder and withoutReminder.dismissSyncReminder == nil)
+withoutReminder:willUnmount()
+
+-- No-marker failed lookup still offers the stock manual reminder.
+reset(); settings.syncReminderMode = "Fullscreen"; settings.priorEndpoints["0"].timestamp = 60
+local missing = app(); apiConnect:reject("offline")
+assert(missing.dismissSyncReminder ~= nil and missing.serveSession == nil)
+missing:willUnmount()
 
 -- Existing-marker connection runs the real initial-sync and stream-readiness code.
 reset(); existing = marker(); local first = app()
@@ -344,7 +399,7 @@ for _, when in {"downtime", "lookup", "unmount"} do
 	reset(); existing = marker(); local instance = app(); server(); initialSync(); stream:reject("offline")
 	apiConnect = Promise.new(); apiRead = Promise.new()
 	if when ~= "downtime" then advance(1) end
-	if when == "unmount" then instance:willUnmount() else instance:endSession() end
+	if when == "unmount" then instance:willUnmount() else disconnectAction(instance) end
 	local stoppedAt = connects
 	server("Game@worktree", "late"); initialSync("stale tree"); advance(10)
 	assert(connects == stoppedAt and instance.serveSession == nil and instance.forgeMarker == nil and world.probe == "initial", "manual cleanup suppresses late reconnect")
@@ -361,14 +416,14 @@ for _, identity in {{"Game@worktree", "changed"}, {"Other@worktree", "polled"}} 
 	raced:willUnmount()
 end
 
--- Manual Disconnect cancels each stage of the fresh reconnect.
+-- The rendered Disconnect action cancels each stage of the fresh reconnect.
 for _, when in {"connect", "initial", "stream"} do
 	reset(); existing = marker(); local instance = app(); server(); initialSync(); stream:reject("offline")
 	local lookup = Promise.new(); local handshake = Promise.new(); connectQueue = {lookup, handshake}; apiRead = Promise.new()
 	advance(1); lookup:resolve({projectName = "Game@worktree", sessionId = "fresh"})
 	if when ~= "connect" then handshake:resolve({projectName = "Game@worktree", sessionId = "fresh", rootInstanceId = "root"}) end
 	if when == "stream" then initialSync("fresh tree") end
-	instance:endSession()
+	disconnectAction(instance)
 	handshake:resolve({projectName = "Game@worktree", sessionId = "fresh", rootInstanceId = "root"})
 	initialSync("cancelled tree"); advance(5)
 	assert(instance.serveSession == nil and instance.forgeMarker == nil and #httpRequests == 0)

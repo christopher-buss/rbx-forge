@@ -181,84 +181,99 @@ fs.writeFileSync(directory + '/watched.txt', 'content');`;
 		);
 	});
 
-	it("should preserve the root serve fields and tree while advertising the worktree name", async () => {
-		expect.assertions(5);
+	it.for([
+		{ name: path.basename, projectPath: "default.project.json" },
+		{ name: path.basename, projectPath: "default.project.jsonc" },
+		{ name: () => "named", projectPath: "named.project.json" },
+		{ name: () => "my.game", projectPath: "my.game.project.jsonc" },
+	])(
+		"should preserve JSONC root fields and the unnamed $projectPath tree",
+		async ({ name, projectPath }) => {
+			expect.assertions(5);
 
-		const port = await nodeNetwork.freePortAsync();
-		const cwd = makeTemporaryDirectory({
-			"default.project.json": JSON.stringify({
-				name: "Wrapper test",
+			const port = await nodeNetwork.freePortAsync();
+			const cwd = makeTemporaryDirectory({
+				[projectPath]: `/* Rojo accepts JSONC */\n${JSON.stringify({
+					gameId: 1011,
+					placeId: 789,
+					serveAddress: "127.0.0.1",
+					servePlaceIds: [123, 456],
+					servePort: port,
+					tree: {
+						$className: "DataModel",
+						ReplicatedStorage: {
+							$className: "ReplicatedStorage",
+							Content: { $className: "Folder" },
+						},
+					},
+				}).replace(/}$/, ", // trailing root comma\n}")}`,
+			});
+			const projectName = name(cwd);
+			const directory = path.join(cwd, "session");
+			nodeFs.mkdirSync(directory);
+			const context = createCommandContext({
+				cwd,
+				seams: createTestSeams({ fileSystem: nodeFs }),
+			});
+			writeRojoWrapper(
+				context,
+				resolveConfig({ projectType: "luau", rojoProjectPath: projectPath }, {}),
+				directory,
+			);
+			const rojo = spawn("rojo", ["serve", path.join(directory, "rojo.project.json")], {
+				cwd,
+				stdio: "ignore",
+				windowsHide: true,
+			});
+			const closed = new Promise<void>((resolve) => {
+				rojo.once("close", () => {
+					resolve();
+				});
+			});
+			onTestFinished(async () => {
+				rojo.kill();
+				await closed;
+			});
+			const deadline = Date.now() + 10_000;
+			while (!(await nodeNetwork.isListeningAsync(port))) {
+				assert(
+					rojo.exitCode === null && Date.now() < deadline,
+					"Rojo did not listen on the copied serve port",
+				);
+				await sleep(50);
+			}
+
+			const info = await readApiAsync(port, "rojo");
+
+			await expect(nodeNetwork.getRojoInfoAsync(port)).resolves.toMatchObject({
+				projectName: `${projectName}@${endpointKey(cwd, "game.rbxl")}`,
+				protocolVersion: 5,
+				sessionId: info["sessionId"],
+			});
+
+			expect(info).toMatchObject({
 				gameId: 1011,
 				placeId: 789,
-				serveAddress: "127.0.0.1",
-				servePlaceIds: [123, 456],
-				servePort: port,
-				tree: {
-					$className: "DataModel",
-					ReplicatedStorage: {
-						$className: "ReplicatedStorage",
-						Content: { $className: "Folder" },
-					},
-				},
-			}),
-		});
-		const directory = path.join(cwd, "session");
-		nodeFs.mkdirSync(directory);
-		const context = createCommandContext({
-			cwd,
-			seams: createTestSeams({ fileSystem: nodeFs }),
-		});
-		writeRojoWrapper(context, resolveConfig({ projectType: "luau" }, {}), directory);
-		const rojo = spawn("rojo", ["serve", path.join(directory, "rojo.project.json")], {
-			cwd,
-			stdio: "ignore",
-			windowsHide: true,
-		});
-		const closed = new Promise<void>((resolve) => {
-			rojo.once("close", () => {
-				resolve();
+				projectName: `${projectName}@${endpointKey(cwd, "game.rbxl")}`,
 			});
-		});
-		onTestFinished(async () => {
-			rojo.kill();
-			await closed;
-		});
-		const deadline = Date.now() + 10_000;
-		while (!(await nodeNetwork.isListeningAsync(port))) {
-			assert(
-				rojo.exitCode === null && Date.now() < deadline,
-				"Rojo did not listen on the copied serve port",
-			);
-			await sleep(50);
-		}
+			expect(info["expectedPlaceIds"]).toIncludeSameMembers([123, 456]);
 
-		const info = await readApiAsync(port, "rojo");
+			const tree = await readApiAsync(port, `read/${String(info["rootInstanceId"])}`);
+			assert(typeof tree["instances"] === "object" && tree["instances"] !== null);
+			const instances = Object.values(tree["instances"]);
 
-		await expect(nodeNetwork.getRojoInfoAsync(port)).resolves.toMatchObject({
-			projectName: `Wrapper test@${endpointKey(cwd, "game.rbxl")}`,
-			protocolVersion: 5,
-			sessionId: info["sessionId"],
-		});
-
-		expect(info).toMatchObject({
-			gameId: 1011,
-			placeId: 789,
-			projectName: `Wrapper test@${endpointKey(cwd, "game.rbxl")}`,
-		});
-		expect(info["expectedPlaceIds"]).toIncludeSameMembers([123, 456]);
-
-		const tree = await readApiAsync(port, `read/${String(info["rootInstanceId"])}`);
-		assert(typeof tree["instances"] === "object" && tree["instances"] !== null);
-		const instances = Object.values(tree["instances"]);
-
-		expect(instances).toHaveLength(3);
-		expect(instances).toIncludeSameMembers([
-			expect.objectContaining({
-				ClassName: "DataModel",
-				Name: `Wrapper test@${endpointKey(cwd, "game.rbxl")}`,
-			}),
-			expect.objectContaining({ ClassName: "ReplicatedStorage", Name: "ReplicatedStorage" }),
-			expect.objectContaining({ ClassName: "Folder", Name: "Content" }),
-		]);
-	});
+			expect(instances).toHaveLength(3);
+			expect(instances).toIncludeSameMembers([
+				expect.objectContaining({
+					ClassName: "DataModel",
+					Name: `${projectName}@${endpointKey(cwd, "game.rbxl")}`,
+				}),
+				expect.objectContaining({
+					ClassName: "ReplicatedStorage",
+					Name: "ReplicatedStorage",
+				}),
+				expect.objectContaining({ ClassName: "Folder", Name: "Content" }),
+			]);
+		},
+	);
 });

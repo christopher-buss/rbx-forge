@@ -12,10 +12,12 @@
 import process from "node:process";
 import { describe, expect, it } from "vitest";
 
+import { readVariable } from "../../src/process/environment.ts";
 import { makeRealStudioSyncAsync } from "../helpers/real-studio-sync.ts";
 
 const IS_ENABLED =
-	process.platform === "win32" && process.env["RBX_FORGE_TEST_REAL_STUDIO"] === "1";
+	process.platform === "win32" &&
+	readVariable(process.env, "RBX_FORGE_TEST_REAL_STUDIO", process.platform) === "1";
 
 describe.skipIf(!IS_ENABLED)("real Studio Rojo synchronization", () => {
 	it(

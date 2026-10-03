@@ -4,7 +4,7 @@ import type { SessionStatus } from "../session/status.ts";
 
 /**
  * Classify a Studio attachment that lost its Studio or session.
- * @returns A launch failure rather than success or a daemon crash.
+ * @returns A launch failure rather than success or a supervisor crash.
  */
 export function studioCancelled(): ForgeError {
 	return new ForgeError(

@@ -182,7 +182,10 @@ describe("forge start", () => {
 		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
 		const session = startSession(fixture, ["start", "--no-open", "--json"]);
 		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
-		const status = await waitForStatusAsync(fixture, () => true);
+		const status = await waitForStatusAsync(
+			fixture,
+			({ services }) => services.compiler.status === "ready",
+		);
 		const isListening = await isListeningAsync(fixture.port);
 		session.child.kill("SIGKILL");
 		await session.closed;

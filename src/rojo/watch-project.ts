@@ -14,7 +14,7 @@ import { rojoWrapperPath } from "./wrapper-project.ts";
  * @param scope - The session's cancellation and tracked work.
  */
 export function watchRojoProject(
-	{ cwd, reporter, seams: { fileSystem } }: CommandContext,
+	{ cwd, reporter, seams: { fileSystem, host } }: CommandContext,
 	{
 		config,
 		directory,
@@ -27,6 +27,7 @@ export function watchRojoProject(
 	scope: Pick<SessionScope, "signal" | "track">,
 ): void {
 	const project = path.resolve(cwd, config.rojoProjectPath);
+	const basename = normalizeFilename(path.basename(project), host.platform);
 	const wrapper = rojoWrapperPath(directory);
 	const content = fileSystem.readFileSync(wrapper);
 	function warn(error: unknown): void {
@@ -46,7 +47,7 @@ export function watchRojoProject(
 	}
 
 	watcher.on("change", (_event: string, filename: null | string) => {
-		if (filename === null || filename === path.basename(project)) {
+		if (filename === null || normalizeFilename(filename, host.platform) === basename) {
 			try {
 				fileSystem.writeFileSync(wrapper, content);
 			} catch (err) {
@@ -55,6 +56,17 @@ export function watchRojoProject(
 		}
 	});
 	closeWithRojo(watcher, scope, stopped, warn);
+}
+
+/**
+ * Match file-event casing on the host that owns the project.
+ *
+ * @param filename - A configured basename or a watch event.
+ * @param platform - The project's host OS.
+ * @returns The comparable basename.
+ */
+function normalizeFilename(filename: string, platform: NodeJS.Platform): string {
+	return platform === "win32" ? filename.toLowerCase() : filename;
 }
 
 /**

@@ -570,7 +570,7 @@ describe(runUpAsync, () => {
 		expect(launchFiles(up)).toStrictEqual([]);
 	});
 
-	it("should classify its daemon ending during a Studio attachment as a launch failure", async () => {
+	it("should classify its supervisor ending during a Studio attachment as a launch failure", async () => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp(

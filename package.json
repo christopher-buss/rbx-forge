@@ -67,7 +67,8 @@
 		"@msgpack/msgpack": "catalog:runtime",
 		"arktype": "catalog:runtime",
 		"c12": "catalog:runtime",
-		"jiti": "catalog:runtime"
+		"jiti": "catalog:runtime",
+		"strip-json-comments": "catalog:runtime"
 	},
 	"devDependencies": {
 		"@isentinel/eslint-config": "catalog:lint",

@@ -1,8 +1,11 @@
 import path from "node:path";
+import stripJsonComments from "strip-json-comments";
 
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { endpointKey } from "../supervisor/endpoint.ts";
+
+const PROJECT_SUFFIX = /\.project\.jsonc?$/u;
 
 /**
  * The generated project belongs to the session and only `rojo serve` uses it.
@@ -29,13 +32,13 @@ export function writeRojoWrapper(
 	const projectPath = path.resolve(cwd, config.rojoProjectPath);
 	// Rojo validates the project; forge reads only its name and root serve
 	// fields.
-	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- project JSON has named fields
-	const project = JSON.parse(seams.fileSystem.readFileSync(projectPath, "utf8")) as Record<
-		string,
-		unknown
-	>;
+	const content = stripJsonComments(seams.fileSystem.readFileSync(projectPath, "utf8"), {
+		trailingCommas: true,
+	});
+	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Rojo validates the project shape
+	const project = JSON.parse(content) as Record<string, unknown> & { name?: string };
 	const wrapper: Record<string, unknown> = {
-		name: `${String(project["name"])}@${endpointKey(cwd, config.buildOutputPath)}`,
+		name: `${project.name ?? inferProjectName(projectPath)}@${endpointKey(cwd, config.buildOutputPath)}`,
 		tree: { $path: projectPath },
 	};
 	// Rojo reads these fields from the root project only.
@@ -51,4 +54,17 @@ export function writeRojoWrapper(
 		// Stryker disable next-line StringLiteral: equivalent formatting
 		`${JSON.stringify(wrapper, undefined, "\t")}\n`,
 	);
+}
+
+/**
+ * Match Rojo's default-project folder name and named-project filename stem.
+ *
+ * @param projectPath - The absolute user project path.
+ * @returns The inferred project name.
+ */
+function inferProjectName(projectPath: string): string {
+	const filename = path.basename(projectPath);
+	return filename === "default.project.json" || filename === "default.project.jsonc"
+		? path.basename(path.dirname(projectPath))
+		: filename.replace(PROJECT_SUFFIX, "");
 }

@@ -232,6 +232,9 @@ catalogs:
     jiti:
       specifier: 2.7.0
       version: 2.7.0
+    strip-json-comments:
+      specifier: 5.0.3
+      version: 5.0.3
   test:
     '@total-typescript/shoehorn':
       specifier: 0.1.2
@@ -294,6 +297,9 @@ importers:
       jiti:
         specifier: catalog:runtime
         version: 2.7.0
+      strip-json-comments:
+        specifier: catalog:runtime
+        version: 5.0.3
     devDependencies:
       '@isentinel/eslint-config':
         specifier: catalog:lint

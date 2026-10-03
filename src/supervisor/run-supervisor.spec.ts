@@ -1268,6 +1268,76 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
+	it.for([
+		{
+			filename: "default.project.json",
+			platform: "win32" as const,
+			projectPath: "DEFAULT.project.json",
+			reloads: true,
+		},
+		{
+			filename: "DeFaUlT.project.json",
+			platform: "win32" as const,
+			projectPath: "DEFAULT.project.json",
+			reloads: true,
+		},
+		{
+			filename: "default.project.json",
+			platform: "linux" as const,
+			projectPath: "DEFAULT.project.json",
+			reloads: false,
+		},
+		{
+			filename: "default.project.json",
+			platform: "darwin" as const,
+			projectPath: "DEFAULT.project.json",
+			reloads: false,
+		},
+		{
+			filename: "DEFAULT.project.json",
+			platform: "linux" as const,
+			projectPath: "DEFAULT.project.json",
+			reloads: true,
+		},
+		{
+			filename: "aß.project.json",
+			platform: "win32" as const,
+			projectPath: "Aß.project.json",
+			reloads: true,
+		},
+		{
+			filename: "ass.project.json",
+			platform: "win32" as const,
+			projectPath: "Aß.project.json",
+			reloads: false,
+		},
+	])(
+		"should respect $platform project filename casing for $filename",
+		async ({ filename, platform, projectPath, reloads }) => {
+			expect.assertions(1);
+
+			const run = startCommand({
+				file: { rojoProjectPath: projectPath },
+				files: {
+					...TOOL_FILES,
+					[projectPath]: '{"name":"Example","tree":{"$className":"DataModel"}}',
+					"tools/rojo.exe": "",
+				},
+				platform,
+				writePrivateFile: () => {},
+			});
+			await flushAsync();
+			const wrapper = path.join(SESSION, "rojo.project.json");
+			run.memory.setModifiedTime(wrapper, 1);
+			run.memory.watch.change(PROJECT, filename);
+			const modified = run.memory.fileSystem.statSync(wrapper).mtimeMs;
+			run.signals.fire("SIGINT");
+			await run.result;
+
+			expect(modified !== 1).toBe(reloads);
+		},
+	);
+
 	it("should reload after atomic project replacement and filename-less events, ignoring unrelated files", async () => {
 		expect.assertions(3);
 
@@ -1457,6 +1527,83 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 		expect(run.memory.files()[".forge/sessions/session-1/studio-marker.lua"]).toBeUndefined();
 	});
+
+	it.for(["default.project.json", "default.project.jsonc"])(
+		"should serve a commented %s project with trailing commas",
+		async (projectPath) => {
+			expect.assertions(1);
+
+			const run = startCommand({
+				file: { rojoProjectPath: projectPath },
+				files: {
+					...TOOL_FILES,
+					[projectPath]:
+						'{/* project */ "name":"Example // literal", "servePlaceIds":[10,20,], "tree":{"$className":"DataModel",}, // root\n}',
+				},
+				getRojoInfo: async () => {
+					return {
+						projectName: `Example // literal@${endpointKey(PROJECT, "game.rbxl")}`,
+						protocolVersion: 5,
+						serverVersion: "7.7.1",
+						sessionId: "launch",
+					};
+				},
+			});
+			await flushAsync();
+			const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+			run.signals.fire("SIGINT");
+			await run.result;
+			assert(typeof wrapper === "string");
+
+			expect(JSON.parse(wrapper)).toStrictEqual({
+				name: `Example // literal@${endpointKey(PROJECT, "game.rbxl")}`,
+				servePlaceIds: [10, 20],
+				tree: { $path: path.join(PROJECT, projectPath) },
+			});
+		},
+	);
+
+	it.for<{ expectedName: string; name?: null | string; projectPath: string }>([
+		{ expectedName: path.basename(PROJECT), projectPath: "default.project.json" },
+		{ expectedName: path.basename(PROJECT), projectPath: "default.project.jsonc" },
+		{ expectedName: "nested", projectPath: "nested/default.project.jsonc" },
+		{ expectedName: "named", projectPath: "nested/named.project.json" },
+		{ expectedName: "named", projectPath: "nested/named.project.jsonc" },
+		{ expectedName: "my.game", projectPath: "nested/my.game.project.jsonc" },
+		{ expectedName: "Default", projectPath: "nested/Default.project.json" },
+		{ name: null, expectedName: "nested", projectPath: "nested/default.project.json" },
+		{ name: "", expectedName: "", projectPath: "nested/default.project.jsonc" },
+	])(
+		"should infer the Rojo name for $projectPath",
+		async ({ name, expectedName, projectPath }) => {
+			expect.assertions(1);
+
+			const run = startCommand({
+				file: { rojoProjectPath: projectPath },
+				files: {
+					...TOOL_FILES,
+					[projectPath]: JSON.stringify({ name, tree: { $className: "DataModel" } }),
+				},
+				getRojoInfo: async () => {
+					return {
+						projectName: `${expectedName}@${endpointKey(PROJECT, "game.rbxl")}`,
+						protocolVersion: 5,
+						serverVersion: "7.7.1",
+						sessionId: "launch",
+					};
+				},
+			});
+			await flushAsync();
+			const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+			run.signals.fire("SIGINT");
+			await run.result;
+			assert(typeof wrapper === "string");
+
+			expect(JSON.parse(wrapper)).toMatchObject({
+				name: `${expectedName}@${endpointKey(PROJECT, "game.rbxl")}`,
+			});
+		},
+	);
 
 	it("should serve a wrapper that identifies the worktree without adding an instance", async () => {
 		expect.assertions(2);
@@ -1654,6 +1801,11 @@ describe(runSupervisorAsync, () => {
 			{
 				message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it.`,
 				type: "info",
+			},
+			{
+				message:
+					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+				type: "warning",
 			},
 			{ message: `Roblox Studio has ${PLACE} open.`, type: "info" },
 			{ name: "rojo serve", status: "started", type: "step" },
@@ -1870,7 +2022,7 @@ describe(runSupervisorAsync, () => {
 	});
 
 	it("should say it uses the Studio that has the place open", async () => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const run = await stoppedAsync({
 			files: { ...TOOL_FILES, "game.rbxl.lock": STUDIO_LOCK },
@@ -1882,6 +2034,11 @@ describe(runSupervisorAsync, () => {
 		expect(run.reporter.events).toContainEqual({
 			message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it.`,
 			type: "info",
+		});
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+			type: "warning",
 		});
 	});
 
@@ -3847,6 +4004,24 @@ describe("forge up --studio", () => {
 		expect(run.reporter.events).toContainEqual({
 			message: `Roblox Studio has ${PLACE} open.`,
 			type: "info",
+		});
+	});
+
+	it("should warn that an existing Studio attached to a running supervisor needs manual synchronization", async () => {
+		expect.assertions(3);
+
+		const run = startCommand({ ...ATTACHED, flags: UP });
+		await flushAsync();
+		const answer = await askAddAsync(run, STUDIO);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toStrictEqual({ added: ["studio", "rojo"] });
+		expect(run.studioLauncher).not.toHaveBeenCalled();
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
+			type: "warning",
 		});
 	});
 
