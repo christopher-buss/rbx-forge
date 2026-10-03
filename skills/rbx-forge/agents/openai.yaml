@@ -1,0 +1,3 @@
+interface:
+  display_name: rbx-forge
+  short_description: "Roblox dev loop: background compiler, Studio, syncback"
