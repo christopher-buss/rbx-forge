@@ -22,6 +22,12 @@ and starts the watch-mode compiler. It opens Studio only once Rojo listens. With
 syncback on, each save in Studio syncs the place back into the project and runs
 your hooks, such as `eslint --fix`.
 
+A Studio launched for a session connects to its own worktree's Rojo and
+reconnects after a same-port restart. It refuses another worktree's project;
+click Disconnect in the Rojo widget to stop reconnecting. See
+[Studio sync](./docs/studio.md#managed-rojo-plugin) for supported plugins and
+readiness behavior.
+
 A session runs in its own supervisor process. A native reaper process starts
 every worker (Rojo, the compiler, syncback, hooks) and owns it at OS level.
 Ctrl+C, a closed terminal, or a killed `forge start` stops every worker that

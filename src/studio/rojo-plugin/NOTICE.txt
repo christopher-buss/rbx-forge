@@ -4,7 +4,7 @@ The bundled stock sources come from Rojo 7.7.1 and also match Rojo 7.7.0.
 These sources, including the modified App.lua and ServeSession.lua shipped in
 dist/rojo-plugin/, are covered by the Mozilla Public License 2.0. See LICENSE.txt
 alongside this notice. Forge adds launch-marker identity checks, automatic initial
-sync acceptance, a bounded sync-stream acknowledgement, and a version/hash comment
+sync acceptance, same-project reconnect, a bounded sync-stream acknowledgement, and a version/hash comment
 when preparing the managed plugin. The independent TypeScript code remains under
 the root MIT license.
 

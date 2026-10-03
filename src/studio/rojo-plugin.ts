@@ -19,17 +19,24 @@ export interface PluginCapabilities {
 }
 
 /** Current patch version, shared with the readable source distribution. */
-export const VERSION = 2;
+export const VERSION = 3;
 /** Script bodies and provenance for the source distribution. */
-export const SCRIPTS: ReadonlyArray<{ hash: string; name: string; source: string }> = [
+export const SCRIPTS: ReadonlyArray<{
+	hash: string;
+	name: string;
+	previousHash: string;
+	source: string;
+}> = [
 	{
 		name: "App",
 		hash: "f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+		previousHash: "6f2c0bc5ca581f2d0dd62da344fee033821a44ead7d55d800247f071f113bae9",
 		source: patched.App,
 	},
 	{
 		name: "ServeSession",
 		hash: "e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+		previousHash: "0ae6058c41a198e5a5cee72918809e9f67733669732895e3fee208dd0f6e1318",
 		source: patched.ServeSession,
 	},
 ];
@@ -145,7 +152,11 @@ function checkProtocol(context: CommandContext, source: string, serverProtocol: 
 }
 
 function recognizes(
-	{ hash, source: original }: { hash: string; source: string },
+	{
+		hash,
+		previousHash,
+		source: original,
+	}: { hash: string; previousHash: string; source: string },
 	source: string,
 ): boolean {
 	const mark = MARK.exec(source);
@@ -159,10 +170,11 @@ function recognizes(
 		return false;
 	}
 
+	const legacyHash = version === VERSION - 1 ? previousHash : hash;
 	const isKnownBody =
 		version === VERSION
 			? body === original
-			: createHash("sha256").update(body).digest("hex") === hash;
+			: createHash("sha256").update(body).digest("hex") === legacyHash;
 	return mark[2] === hash && isKnownBody;
 }
 

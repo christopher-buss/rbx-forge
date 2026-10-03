@@ -109,9 +109,11 @@ local settings = {priorEndpoints = { ["0"] = {host = "old", port = "9", projectN
 local httpRequests = {}
 local httpFailure
 local reconcileName
+local reconcileValue
 local emptyDiff = false
 local appClass
 local modules = {
+	Dictionary = {merge = function(left, right) local value = table.clone(left); for key, item in right do value[key] = item end; return value end},
 	Promise = Promise,
 	Roact = {Component = {extend = function() appClass = {}; return appClass end}, createElement = noop, createBinding = function(value)
 		local binding = {getValue = function() return value end}; return binding, function(nextValue) value = nextValue end
@@ -130,9 +132,9 @@ local modules = {
 	InstanceMap = {new = function() return {fromInstances = {}, fromIds = {}, stop = noop} end},
 	ChangeBatcher = {new = function() return {stop = noop} end},
 	Reconciler = {new = function() return {
-		hydrate = noop,
+		hydrate = function(_, instances) reconcileValue = instances.probe end,
 		diff = function() return true, {added = {}, removed = {}, updated = if emptyDiff then {} else {{id = "root", changedName = reconcileName}}} end,
-		applyPatch = function() world.Name = reconcileName; return {added = {}, removed = {}, updated = {}} end,
+		applyPatch = function() world.Name = reconcileName; world.probe = reconcileValue; return {added = {}, removed = {}, updated = {}} end,
 	} end},
 	Http = {get = function(url)
 		if httpFailure == "throw" then error("synchronous HTTP setup error") end
@@ -155,15 +157,19 @@ modules.ServeSession = Session
 local apiConnect = Promise.new()
 local apiRead = Promise.new()
 local currentApi
+local stream
 local reads = 0
 local connects = 0
+local apiUrls = {}
+local connectQueue = {}
 modules.ApiContext = {new = function(url)
 	connects += 1
+	table.insert(apiUrls, url)
 	currentApi = {__baseUrl = url,
-		connect = function() return apiConnect end,
+		connect = function() return table.remove(connectQueue, 1) or apiConnect end,
 		read = function() reads += 1; return apiRead end,
 		setMessageCursor = noop,
-		connectWebSocket = function(self) self.__wsClient = {ConnectionState = "Connecting"}; return Promise.new() end,
+		connectWebSocket = function(self) self.__wsClient = {ConnectionState = "Connecting"}; stream = Promise.new(); return stream end,
 		disconnect = noop,
 	}
 	return currentApi
@@ -197,15 +203,17 @@ end
 local function reset()
 	apiConnect = Promise.new(); apiRead = Promise.new(); httpRequests = {}; reads = 0; connects = 0; httpFailure = nil; existing = nil; edit = true; sleepers = {}; now = 0
 	world.ChildAdded = signal(); world.Name = "Untitled"
+	world.probe = "saved"; apiUrls = {}; connectQueue = {}
 	playtestUrl = nil; settings.autoConnectPlaytestServer = false
 	emptyDiff = false; settings.confirmationBehavior = "Initial"
+	settings.showNotifications = true
 	settings.priorEndpoints = {["0"] = {host = "old", port = "9", projectName = "Foreign"}}
 end
 local function server(projectName, sessionId)
 	reconcileName = projectName or "Game@worktree"
 	apiConnect:resolve({projectName = projectName or "Game@worktree", sessionId = sessionId or "launch", rootInstanceId = "root"})
 end
-local function initialSync() apiRead:resolve({messageCursor = 1, instances = {}}) end
+local function initialSync(value) apiRead:resolve({messageCursor = 1, instances = {probe = value or "initial"}}) end
 local function openStream() currentApi.__wsClient.ConnectionState = "Open"; advance(0.1) end
 
 -- Existing-marker connection runs the real initial-sync and stream-readiness code.
@@ -243,7 +251,7 @@ assert(playtest.serveSession:getStatus() == Session.Status.Connected and #httpRe
 playtest:endSession()
 
 for _, identity in {{"Foreign", "launch"}, {"Game@worktree", "foreign"}} do
-	reset(); emptyDiff = true; local instance = app(); world.ChildAdded:Fire(marker()); server(identity[1], identity[2]); advance(1)
+	reset(); emptyDiff = true; local instance = app(); world.ChildAdded:Fire(marker()); server(identity[1], identity[2]); advance(0.9)
 	assert(reads == 0 and #httpRequests == 0 and instance.serveSession == nil, "reject identity before initial sync")
 	instance:willUnmount()
 end
@@ -264,7 +272,7 @@ for _, when in {"connect", "initial", "stream"} do
 	assert(instance.serveSession == nil and instance.forgeMarker == nil and #httpRequests == 0)
 	instance:willUnmount()
 end
-reset(); local failed = app(); world.ChildAdded:Fire(marker()); server(); apiRead:reject("initial sync failed"); advance(1)
+reset(); local failed = app(); world.ChildAdded:Fire(marker()); server(); apiRead:reject("initial sync failed"); advance(0.9)
 assert(failed.serveSession == nil and #httpRequests == 0); failed:willUnmount()
 reset(); local bounded = app(); world.ChildAdded:Fire(marker()); server(); initialSync(); advance(181); openStream()
 assert(#httpRequests == 0); bounded:willUnmount()
@@ -278,3 +286,134 @@ assert(ignored.destroyed and connects == 0); playing:willUnmount()
 reset(); local currentUser = app(); local foreignUser = marker(); foreignUser.Name = "ROJO_OPEN_99"; world.ChildAdded:Fire(foreignUser)
 assert(not foreignUser.destroyed and connects == 0); currentUser:willUnmount()
 print("PASS: full shipped App/ServeSession marker, identity, initial sync, stream, cancellation, and HTTP isolation")
+
+-- A restarted server supplies a fresh identity and the current initial tree.
+reset(); existing = marker(); local reconnecting = app(); server(); initialSync(); openStream()
+stream:reject("server stopped")
+assert(reconnecting.serveSession == nil and reconnecting.forgeMarker ~= nil, "automatic disconnect retains marker")
+apiConnect = Promise.new(); apiRead = Promise.new()
+advance(0.9); assert(connects == 1, "retry waits one second")
+advance(0.1); assert(connects == 2, "retry polls the marker endpoint")
+server("Game@worktree", "restarted"); initialSync("offline edit"); openStream()
+assert(reconnecting.serveSession:getStatus() == Session.Status.Connected and reads == 2, "fresh identity performs initial sync")
+assert(world.probe == "offline edit", "edits made while Rojo was down sync after restart")
+assert(#httpRequests == 1, "reconnect does not repeat launch acknowledgement")
+reconnecting:willUnmount()
+
+-- A cancelled pending initial read cannot apply a stale tree.
+reset(); existing = marker(); local cancelledRead = app(); server()
+cancelledRead:endSession(); initialSync("cancelled")
+assert(world.probe == "saved", "manual disconnect cancels initial synchronization")
+cancelledRead:willUnmount()
+
+-- Refuse each foreign server once, keep the fixed endpoint, and accept a later matching restart.
+reset(); existing = marker(); local refusing = app(); server(); initialSync(); openStream(); stream:reject("offline")
+refusing.setHost("foreign-ui"); refusing.setPort("12345")
+local function refusalCount(instance)
+	local count = 0
+	for _, notification in instance.state.notifications do
+		if notification.text:find("Refused Rojo project", 1, true) then count += 1 end
+	end
+	return count
+end
+for index, identity in {"foreign-one", "foreign-one", "foreign-two"} do
+	apiConnect = Promise.new(); advance(1); server("Other@worktree", identity)
+	assert(refusing.serveSession == nil and reads == 1 and world.probe == "initial", "foreign wrapper never applies data")
+	assert(refusalCount(refusing) == (if index == 3 then 2 else 1), "one notice per refused server identity")
+end
+apiConnect = Promise.new(); apiRead = Promise.new(); advance(1); server("Game@worktree", "correct"); initialSync("new matching tree"); openStream()
+assert(refusing.serveSession:getStatus() == Session.Status.Connected and world.probe == "new matching tree")
+for _, url in apiUrls do assert(url == "http://127.0.0.1:34872", "UI edits do not retarget managed reconnect") end
+refusing:willUnmount()
+
+-- Transient/protocol failures retry serially; repeated disconnect callbacks create no extra loop.
+reset(); existing = marker(); local retrying = app(); server(); initialSync(); local oldSession = retrying.serveSession
+stream:reject("socket error"); oldSession:stop(); oldSession:stop()
+apiConnect = Promise.new(); advance(1); local count = connects; advance(10)
+assert(connects == count, "only one identity lookup in flight")
+apiConnect:reject("protocol/request error")
+apiConnect = Promise.new(); advance(0.9); assert(connects == count); advance(0.1)
+apiConnect:reject("network offline")
+apiConnect = Promise.new(); advance(1); server("Game@worktree", "after-errors")
+apiRead = Promise.new(); retrying:endSession(); advance(5)
+assert(retrying.serveSession == nil and retrying.forgeMarker == nil and #httpRequests == 0)
+retrying:willUnmount()
+
+-- Disconnect during downtime or a pending lookup and unmount suppress late continuations.
+for _, when in {"downtime", "lookup", "unmount"} do
+	reset(); existing = marker(); local instance = app(); server(); initialSync(); stream:reject("offline")
+	apiConnect = Promise.new(); apiRead = Promise.new()
+	if when ~= "downtime" then advance(1) end
+	if when == "unmount" then instance:willUnmount() else instance:endSession() end
+	local stoppedAt = connects
+	server("Game@worktree", "late"); initialSync("stale tree"); advance(10)
+	assert(connects == stoppedAt and instance.serveSession == nil and instance.forgeMarker == nil and world.probe == "initial", "manual cleanup suppresses late reconnect")
+	if when ~= "unmount" then instance:willUnmount() end
+end
+
+-- Poll/connection identity races are rejected before the read.
+for _, identity in {{"Game@worktree", "changed"}, {"Other@worktree", "polled"}} do
+	reset(); existing = marker(); local raced = app(); server(); initialSync(); stream:reject("offline")
+	local polled = Promise.new(); local changed = Promise.new(); connectQueue = {polled, changed}; apiRead = Promise.new()
+	advance(1); polled:resolve({projectName = "Game@worktree", sessionId = "polled"})
+	changed:resolve({projectName = identity[1], sessionId = identity[2], rootInstanceId = "root"})
+	assert(reads == 1 and raced.serveSession == nil and world.probe == "initial", "session validates both identities again after lookup")
+	raced:willUnmount()
+end
+
+-- Manual Disconnect cancels each stage of the fresh reconnect.
+for _, when in {"connect", "initial", "stream"} do
+	reset(); existing = marker(); local instance = app(); server(); initialSync(); stream:reject("offline")
+	local lookup = Promise.new(); local handshake = Promise.new(); connectQueue = {lookup, handshake}; apiRead = Promise.new()
+	advance(1); lookup:resolve({projectName = "Game@worktree", sessionId = "fresh"})
+	if when ~= "connect" then handshake:resolve({projectName = "Game@worktree", sessionId = "fresh", rootInstanceId = "root"}) end
+	if when == "stream" then initialSync("fresh tree") end
+	instance:endSession()
+	handshake:resolve({projectName = "Game@worktree", sessionId = "fresh", rootInstanceId = "root"})
+	initialSync("cancelled tree"); advance(5)
+	assert(instance.serveSession == nil and instance.forgeMarker == nil and #httpRequests == 0)
+	assert(world.probe == (if when == "stream" then "fresh tree" else "initial"), "cancelled reconnect cannot apply a later tree")
+	instance:willUnmount()
+end
+
+-- A replacement marker cancels an old identity request, even while Studio is disconnected.
+reset(); existing = marker(); local replaced = app(); server(); initialSync(); stream:reject("offline")
+local stale = Promise.new(); apiConnect = stale; advance(1)
+apiConnect = Promise.new(); apiRead = Promise.new()
+world.ChildAdded:Fire(marker({Host = "127.0.0.1", Port = "34567", SessionId = "replacement", ProjectName = "New@worktree"}))
+server("New@worktree", "replacement"); initialSync("replacement tree"); openStream()
+local replacementCount = connects
+stale:resolve({projectName = "Other@worktree", sessionId = "stale"}); advance(5)
+assert(connects == replacementCount and world.Name == "New@worktree" and world.probe == "replacement tree" and refusalCount(replaced) == 0)
+replaced:willUnmount()
+
+-- A new marker also replaces a connection whose handshake or initial read is pending.
+for _, when in {"connect", "initial"} do
+	reset(); existing = marker(); local instance = app()
+	local staleConnect = apiConnect; local staleRead = apiRead
+	if when == "initial" then server() end
+	apiConnect = Promise.new(); apiRead = Promise.new()
+	world.ChildAdded:Fire(marker({Host = "127.0.0.1", Port = "34567", SessionId = "replacement", ProjectName = "New@worktree"}))
+	assert(connects == 2, "replacement marker cancels a pending connection and starts its own")
+	server("New@worktree", "replacement"); initialSync("replacement tree"); openStream()
+	staleConnect:resolve({projectName = "Game@worktree", sessionId = "launch", rootInstanceId = "root"})
+	staleRead:resolve({messageCursor = 1, instances = {probe = "stale tree"}}); advance(2)
+	assert(world.Name == "New@worktree" and world.probe == "replacement tree" and #httpRequests == 0, "replacement marker cancels pending old synchronization")
+	instance:willUnmount()
+end
+
+-- Initial failure consumes the original one-shot readiness URL before any fresh session syncs.
+for _, failure in {"connect", "initial", "stream"} do
+	reset(); existing = marker(); local instance = app()
+	if failure == "connect" then apiConnect:reject("initial connect failed")
+	else
+		server()
+		if failure == "initial" then apiRead:reject("initial read failed")
+		else initialSync(); stream:reject("closed before Open") end
+	end
+	apiConnect = Promise.new(); apiRead = Promise.new(); advance(1)
+	server("Game@worktree", "fresh-before-ack"); initialSync("fresh tree"); openStream()
+	assert(instance.serveSession:getStatus() == Session.Status.Connected and world.probe == "fresh tree" and #httpRequests == 0, "fresh reconnect must never acknowledge the original launch token")
+	instance:willUnmount()
+end
+print("PASS: reconnect, offline edits, foreign identity, fixed endpoint, cancellation, and original readiness identity")

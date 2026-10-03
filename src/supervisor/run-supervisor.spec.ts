@@ -3,6 +3,7 @@ import { fromAny } from "@total-typescript/shoehorn";
 import path from "node:path";
 import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
 
+import previousPlugin from "../../test/fixtures/rojo-plugin-v2.json" with { type: "json" };
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createFakeReaper, createFakeSignals } from "../../test/helpers/fake-reaper.ts";
@@ -535,10 +536,10 @@ describe("managed Rojo plugin lifecycle", () => {
 		await run.result;
 
 		expect(sources[0]).toContain(
-			"-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+			"-- rbx-forge patch 3 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
 		);
 		expect(sources[1]).toContain(
-			"-- rbx-forge patch 2 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+			"-- rbx-forge patch 3 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
 		);
 	});
 
@@ -554,11 +555,26 @@ describe("managed Rojo plugin lifecycle", () => {
 		await endPluginSessionAsync(run);
 
 		expect(sources[0].split("\n", 1)[0]).toBe(
-			"-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+			"-- rbx-forge patch 3 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
 		);
 		expect(sources[1]!.split("\n", 1)[0]).toBe(
-			"-- rbx-forge patch 2 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+			"-- rbx-forge patch 3 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
 		);
+	});
+
+	it("should upgrade the genuine preceding plugin sources coherently", async () => {
+		expect.assertions(2);
+
+		const sources = [
+			`-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${previousPlugin.App}`,
+			`-- rbx-forge patch 2 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a\n${previousPlugin.ServeSession}`,
+			"return { protocolVersion = 5 }",
+		];
+		const run = startPluginSession(sources);
+		await endPluginSessionAsync(run);
+
+		expect(sources[0]).toContain("-- rbx-forge patch 3 stock");
+		expect(sources[1]).toContain("-- rbx-forge patch 3 stock");
 	});
 
 	it("should preserve a coherent current pair without rewriting the model", async () => {
@@ -589,6 +605,14 @@ describe("managed Rojo plugin lifecycle", () => {
 		{
 			reason: "manually changed marked sources",
 			source: "-- rbx-forge patch 1 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\nreturn 'changed'",
+		},
+		{
+			reason: "changed preceding patch sources",
+			source: `-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${previousPlugin.App}\n-- changed`,
+		},
+		{
+			reason: "stock bodies with a preceding patch header",
+			source: `-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`,
 		},
 	])("should preserve $reason and explain manual connection", async ({ source }) => {
 		expect.assertions(3);
@@ -646,7 +670,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		await endPluginSessionAsync(run);
 
 		expect(run.fake.spawned.map(({ args }) => args)).not.toContainEqual(["plugin", "install"]);
-		expect(sources[0]).toStartWith("-- rbx-forge patch 2");
+		expect(sources[0]).toStartWith("-- rbx-forge patch 3");
 	});
 
 	it.for(["", undefined])(
@@ -746,7 +770,7 @@ describe("managed Rojo plugin lifecycle", () => {
 				file: path.join(TOOLS, "custom-rojo"),
 			}),
 		);
-		expect(sources[0]).toStartWith("-- rbx-forge patch 2");
+		expect(sources[0]).toStartWith("-- rbx-forge patch 3");
 	});
 
 	it("should fail on a protocol mismatch before changing the plugin or launching", async () => {

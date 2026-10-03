@@ -73,6 +73,15 @@ to the wrapper name, as stock Rojo does. A plugin/server protocol mismatch fails
 `plugin_protocol_mismatch` (exit 7); an atomic write failure uses
 `plugin_write_failed` (exit 8).
 
+After an unexpected disconnect, the patch keeps the launch marker's host, port,
+and worktree project name and polls that same address every second. A restarted
+Rojo with the expected project name reconnects without a dialog, using its fresh
+session id; initial synchronization includes edits made while Rojo was down. A
+different project is refused before any data applies, with one notice per server
+session id while polling continues. Editing the widget's address does not retarget
+this reconnect. A manual Disconnect stops polling, including during downtime or
+a pending request.
+
 The patch is on by default, with no config option or restore command. Run the
 project's `rojo plugin install` to restore the stock plugin. Creator Store
 plugins are outside this managed file and are not patched. Existing attached
@@ -94,6 +103,9 @@ token and the expected Rojo identity. It closes on success, cancellation, Studio
 close, failure, or the readiness deadline. `down` and `stop` remain responsive
 while synchronization is pending. If synchronization is not acknowledged before
 the deadline, forge reports the failure; a late callback cannot make Studio ready.
+The callback certifies only the original launch session. If that connection fails
+before acknowledgement, reconnecting to a fresh Rojo session cannot satisfy the
+original readiness wait.
 
 An unknown or upstream plugin, an existing Studio, and a platform fallback need
 manual connection. Their `open` status confirms only the place lock. The managed

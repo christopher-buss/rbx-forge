@@ -179,7 +179,7 @@ mod tests {
             vec!["Plugin".into(), "Missing".into()],
             vec!["Plugin".into(), "Settings".into()],
         ] {
-            assert!(read_sources(&path, &[invalid.clone()]).is_err());
+            assert!(read_sources(&path, std::slice::from_ref(&invalid)).is_err());
             assert!(
                 write_sources(
                     &path,
