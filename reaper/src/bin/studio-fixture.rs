@@ -243,7 +243,7 @@ extern "C" fn on_close(_: libc::c_int) {
 #[cfg(unix)]
 fn install_close_handler() {
     // SAFETY: the signal handler only updates an atomic flag.
-    unsafe { libc::signal(libc::SIGTERM, on_close as libc::sighandler_t) };
+    unsafe { libc::signal(libc::SIGTERM, on_close as *const () as libc::sighandler_t) };
 }
 
 #[cfg(unix)]
