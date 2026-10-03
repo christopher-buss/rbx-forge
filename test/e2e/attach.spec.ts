@@ -15,6 +15,7 @@ import {
 	makeFixtureAsync,
 	startReadyAsync,
 	startSession,
+	STUDIO_PLUGIN_INSTALL,
 	waitForOutputAsync,
 } from "./session-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
@@ -69,7 +70,7 @@ describe("attach an open Studio", () => {
 		// Only the first start builds, installs the plugin, and launches Studio.
 		expect(rolesOf(fixture).filter((role) => !role.startsWith("rojo serve"))).toStrictEqual([
 			expect.stringMatching(/^rojo build /),
-			"rojo plugin install",
+			...STUDIO_PLUGIN_INSTALL,
 			expect.stringMatching(/^studio/),
 		]);
 	});

@@ -20,13 +20,12 @@ describe("real directory watch", () => {
 		onTestFinished(() => {
 			watcher.close();
 		});
-		const changed = new Promise<string>((resolve) => {
-			watcher.once("change", (_event: string, filename: string) => {
-				resolve(filename);
-			});
+		const filenames: Array<null | string> = [];
+		watcher.on("change", (_event: string, filename: null | string) => {
+			filenames.push(filename);
 		});
 		fileSystem.writeFileSync(path.join(directory, "note.txt"), "hello");
 
-		await expect(changed).resolves.toBe("note.txt");
+		await expect.poll(() => filenames).toContain("note.txt");
 	});
 });

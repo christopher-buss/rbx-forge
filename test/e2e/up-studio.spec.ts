@@ -12,7 +12,13 @@ import { parseStatus } from "../../src/session/status.ts";
 import { openStudioStandInAsync, pidOf } from "../helpers/real-native.ts";
 import { readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { holdPortAsync, makeFixtureAsync, pidsOf, wrapperPath } from "./session-fixture.ts";
+import {
+	holdPortAsync,
+	makeFixtureAsync,
+	pidsOf,
+	STUDIO_PLUGIN_INSTALL,
+	wrapperPath,
+} from "./session-fixture.ts";
 import type { UpRun } from "./up-fixture.ts";
 import { runForgeAsync, UP, WATCH_COMMAND } from "./up-fixture.ts";
 
@@ -99,7 +105,7 @@ describe("forge up --studio", () => {
 
 		expect({ attached: attached.toSorted(), compiler }).toStrictEqual({
 			attached: [
-				"rojo plugin install",
+				...STUDIO_PLUGIN_INSTALL,
 				`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
 				expect.stringMatching(/^studio /),
 			],

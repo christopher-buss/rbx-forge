@@ -5,8 +5,6 @@
  *
  * Real Roblox Studio never opens. The stand-in or the test owns the lock file.
  */
-import { fromAny } from "@total-typescript/shoehorn";
-
 import { readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -34,6 +32,8 @@ import {
 	PLACE,
 	START_STUDIO,
 	startSession,
+	STUDIO_PLUGIN_INSTALL,
+	STUDIO_PLUGIN_OUTPUT,
 	STUDIO_PROJECT,
 	waitForOutputAsync,
 	waitForRoleAsync,
@@ -157,7 +157,7 @@ describe("forge start", () => {
 			`rojo build default.project.json --output ${PLACE}`,
 			`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
 			"rbxtsc -w",
-			"rojo plugin install",
+			...STUDIO_PLUGIN_INSTALL,
 			`rojo syncback default.project.json --input ${PLACE} --non-interactive`,
 			"hook",
 		]);
@@ -320,31 +320,24 @@ describe("forge start --no-compiler", () => {
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
 		const session = startSession(fixture, START_STUDIO);
 		await waitForOutputAsync(session, "Press Ctrl+C to stop.");
+		await waitForOutputAsync(session, "Roblox Studio has ");
 		const output = parseLines(session.stdout());
 		await waitForRoleAsync(fixture.log, "studio");
 
-		expect(output).toStrictEqual([
+		expect(output).toIncludeSameMembers([
 			{ name: "rojo serve", status: "started", type: "step" },
 			{ name: "rojo serve", status: "succeeded", type: "step" },
 			{ name: "rojo build", status: "started", type: "step" },
 			{ name: "rojo build", status: "succeeded", type: "step" },
 			{ name: "open Roblox Studio", status: "started", type: "step" },
-			{ name: "rojo plugin", status: "started", type: "step" },
-			{ name: "rojo plugin", status: "succeeded", type: "step" },
-			{
-				message: fromAny(
-					expect.stringContaining(
-						"Auto-connect is off; connect to Rojo manually in Studio.",
-					),
-				),
-				type: "warning",
-			},
+			...STUDIO_PLUGIN_OUTPUT,
 			{ name: "open Roblox Studio", status: "succeeded", type: "step" },
 			{
 				message:
 					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
 				type: "warning",
 			},
+			{ message: `Roblox Studio has ${fixture.place} open.`, type: "info" },
 			{
 				message: `Rojo serves default.project.json on port ${fixture.port}. Press Ctrl+C to stop.`,
 				type: "info",

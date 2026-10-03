@@ -4,6 +4,8 @@
  * native Studio stand-in that forge starts directly, so real Roblox Studio
  * never opens.
  */
+import { fromAny } from "@total-typescript/shoehorn";
+
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { spawn } from "node:child_process";
 import nodeFs, { mkdirSync, writeFileSync } from "node:fs";
@@ -29,6 +31,26 @@ import { BIN, makeProject } from "./run-bin.ts";
 
 export const IS_WINDOWS = process.platform === "win32";
 export const IS_MACOS = process.platform === "darwin";
+
+/** Managed plugin preparation runs only on Studio's supported platforms. */
+export const STUDIO_PLUGIN_INSTALL: Array<string> =
+	IS_WINDOWS || IS_MACOS ? ["rojo plugin install"] : [];
+/** The fake install leaves no model, so Studio needs manual connection. */
+export const STUDIO_PLUGIN_OUTPUT: Array<unknown> =
+	IS_WINDOWS || IS_MACOS
+		? [
+				{ name: "rojo plugin", status: "started", type: "step" },
+				{ name: "rojo plugin", status: "succeeded", type: "step" },
+				{
+					message: fromAny(
+						expect.stringContaining(
+							"Auto-connect is off; connect to Rojo manually in Studio.",
+						),
+					),
+					type: "warning",
+				},
+			]
+		: [];
 
 const PATH_NAME = /^path$/i;
 /** Studio and Rojo with no compiler: the open step builds the place first. */
