@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 import { assert, describe, expect, it, onTestFinished } from "vitest";
 
 import {
@@ -13,6 +14,7 @@ import {
 	waitForFileAsync,
 } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
+import { waitForDeathAsync } from "../helpers/worker-log.ts";
 
 async function hiddenStudioAsync(
 	close = "exit",
@@ -69,7 +71,99 @@ async function queryHiddenClientAsync(pid: number): Promise<string> {
 	});
 }
 
+async function launchSnapshotWatcherAsync(
+	studio: { pid: number; startTime: string },
+	place: string,
+): Promise<number> {
+	const launcher = path.join(
+		import.meta.dirname,
+		"..",
+		"..",
+		"src",
+		"studio",
+		"snapshot-lighting-launcher.ts",
+	);
+	const entry = path.join(import.meta.dirname, "..", "..", "src", "supervisor.ts");
+	const source = `import { createSnapshotLightingLauncher } from ${JSON.stringify(pathToFileURL(launcher).href)};
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const launch = createSnapshotLightingLauncher({ host: { execPath: process.execPath }, native: () => require(${JSON.stringify(realNativePath())}) }, ${JSON.stringify(entry)});
+console.log(launch({ cwd: ${JSON.stringify(path.dirname(place))}, env: { ...process.env, RBX_FORGE_NATIVE_DIR: ${JSON.stringify(path.dirname(realNativePath()))} }, place: ${JSON.stringify(place)}, studio: ${JSON.stringify(studio)} }));`;
+	const pid = await new Promise<number>((resolve, reject) => {
+		execFile(
+			process.execPath,
+			["--input-type=module", "-e", source],
+			{ windowsHide: true },
+			(error, stdout) => {
+				if (error !== null) {
+					reject(new Error("The snapshot launching client failed.", { cause: error }));
+				} else {
+					resolve(Number(stdout.trim()));
+				}
+			},
+		);
+	});
+	const pinned = loadRealNative().pinProcess(pid);
+	assert(pinned !== null);
+	onTestFinished(() => {
+		pinned.kill();
+		pinned.waitForExit(5000);
+	});
+	return pid;
+}
+
 describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
+	it(
+		"dismisses a delayed snapshot prompt after the launching client exits",
+		{ timeout: 20_000 },
+		async () => {
+			expect.assertions(5);
+
+			const { pin, place } = await hiddenStudioAsync("exit", {
+				FIXTURE_STUDIO_DIALOG_DELAY_MS: "7000",
+			});
+			const watcherPid = await launchSnapshotWatcherAsync(
+				{ pid: pin.pid, startTime: pin.startTime },
+				place,
+			);
+			const watcher = loadRealNative().pinProcess(watcherPid);
+			assert(watcher !== null);
+
+			expect(watcher.isAlive()).toBeTrue();
+
+			await sleep(8500);
+
+			expect(watcher.waitForExit(5000)).toBeTrue();
+
+			await expect(waitForDeathAsync([watcherPid], 5000)).resolves.toStrictEqual([]);
+
+			expect(pin.isBlocked()).toBeFalse();
+			expect(pin.isAlive()).toBeTrue();
+		},
+	);
+
+	it("ends the independent snapshot watcher when Studio exits", async () => {
+		expect.assertions(4);
+
+		const { pin, place } = await hiddenStudioAsync();
+		const watcherPid = await launchSnapshotWatcherAsync(
+			{ pid: pin.pid, startTime: pin.startTime },
+			place,
+		);
+		const watcher = loadRealNative().pinProcess(watcherPid);
+		assert(watcher !== null);
+
+		expect(watcher.isAlive()).toBeTrue();
+
+		pin.kill();
+
+		expect(watcher.waitForExit(5000)).toBeTrue();
+
+		await expect(waitForDeathAsync([watcherPid], 5000)).resolves.toStrictEqual([]);
+
+		expect(watcher.isAlive()).toBeFalse();
+	});
+
 	it("queries and closes hidden Studio from a client that never launched it", async () => {
 		expect.assertions(2);
 

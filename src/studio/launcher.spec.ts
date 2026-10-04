@@ -53,13 +53,16 @@ function makeLauncher({
 
 	return {
 		clock,
-		launch: createStudioLauncher({
-			childProcess,
-			clock: clock.clock,
-			fileSystem: memory.fileSystem,
-			host: { ...createTestSeams().host, kill: vi.fn<Host["kill"]>(), platform },
-			native: () => native.addon,
-		}),
+		launch: createStudioLauncher(
+			{
+				childProcess,
+				clock: clock.clock,
+				fileSystem: memory.fileSystem,
+				host: { ...createTestSeams().host, kill: vi.fn<Host["kill"]>(), platform },
+				native: () => native.addon,
+			},
+			"/forge/supervisor.mjs",
+		),
 	};
 }
 

@@ -30,6 +30,7 @@ import {
 	PAUSE_POLL_MS,
 } from "./session/pause.ts";
 import { createStopSource } from "./session/stop-source.ts";
+import { runSnapshotLightingAsync } from "./studio/snapshot-lighting.ts";
 import type { SessionRequest } from "./supervisor/channel.ts";
 import { createChannelReporter, encodeMessage, parseSessionRequest } from "./supervisor/channel.ts";
 import type { SupervisorOwner } from "./supervisor/owner-end.ts";
@@ -47,6 +48,19 @@ function readRequest(): ForgeError | SessionRequest {
 	} catch (err) {
 		return toForgeError(err);
 	}
+}
+
+if (process.argv[2] === "--watch-hidden-lighting") {
+	await runSnapshotLightingAsync(
+		createNodeSeams({
+			input: process.stdin,
+			nativeDirectory: process.env["RBX_FORGE_NATIVE_DIR"],
+			output: process.stderr,
+			supervisorEntry: import.meta.filename,
+		}),
+		process.argv[3] ?? "",
+	);
+	process.exit();
 }
 
 const REQUEST = readRequest();

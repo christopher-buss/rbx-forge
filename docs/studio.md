@@ -56,7 +56,9 @@ the session and stays open.
 A Studio that the session attached this way is a found Studio:
 `data.services.studio.origin` is `found` (`forge` for a Studio the session
 opened), also after a `start` took it and gave it back. Only `stop --force` and
-`restart --force` close a found Studio. `down` and the idle timeout stop its
+`restart --force` close a found Studio during cleanup. An explicit Windows
+`show` or `hide` also closes it when changing its desktop, after saving it.
+`down` and the idle timeout stop its
 Rojo and let it go, open, and touch none of its auto-recovery files; `restart`
 keeps it, and starts the compiler and Rojo again on the same port; `stop` fails
 with `studio_found`.
@@ -251,7 +253,10 @@ its edits back into the project.
 
 A place with Compatibility lighting can show **Lighting Technology Migration**
 after its lock file appears. On the hidden Windows desktop, forge watches for
-that prompt during startup and presses its exact **Continue** button there;
+that prompt during startup and presses its exact **Continue** button there.
+Hidden snapshots use a bounded detached watcher, so `forge open` returns
+without waiting for the delayed prompt and the watcher ends after Studio
+exits, the prompt is dismissed, or its startup deadline expires;
 save also checks for it before reporting `studio_busy`. Other dialogs still
 require attention. Hidden saves and this dismissal leave the user's focus
 unchanged.
@@ -267,7 +272,9 @@ desktop. `forge hide` saves it and reopens it on forge's hidden desktop. Both
 wait until the replacement has the place open, keep Rojo running, and preserve
 the Studio's owner. They use the saved file without rebuilding it, so edits
 made in Studio survive. Undo history and open script tabs are lost when Studio
-reopens. Snapshot Studios are outside these commands.
+reopens. These commands also move an owned or found Studio: the replacement
+keeps the owner and its origin becomes forge. Snapshot Studios are outside
+these commands.
 
 `--timeout <s>` controls the save wait (30 seconds by default).
 `--studio-path <exe>` selects the executable used to reopen Studio. A failed

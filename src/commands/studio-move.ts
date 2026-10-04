@@ -9,7 +9,7 @@ import { callSessionAsync } from "../ipc/client.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { STUDIO_OPEN_BOUND_MS } from "../session/studio-readiness.ts";
 import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
-import { STUDIO_SAVE_TIMEOUT_MS } from "../studio/save-studio.ts";
+import { saveTimeoutMs, studioSaveResult } from "../studio/save-contract.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
@@ -28,14 +28,7 @@ const moveResult = type({
 	durationMs: "number",
 	from: DESKTOP,
 	pid: "number",
-	save: {
-		bytes: "number",
-		desktop: DESKTOP,
-		durationMs: "number",
-		mtime: "string",
-		pid: "number",
-		place: "string",
-	},
+	save: studioSaveResult,
 	to: DESKTOP,
 });
 
@@ -52,7 +45,7 @@ export async function runStudioMoveAsync(
 	input: CommandInput,
 	desktop: StudioDesktop,
 ): Promise<CommandResult> {
-	const timeoutMs = saveTimeout(input);
+	const timeoutMs = saveTimeoutMs(input.flags["timeout"]);
 	const session = findSession(context.seams.fileSystem, forgeFiles(context.cwd));
 	if (session === undefined) {
 		throw new ForgeError("studio_not_open", "No session Studio is open.");
@@ -95,16 +88,6 @@ function movePlatform(context: CommandContext): NodeJS.Platform {
 function resolveStudioPath(context: CommandContext, { flags }: CommandInput): string | undefined {
 	const studioPath = flags["studio-path"];
 	return typeof studioPath === "string" ? path.resolve(context.cwd, studioPath) : undefined;
-}
-
-function saveTimeout({ flags }: CommandInput): number {
-	const value = flags["timeout"];
-	const timeoutMs = value === undefined ? STUDIO_SAVE_TIMEOUT_MS : Number(value) * 1000;
-	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-		throw new ForgeError("usage", "--timeout must be a positive number of seconds.");
-	}
-
-	return timeoutMs;
 }
 
 function moveSummary(moved: { pid: number; to: string }, platform: NodeJS.Platform): string {

@@ -136,7 +136,9 @@ the project's `rojo plugin install`. See
 
 A Studio that already had the place open when the session attached it is a found
 Studio (`origin: "found"` in `status`; a Studio the session opened is `forge`).
-Only `stop --force` and `restart --force` close it: `down` and the idle timeout
+Only `stop --force` and `restart --force` close it during cleanup. Explicit
+Windows `show` and `hide` also save and reopen it when changing its desktop; the
+replacement keeps its owner and has origin `forge`. `down` and the idle timeout
 stop its Rojo and leave it open, `restart` keeps it, and `stop` fails with
 `studio_found` (exit 1).
 

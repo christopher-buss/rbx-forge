@@ -43,29 +43,48 @@ fn inheritable(file: File) -> io::Result<File> {
 /// Start `detached` outside the caller's job, with no console and stdin
 /// from `NUL`.
 ///
-/// Returns its PID, or `None` when the caller's job forbids breakaway.
+/// Returns its PID, or `None` when the caller's job forbids breakaway or
+/// the requested hidden desktop cannot be opened.
 ///
 /// # Errors
 ///
 /// When the output file cannot be opened or the process cannot start for
 /// another reason.
 pub fn spawn_detached(detached: &Detached<'_>) -> io::Result<Option<u32>> {
+    spawn_with_desktop(detached, super::desktop::inherit_hidden)
+}
+
+fn spawn_with_desktop(
+    detached: &Detached<'_>,
+    open_hidden: impl FnOnce() -> io::Result<super::desktop::Desktop>,
+) -> io::Result<Option<u32>> {
     let stdin = inheritable(File::open("NUL")?)?;
     let output = inheritable(match detached.output {
         Some(path) => OpenOptions::new().append(true).create(true).open(path)?,
         None => OpenOptions::new().write(true).open("NUL")?,
     })?;
 
-    // Only these two handles pass to the child, whatever else is
-    // inheritable in this process.
-    let handles = [raw(&stdin), raw(&output)];
+    let desktop = if detached.desktop == Some("hidden") {
+        // No process exists yet: the caller can safely use its platform launcher.
+        match open_hidden() {
+            Ok(desktop) => Some(desktop),
+            Err(_) => return Ok(None),
+        }
+    } else {
+        None
+    };
+    // Only the standard streams and requested desktop pass to the child.
+    let mut handles = vec![raw(&stdin), raw(&output)];
+    if let Some(desktop) = &desktop {
+        handles.push(desktop.raw());
+    }
     let mut attributes = AttributeList::new(1)?;
     // SAFETY: `handles` outlives `attributes`, dropped after the create.
     unsafe {
         attributes.set(
             PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
             handles.as_ptr().cast(),
-            size_of_val(&handles),
+            size_of_val(handles.as_slice()),
         )?;
     }
 
@@ -78,12 +97,7 @@ pub fn spawn_detached(detached: &Detached<'_>) -> io::Result<Option<u32>> {
     startup.StartupInfo.hStdError = raw(&output);
     startup.lpAttributeList = attributes.as_ptr();
 
-    let mut desktop_name = if detached.desktop == Some("hidden") {
-        super::desktop::open_hidden()?;
-        Some(wide(super::desktop::HIDDEN_NAME))
-    } else {
-        None
-    };
+    let mut desktop_name = desktop.as_ref().map(|_| wide(super::desktop::HIDDEN_NAME));
     if let Some(name) = &mut desktop_name {
         startup.StartupInfo.lpDesktop = name.as_mut_ptr();
     }
@@ -129,4 +143,41 @@ pub fn spawn_detached(detached: &Detached<'_>) -> io::Result<Option<u32>> {
         drop(OwnedHandle::from_raw_handle(info.hThread.cast()));
     }
     Ok(Some(info.dwProcessId))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn missing_studio(desktop: Option<&str>) -> Detached<'_> {
+        Detached {
+            program: "C:\\rbx-forge-missing\\RobloxStudioBeta.exe",
+            args: &[],
+            cwd: "C:\\",
+            env: &[],
+            output: None,
+            desktop,
+        }
+    }
+
+    #[test]
+    fn unavailable_hidden_desktop_returns_without_starting_studio() {
+        let result = spawn_with_desktop(&missing_studio(Some("hidden")), || {
+            Err(io::Error::from_raw_os_error(ERROR_ACCESS_DENIED as i32))
+        });
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn other_setup_errors_are_not_hidden_desktop_fallbacks() {
+        let detached = Detached {
+            output: Some("C:\\rbx-forge-missing\\output.log"),
+            ..missing_studio(Some("hidden"))
+        };
+        let error = spawn_with_desktop(&detached, || {
+            Err(io::Error::from_raw_os_error(ERROR_ACCESS_DENIED as i32))
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    }
 }

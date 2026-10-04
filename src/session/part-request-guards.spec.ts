@@ -5,6 +5,18 @@ import { describe, expect, it } from "vitest";
 import { createPartRequests } from "./part-requests.ts";
 
 describe("guarded session stops", () => {
+	it("explains when the running session has no Studio move handler", async () => {
+		expect.assertions(1);
+
+		const parts = createPartRequests();
+		parts.attach(fromPartial({}));
+
+		await expect(parts.moveAsync({ desktop: "user", timeoutMs: 1000 })).rejects.toMatchObject({
+			code: "studio_not_open",
+			message: "No session Studio is open.",
+		});
+	});
+
 	it("keeps the session running when a queued stop is no longer needed", async () => {
 		expect.assertions(1);
 

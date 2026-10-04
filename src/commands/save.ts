@@ -6,8 +6,9 @@ import { findSession } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import { callSessionAsync } from "../ipc/client.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { saveTimeoutMs, studioSaveResult } from "../studio/save-contract.ts";
 import type { StudioSave } from "../studio/save-studio.ts";
-import { saveStudioAsync, STUDIO_SAVE_TIMEOUT_MS } from "../studio/save-studio.ts";
+import { saveStudioAsync } from "../studio/save-studio.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
@@ -26,15 +27,6 @@ export const SAVE_FLAGS: ReadonlyArray<FlagDefinition> = [
 	},
 ];
 
-const saveResult = type({
-	bytes: "number",
-	desktop: "'user' | 'hidden'",
-	durationMs: "number",
-	mtime: "string",
-	pid: "number",
-	place: "string",
-});
-
 /**
  * Save a snapshot Studio directly, or ask the session to save its Studio.
  * @param context - The project and seams.
@@ -46,11 +38,7 @@ export async function runSaveAsync(
 	context: CommandContext,
 	input: CommandInput,
 ): Promise<CommandResult> {
-	const value = input.flags["timeout"];
-	const timeoutMs = value === undefined ? STUDIO_SAVE_TIMEOUT_MS : Number(value) * 1000;
-	if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-		throw new ForgeError("usage", "--timeout must be a positive number of seconds.");
-	}
+	const timeoutMs = saveTimeoutMs(input.flags["timeout"]);
 
 	const { place } = input.flags;
 	const saved =
@@ -81,7 +69,7 @@ async function saveSessionAsync(context: CommandContext, timeoutMs: number): Pro
 			responseTimeoutMs: timeoutMs + 2000,
 		},
 	);
-	const parsed = saveResult(answer);
+	const parsed = studioSaveResult(answer);
 	if (parsed instanceof type.errors) {
 		throw new ForgeError("internal_error", "The session answered save with something else.");
 	}

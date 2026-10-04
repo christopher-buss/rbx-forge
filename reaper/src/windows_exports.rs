@@ -270,7 +270,8 @@ pub struct DetachedSpawn {
 }
 
 /// Start a process outside this process's job, with no console. Returns its
-/// PID, or `null` when the job forbids breakaway.
+/// PID, or `null` when the job forbids breakaway or the requested hidden
+/// desktop cannot be opened.
 ///
 /// # Errors
 ///

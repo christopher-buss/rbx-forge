@@ -13,6 +13,7 @@ import {
 	PROJECT,
 	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
+import { watchHiddenLightingAsync } from "../studio/lighting-dialog.ts";
 import { followSessionStudio } from "./studio-part.ts";
 
 function followingLightingStudio({
@@ -124,6 +125,36 @@ function followingLightingStudio({
 }
 
 describe("startup Lighting identity checks", () => {
+	it("ends observation if its polling timer fails while the session remains active", async () => {
+		expect.assertions(1);
+
+		const memory = createMemoryFileSystem({
+			"game.rbxl": "place",
+			"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+		});
+		const native = createFakeNative({
+			42: { alive: true, desktop: "hidden", executablePath: "RobloxStudioBeta.exe" },
+		});
+		const manual = createManualClock(5000);
+		const seams = createTestSeams({
+			clock: failingFirstSleep(manual.clock),
+			fileSystem: memory.fileSystem,
+			native: () => native.addon,
+		});
+		const abort = new AbortController();
+		const watched = watchHiddenLightingAsync(
+			seams,
+			{ place: path.join(PROJECT, "game.rbxl") },
+			{ openingTimeoutMs: 180_000, signal: abort.signal },
+		);
+		onTestFinished(async () => {
+			abort.abort();
+			await watched;
+		});
+
+		await expect(watched).resolves.toBeUndefined();
+	});
+
 	it("retries a temporary accessibility failure while Studio finishes opening", async () => {
 		expect.assertions(2);
 
@@ -285,3 +316,18 @@ describe("startup Lighting identity checks", () => {
 		},
 	);
 });
+
+function failingFirstSleep(clock: ReturnType<typeof createManualClock>["clock"]) {
+	let hasFailed = false;
+	return {
+		...clock,
+		sleep: async (...parameters: Parameters<typeof clock.sleep>) => {
+			if (!hasFailed) {
+				hasFailed = true;
+				throw new Error("Polling timer unavailable.");
+			}
+
+			await clock.sleep(...parameters);
+		},
+	};
+}

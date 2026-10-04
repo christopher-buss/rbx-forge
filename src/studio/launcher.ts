@@ -10,6 +10,8 @@ import type { FileSystem } from "../seams/file-system.ts";
 import type { Environment } from "../seams/seams.ts";
 import type { StudioExecutable } from "./discover.ts";
 import { findStudioExecutable } from "./discover.ts";
+import { createSnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
+import type { SnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
 
 /**
  * How long forge waits for the platform launcher to report. A launcher that
@@ -33,6 +35,8 @@ export interface StudioLaunch {
 	runScript?: string | undefined;
 	/** The `--studio-path` flag: the Studio executable to start. */
 	studioPath?: string | undefined;
+	/** Start a detached watcher for a snapshot's delayed migration prompt. */
+	watchHiddenLighting?: boolean | undefined;
 }
 
 /** A Studio forge started itself, pinned at the start. */
@@ -53,7 +57,7 @@ export type LocatedStudio = StudioProcess & { desktop: StudioDesktop };
  */
 export type StudioLaunchOutcome =
 	| { desktop?: StudioDesktop; studio?: StudioProcess; type: "launched"; warning?: string }
-	| { hint?: string | undefined; message: string; type: "failed" };
+	| { hint?: string | undefined; message: string; studio?: never; type: "failed" };
 
 /**
  * Opens a place in Roblox Studio, so Studio is never a child of forge and
@@ -132,30 +136,26 @@ export function studioLaunchInvocation(
  * The {@link StudioLauncher} of forge.
  *
  * - Direct: Studio starts with the place, or a session's RunScript task.
- *   Windows: through the addon, out of this
- *   process's job, with no console and no inherited handles; a job that
- *   forbids breakaway falls back to the platform launcher. POSIX: detached
- *   in its own session, with no pipes. The process is pinned at once, so
- *   later checks rely on its PID and start time.
+ *   Windows: through the addon, out of this process's job, with no console and
+ *   only its streams and desktop inherited; a job that forbids breakaway falls
+ *   back to the platform launcher. POSIX: detached in its own session, with no
+ *   pipes. The process is pinned at once, so later checks rely on its PID and
+ *   start time.
  * - Platform launcher: detached, hidden, and with no pipes; forge waits at
  *   most {@link LAUNCHER_WAIT_MS} for it to exit and never keeps it alive.
  *
  * @param backend - The spawn seam, clock, host, file system, and addon.
+ * @param supervisorEntry - The entry for a detached snapshot Lighting watcher.
  * @returns A {@link StudioLauncher}.
  */
-export function createStudioLauncher(backend: StudioLaunchBackend): StudioLauncher {
+export function createStudioLauncher(
+	backend: StudioLaunchBackend,
+	supervisorEntry: string,
+): StudioLauncher {
+	const watch = createSnapshotLightingLauncher(backend, supervisorEntry);
 	return async (launch) => {
-		let executable: StudioExecutable | undefined;
-		try {
-			executable = findStudioExecutable(backend, launch);
-		} catch (err) {
-			const { hint, message } = toForgeError(err);
-			return { hint, message, type: "failed" };
-		}
-
-		return executable === undefined
-			? launchThroughPlatformAsync(backend, launch)
-			: launchDirectAsync(backend, launch, executable.path);
+		const outcome = await launchStudioAsync(backend, launch);
+		return watchSnapshotLighting(watch, launch, outcome);
 	};
 }
 
@@ -262,7 +262,7 @@ function studioArguments({ place, runScript }: StudioLaunch): Array<string> {
  * @param backend - The addon.
  * @param launch - The place, directory, and environment.
  * @param executable - The Studio executable.
- * @returns Its PID; `undefined` when the job forbids breakaway.
+ * @returns Its PID; `undefined` when breakaway or hidden desktop setup is unavailable.
  */
 function startBreakingAway(
 	backend: Pick<StudioLaunchBackend, "native">,
@@ -360,4 +360,42 @@ async function launchDirectAsync(
 		},
 		type: "launched",
 	};
+}
+
+async function launchStudioAsync(
+	backend: StudioLaunchBackend,
+	launch: StudioLaunch,
+): Promise<StudioLaunchOutcome> {
+	let executable: StudioExecutable | undefined;
+	try {
+		executable = findStudioExecutable(backend, launch);
+	} catch (err) {
+		const { hint, message } = toForgeError(err);
+		return { hint, message, type: "failed" };
+	}
+
+	return executable === undefined
+		? launchThroughPlatformAsync(backend, launch)
+		: launchDirectAsync(backend, launch, executable.path);
+}
+
+function watchSnapshotLighting(
+	watch: SnapshotLightingLauncher,
+	launch: StudioLaunch,
+	outcome: StudioLaunchOutcome,
+): StudioLaunchOutcome {
+	if (launch.watchHiddenLighting !== true || outcome.studio?.desktop !== "hidden") {
+		return outcome;
+	}
+
+	try {
+		watch({ cwd: launch.cwd, env: launch.env, place: launch.place, studio: outcome.studio });
+		return outcome;
+	} catch (err) {
+		return {
+			...outcome,
+			type: "launched",
+			warning: `Studio opened, but its automatic Lighting prompt watcher could not start: ${String(err)}`,
+		};
+	}
 }
