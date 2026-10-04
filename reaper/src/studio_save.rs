@@ -29,7 +29,7 @@ pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
         scope
             .spawn(|| {
                 desktop.attach()?;
-                unsafe { windows_save(window, deadline) }
+                unsafe { windows_save(pid, window, deadline) }
                     .map_err(|err| io::Error::other(err.to_string()))
             })
             .join()
@@ -38,7 +38,11 @@ pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
 }
 
 #[cfg(windows)]
-unsafe fn windows_save(handle: isize, deadline: Instant) -> windows::core::Result<String> {
+unsafe fn windows_save(
+    pid: u32,
+    handle: isize,
+    deadline: Instant,
+) -> windows::core::Result<String> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
@@ -47,9 +51,9 @@ unsafe fn windows_save(handle: isize, deadline: Instant) -> windows::core::Resul
     use windows::Win32::System::Variant::VARIANT;
     use windows::Win32::UI::Accessibility::{
         CUIAutomation8, IUIAutomation2, IUIAutomationExpandCollapsePattern,
-        IUIAutomationInvokePattern, TreeScope_Descendants, UIA_ControlTypePropertyId,
-        UIA_ExpandCollapsePatternId, UIA_InvokePatternId, UIA_MenuItemControlTypeId,
-        UIA_NamePropertyId,
+        IUIAutomationInvokePattern, TreeScope_Children, TreeScope_Descendants,
+        UIA_ControlTypePropertyId, UIA_ExpandCollapsePatternId, UIA_InvokePatternId,
+        UIA_MenuItemControlTypeId, UIA_NamePropertyId,
     };
     use windows::core::BSTR;
 
@@ -88,21 +92,27 @@ unsafe fn windows_save(handle: isize, deadline: Instant) -> windows::core::Resul
         windows_deadline(&automation, deadline)?;
         let expand: IUIAutomationExpandCollapsePattern =
             file.GetCurrentPatternAs(UIA_ExpandCollapsePatternId)?;
-        windows_deadline(&automation, deadline)?;
-        expand.Expand()?;
         let condition = automation.CreatePropertyCondition(
             UIA_NamePropertyId,
             &VARIANT::from(BSTR::from("Save to File")),
         )?;
-        let menu_deadline = deadline.min(Instant::now() + std::time::Duration::from_secs(5));
+        let menu_deadline = deadline.min(Instant::now() + std::time::Duration::from_secs(15));
+        let walker = automation.ControlViewWalker()?;
         let result = (|| loop {
+            windows_action(&automation, deadline, pid, handle)?;
+            // Startup can dismiss the popup before its accessible children appear.
+            expand.Expand()?;
             windows_deadline(&automation, deadline)?;
-            match file.FindFirst(TreeScope_Descendants, &condition) {
+            let item = walker.GetFirstChildElement(&file).and_then(|menu| {
+                windows_deadline(&automation, deadline)?;
+                menu.FindFirst(TreeScope_Children, &condition)
+            });
+            match item {
                 Ok(item) => {
                     windows_deadline(&automation, deadline)?;
                     let invoke: IUIAutomationInvokePattern =
                         item.GetCurrentPatternAs(UIA_InvokePatternId)?;
-                    windows_deadline(&automation, deadline)?;
+                    windows_action(&automation, deadline, pid, handle)?;
                     invoke.Invoke()?;
                     break Ok("requested".to_owned());
                 }
@@ -115,7 +125,7 @@ unsafe fn windows_save(handle: isize, deadline: Instant) -> windows::core::Resul
                 Err(err) => break Err(err),
             }
         })();
-        if windows_deadline(&automation, deadline).is_ok() {
+        if windows_action(&automation, deadline, pid, handle).is_ok() {
             let _ = expand.Collapse();
         }
         result
@@ -141,4 +151,27 @@ unsafe fn windows_deadline(
         automation.SetConnectionTimeout(milliseconds)?;
         automation.SetTransactionTimeout(milliseconds)
     }
+}
+
+#[cfg(windows)]
+unsafe fn windows_action(
+    automation: &windows::Win32::UI::Accessibility::IUIAutomation2,
+    deadline: Instant,
+    pid: u32,
+    handle: isize,
+) -> windows::core::Result<()> {
+    unsafe { windows_deadline(automation, deadline)? };
+    let mut actual = 0;
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(
+            handle as *mut _,
+            &raw mut actual,
+        );
+    }
+    if actual != pid {
+        return Err(windows::core::Error::from_hresult(windows::core::HRESULT(
+            0x80040201_u32 as i32,
+        )));
+    }
+    Ok(())
 }

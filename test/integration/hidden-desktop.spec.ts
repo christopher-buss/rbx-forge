@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -7,6 +8,7 @@ import { assert, describe, expect, it, onTestFinished } from "vitest";
 import {
 	loadRealNative,
 	makeRunScriptStudioExecutable,
+	realNativePath,
 	studioVariables,
 	waitForFileAsync,
 } from "../helpers/real-native.ts";
@@ -45,7 +47,42 @@ async function hiddenStudioAsync(
 	return { pin, place };
 }
 
+async function queryHiddenClientAsync(pid: number): Promise<string> {
+	return new Promise((resolve, reject) => {
+		execFile(
+			process.execPath,
+			[
+				"-e",
+				"const addon = require(process.argv[1]); const pin = addon.pinProcess(Number(process.argv[2])); const desktop = pin.desktop(); console.log(JSON.stringify({blocked: pin.isBlocked(), closed: pin.requestClose(), desktop}));",
+				realNativePath(),
+				String(pid),
+			],
+			{ timeout: 10_000, windowsHide: true },
+			(error, stdout) => {
+				if (error === null) {
+					resolve(stdout);
+				} else {
+					reject(new Error("Cold native client failed.", { cause: error }));
+				}
+			},
+		);
+	});
+}
+
 describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
+	it("queries and closes hidden Studio from a client that never launched it", async () => {
+		expect.assertions(2);
+
+		const { pin, place } = await hiddenStudioAsync();
+		const stdout = await queryHiddenClientAsync(pin.pid);
+
+		expect(stdout.trim()).toBe('{"blocked":false,"closed":true,"desktop":"hidden"}');
+
+		await sleep(300);
+
+		expect(existsSync(`${place}.lock`)).toBeFalse();
+	});
+
 	it("dismisses only the exact migration dialog of the pinned hidden Studio", async () => {
 		expect.assertions(4);
 
