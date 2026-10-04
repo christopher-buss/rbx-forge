@@ -121,11 +121,9 @@ export function createPartRestarter(
 		const hasWork = parts.length > 0 || stops.stopped.includes("rojo");
 		const added = hasWork
 			? await restart.add({
+					desktop: services.studio.desktop,
 					parts,
 					studioPath,
-					...(services.studio.desktop === undefined
-						? {}
-						: { desktop: services.studio.desktop }),
 				})
 			: [];
 		return {
