@@ -145,7 +145,8 @@ windows; `SIGTERM` on macOS and Linux), then looks at Studio every 50 ms:
 
 - When the place's lock file goes, Studio has closed the place: forge ends the
   process at once, instead of waiting for Studio's slow exit.
-- When a modal dialog blocks Studio (Windows), forge ends it at once, without a
+- When a modal dialog blocks Studio (Windows, or macOS with Accessibility
+  access), forge ends it at once, without a
   save. A place fresh from `rojo build` always counts as changed in Studio, so
   "Save changes?" is the common case. Studio also shows a modal dialog while it
   opens a place.
@@ -218,6 +219,14 @@ saves run one at a time and count as activity for the idle timeout.
 
 On Windows, saving Studio on the user's desktop takes focus. The result names
 the desktop so an agent can tell whether the user saw the save.
+
+On macOS, forge presses the menu through Accessibility (AX) without activating
+Studio. It saves in the background, while minimized, and while the app is hidden;
+Studio keeps its focus and visibility. Grant Accessibility access to the terminal
+running forge in System Settings > Privacy & Security > Accessibility, then
+restart that terminal if needed. forge never prompts for this permission. Menu
+names must be English. The writable check runs before any AX action, because a
+read-only save can activate Studio and switch Space.
 
 An agent edits through Studio, then runs `forge save --json`, then
 `forge syncback --json`. Syncback reads the saved place on disk.

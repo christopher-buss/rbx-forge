@@ -36,8 +36,9 @@ export interface PinnedProcess {
 	/**
 	 * Whether a modal dialog blocks the process's main windows: on Windows
 	 * one of them is disabled, as Windows does to the owner of a modal
-	 * dialog, and it ignores a close request. Always `false` on POSIX, and
-	 * once the process has exited.
+	 * dialog, and it ignores a close request. On macOS, AX reports modal
+	 * windows and sheets. `false` on Linux, without macOS Accessibility
+	 * access, and once the process has exited.
 	 */
 	isBlocked: () => boolean;
 	/**
@@ -67,8 +68,8 @@ export interface PinnedProcess {
 	 *   window.
 	 */
 	requestClose: () => boolean;
-	/** Press the English File > Save to File menu on the pinned Studio. */
-	requestSave: () => Promise<"no_menu_item" | "requested">;
+	/** Press File > Save to File within the deadline (default 30 seconds). */
+	requestSave: (timeoutMs?: number) => Promise<"no_menu_item" | "requested" | "timeout">;
 	/** The start time read when it was pinned (see `processStartTime`). */
 	readonly startTime: string;
 	/**

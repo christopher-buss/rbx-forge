@@ -1,7 +1,7 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -79,6 +79,41 @@ describe(runSaveAsync, () => {
 		).rejects.toMatchObject({ code: "studio_busy" });
 	});
 
+	it("reports an accessibility deadline without treating a late disk write as a save", async () => {
+		expect.assertions(1);
+
+		const memory = createMemoryFileSystem({
+			"game.rbxl": "place",
+			"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+		});
+		memory.setModifiedTime("game.rbxl", 1000);
+		const native = createFakeNative({
+			42: {
+				alive: true,
+				executablePath: "RobloxStudioBeta.exe",
+				onSave: () => {
+					memory.setModifiedTime("game.rbxl", 2000);
+				},
+				onSaveRequest: "timeout",
+			},
+		});
+		let now = 0;
+		const seams = createTestSeams({
+			clock: {
+				now: () => now,
+				sleep: async (ms) => {
+					now += ms;
+				},
+			},
+			fileSystem: memory.fileSystem,
+			native: () => native.addon,
+		});
+
+		await expect(
+			saveStudioAsync(seams, { place: path.join(PROJECT, "game.rbxl") }, 1000),
+		).rejects.toMatchObject({ code: "save_failed", details: { reason: "timeout" } });
+	});
+
 	it("rejects a zero timeout", async () => {
 		expect.assertions(1);
 
@@ -86,6 +121,52 @@ describe(runSaveAsync, () => {
 			runSaveAsync(createCommandContext(), { config: {}, flags: { timeout: "0" } }),
 		).rejects.toMatchObject({ code: "usage" });
 	});
+
+	it.for<"cancelled" | "expired">(["cancelled", "expired"])(
+		"leaves the place unchanged when the save is %s before the menu request",
+		async (kind) => {
+			expect.assertions(2);
+
+			const memory = createMemoryFileSystem({
+				"game.rbxl": "place",
+				"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+			});
+			memory.setModifiedTime("game.rbxl", 1000);
+			const native = createFakeNative({
+				42: {
+					alive: true,
+					executablePath: "RobloxStudioBeta.exe",
+					onSave: () => {
+						memory.setModifiedTime("game.rbxl", 2000);
+					},
+				},
+			});
+			const times = [0, 1000];
+			const seams = createTestSeams({
+				clock: {
+					now: () => {
+						const now = times.shift();
+						assert(now !== undefined);
+						return now;
+					},
+					sleep: async () => {},
+				},
+				fileSystem: memory.fileSystem,
+				native: () => native.addon,
+			});
+			const signals = { cancelled: AbortSignal.abort(), expired: undefined };
+			const reasons = { cancelled: "studio_error", expired: "timeout" };
+			const place = path.join(PROJECT, "game.rbxl");
+
+			await expect(
+				saveStudioAsync(seams, { place }, 1000, signals[kind]),
+			).rejects.toMatchObject({
+				code: "save_failed",
+				details: { reason: reasons[kind] },
+			});
+			expect(memory.fileSystem.statSync(place).mtimeMs).toBe(1000);
+		},
+	);
 
 	it("saves a found session Studio one request at a time and resets its idle timeout", async () => {
 		expect.assertions(2);
