@@ -23,6 +23,11 @@ export interface RbxtsOptions {
 	args?: Array<string>;
 	/** The compiler command. */
 	command?: string;
+	/**
+	 * The tsconfig the build compiles, when `args` do not name it (such as a
+	 * task runner's target). `status --wait` reads its sources.
+	 */
+	project?: string;
 }
 
 /** The watch command of a Luau project (for example darklua). */
@@ -167,7 +172,7 @@ const fileSchema = type({
 		"projectPath?": PATH,
 	},
 	"projectType": "'luau' | 'rbxts'",
-	"rbxts?": { "+": "reject", "args?": STRINGS, "command?": PATH },
+	"rbxts?": { "+": "reject", "args?": STRINGS, "command?": PATH, "project?": PATH },
 	"rojoAlias?": PATH,
 	"rojoPort?": "1 <= number.integer <= 65535",
 	"rojoProjectPath?": PATH,

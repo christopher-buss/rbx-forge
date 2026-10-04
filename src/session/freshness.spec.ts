@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CompileEvent, Diagnostic } from "../compiler/diagnostics.ts";
 import type { FreshnessTracker } from "./freshness.ts";
-import { createFreshnessTracker, QUIET_WINDOW_MS } from "./freshness.ts";
+import { createFreshnessTracker, EDIT_PICKUP_MS, QUIET_WINDOW_MS } from "./freshness.ts";
 import { isoTime as iso } from "./status.ts";
 
 type BuildEvent = CompileEvent | undefined;
@@ -261,5 +261,106 @@ describe(createFreshnessTracker, () => {
 		tracker.record(CHANGE, 100_000);
 
 		expect(tracker.settleAt()).toBeUndefined();
+	});
+
+	it("should not answer for an edit until a compile starts after it", () => {
+		expect.assertions(3);
+
+		// The watcher notices an edit at 5000 only at 11_000.
+		const tracker = feed([
+			[0, START],
+			[400, FOUND],
+		]);
+
+		expect(tracker.freshAt(6000, 5000)).toBeUndefined();
+
+		tracker.record(CHANGE, 11_000);
+		tracker.record(FOUND, 11_400);
+
+		expect(tracker.freshAt(6000, 5000)).toBe(11_400 + QUIET_WINDOW_MS);
+		expect(tracker.freshAt(6000, 11_000)).toBe(11_400 + QUIET_WINDOW_MS);
+	});
+
+	it("should not count a compile that started before the edit", () => {
+		expect.assertions(2);
+
+		const tracker = feed([
+			[0, START],
+			[400, FOUND],
+			[1000, CHANGE],
+			[1400, FOUND],
+		]);
+
+		expect(tracker.freshAt(3000, 1200)).toBeUndefined();
+		expect(tracker.freshAt(3000, 1000)).toBe(3000 + QUIET_WINDOW_MS);
+	});
+
+	it("should count a merged start event after the edit", () => {
+		expect.assertions(1);
+
+		const tracker = feed([
+			[0, START],
+			[400, FOUND],
+			[1000, CHANGE],
+			[1200, CHANGE],
+			[1400, FOUND],
+		]);
+		// Twice the longest compile (400 ms) after the last event.
+		const bound = 1400 + 800;
+		tracker.tick(bound);
+
+		expect(tracker.freshAt(900, 1100)).toBe(bound + QUIET_WINDOW_MS);
+	});
+
+	it("should give the compiler one pickup window from the call or its last build to start a compile for an edit", () => {
+		expect.assertions(2);
+
+		const tracker = feed([
+			[0, START],
+			[400, FOUND],
+		]);
+
+		expect(tracker.pickupBy(5000, 4000)).toBe(5000 + EDIT_PICKUP_MS);
+
+		tracker.record(CHANGE, 6000);
+		tracker.record(FOUND, 6400);
+
+		expect(tracker.pickupBy(5000, 7000)).toBe(6400 + EDIT_PICKUP_MS);
+	});
+
+	it("should not take an end event with no start event as a compile after a later edit", () => {
+		expect.assertions(1);
+
+		expect(feed([[500, FOUND]]).freshAt(1000, 800)).toBeUndefined();
+	});
+
+	it("should count a compile that started at the time of the edit", () => {
+		expect.assertions(1);
+
+		const tracker = feed([
+			[0, START],
+			[400, FOUND],
+			[1000, CHANGE],
+			[1400, FOUND],
+		]);
+
+		expect(tracker.pickupBy(3000, 1000)).toBeUndefined();
+	});
+
+	it("should set no pickup bound once a compile started after the edit, while one runs, or before the first build", () => {
+		expect.assertions(3);
+
+		const tracker = feed([[0, START]]);
+
+		expect(tracker.pickupBy(100, 50)).toBeUndefined();
+
+		tracker.record(FOUND, 400);
+		tracker.record(CHANGE, 1000);
+
+		expect(tracker.pickupBy(2000, 1500)).toBeUndefined();
+
+		tracker.record(FOUND, 1400);
+
+		expect(tracker.pickupBy(2000, 900)).toBeUndefined();
 	});
 });

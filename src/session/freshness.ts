@@ -11,6 +11,12 @@ import { isoTime } from "./status.ts";
 export const QUIET_WINDOW_MS = 750;
 
 /**
+ * The pickup window: how long an idle compiler may take to start a compile
+ * for a source edit before a wait gives up on it.
+ */
+export const EDIT_PICKUP_MS = 10_000;
+
+/**
  * What the watch-mode compiler is doing, from its build events and the time.
  * Pure: every call takes the time it happens at.
  */
@@ -22,11 +28,23 @@ export interface FreshnessTracker {
 	 * first: one quiet window after `since` or the end of the last compile,
 	 * whichever is later.
 	 *
-	 * @returns The time, or `undefined` while a compile runs or before the
-	 *   first build.
+	 * @param since - When the wait began.
+	 * @param editedAt - The newest source edit; a compile must start at or
+	 *   after it.
+	 * @returns The time, or `undefined` while a compile runs, before the
+	 *   first build, or before a compile started for the edit.
 	 */
-	freshAt: (since: number) => number | undefined;
+	freshAt: (since: number, editedAt?: number) => number | undefined;
 	lastBuild: () => LastBuild | undefined;
+	/**
+	 * When a wait that began at `since` stops waiting for a compile of the
+	 * edit at `editedAt`: one pickup window after `since` or the end of the
+	 * last compile, whichever is later.
+	 *
+	 * @returns The time, or `undefined` once a compile started at or after
+	 *   the edit, while a compile runs, or before the first build.
+	 */
+	pickupBy: (since: number, editedAt: number) => number | undefined;
 	/**
 	 * Record one event: a compile's start or end, or `undefined` for any
 	 * other output. An adapter turns a compiler's output into these.
@@ -57,6 +75,8 @@ interface TrackerState {
 	idleSince: number;
 	lastBuild: LastBuild | undefined;
 	lastEventAt: number;
+	/** The time of the last start event. */
+	lastStartAt: number;
 	longestMs: number;
 	/** The times of the start events with no end event yet, oldest first. */
 	starts: Array<number>;
@@ -79,26 +99,46 @@ export function createFreshnessTracker(): FreshnessTracker {
 		idleSince: 0,
 		lastBuild: undefined,
 		lastEventAt: 0,
+		lastStartAt: -Infinity,
 		longestMs: 0,
 		starts: [],
 		unsettled: false,
 	};
 	return {
 		building: () => state.starts.length > 0,
-		freshAt: (since) => freshAt(state, since),
+		freshAt: (since, editedAt) => freshAt(state, since, editedAt),
 		lastBuild: () => state.lastBuild,
+		pickupBy: (since, editedAt) => pickupBy(state, since, editedAt),
 		record: (event, now) => record(state, event, now),
 		settleAt: () => settleAt(state),
 		tick: (now) => tick(state, now),
 	};
 }
 
-function freshAt(state: TrackerState, since: number): number | undefined {
+/**
+ * One window after `since` or the end of the last compile, whichever is
+ * later.
+ *
+ * @param state - The tracker.
+ * @param since - When the wait began.
+ * @param windowMs - The window's length.
+ * @returns The time, or `undefined` while a compile runs or before the
+ *   first build.
+ */
+function idleWindowEnd(state: TrackerState, since: number, windowMs: number): number | undefined {
 	if (state.lastBuild === undefined || state.starts.length > 0) {
 		return undefined;
 	}
 
-	return Math.max(since, state.idleSince) + QUIET_WINDOW_MS;
+	return Math.max(since, state.idleSince) + windowMs;
+}
+
+function freshAt(state: TrackerState, since: number, editedAt = -Infinity): number | undefined {
+	return state.lastStartAt < editedAt ? undefined : idleWindowEnd(state, since, QUIET_WINDOW_MS);
+}
+
+function pickupBy(state: TrackerState, since: number, editedAt: number): number | undefined {
+	return state.lastStartAt >= editedAt ? undefined : idleWindowEnd(state, since, EDIT_PICKUP_MS);
 }
 
 /**
@@ -139,6 +179,7 @@ function record(
 			}
 
 			state.starts.push(now);
+			state.lastStartAt = now;
 			return undefined;
 		}
 		case undefined: {

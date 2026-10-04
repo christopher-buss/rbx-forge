@@ -406,12 +406,17 @@ async function runStepsAsync(
 	return plan.open ? prepareStudioAsync(session, steps, { build: plan.build }) : undefined;
 }
 
-function announceReady({ config, context, plan }: SessionSetup, port: number | undefined): void {
+function announceReady(
+	{ config, context, owner, plan }: SessionSetup,
+	port: number | undefined,
+): void {
 	const rojo =
 		port === undefined ? "" : `Rojo serves ${config.rojoProjectPath} on port ${port}. `;
 	const compiler = plan.compiler === undefined ? "" : "The compiler watches your code. ";
+	// Only a `start` terminal holds the session; `up` returns to its shell.
+	const stop = owner === null ? 'Stop it with "forge down".' : "Press Ctrl+C to stop.";
 	context.reporter.emit({
-		message: `${rojo}${compiler}Press Ctrl+C to stop.`,
+		message: `${rojo}${compiler}${stop}`,
 		type: "info",
 	});
 }

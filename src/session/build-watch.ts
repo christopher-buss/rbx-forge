@@ -4,8 +4,10 @@ import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import type { FreshnessTracker } from "./freshness.ts";
-import { createFreshnessTracker, QUIET_WINDOW_MS } from "./freshness.ts";
+import { createFreshnessTracker, EDIT_PICKUP_MS, QUIET_WINDOW_MS } from "./freshness.ts";
+import type { SourceEdit } from "./source-edits.ts";
 import type { LastBuild, StatusRecorder } from "./status.ts";
+import { isoTime } from "./status.ts";
 
 /** How long `forge status --wait` waits for a fresh build by default. */
 export const FRESH_BUILD_TIMEOUT_MS = 300_000;
@@ -33,12 +35,14 @@ export interface BuildWatch {
 	/** Let time pass with no output, such as before a status is read. */
 	tick: () => void;
 	/**
-	 * Wait until the last build is fresh: no compile runs, and none started
-	 * for one quiet window since the call or the last build. A `timeoutMs`
-	 * of 0 does not wait: the caller reads the status now.
+	 * Wait until the last build is fresh: a compile started after the
+	 * newest source edit, no compile runs, and none started for one quiet
+	 * window since the call or the last build. A `timeoutMs` of 0 does not
+	 * wait: the caller reads the status now.
 	 *
-	 * @rejects {ForgeError} `compile_timeout` after `timeoutMs`; the failure
-	 *   given to `fail` or `close`.
+	 * @rejects {ForgeError} `compile_timeout` after `timeoutMs`;
+	 *   `edit_not_compiled` when no compile starts for the edit within the
+	 *   pickup window; the failure given to `fail` or `close`.
 	 */
 	waitAsync: (timeoutMs: number) => Promise<void>;
 }
@@ -46,6 +50,11 @@ export interface BuildWatch {
 /** What a build watch runs with. */
 export interface BuildWatchOptions {
 	clock: Clock;
+	/**
+	 * Finds the newest edit to the compiler's sources, at or before the
+	 * time given; read once per wait.
+	 */
+	edits: (before: number) => SourceEdit | undefined;
 	/** Gets each compile's start and build. */
 	recorder: Pick<StatusRecorder, "building" | "compiled">;
 	/**
@@ -63,13 +72,34 @@ interface Watch {
 	 */
 	change: PromiseWithResolvers<void> | undefined;
 	clock: Clock;
+	edits: BuildWatchOptions["edits"];
 	failure: ForgeError | undefined;
+	/**
+	 * The time of the last edit that failed its pickup window: a wait does
+	 * not wait again for an edit up to then.
+	 */
+	givenUpAt: number;
 	isClosed: boolean;
 	/** Turns each output line into its build event (rbxtsc or sloptor). */
 	parse: (line: string) => CompileEvent | undefined;
 	recorder: BuildWatchOptions["recorder"];
 	tracker: FreshnessTracker;
 	tracks: boolean;
+}
+
+/** One wait for a fresh build. */
+interface FreshWait {
+	deadline: number;
+	/** The newest source edit when the wait began. */
+	edit: SourceEdit | undefined;
+	since: number;
+	timeoutMs: number;
+}
+
+/** An edit no compile started for yet, and when the wait gives up on it. */
+interface PendingEdit {
+	by: number;
+	edit: SourceEdit;
 }
 
 /**
@@ -106,11 +136,13 @@ export function createBuildWatch(options: BuildWatchOptions): BuildWatch {
 	};
 }
 
-function initialWatch({ clock, recorder, tracks }: BuildWatchOptions): Watch {
+function initialWatch({ clock, edits, recorder, tracks }: BuildWatchOptions): Watch {
 	return {
 		change: undefined,
 		clock,
+		edits,
 		failure: undefined,
+		givenUpAt: -Infinity,
 		isClosed: false,
 		parse: createCompilerOutputParser().read,
 		recorder,
@@ -176,13 +208,19 @@ function read(watch: Watch, line: string): LastBuild | undefined {
 	return build;
 }
 
-function timedOut(tracker: FreshnessTracker, timeoutMs: number): ForgeError {
+function timedOut(
+	tracker: FreshnessTracker,
+	timeoutMs: number,
+	pending: PendingEdit | undefined,
+): ForgeError {
 	const isBuilding = tracker.building();
 	let why = "compiles kept starting";
 	if (isBuilding) {
 		why = "a compile still runs";
 	} else if (tracker.lastBuild() === undefined) {
 		why = "the first compile has not ended";
+	} else if (pending !== undefined) {
+		why = `no compile started for the edit to ${pending.edit.path}`;
 	} else if (timeoutMs < QUIET_WINDOW_MS) {
 		why = `the quiet window (${QUIET_WINDOW_MS / 1000} s) is longer than the wait`;
 	}
@@ -194,9 +232,74 @@ function timedOut(tracker: FreshnessTracker, timeoutMs: number): ForgeError {
 	});
 }
 
+function notCompiled(edit: SourceEdit): ForgeError {
+	const pickupSeconds = EDIT_PICKUP_MS / 1000;
+	return new ForgeError(
+		"edit_not_compiled",
+		`No compile started for the edit to ${edit.path} within ${pickupSeconds} s.`,
+		{
+			details: { editedAt: isoTime(edit.at), path: edit.path, pickupSeconds },
+			hint: 'The compiler may ignore this file. Read its output with "forge logs compiler", or save the file again.',
+		},
+	);
+}
+
+function pendingEdit(
+	tracker: FreshnessTracker,
+	{ edit, since }: FreshWait,
+): PendingEdit | undefined {
+	if (edit === undefined) {
+		return undefined;
+	}
+
+	const by = tracker.pickupBy(since, edit.at);
+	return by === undefined ? undefined : { by, edit };
+}
+
+/**
+ * One turn of {@link waitFreshAsync}.
+ *
+ * @param watch - The tracker and the failure, if any.
+ * @param wait - Its start, deadline, and edit.
+ * @param now - The current time.
+ * @returns When to look again, or `undefined` once the build is fresh.
+ * @throws {ForgeError} As {@link BuildWatch.waitAsync}.
+ */
+function nextWake(watch: Watch, wait: FreshWait, now: number): number | undefined {
+	if (watch.failure !== undefined) {
+		throw watch.failure;
+	}
+
+	// A compiler that started again reads into a new tracker.
+	const { tracker } = watch;
+	tick(watch, now);
+	const freshAt = tracker.freshAt(wait.since, wait.edit?.at);
+	if (freshAt !== undefined && now >= freshAt) {
+		return undefined;
+	}
+
+	const pending = pendingEdit(tracker, wait);
+	if (now >= wait.deadline) {
+		throw timedOut(tracker, wait.timeoutMs, pending);
+	}
+
+	if (pending !== undefined && now >= pending.by) {
+		watch.givenUpAt = pending.edit.at;
+		throw notCompiled(pending.edit);
+	}
+
+	return Math.min(
+		freshAt ?? wait.deadline,
+		tracker.settleAt() ?? wait.deadline,
+		pending?.by ?? wait.deadline,
+		wait.deadline,
+	);
+}
+
 /**
  * The loop of {@link BuildWatch.waitAsync}: wake at each line, at the end of
- * the quiet window, when merged start lines settle, and at the deadline.
+ * the quiet window, when merged start lines settle, at the end of the pickup
+ * window, and at the deadline.
  *
  * @param watch - The builds and the clock.
  * @param timeoutMs - How long the wait may take.
@@ -205,26 +308,20 @@ function timedOut(tracker: FreshnessTracker, timeoutMs: number): ForgeError {
 async function waitFreshAsync(watch: Watch, timeoutMs: number): Promise<void> {
 	const { clock } = watch;
 	const since = clock.now();
-	const deadline = since + timeoutMs;
+	const edit = watch.edits(since);
+	const wait = {
+		deadline: since + timeoutMs,
+		edit: edit !== undefined && edit.at > watch.givenUpAt ? edit : undefined,
+		since,
+		timeoutMs,
+	};
 	for (;;) {
-		if (watch.failure !== undefined) {
-			throw watch.failure;
-		}
-
-		// A compiler that started again reads into a new tracker.
-		const { tracker } = watch;
 		const now = clock.now();
-		tick(watch, now);
-		const freshAt = tracker.freshAt(since);
-		if (freshAt !== undefined && now >= freshAt) {
+		const wakeAt = nextWake(watch, wait, now);
+		if (wakeAt === undefined) {
 			return;
 		}
 
-		if (now >= deadline) {
-			throw timedOut(tracker, timeoutMs);
-		}
-
-		const wakeAt = Math.min(freshAt ?? deadline, tracker.settleAt() ?? deadline, deadline);
 		watch.change ??= Promise.withResolvers();
 		await settlesWithinAsync(clock, watch.change.promise, wakeAt - now);
 	}

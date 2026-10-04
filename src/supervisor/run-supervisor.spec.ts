@@ -1780,6 +1780,18 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(run.reporter.events.at(-1)).toStrictEqual({
+			message: 'Rojo serves default.project.json on port 4000. Stop it with "forge down".',
+			type: "info",
+		});
+	});
+
+	it("should tell an owning start to press Ctrl+C once ready", async () => {
+		expect.assertions(1);
+
+		const run = await stoppedAsync({ owned: true });
+		await run.result;
+
+		expect(run.reporter.events.at(-1)).toStrictEqual({
 			message: "Rojo serves default.project.json on port 4000. Press Ctrl+C to stop.",
 			type: "info",
 		});
@@ -1870,7 +1882,7 @@ describe(runSupervisorAsync, () => {
 			},
 			{
 				message:
-					"Rojo serves default.project.json on port 4000. The compiler watches your code. Press Ctrl+C to stop.",
+					'Rojo serves default.project.json on port 4000. The compiler watches your code. Stop it with "forge down".',
 				type: "info",
 			},
 		]);
@@ -2275,7 +2287,7 @@ describe(runSupervisorAsync, () => {
 			type: "warning",
 		});
 		expect(run.reporter.events).toContainEqual({
-			message: "Press Ctrl+C to stop.",
+			message: 'Stop it with "forge down".',
 			type: "info",
 		});
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
@@ -2300,7 +2312,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(run.isListeningAsync).toHaveBeenCalledTimes(checks);
 		expect(run.reporter.events).toContainEqual({
-			message: "The compiler watches your code. Press Ctrl+C to stop.",
+			message: 'The compiler watches your code. Stop it with "forge down".',
 			type: "info",
 		});
 	});
@@ -2322,7 +2334,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(state).toMatchObject({ services: { rojo: { status: "failed" } } });
 		expect(run.reporter.events).toContainEqual({
-			message: "Press Ctrl+C to stop.",
+			message: 'Stop it with "forge down".',
 			type: "info",
 		});
 	});
@@ -3338,6 +3350,38 @@ describe("forge up control channel", () => {
 		run.clock.advance(1);
 
 		await expect(waiting).rejects.toMatchObject({ code: "compile_timeout" });
+	});
+
+	it("should fail freshStatus naming an edit that no compile started for", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			files: {
+				...TOOL_FILES,
+				"src/main.ts": "",
+				"tsconfig.json": '{"compilerOptions":{"rootDir":"src"}}',
+			},
+			flags: { open: false },
+			projectType: "rbxts",
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "compiler.log"),
+			"[10:00:00] Starting compilation in watch mode...\nFound 0 errors. Watching for file changes.\n",
+		);
+		await passAsync(run, 2 * OUTPUT_POLL_MS);
+		run.memory.setModifiedTime("src/main.ts", run.clock.clock.now());
+		const waiting = callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", {
+			params: { timeoutMs: 2000 },
+		});
+		// The test awaits it; this only keeps the early rejection handled.
+		waiting.catch(() => {});
+		await flushAsync();
+		await passAsync(run, 2000);
+
+		await expect(waiting).rejects.toThrow(
+			`no compile started for the edit to ${path.join("src", "main.ts")}`,
+		);
 	});
 
 	it("should fail a freshStatus wait with service_failed when the compiler exits", async () => {
