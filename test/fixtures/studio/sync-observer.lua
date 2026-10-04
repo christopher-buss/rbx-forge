@@ -1,5 +1,6 @@
 -- Bounded RunScript observer: no persisted instances or settings.
 local HttpService = game:GetService("HttpService")
+HttpService.HttpEnabled = true
 local endpoint = __FORGE_OBSERVER_URL__
 task.spawn(function()
 	local deadline = os.clock() + 180
