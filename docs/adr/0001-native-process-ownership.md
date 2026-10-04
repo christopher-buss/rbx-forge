@@ -236,9 +236,10 @@ Window states after `WM_CLOSE` to the main window:
   `scripts/release/release.ts`:
   1. For each `package.json#napi` target it stages
      `@rbx-forge/native-<platform>`: the `.node` file, `forge-reaper` (`.exe` on
-     Windows) set to mode 0755, and a generated `package.json` that lists both
-     in `files`. Upload and download artifact steps do not keep file modes, so
-     this step must set the mode.
+     Windows), and a generated `package.json` that lists both in `files`. It
+     packs each package and sets the reaper entry to mode 0755 in the tarball.
+     Artifact downloads and a pack on Windows both drop the exec bit, so the
+     tarball, not the file system, carries the mode.
   2. It publishes each platform package, then `rbx-forge` with them as
      `optionalDependencies`. Those are written only for the publish, so the
      lockfile never names a version that is not on npm. `packageName`

@@ -71,9 +71,9 @@ set `RBX_FORGE_NATIVE_DIR` to that directory; without it, forge loads the
 
 `pnpm release` (bumpp) asks for the next version, then runs the release gate
 (`scripts/release/check.ts`, the `preversion` script) before it changes a file.
-The gate needs a clean `main` equal to `origin/main`, then runs `build:all`,
-`cargo test`, typecheck, lint, knip, and the unit, integration, and e2e
-projects. A failure stops the release with no change.
+The gate needs a clean `main` equal to `origin/main`, then runs typecheck, lint,
+knip, `build:all`, `cargo test`, and the unit, integration, and e2e projects. A
+failure stops the release with no change.
 
 - On Windows the gate sets `RBX_FORGE_TEST_REAL_STUDIO=1`: the real-Studio
   specs, which CI never runs, run here. Install Studio and log in first; the

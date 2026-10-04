@@ -1,7 +1,8 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { entryMode, gzippedTarball } from "../../test/helpers/tarball.ts";
 import type { BootstrapOptions, PublishDependencies, ReadResult, ReleaseFiles } from "./release.ts";
 import {
 	bootstrapRelease,
@@ -17,6 +18,12 @@ const OPTIONS = { artifacts: "artifacts", root: "repo", staging: "staging" } sat
 	BootstrapOptions,
 	"artifacts" | "root" | "staging"
 >;
+/** What a pack writes: a reaper of each name, stored 0644. */
+const PACKED = gzippedTarball([
+	{ name: "package/forge-reaper", size: 1 },
+	{ name: "package/forge-reaper.exe", size: 1 },
+]);
+const FLAGS = "--access public --no-git-checks";
 const RUN_LIST =
 	"gh run list --workflow ci.yaml --commit abc --status success --limit 1 --json databaseId --jq .[0].databaseId";
 const BOOTSTRAP_READS = {
@@ -69,19 +76,17 @@ const CLEAN_MAIN = {
 
 function fakeFiles(seed: Record<string, string> = {}) {
 	const contents = new Map(Object.entries(seed));
-	const modes = new Map<string, number>();
+	const bytes = new Map<string, Uint8Array>();
 	const removed: Array<string> = [];
 	const writes: Array<string> = [];
 	const files: ReleaseFiles = {
-		chmod: (file, mode) => {
-			modes.set(file, mode);
-		},
 		copy: (from, to) => {
 			contents.set(to, contents.get(from) ?? "");
 		},
 		exists: (file) => contents.has(file),
 		mkdir: () => {},
 		read: (file) => contents.get(file) ?? "",
+		readBytes: (file) => bytes.get(file) ?? PACKED,
 		remove: (directory) => {
 			removed.push(directory);
 		},
@@ -89,8 +94,11 @@ function fakeFiles(seed: Record<string, string> = {}) {
 			writes.push(file);
 			contents.set(file, text);
 		},
+		writeBytes: (file, written) => {
+			bytes.set(file, written);
+		},
 	};
-	return { contents, files, modes, removed, writes };
+	return { bytes, contents, files, removed, writes };
 }
 
 function artifactFiles(): Record<string, string> {
@@ -138,7 +146,9 @@ describe(platformManifest, () => {
 
 		const target = NATIVE_TARGETS.find(({ target: name }) => name === "linux-x64-musl");
 
-		expect(platformManifest({ license: "MIT" }, target!, "2.0.0")).toMatchObject({
+		assert(target);
+
+		expect(platformManifest({ license: "MIT" }, target, "2.0.0")).toMatchObject({
 			name: "@rbx-forge/native-linux-x64-musl",
 			cpu: ["x64"],
 			files: ["forge-native.linux-x64-musl.node", "forge-reaper"],
@@ -304,32 +314,48 @@ describe(publishRelease, () => {
 		const { dependencies, processes } = publishSetup();
 		publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
 
-		const flags = "--access public --no-git-checks --tag latest";
-
-		expect(processes.runs).toHaveLength(NATIVE_TARGETS.length + 1);
+		expect(processes.runs).toHaveLength(NATIVE_TARGETS.length * 2 + 1);
 		expect(processes.runs).toStrictEqual([
-			...NATIVE_TARGETS.map(
-				({ target }) => `pnpm publish ${path.join("staging", target)} ${flags}`,
-			),
-			`pnpm publish repo ${flags}`,
+			...NATIVE_TARGETS.flatMap(({ target }) => {
+				const tarball = path.join("staging", `rbx-forge-native-${target}-1.0.0.tgz`);
+				return [
+					`pnpm --dir ${path.join("staging", target)} pack --pack-destination ..`,
+					`pnpm publish ${tarball} ${FLAGS} --tag latest`,
+				];
+			}),
+			`pnpm publish repo ${FLAGS} --tag latest`,
 		]);
 	});
 
-	it("should stage the addon, an executable reaper, the license, and a manifest", () => {
+	it("should stage the addon, the reaper, the license, and a manifest", () => {
 		expect.assertions(4);
 
-		const { contents, dependencies, modes } = publishSetup();
+		const { contents, dependencies } = publishSetup();
 		publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
 
 		const directory = path.join("staging", "darwin-arm64");
 
 		expect(contents.get(path.join(directory, "forge-native.darwin-arm64.node"))).toBe("addon");
-		expect(modes.get(path.join(directory, "forge-reaper"))).toBe(0o755);
+		expect(contents.get(path.join(directory, "forge-reaper"))).toBe("reaper");
 		expect(contents.get(path.join(directory, "LICENSE"))).toBe("MIT");
 		expect(JSON.parse(contents.get(path.join(directory, "package.json"))!)).toMatchObject({
 			name: "@rbx-forge/native-darwin-arm64",
 			version: "1.0.0",
 		});
+	});
+
+	it.for([
+		{ entry: 0, target: "darwin-arm64" },
+		{ entry: 1, target: "win32-x64-msvc" },
+	])("should publish an executable reaper for $target", ({ entry, target }) => {
+		expect.assertions(1);
+
+		const { bytes, dependencies } = publishSetup();
+		publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
+
+		const tarball = bytes.get(path.join("staging", `rbx-forge-native-${target}-1.0.0.tgz`));
+
+		expect(entryMode(tarball!, entry)).toBe("0000755");
 	});
 
 	it("should publish the root with the platform packages as optional dependencies, then restore it", () => {
@@ -367,7 +393,7 @@ describe(publishRelease, () => {
 		});
 		publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
 
-		expect(processes.runs).toHaveLength(NATIVE_TARGETS.length);
+		expect(processes.runs).toHaveLength((NATIVE_TARGETS.length - 1) * 2 + 1);
 		expect(processes.logs).toStrictEqual([
 			"release: @rbx-forge/native-win32-x64-msvc@1.0.0 is on npm; skipped",
 		]);
@@ -416,7 +442,7 @@ describe(bootstrapRelease, () => {
 		expect(processes.runs.slice(0, 3)).toStrictEqual([
 			"gh run download 42 --pattern native-* --dir artifacts",
 			"pnpm build",
-			`pnpm publish ${path.join("staging", "win32-x64-msvc")} --access public --no-git-checks --tag next`,
+			`pnpm --dir ${path.join("staging", "win32-x64-msvc")} pack --pack-destination ..`,
 		]);
 	});
 

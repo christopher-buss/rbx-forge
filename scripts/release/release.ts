@@ -3,6 +3,7 @@ import { parseTriple } from "@napi-rs/cli";
 import path from "node:path";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { setEntryMode } from "./tarball.ts";
 
 export interface ReadResult {
 	readonly status: null | number;
@@ -21,13 +22,14 @@ export interface Processes {
 
 /** File effects. Directories are made and removed recursively. */
 export interface ReleaseFiles {
-	readonly chmod: (file: string, mode: number) => void;
 	readonly copy: (from: string, to: string) => void;
 	readonly exists: (file: string) => boolean;
 	readonly mkdir: (directory: string) => void;
 	readonly read: (file: string) => string;
+	readonly readBytes: (file: string) => Uint8Array;
 	readonly remove: (directory: string) => void;
 	readonly write: (file: string, contents: string) => void;
+	readonly writeBytes: (file: string, contents: Uint8Array) => void;
 }
 
 export interface NativeTarget {
@@ -62,6 +64,12 @@ export interface PublishOptions extends BootstrapOptions {
 export interface PublishDependencies extends Processes {
 	readonly files: ReleaseFiles;
 	readonly log: (message: string) => void;
+}
+
+interface StagedPackage {
+	readonly name: string;
+	readonly directory: string;
+	readonly target: NativeTarget;
 }
 
 interface Manifest extends Record<string, unknown> {
@@ -160,6 +168,16 @@ export function platformManifest(
 }
 
 /**
+ * Refuse a prerelease: a tag releases a stable version only.
+ * @param version - The version to release.
+ */
+export function assertStable(version: string): void {
+	if (isPrerelease(version)) {
+		throw new Error(`a tag releases a stable version only, not ${version}`);
+	}
+}
+
+/**
  * The version a tag push releases: the root `package.json` version, which the
  * tag must name. A prerelease goes out only through {@link bootstrapRelease}.
  * @param manifest - The root `package.json` text.
@@ -174,9 +192,7 @@ export function releaseVersion(manifest: string, reference: string | undefined):
 		);
 	}
 
-	if (version.includes("-")) {
-		throw new Error(`a tag releases a stable version only, not ${version}`);
-	}
+	assertStable(version);
 
 	return version;
 }
@@ -194,8 +210,10 @@ export function publishRelease(dependencies: PublishDependencies, options: Publi
 	const original = files.read(manifestPath);
 	const root = readManifest(original);
 
-	for (const directory of stageNativePackages(files, root, options)) {
-		publishOnce(dependencies, options, directory.name, directory.path);
+	for (const staged of stageNativePackages(files, root, options)) {
+		publishOnce(dependencies, options, staged.name, () => {
+			return packPlatform(dependencies, staged, options.version);
+		});
 	}
 
 	const optionalDependencies = Object.fromEntries(
@@ -204,7 +222,7 @@ export function publishRelease(dependencies: PublishDependencies, options: Publi
 	const published = { ...root, optionalDependencies, version: options.version };
 	files.write(manifestPath, `${JSON.stringify(published, undefined, "\t")}\n`);
 	try {
-		publishOnce(dependencies, options, String(root["name"]), options.root);
+		publishOnce(dependencies, options, String(root["name"]), () => options.root);
 	} finally {
 		files.write(manifestPath, original);
 	}
@@ -222,7 +240,7 @@ export function bootstrapRelease(
 	options: BootstrapOptions,
 ): void {
 	const { read, run } = dependencies;
-	if (!options.version.includes("-")) {
+	if (!isPrerelease(options.version)) {
 		throw new Error(`bootstrap publishes a prerelease only, not ${options.version}`);
 	}
 
@@ -289,6 +307,15 @@ function reaperName(target: NativeTarget): string {
 	return target.os === "win32" ? "forge-reaper.exe" : "forge-reaper";
 }
 
+/**
+ * Whether a semver version has a prerelease part (`2.0.0-rc.0`).
+ * @param version - A semver version.
+ * @returns `true` for a prerelease.
+ */
+function isPrerelease(version: string): boolean {
+	return version.includes("-");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -306,7 +333,7 @@ function publishOnce(
 	{ log, read, run }: PublishDependencies,
 	{ tag, version }: PublishOptions,
 	name: string,
-	directory: string,
+	prepare: () => string,
 ): void {
 	const published = read("npm", ["view", `${name}@${version}`, "version", "--loglevel=silent"]);
 	if (published.status === 0 && published.stdout.trim() === version) {
@@ -316,7 +343,7 @@ function publishOnce(
 
 	runOrThrow(run, "pnpm", [
 		"publish",
-		directory,
+		prepare(),
 		"--access",
 		"public",
 		"--no-git-checks",
@@ -325,33 +352,54 @@ function publishOnce(
 	]);
 }
 
+/**
+ * Pack a staged platform package and make its reaper executable in the
+ * tarball: artifact downloads and a Windows pack both drop the exec bit, and
+ * the reaper locator never sets it.
+ * @param dependencies - Files and processes.
+ * @param staged - The staged package.
+ * @param version - The release version.
+ * @returns The tarball to publish.
+ */
+function packPlatform(
+	{ files, run }: PublishDependencies,
+	{ name, directory, target }: StagedPackage,
+	version: string,
+): string {
+	runOrThrow(run, "pnpm", ["--dir", directory, "pack", "--pack-destination", ".."]);
+	const tarball = path.join(
+		path.dirname(directory),
+		`${name.slice(1).replace("/", "-")}-${version}.tgz`,
+	);
+	const entry = `package/${reaperName(target)}`;
+	files.writeBytes(tarball, setEntryMode(files.readBytes(tarball), entry, 0o755));
+	return tarball;
+}
+
 function stagePackage(
 	files: ReleaseFiles,
 	root: Manifest,
 	{ root: rootDirectory, staging, version }: PublishOptions,
 	{ addon, reaper, target }: { addon: string; reaper: string; target: NativeTarget },
-): { name: string; path: string } {
+): StagedPackage {
 	const directory = path.join(staging, target.target);
 	const manifest = platformManifest(root, target, version);
 	files.mkdir(directory);
 	files.copy(addon, path.join(directory, path.basename(addon)));
-	// Artifact downloads drop the exec bit; the reaper locator never sets it.
-	const staged = path.join(directory, reaperName(target));
-	files.copy(reaper, staged);
-	files.chmod(staged, 0o755);
+	files.copy(reaper, path.join(directory, reaperName(target)));
 	files.copy(path.join(rootDirectory, "LICENSE"), path.join(directory, "LICENSE"));
 	files.write(
 		path.join(directory, "package.json"),
 		`${JSON.stringify(manifest, undefined, "\t")}\n`,
 	);
-	return { name: String(manifest["name"]), path: directory };
+	return { name: String(manifest["name"]), directory, target };
 }
 
 function stageNativePackages(
 	files: ReleaseFiles,
 	root: Manifest,
 	options: PublishOptions,
-): Array<{ name: string; path: string }> {
+): Array<StagedPackage> {
 	const sources = NATIVE_TARGETS.map((target) => {
 		const artifact = path.join(options.artifacts, `native-${target.rust}`);
 		return {
@@ -391,7 +439,7 @@ function findCiRun(read: Processes["read"], head: string): number {
 		]),
 	);
 	if (!Number.isSafeInteger(id) || id <= 0) {
-		throw new TypeError(`no successful CI run for ${head}; push it and wait for CI`);
+		throw new Error(`no successful CI run for ${head}; push it and wait for CI`);
 	}
 
 	return id;
