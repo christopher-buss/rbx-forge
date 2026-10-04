@@ -31,26 +31,43 @@ const START_SLACK_MS = process.platform === "linux" ? 1000 : 100;
 let native: NativeAddon | undefined;
 
 /**
+ * Read every whole record of an NDJSON file that fake workers append to. A
+ * missing file holds none.
+ *
+ * @template T - The record shape `fake-worker.ts` writes.
+ * @param file - `FIXTURE_LOG` or `FIXTURE_BEAT_LOG`.
+ * @returns Records in append order.
+ */
+export function readRecords<T>(file: string): Array<T> {
+	if (!existsSync(file)) {
+		return [];
+	}
+
+	const content = readFileSync(file, "utf8");
+	// A live append becomes a record only at its terminating newline. A
+	// record a kill cut short is a line of its own that does not parse.
+	return content
+		.slice(0, content.lastIndexOf("\n") + 1)
+		.split("\n")
+		.filter((line) => line.length > 0)
+		.flatMap((line) => {
+			try {
+				// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- fake-worker.ts writes this shape
+				return [JSON.parse(line) as unknown as T];
+			} catch {
+				return [];
+			}
+		});
+}
+
+/**
  * Read every record in a fixture log. A missing file means no worker started.
  *
  * @param logFile - The `FIXTURE_LOG` path.
  * @returns Records in start order.
  */
 export function readWorkerLog(logFile: string): Array<WorkerRecord> {
-	if (!existsSync(logFile)) {
-		return [];
-	}
-
-	const content = readFileSync(logFile, "utf8");
-	// A live append becomes a record only at its terminating newline.
-	return content
-		.slice(0, content.lastIndexOf("\n") + 1)
-		.split("\n")
-		.filter((line) => line.length > 0)
-		.map((line) => {
-			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- fake-worker.ts writes this shape
-			return JSON.parse(line) as unknown as WorkerRecord;
-		});
+	return readRecords<WorkerRecord>(logFile);
 }
 
 /**
