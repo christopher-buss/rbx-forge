@@ -29,7 +29,8 @@ it later. forge finds the executable in this order:
    that opens `.rbxl` files (`HKCU\Software\Classes\Roblox.Place`).
 4. macOS: `/Applications/RobloxStudio.app/Contents/MacOS/RobloxStudio`.
 
-A path from 1 or 2 that is not a file fails with `studio_launch_failed`.
+A path from 1 or 2 that is not a file fails with `studio_launch_failed`. On
+Windows, a missing native addon fails with `native_missing`.
 
 When forge finds no executable, or the terminal's job forbids breakaway
 (Windows), it opens the place through the platform launcher (`start`, `open`,

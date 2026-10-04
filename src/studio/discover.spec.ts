@@ -136,16 +136,23 @@ describe(findStudioExecutable, () => {
 		).toBeUndefined();
 	});
 
-	it("should find nothing without the addon or its registry read", () => {
-		expect.assertions(2);
+	it("should fail with native_missing when the addon does not load", () => {
+		expect.assertions(1);
 
-		expect(
-			find({
+		const error = catchForgeError(() => {
+			return find({
 				native: () => {
 					throw new ForgeError("native_missing", "no addon");
 				},
-			}),
-		).toBeUndefined();
+			});
+		});
+
+		expect(error.code).toBe("native_missing");
+	});
+
+	it("should find nothing when the addon has no registry read", () => {
+		expect.assertions(1);
+
 		expect(find({ files: [LINK_EXE] })).toBeUndefined();
 	});
 

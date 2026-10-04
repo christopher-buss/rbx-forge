@@ -64,7 +64,7 @@ export type StudioLaunchOutcome =
  * never in a process group or job that forge ends. With a Studio executable
  * found ({@link findStudioExecutable}), forge starts it directly with the
  * place, optionally using RunScript; else the platform launcher opens the
- * place.
+ * place. Rejects with `native_missing` when Windows has no addon.
  */
 export type StudioLauncher = (launch: StudioLaunch) => Promise<StudioLaunchOutcome>;
 
@@ -370,8 +370,14 @@ async function launchStudioAsync(
 	try {
 		executable = findStudioExecutable(backend, launch);
 	} catch (err) {
-		const { hint, message } = toForgeError(err);
-		return { hint, message, type: "failed" };
+		// Only a bad override is a launch failure; `native_missing` keeps its
+		// code.
+		const error = toForgeError(err);
+		if (error.code !== "studio_launch_failed") {
+			throw error;
+		}
+
+		return { hint: error.hint, message: error.message, type: "failed" };
 	}
 
 	return executable === undefined

@@ -8,7 +8,8 @@ import type { ManualClock } from "../../test/helpers/manual-clock.ts";
 import type { FakeNative } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import { createMemoryFileSystem, createTestSeams } from "../../test/helpers/seams.ts";
-import type { DetachedSpawn } from "../native/addon.ts";
+import { ForgeError } from "../errors.ts";
+import type { DetachedSpawn, NativeLoader } from "../native/addon.ts";
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Host } from "../seams/host.ts";
 import { MACOS_STUDIO_PATH, STUDIO_REGISTRY_KEYS } from "./discover.ts";
@@ -30,6 +31,8 @@ interface LauncherSetup {
 	/** Files that exist, by absolute path. */
 	files?: Record<string, string>;
 	native?: FakeNative;
+	/** Replaces the addon loader. */
+	nativeLoader?: NativeLoader;
 	platform?: NodeJS.Platform;
 }
 
@@ -42,6 +45,7 @@ function makeLauncher({
 	childProcess = createFakeSpawner().runner,
 	files = {},
 	native = createFakeNative(),
+	nativeLoader = () => native.addon,
 	platform = "linux",
 }: LauncherSetup = {}): Launcher {
 	const clock = createManualClock();
@@ -59,7 +63,7 @@ function makeLauncher({
 				clock: clock.clock,
 				fileSystem: memory.fileSystem,
 				host: { ...createTestSeams().host, kill: vi.fn<Host["kill"]>(), platform },
-				native: () => native.addon,
+				native: nativeLoader,
 			},
 			"/forge/supervisor.mjs",
 		),
@@ -174,6 +178,24 @@ describe(createStudioLauncher, () => {
 			warning:
 				"Studio opened on the user's desktop: the platform launcher cannot use the hidden desktop.",
 		});
+	});
+
+	it("should fail with native_missing, not use the platform launcher, when the Windows addon does not load", async () => {
+		expect.assertions(2);
+
+		const spawner = spawnerExiting(0);
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			nativeLoader: () => {
+				throw new ForgeError("native_missing", "no addon");
+			},
+			platform: "win32",
+		});
+
+		await expect(
+			launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden" }),
+		).rejects.toMatchObject({ code: "native_missing" });
+		expect(spawner.calls).toHaveLength(0);
 	});
 
 	it("should report the user desktop without a warning for a requested user platform launch", async () => {
