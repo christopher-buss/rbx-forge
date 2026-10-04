@@ -34,6 +34,7 @@ copy the `.worktreeinclude` files, then run `pnpm build:all` in the background.
 | `pnpm build:native`           | the Rust crate in `reaper/` through napi-rs     |
 | `pnpm build:reaper`           | the `forge-reaper` binary, next to the addon    |
 | `pnpm mutation`               | Stryker mutation testing                        |
+| `pnpm release`                | pick a version, run the gate, then tag          |
 
 ## Before a commit
 
@@ -65,6 +66,38 @@ set `RBX_FORGE_NATIVE_DIR` to that directory; without it, forge loads the
 - `reaper/src/lib.rs`: the napi layer, types and errors only.
 - `src/native/addon.ts`: the same surface in TypeScript, written by hand. Change
   it with `lib.rs`.
+
+## Releases
+
+`pnpm release` (bumpp) asks for the next version, then runs the release gate
+(`scripts/release/check.ts`, the `preversion` script) before it changes a file.
+The gate needs a clean `main` equal to `origin/main`, then runs `build:all`,
+`cargo test`, typecheck, lint, knip, and the unit, integration, and e2e
+projects. A failure stops the release with no change.
+
+- On Windows the gate sets `RBX_FORGE_TEST_REAL_STUDIO=1`: the real-Studio
+  specs, which CI never runs, run here. Install Studio and log in first; the
+  specs open Studio windows.
+- On macOS the gate runs the rest; the real-Studio specs are Windows only.
+- Release only when CI is green for HEAD; the gate does not check it.
+
+When the gate passes, bumpp commits `chore: release vX.Y.Z`, tags `vX.Y.Z`, and
+pushes. The tag starts `.github/workflows/release.yaml`: it builds every napi
+target (`native.yaml`, the same build as CI), publishes the
+`@rbx-forge/native-<target>` packages and then `rbx-forge` through npm trusted
+publishing, and makes the GitHub release with changelogithub. A tag releases a
+stable version only.
+
+### First publish
+
+npm trusted publishing needs each package on npm first. Once, from Windows or
+macOS, logged in to npm:
+
+1. Push `main` and wait for CI to pass for HEAD.
+2. `pnpm release:bootstrap 2.0.0-rc.0`: downloads the `native-*` artifacts of
+   that CI run, builds, and publishes all 9 packages on dist-tag `next`.
+3. On npmjs.com, add a trusted publisher to each package: this repository,
+   workflow `release.yaml`.
 
 ## Commit messages
 
