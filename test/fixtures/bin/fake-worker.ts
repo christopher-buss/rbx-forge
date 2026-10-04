@@ -6,8 +6,8 @@
  *
  * - `FIXTURE_LOG`: NDJSON file; every process appends one `start` record,
  *   with the time it started (`at`, milliseconds since the Unix epoch).
- *   Each append starts on a new line: a kill can cut one write short, and
- *   the next record stays whole.
+ *   Each append here and to `FIXTURE_BEAT_LOG` starts on a new line: a kill
+ *   can cut one write short, and the next record stays whole.
  * - `FIXTURE_GRANDCHILDREN`: number of grandchildren a long-running role
  *   spawns. Grandchildren stay alive and spawn nothing.
  * - `FIXTURE_DETACH=1`: grandchildren start detached (own process group /

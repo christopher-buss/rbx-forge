@@ -169,11 +169,11 @@ describe("sessions", () => {
 		const next = currentIdentity(project);
 		second.stop("SIGINT");
 		const settled = await second.settled;
-		const lastOldBeat = Math.max(
-			...readRecords<Beat>(beats)
-				.filter(({ session }) => session === old.sessionId)
-				.map(({ at }) => at),
+		const oldBeats = readRecords<Beat>(beats).filter(
+			({ session }) => session === old.sessionId,
 		);
+		assert(oldBeats.length > 0, "the old session's workers beat");
+		const lastOldBeat = Math.max(...oldBeats.map(({ at }) => at));
 		const firstNewStart = Math.min(...workersOf(project, next.sessionId).map(({ at }) => at));
 
 		expect(settled.ok).toBeTrue();

@@ -40,6 +40,7 @@ describe("fixture worker log", () => {
 		spawnSync(process.execPath, [FAKE_WORKER, "hook"], {
 			env: { ...process.env, FIXTURE_LOG: file },
 			stdio: "ignore",
+			timeout: 10_000,
 			windowsHide: true,
 		});
 
