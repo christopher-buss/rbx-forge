@@ -38,8 +38,18 @@ copy the `.worktreeinclude` files, then run `pnpm build:all` in the background.
 
 ## Before a commit
 
-The pre-commit hook runs lint and typecheck. Run the rest by hand, or all of it
-with `hk check`:
+The pre-commit hook runs lint and typecheck. With the agent profile, it also
+builds and runs the unit, integration, and e2e suites for changes under `src/`,
+`test/`, or `scripts/`, or to the package manifest, dependency lockfile and
+workspace config, TypeScript configs, tsdown config, or Vitest configs. Changes
+under `reaper/` run the native build.
+
+The agent pre-push hook runs mutation tests only when `src/` differs from the
+merge-base with `origin/main`, including pushes to a remote URL. Keep
+`origin/main` available and current with `git fetch origin`. Knip runs on every
+push. CI runs the full checks for every change that is not docs-only.
+
+Run the rest by hand, or all of it with `hk check`:
 
 ```bash
 pnpm lint
