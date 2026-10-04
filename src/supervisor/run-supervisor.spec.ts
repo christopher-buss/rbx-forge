@@ -1800,7 +1800,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(run.reporter.events).toStrictEqual([
 			{
-				message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it as a found Studio: only stop --force and restart --force close it.`,
+				message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it as a found Studio: a stop or restart closes it only with --force.`,
 				type: "info",
 			},
 			{
@@ -2033,7 +2033,7 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(run.reporter.events).toContainEqual({
-			message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it as a found Studio: only stop --force and restart --force close it.`,
+			message: `Roblox Studio (PID ${STUDIO_PID}) already has ${PLACE} open, so the session uses it as a found Studio: a stop or restart closes it only with --force.`,
 			type: "info",
 		});
 		expect(run.reporter.events).toContainEqual({
