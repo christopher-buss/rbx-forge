@@ -98,7 +98,10 @@ export const NATIVE_TARGETS: ReadonlyArray<NativeTarget> = packageJson.napi.targ
 	},
 );
 
+const MANIFEST = "package.json";
 const NATIVE_PREFIX = "@rbx-forge/native-";
+/** `owner/name` in a `github:` shorthand or a github.com URL. */
+const GITHUB_REPOSITORY = /^(?:github:|.*github\.com[/:])([^/]+\/[^/]+?)(?:\.git)?$/;
 
 /** Every test project but `other-user`, which needs a second local user. */
 const GATE_STEPS: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
@@ -206,7 +209,7 @@ export function releaseVersion(manifest: string, reference: string | undefined):
  */
 export function publishRelease(dependencies: PublishDependencies, options: PublishOptions): void {
 	const { files } = dependencies;
-	const manifestPath = path.join(options.root, "package.json");
+	const manifestPath = path.join(options.root, MANIFEST);
 	const original = files.read(manifestPath);
 	const root = readManifest(original);
 
@@ -245,12 +248,18 @@ export function bootstrapRelease(
 	}
 
 	assertClean(read);
-	const id = findCiRun(read, readText(read, "git", ["rev-parse", "HEAD"]));
+	// gh's own default repository is unset in a clone with several remotes.
+	const repo = githubRepo(
+		readManifest(dependencies.files.read(path.join(options.root, MANIFEST))),
+	);
+	const id = findCiRun(read, repo, readText(read, "git", ["rev-parse", "HEAD"]));
 	dependencies.files.remove(options.artifacts);
 	runOrThrow(run, "gh", [
 		"run",
 		"download",
 		String(id),
+		"--repo",
+		repo,
 		"--pattern",
 		"native-*",
 		"--dir",
@@ -388,10 +397,7 @@ function stagePackage(
 	files.copy(addon, path.join(directory, path.basename(addon)));
 	files.copy(reaper, path.join(directory, reaperName(target)));
 	files.copy(path.join(rootDirectory, "LICENSE"), path.join(directory, "LICENSE"));
-	files.write(
-		path.join(directory, "package.json"),
-		`${JSON.stringify(manifest, undefined, "\t")}\n`,
-	);
+	files.write(path.join(directory, MANIFEST), `${JSON.stringify(manifest, undefined, "\t")}\n`);
 	return { name: String(manifest["name"]), directory, target };
 }
 
@@ -419,11 +425,29 @@ function stageNativePackages(
 	return sources.map((source) => stagePackage(files, root, options, source));
 }
 
-function findCiRun(read: Processes["read"], head: string): number {
+/**
+ * The GitHub `owner/name` that `package.json#repository` names.
+ * @param manifest - The root `package.json`.
+ * @returns The repository, for `gh --repo`.
+ */
+function githubRepo(manifest: Manifest): string {
+	const field = manifest["repository"];
+	const url = isRecord(field) ? field["url"] : field;
+	const match = typeof url === "string" ? GITHUB_REPOSITORY.exec(url) : null;
+	if (match?.[1] === undefined) {
+		throw new Error("package.json#repository names no GitHub repository");
+	}
+
+	return match[1];
+}
+
+function findCiRun(read: Processes["read"], repo: string, head: string): number {
 	const id = Number(
 		readText(read, "gh", [
 			"run",
 			"list",
+			"--repo",
+			repo,
 			"--workflow",
 			"ci.yaml",
 			"--commit",

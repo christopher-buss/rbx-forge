@@ -13,7 +13,12 @@ import {
 	runReleaseCheck,
 } from "./release.ts";
 
-const ROOT_MANIFEST = `${JSON.stringify({ name: "rbx-forge", license: "MIT", version: "1.0.0" })}\n`;
+const ROOT_MANIFEST = `${JSON.stringify({
+	name: "rbx-forge",
+	license: "MIT",
+	repository: { type: "git", url: "git+https://github.com/owner/forge.git" },
+	version: "1.0.0",
+})}\n`;
 const OPTIONS = { artifacts: "artifacts", root: "repo", staging: "staging" } satisfies Pick<
 	BootstrapOptions,
 	"artifacts" | "root" | "staging"
@@ -25,7 +30,7 @@ const PACKED = gzippedTarball([
 ]);
 const FLAGS = "--access public --no-git-checks";
 const RUN_LIST =
-	"gh run list --workflow ci.yaml --commit abc --status success --limit 1 --json databaseId --jq .[0].databaseId";
+	"gh run list --repo owner/forge --workflow ci.yaml --commit abc --status success --limit 1 --json databaseId --jq .[0].databaseId";
 const BOOTSTRAP_READS = {
 	"git rev-parse HEAD": "abc\n",
 	"git status --porcelain": "",
@@ -440,7 +445,7 @@ describe(bootstrapRelease, () => {
 
 		expect(removed[0]).toBe("artifacts");
 		expect(processes.runs.slice(0, 3)).toStrictEqual([
-			"gh run download 42 --pattern native-* --dir artifacts",
+			"gh run download 42 --repo owner/forge --pattern native-* --dir artifacts",
 			"pnpm build",
 			`pnpm --dir ${path.join("staging", "win32-x64-msvc")} pack --pack-destination ..`,
 		]);
@@ -482,6 +487,45 @@ describe(bootstrapRelease, () => {
 		}).toThrow("no successful CI run for abc; push it and wait for CI");
 	});
 
+	it.for([
+		{ repository: undefined, what: "no repository" },
+		{ repository: "https://gitlab.com/owner/forge", what: "a repository off GitHub" },
+	])("should refuse a package.json with $what", ({ repository }) => {
+		expect.assertions(1);
+
+		const { contents, dependencies } = publishSetup(BOOTSTRAP_READS);
+		contents.set(
+			path.join("repo", "package.json"),
+			JSON.stringify({ name: "rbx-forge", repository, version: "1.0.0" }),
+		);
+
+		expect(() => {
+			bootstrapRelease(dependencies, { ...OPTIONS, version: "1.0.0-rc.0" });
+		}).toThrow("package.json#repository names no GitHub repository");
+	});
+
+	it("should take the repository from a string", () => {
+		expect.assertions(1);
+
+		const { contents, dependencies, processes } = publishSetup({
+			...BOOTSTRAP_READS,
+			[RUN_LIST.replace("owner/forge", "other/tool")]: "7\n",
+		});
+		contents.set(
+			path.join("repo", "package.json"),
+			JSON.stringify({
+				name: "rbx-forge",
+				repository: "github:other/tool",
+				version: "1.0.0",
+			}),
+		);
+		bootstrapRelease(dependencies, { ...OPTIONS, version: "1.0.0-rc.0" });
+
+		expect(processes.runs[0]).toBe(
+			"gh run download 7 --repo other/tool --pattern native-* --dir artifacts",
+		);
+	});
+
 	it("should throw when the download fails", () => {
 		expect.assertions(1);
 
@@ -490,6 +534,8 @@ describe(bootstrapRelease, () => {
 
 		expect(() => {
 			bootstrapRelease(failing, { ...OPTIONS, version: "1.0.0-rc.0" });
-		}).toThrow("gh run download 42 --pattern native-* --dir artifacts exited with 1");
+		}).toThrow(
+			"gh run download 42 --repo owner/forge --pattern native-* --dir artifacts exited with 1",
+		);
 	});
 });
