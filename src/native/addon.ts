@@ -27,6 +27,10 @@ export interface FileLock {
  * that reused the PID.
  */
 export interface PinnedProcess {
+	/**
+	 * The macOS app-hidden state; null for no app or an unsupported platform.
+	 */
+	appHidden: () => boolean | null;
 	/** The pinned process desktop. Always user on POSIX. */
 	desktop: () => "hidden" | "user";
 	/**
@@ -79,6 +83,8 @@ export interface PinnedProcess {
 	requestClose: () => boolean;
 	/** Press File > Save to File within the deadline (default 30 seconds). */
 	requestSave: (timeoutMs?: number) => Promise<"no_menu_item" | "requested" | "timeout">;
+	/** Hide or unhide the macOS app without activation; false for no app. */
+	setAppHidden: (hidden: boolean) => boolean;
 	/** The start time read when it was pinned (see `processStartTime`). */
 	readonly startTime: string;
 	/**

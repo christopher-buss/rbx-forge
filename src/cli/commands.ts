@@ -99,15 +99,14 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		name: "show",
 		flags: STUDIO_MOVE_FLAGS,
 		run: runShowAsync,
-		summary:
-			"Save and reopen the session Studio on the user desktop. Undo history and open script tabs are lost.",
+		summary: "Save and show the session Studio. Windows reopens it; macOS shows the app.",
 	},
 	{
 		name: "hide",
 		flags: STUDIO_MOVE_FLAGS,
 		run: runHideAsync,
 		summary:
-			"Save and reopen the session Studio on the hidden desktop. Undo history and open script tabs are lost.",
+			"Save and hide the session Studio. Windows reopens it hidden; macOS hides the app.",
 	},
 	{
 		name: "sync",

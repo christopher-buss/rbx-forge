@@ -279,3 +279,22 @@ If Windows cannot launch on the hidden desktop, forge warns and opens Studio
 on the user's desktop. The result's `to` and `forge status` report the actual
 desktop. `save.pid` identifies the saved Studio; `pid` identifies the Studio
 that now has the place open.
+
+## Showing and hiding Studio on macOS
+
+`forge hide` saves the session Studio and hides that app. `forge show` saves it
+and unhides it. Both retain the same PID, undo history, script tabs, owner, and
+Rojo. They preserve focus, Space, and window order; show does not raise Studio
+above other apps. Snapshot Studios are outside these commands. Each place has
+its own Studio process, so other open places stay as they are.
+
+The commands read the app's current hidden state, including a manual Cmd+H.
+Their result uses `from` and `to` as app visibility: `hidden` means app-hidden,
+`user` means shown. `services.studio.desktop` records the last successful forge
+visibility command. Manual Cmd+H or Dock changes do not update this status marker;
+the next show or hide reads their actual effect. `save.desktop` remains `user`
+because macOS uses no hidden desktop. A restart can open a visible Studio again;
+keeping the desktop across a restart refers to Windows placement.
+
+As on Windows, `--timeout <s>` controls saving first. A save failure leaves app
+visibility and PID unchanged. `--studio-path` applies only to Windows reopening.
