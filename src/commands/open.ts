@@ -77,6 +77,11 @@ export interface OpenOptions {
 	signal?: AbortSignal;
 	/** The `--studio-path` flag, resolved. */
 	studioPath?: string | undefined;
+	/**
+	 * Watch a snapshot's delayed hidden-desktop Lighting prompt after the CLI
+	 * exits.
+	 */
+	watchHiddenLighting?: boolean | undefined;
 }
 
 /** The place, as the config names it and as an absolute path. */
@@ -170,7 +175,9 @@ export async function runOpenAsync(
 		const launched = await launchAsync(context, place, {
 			desktop: resolveStudioDesktop(config, seams.host.platform, "hidden"),
 			studioPath: typeof studioPath === "string" ? path.resolve(cwd, studioPath) : undefined,
+			watchHiddenLighting: true,
 		});
+
 		return { build: { ...build.value, hooks: build.hooks }, pruned, ...launched };
 	});
 	const opened: OpenedSnapshot = { ...value, hooks, place };
@@ -269,7 +276,11 @@ async function launchAsync(
 		desktop,
 		runScript,
 		studioPath,
-	}: Pick<OpenOptions, "beforeLaunch" | "desktop" | "runScript" | "studioPath">,
+		watchHiddenLighting,
+	}: Pick<
+		OpenOptions,
+		"beforeLaunch" | "desktop" | "runScript" | "studioPath" | "watchHiddenLighting"
+	>,
 ): Promise<Pick<OpenedPlace, "desktop" | "studio">> {
 	reporter.emit({ name: STEP, status: "started", type: "step" });
 	const outcome = await seams.studioLauncher({
@@ -278,6 +289,7 @@ async function launchAsync(
 		place,
 		studioPath,
 		...(desktop === undefined ? {} : { desktop }),
+		...(watchHiddenLighting === undefined ? {} : { watchHiddenLighting }),
 		...(runScript === undefined ? {} : { runScript }),
 		...(beforeLaunch === undefined ? {} : { beforeLaunch }),
 	});

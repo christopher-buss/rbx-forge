@@ -256,6 +256,7 @@ describe(runOpenAsync, () => {
 						env: { PATH: TOOLS },
 						place: SNAPSHOT,
 						studioPath: undefined,
+						watchHiddenLighting: true,
 					},
 				],
 			],

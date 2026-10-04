@@ -4,7 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, expect, it, onTestFinished } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import { withVariables } from "../../src/process/environment.ts";
@@ -13,6 +13,7 @@ import type { FixtureProject } from "../helpers/fixture-project.ts";
 import { makeFixtureProject } from "../helpers/fixture-project.ts";
 import { parseLines, parseOpened, parseResult } from "../helpers/output.ts";
 import {
+	loadRealNative,
 	makeRunScriptStudioExecutable,
 	NATIVE_DIRECTORY,
 	waitForFileAsync,
@@ -125,6 +126,31 @@ function installNodeRojo(project: string): void {
 }
 
 describe("forge open", () => {
+	it.skipIf(!IS_WINDOWS)(
+		"dismisses a snapshot migration prompt after the open CLI has exited",
+		{ timeout: 20_000 },
+		async () => {
+			expect.assertions(3);
+
+			const fixture = await makeFixtureAsync({ projectType: "luau" }, { studio: true });
+			const opened = await runForgeAsync(fixture, ["open", "--json"], {
+				FIXTURE_STUDIO_DIALOG_DELAY_MS: "7000",
+			});
+
+			expect(opened.status).toBe(EXIT_SUCCESS);
+
+			const { place, studio } = parseOpened(opened.result.data);
+			assert(studio !== null);
+			await waitForFileAsync(`${place}.lock`);
+			const pinned = loadRealNative().pinProcess(studio.pid);
+			assert(pinned !== null);
+			await sleep(8500);
+
+			expect(pinned.isBlocked()).toBeFalse();
+			expect(pinned.isAlive()).toBeTrue();
+		},
+	);
+
 	it("should open a snapshot on the user desktop when the flag overrides hidden config", async () => {
 		expect.assertions(3);
 

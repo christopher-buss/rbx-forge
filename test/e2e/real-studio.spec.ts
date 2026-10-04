@@ -20,12 +20,22 @@
  * Timings go to `RBX_FORGE_TEST_REAL_STUDIO_LOG` (NDJSON), when set.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import {
+	appendFileSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, expect, it, onTestFinished } from "vitest";
 
+import type { PinnedProcess } from "../../src/native/addon.ts";
+import { parseOpened } from "../helpers/output.ts";
 import { pinNow, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
 import { makeFixtureAsync } from "./session-fixture.ts";
@@ -76,6 +86,34 @@ function killNewStudiosAtEnd(): void {
 	});
 }
 
+function snapshotCleanup(project: string): (pid: number) => PinnedProcess {
+	let studio: PinnedProcess | undefined;
+	onTestFinished(() => {
+		studio?.kill();
+		studio?.waitForExit(10_000);
+		const query = `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like '*--watch-hidden-lighting*' -and $_.CommandLine -like '*${path.basename(project).replaceAll("'", "''")}*' } | ForEach-Object ProcessId`;
+		const { status, stdout } = spawnSync(
+			"powershell.exe",
+			["-NoProfile", "-NonInteractive", "-Command", query],
+			{ encoding: "utf8", windowsHide: true },
+		);
+		assert(status === 0);
+		const pids = stdout.trim().split(/\s+/).filter(Boolean);
+		for (const text of pids) {
+			const watcher = pinNow(Number(text));
+			if (watcher !== undefined && !watcher.waitForExit(5000)) {
+				watcher.kill();
+				watcher.waitForExit(5000);
+			}
+		}
+	});
+	return (pid) => {
+		studio = pinNow(pid);
+		assert(studio !== undefined);
+		return studio;
+	};
+}
+
 /**
  * Note one timing.
  *
@@ -119,6 +157,29 @@ async function makeRealProjectAsync(fixturePlace: string): Promise<Fixture> {
 	});
 	copyFileSync(path.join(PLACES, fixturePlace), path.join(fixture.project, PLACE));
 	return { ...fixture, place: path.join(fixture.project, PLACE) };
+}
+
+async function compatibilitySnapshotAsync(): Promise<Fixture> {
+	const fixture = await makeFixtureAsync({ projectType: "luau" });
+	const directory = path.join(fixture.project, "node_modules", "snapshot-rojo");
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(
+		path.join(fixture.project, "package.json"),
+		JSON.stringify({ devDependencies: { "snapshot-rojo": "1.0.0" } }),
+	);
+	writeFileSync(
+		path.join(directory, "package.json"),
+		JSON.stringify({ name: "snapshot-rojo", bin: { rojo: "cli.mjs" } }),
+	);
+	writeFileSync(
+		path.join(directory, "cli.mjs"),
+		`import { copyFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
+const output = process.argv[process.argv.indexOf('--output') + 1];
+mkdirSync(path.dirname(output), { recursive: true });
+copyFileSync(${JSON.stringify(path.join(PLACES, "compatibility.rbxl"))}, output);`,
+	);
+	return fixture;
 }
 
 /**
@@ -207,6 +268,47 @@ function saveOutcome(run: UpRun): string {
 }
 
 describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
+	it(
+		"dismisses hidden snapshot Compatibility lighting after the open CLI exits",
+		{ timeout: 150_000 },
+		async () => {
+			expect.assertions(6);
+
+			killNewStudiosAtEnd();
+			const fixture = await compatibilitySnapshotAsync();
+			const pinSnapshot = snapshotCleanup(fixture.project);
+			const focus = foregroundWindow();
+			const opened = await runForgeAsync(fixture, ["open", "--json"], realVariables(fixture));
+
+			expect(opened.status).toBe(0);
+
+			const { place, studio } = parseOpened(opened.result.data);
+			assert(studio !== null);
+			const pinned = pinSnapshot(studio.pid);
+			note({
+				bytes: statSync(place).size,
+				command: "snapshot-open",
+				executable: pinned.executablePath(),
+				result: opened.result,
+			});
+
+			await expect
+				.poll(() => existsSync(`${place}.lock`), { interval: 100, timeout: OPEN_MS })
+				.toBeTrue();
+			expect(Number(readFileSync(`${place}.lock`, "utf8").split(/\r?\n/, 1)[0])).toBe(
+				studio.pid,
+			);
+
+			await sleep(10_000);
+
+			await expect
+				.poll(() => pinned.isBlocked(), { interval: 500, timeout: 30_000 })
+				.toBeFalse();
+			expect(pinned.isAlive()).toBeTrue();
+			expect(foregroundWindow()).toBe(focus);
+		},
+	);
+
 	it(
 		"moves the saved session Studio between desktops without restarting Rojo",
 		{ timeout: 600_000 },

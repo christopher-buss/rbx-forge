@@ -276,9 +276,9 @@ async function saveAsync(
 function preflightStop(
 	handlers: PartHandlers,
 	request: Parameters<PartStopper>[0],
-	needed: boolean,
+	shouldStop?: () => boolean,
 ): void {
-	if (needed) {
+	if (shouldStop === undefined) {
 		handlers.beforeStop?.(request);
 	}
 }
@@ -293,14 +293,14 @@ async function stopAsync(
 	}
 
 	const handlers = link.handlers ?? (await waitForHandlersAsync(link.attached, link));
-	preflightStop(handlers, request, shouldStop === undefined);
+	preflightStop(handlers, request, shouldStop);
+
 	return whenAttachedAsync(link, async ({ stop }) => {
 		// Queued idle stops must still be needed after an active save finishes.
 		if (shouldStop?.() === false) {
 			return { ending: false, kept: [], stopped: [] };
 		}
 
-		preflightStop(handlers, request, shouldStop !== undefined);
 		return stop(request);
 	});
 }

@@ -72,6 +72,18 @@ pub fn open_hidden() -> io::Result<&'static Desktop> {
     Ok(HIDDEN.get().expect("the hidden desktop is initialized"))
 }
 
+/// A child keeps its desktop alive after the launching process exits.
+pub fn inherit_hidden() -> io::Result<Desktop> {
+    open_hidden()?;
+    let title = wide(HIDDEN_NAME);
+    // SAFETY: terminated name, inheritable handle owned by the returned Desktop.
+    let handle = unsafe { OpenDesktopW(title.as_ptr(), 0, 1, ACCESS) };
+    if handle.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(Desktop(handle))
+}
+
 /// Read a user object's name, including a borrowed thread desktop handle.
 fn name(handle: HDESK) -> io::Result<String> {
     let mut buffer = [0_u16; 256];

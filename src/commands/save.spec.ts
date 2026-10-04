@@ -455,7 +455,6 @@ describe(runSaveAsync, () => {
 		const saving = saveStudioAsync(
 			seams,
 			{
-				desktop: "user",
 				place: path.join(PROJECT, "game.rbxl"),
 				process: { pid: 42, startTime: "42" },
 			},

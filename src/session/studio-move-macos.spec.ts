@@ -15,8 +15,15 @@ import { resolveConfig } from "../config/resolve.ts";
 import { createStatusStore } from "./status.ts";
 import { createStudioMover } from "./studio-move.ts";
 
-function fixture(hidden = false) {
+function fixture(
+	hidden = false,
+	{ abortAfterSave = false, missingStart = false, reuseAfterLookup = false } = {},
+) {
 	let now = 0;
+	let savedPins = 0;
+	let hasSaved = false;
+	let activities = 0;
+	const abort = new AbortController();
 	const place = path.join(PROJECT, "game.rbxl");
 	const memory = createMemoryFileSystem({
 		"game.rbxl": "edits",
@@ -41,6 +48,19 @@ function fixture(hidden = false) {
 		888: { alive: true, appHidden: false, executablePath },
 	});
 	const seams = createTestSeams();
+	const { pinProcess } = native.addon;
+	native.addon.pinProcess = (pid) => {
+		if (hasSaved) {
+			savedPins++;
+		}
+
+		if (reuseAfterLookup && hasSaved && savedPins === 2) {
+			native.processes.get(777)!.startTime = "99";
+		}
+
+		return pinProcess(pid);
+	};
+
 	const context = createCommandContext({
 		seams: createTestSeams({
 			clock: {
@@ -76,10 +96,34 @@ function fixture(hidden = false) {
 		fromPartial({
 			config: resolveConfig({ projectType: "luau" }, {}),
 			context,
-			idle: { activity: () => {} },
-			status,
+			idle: {
+				activity: () => {
+					activities++;
+					if (activities !== 2) {
+						return;
+					}
+
+					hasSaved = true;
+					if (abortAfterSave) {
+						abort.abort();
+					}
+				},
+			},
+			status: {
+				...status,
+				snapshot: () => {
+					const snapshot = status.snapshot();
+					if (!missingStart) {
+						return snapshot;
+					}
+
+					const studio = { ...snapshot.services.studio };
+					delete studio.startTime;
+					return { ...snapshot, services: { ...snapshot.services, studio } };
+				},
+			},
 		}),
-		fromPartial({ signal: AbortSignal.any([]) }),
+		fromPartial({ signal: abort.signal }),
 		fromPartial({ state: { isAttached: true } }),
 	);
 	return { memory, move, native, place, status };
@@ -94,6 +138,7 @@ describe("macOS Studio visibility", () => {
 
 		await expect(move({ desktop: "hidden", timeoutMs: 30_000 })).rejects.toMatchObject({
 			code: "studio_launch_failed",
+			message: "Studio could not change its app visibility.",
 		});
 		expect(native.processes.get(777)).toMatchObject({ alive: true, appHidden: false });
 		expect(status.snapshot().services.studio).toMatchObject({ desktop: "user", pid: 777 });
@@ -107,6 +152,7 @@ describe("macOS Studio visibility", () => {
 
 		await expect(move({ desktop: "hidden", timeoutMs: 30_000 })).rejects.toMatchObject({
 			code: "studio_not_open",
+			message: "The saved Studio app is no longer open.",
 		});
 	});
 
@@ -122,6 +168,42 @@ describe("macOS Studio visibility", () => {
 
 		await expect(move({ desktop: "hidden", timeoutMs: 30_000 })).rejects.toMatchObject({
 			code: "studio_not_open",
+			message: "The saved Studio is no longer open.",
+		});
+		expect(native.processes.get(777)).toMatchObject({ alive: true, appHidden: false });
+	});
+
+	it("rejects a reused PID between checking the saved place and pinning its app", async () => {
+		expect.assertions(2);
+
+		const { move, native } = fixture(false, { reuseAfterLookup: true });
+
+		await expect(move({ desktop: "hidden", timeoutMs: 30_000 })).rejects.toMatchObject({
+			code: "studio_not_open",
+			message: "The saved Studio is no longer open.",
+		});
+		expect(native.processes.get(777)).toMatchObject({ alive: true, appHidden: false });
+	});
+
+	it("moves a verified app when older session status lacks its start time", async () => {
+		expect.assertions(1);
+
+		const { move } = fixture(false, { missingStart: true });
+
+		await expect(move({ desktop: "hidden", timeoutMs: 30_000 })).resolves.toMatchObject({
+			from: "user",
+			pid: 777,
+			to: "hidden",
+		});
+	});
+
+	it("retains app visibility when cancelled after saving", async () => {
+		expect.assertions(2);
+
+		const { move, native } = fixture(false, { abortAfterSave: true });
+
+		await expect(move({ desktop: "hidden", timeoutMs: 30_000 })).rejects.toMatchObject({
+			name: "AbortError",
 		});
 		expect(native.processes.get(777)).toMatchObject({ alive: true, appHidden: false });
 	});

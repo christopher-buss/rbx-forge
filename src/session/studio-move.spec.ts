@@ -78,6 +78,7 @@ describe("move after saving", () => {
 
 			await expect(move({ desktop: "user", timeoutMs: 30_000 })).rejects.toMatchObject({
 				code: "studio_not_open",
+				message: "The saved Studio is no longer open.",
 			});
 		},
 	);

@@ -31,7 +31,7 @@ const STABLE_MS = 250;
  */
 export async function saveStudioAsync(
 	seams: StudioSeams,
-	target: StudioTarget & { desktop?: "hidden" | "user" },
+	target: StudioTarget,
 	timeoutMs: number = STUDIO_SAVE_TIMEOUT_MS,
 	signal?: AbortSignal,
 ): Promise<StudioSave> {
@@ -97,7 +97,7 @@ async function requestStudioSaveAsync(
 }
 
 function savedResult(
-	target: StudioTarget & { desktop?: "hidden" | "user" },
+	target: StudioTarget,
 	pinned: PinnedProcess,
 	stat: Stats,
 	durationMs: number,
@@ -115,7 +115,7 @@ function savedResult(
 async function waitForSaveAsync(
 	seams: StudioSeams,
 	pinned: PinnedProcess,
-	target: StudioTarget & { desktop?: "hidden" | "user" },
+	target: StudioTarget,
 	options: {
 		before: number;
 		signal: AbortSignal | undefined;

@@ -264,7 +264,8 @@ export interface NativeAddon {
 	 * Windows only: start a process outside this process's job
 	 * (`CREATE_BREAKAWAY_FROM_JOB`), with no console and stdin from `NUL`.
 	 *
-	 * @returns Its PID, or `null` when the job forbids breakaway.
+	 * @returns Its PID, or `null` when the job forbids breakaway or the requested
+	 * hidden desktop cannot be opened. No process has started in either case.
 	 */
 	spawnDetached?: (spawn: DetachedSpawn) => null | number;
 	/**

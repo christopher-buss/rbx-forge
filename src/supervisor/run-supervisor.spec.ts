@@ -4909,6 +4909,40 @@ async function jumpAsync(run: StartRun, ms: number): Promise<void> {
 }
 
 describe("idle timeout", () => {
+	it.for([
+		{ owned: true, studioStatus: "opening" },
+		{ owned: false, studioStatus: "closed" },
+	])(
+		"should apply ownership when idle Studio readiness is still pending (%j)",
+		async ({ owned, studioStatus }) => {
+			expect.assertions(2);
+
+			const { run } = pendingStudio({
+				file: { session: { idleTimeout: 1 } },
+				files: {
+					...TOOL_FILES,
+					"Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model",
+					"game.rbxl": "place",
+				},
+				owned,
+			});
+			onTestFinished(async () => {
+				run.signals.fire("SIGINT");
+				await run.result;
+			});
+			await flushAsync();
+			run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+			await passAsync(run, FILE_POLL_MS);
+			await jumpAsync(run, MINUTE_MS);
+			await passAsync(run, 1000);
+
+			expect(run.native.processes.get(1)).toMatchObject({ alive: owned });
+			expect(stateOf(run)).toMatchObject({
+				services: { studio: { status: studioStatus } },
+			});
+		},
+	);
+
 	it("should preserve opening readiness while a save waits past the idle timeout", async () => {
 		expect.assertions(1);
 
@@ -5254,6 +5288,19 @@ async function exitOnStopAsync(
 const RELAUNCHED_PID = 901;
 const RELAUNCHED_LOCK = `${RELAUNCHED_PID}\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`;
 
+function restartLauncher(run: StartRun): void {
+	run.studioLauncher.mockImplementation(async (launch) => {
+		const desktop = launch.desktop ?? "user";
+		run.native.processes.set(RELAUNCHED_PID, {
+			alive: true,
+			desktop,
+			executablePath: "C:\\Roblox\\RobloxStudioBeta.exe",
+			startTime: "901",
+		});
+		return { studio: { desktop, pid: RELAUNCHED_PID, startTime: "901" }, type: "launched" };
+	});
+}
+
 describe("forge restart control channel", () => {
 	it("should stop the compiler until its tree is gone, then start it again", async () => {
 		expect.assertions(3);
@@ -5319,43 +5366,68 @@ describe("forge restart control channel", () => {
 		});
 	});
 
-	it("should close a found Studio with force, and open the place again", async () => {
-		expect.assertions(2);
+	it.for(["hidden", "user"] as const)(
+		"should force-restart a found Studio on its previous %s desktop",
+		async (desktop) => {
+			expect.assertions(3);
 
-		const found: FakeProcess = {
-			alive: true,
-			executablePath: "/opt/RobloxStudio",
-			startTime: "0",
-		};
-		const run = startCommand({ ...ATTACHED, flags: UP, processes: { [STUDIO_PID]: found } });
-		found.onClose = () => {
-			run.memory.fileSystem.rmSync(LOCK);
-		};
+			const found: FakeProcess = {
+				alive: true,
+				desktop,
+				executablePath: "C:\\Roblox\\RobloxStudioBeta.exe",
+				startTime: "0",
+			};
+			const run = startCommand({
+				...ATTACHED,
+				files: { ...ATTACHED.files, "tools/rojo.exe": "" },
+				flags: { ...UP, open: true },
+				platform: "win32",
+				processes: {
+					[RELAUNCHED_PID]: {
+						alive: true,
+						desktop,
+						executablePath: "C:\\Roblox\\RobloxStudioBeta.exe",
+						startTime: "901",
+					},
+					[STUDIO_PID]: found,
+				},
+				writePrivateFile: () => {},
+			});
+			found.onClose = () => {
+				run.memory.fileSystem.rmSync(LOCK);
+			};
 
-		await flushAsync();
-		await attachFoundAsync(run);
-		run.studioLauncher.mockResolvedValue({
-			studio: { pid: RELAUNCHED_PID, startTime: "901" },
-			type: "launched",
-		});
-		const answer = askRestartAsync(run, { force: true });
-		await exitOnStopAsync(run, "rojo");
-		await passAsync(run, FILE_POLL_MS);
-		run.memory.fileSystem.writeFileSync(LOCK, RELAUNCHED_LOCK);
-		await passAsync(run, FILE_POLL_MS);
-		const state = stateOf(run);
-		run.signals.fire("SIGINT");
-		await run.result;
+			await flushAsync();
 
-		await expect(answer).resolves.toMatchObject({
-			added: ["studio", "rojo"],
-			kept: [],
-			stopped: ["studio", "rojo"],
-		});
-		expect(state).toMatchObject({
-			services: { studio: { origin: "forge", pid: RELAUNCHED_PID, status: "open" } },
-		});
-	});
+			expect(stateOf(run)).toMatchObject({
+				services: { studio: { desktop, origin: "found", status: "open" } },
+			});
+
+			restartLauncher(run);
+			const answer = callSessionAsync(run.ipc, moveTarget(), "restartParts", {
+				params: { force: true },
+				responseTimeoutMs: 600_000,
+			});
+			await exitOnStopAsync(run, "rojo");
+			await passAsync(run, FILE_POLL_MS);
+			run.memory.fileSystem.writeFileSync(LOCK, RELAUNCHED_LOCK);
+			await passAsync(run, FILE_POLL_MS);
+			const state = stateOf(run);
+			run.signals.fire("SIGINT");
+			await run.result;
+
+			await expect(answer).resolves.toMatchObject({
+				added: ["studio", "rojo"],
+				kept: [],
+				stopped: ["studio", "rojo"],
+			});
+			expect(state).toMatchObject({
+				services: {
+					studio: { desktop, origin: "forge", pid: RELAUNCHED_PID, status: "open" },
+				},
+			});
+		},
+	);
 
 	it("should start nothing again when the compiler's tree left processes", async () => {
 		expect.assertions(3);
@@ -5568,7 +5640,7 @@ function moveTarget() {
 	};
 }
 
-function movableStudio(desktop: "hidden" | "user" = "hidden") {
+function movableStudio(desktop: "hidden" | "user" = "hidden", setup: StartSetup = {}) {
 	const run = startCommand({
 		files: { "game.rbxl": "original", "game.rbxl.lock": STUDIO_LOCK, "tools/rojo.exe": "" },
 		platform: "win32",
@@ -5585,6 +5657,7 @@ function movableStudio(desktop: "hidden" | "user" = "hidden") {
 			},
 		},
 		writePrivateFile: () => {},
+		...setup,
 	});
 	onTestFinished(() => {
 		run.signals.fire("SIGINT");
@@ -5703,7 +5776,7 @@ describe("session Studio replacement outcomes", () => {
 	});
 
 	it("should retain Rojo and report Studio closed when replacement launch fails", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const run = movableStudio();
 		await passAsync(run, FILE_POLL_MS);
@@ -5715,6 +5788,16 @@ describe("session Studio replacement outcomes", () => {
 		expect(stateOf(run)).toMatchObject({
 			services: { rojo: { status: "ready" }, studio: { status: "closed" } },
 		});
+
+		const stopped = callSessionAsync(run.ipc, moveTarget(), "stopParts", {
+			params: { force: false, keepStudio: false, scope: "down" },
+			responseTimeoutMs: 600_000,
+		});
+		await flushAsync();
+		run.fake.exit("rojo", OK);
+		await passAsync(run, OUTPUT_POLL_MS);
+
+		await expect(stopped).resolves.toMatchObject({ ending: true });
 	});
 
 	it("should continue following the original Studio if the close fails", async () => {
@@ -5794,6 +5877,52 @@ function configureUnavailableMoveLookup(run: StartRun, lookup: "handle" | "path"
 }
 
 describe("serialized Studio moves", () => {
+	it("should fail the move when its replacement opens the place without acknowledging sync", async () => {
+		expect.assertions(2);
+
+		const ready = Promise.withResolvers<boolean>();
+		const run = movableStudio("user", {
+			files: {
+				"AppData/Local/Roblox/Plugins/RojoManagedPlugin.rbxm": "model",
+				"game.rbxl": "original",
+				"game.rbxl.lock": STUDIO_LOCK,
+				"tools/rojo.exe": "",
+			},
+			listenForStudioReady: async () => {
+				return {
+					close: () => {},
+					ready: ready.promise,
+					url: "http://127.0.0.1:50001/ready",
+				};
+			},
+			pluginSources: stockPluginSources(),
+		});
+		await passAsync(run, FILE_POLL_MS);
+		run.native.processes.set(900, {
+			alive: true,
+			desktop: "hidden",
+			executablePath: "/opt/RobloxStudio",
+			startTime: "0",
+		});
+		run.studioLauncher.mockImplementation(async (launch) => {
+			assert(launch.beforeLaunch !== undefined);
+			await launch.beforeLaunch();
+			run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+			ready.resolve(false);
+			return { studio: { desktop: "hidden", pid: 900, startTime: "0" }, type: "launched" };
+		});
+
+		await expect(
+			finishMoveAsync(run, { desktop: "hidden", timeoutMs: 30_000 }),
+		).rejects.toMatchObject({
+			code: "studio_launch_failed",
+			message: "Studio did not reopen the saved place before the launch deadline.",
+		});
+		expect(stateOf(run)).toMatchObject({
+			services: { studio: { pid: 900, status: "opening" } },
+		});
+	});
+
 	it("should fail a move when the replacement never opens its saved place", async () => {
 		expect.assertions(2);
 
@@ -5814,6 +5943,7 @@ describe("serialized Studio moves", () => {
 			finishMoveAsync(run, { desktop: "user", timeoutMs: 30_000 }),
 		).rejects.toMatchObject({
 			code: "studio_launch_failed",
+			message: "Studio did not reopen the saved place before the launch deadline.",
 		});
 		expect(stateOf(run)).toMatchObject({ services: { rojo: { status: "ready" } } });
 	});
