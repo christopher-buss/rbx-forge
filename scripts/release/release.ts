@@ -1,4 +1,8 @@
+import { parseTriple } from "@napi-rs/cli";
+
 import path from "node:path";
+
+import packageJson from "../../package.json" with { type: "json" };
 
 export interface ReadResult {
 	readonly status: null | number;
@@ -64,50 +68,37 @@ interface Manifest extends Record<string, unknown> {
 	readonly version: string;
 }
 
-export const NATIVE_TARGETS: ReadonlyArray<NativeTarget> = [
-	{ cpu: "x64", os: "win32", rust: "x86_64-pc-windows-msvc", target: "win32-x64-msvc" },
-	{ cpu: "arm64", os: "win32", rust: "aarch64-pc-windows-msvc", target: "win32-arm64-msvc" },
-	{ cpu: "x64", os: "darwin", rust: "x86_64-apple-darwin", target: "darwin-x64" },
-	{ cpu: "arm64", os: "darwin", rust: "aarch64-apple-darwin", target: "darwin-arm64" },
-	{
-		cpu: "x64",
-		libc: "glibc",
-		os: "linux",
-		rust: "x86_64-unknown-linux-gnu",
-		target: "linux-x64-gnu",
+/** Napi ABI to `package.json#libc`. */
+const LIBC: Readonly<Record<string, "glibc" | "musl">> = { gnu: "glibc", musl: "musl" };
+
+/** One per `package.json#napi.targets`, named as napi names them. */
+export const NATIVE_TARGETS: ReadonlyArray<NativeTarget> = packageJson.napi.targets.map(
+	(triple) => {
+		const { abi, arch, platform, platformArchABI } = parseTriple(triple);
+		const target: { -readonly [K in keyof NativeTarget]: NativeTarget[K] } = {
+			cpu: arch,
+			os: platform,
+			rust: triple,
+			target: platformArchABI,
+		};
+		const libc = abi === null ? undefined : LIBC[abi];
+		if (libc !== undefined) {
+			target.libc = libc;
+		}
+
+		return target;
 	},
-	{
-		cpu: "arm64",
-		libc: "glibc",
-		os: "linux",
-		rust: "aarch64-unknown-linux-gnu",
-		target: "linux-arm64-gnu",
-	},
-	{
-		cpu: "x64",
-		libc: "musl",
-		os: "linux",
-		rust: "x86_64-unknown-linux-musl",
-		target: "linux-x64-musl",
-	},
-	{
-		cpu: "arm64",
-		libc: "musl",
-		os: "linux",
-		rust: "aarch64-unknown-linux-musl",
-		target: "linux-arm64-musl",
-	},
-];
+);
 
 const NATIVE_PREFIX = "@rbx-forge/native-";
 
 /** Every test project but `other-user`, which needs a second local user. */
 const GATE_STEPS: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
-	["pnpm", ["build:all"]],
-	["cargo", ["test", "--manifest-path", "reaper/Cargo.toml"]],
 	["pnpm", ["typecheck"]],
 	["pnpm", ["lint"]],
 	["pnpm", ["knip"]],
+	["pnpm", ["build:all"]],
+	["cargo", ["test", "--manifest-path", "reaper/Cargo.toml"]],
 	["pnpm", ["test:unit"]],
 	["pnpm", ["test:integration"]],
 	["pnpm", ["test:e2e"]],
@@ -117,19 +108,13 @@ const GATE_STEPS: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
  * The local release gate (bumpp's `preversion`): build and every test project
  * that can run here, real Studio included on Windows.
  * @param dependencies - Platform, processes, and log.
- * @returns The exit code.
  */
-export function runReleaseCheck({ log, platform, read, run }: CheckDependencies): 0 | 1 {
+export function runReleaseCheck({ log, platform, read, run }: CheckDependencies): void {
 	if (platform !== "win32" && platform !== "darwin") {
-		log(`release-check: release from Windows or macOS, not ${platform}`);
-		return 1;
+		throw new Error(`release from Windows or macOS, not ${platform}`);
 	}
 
-	const problem = findHeadProblem({ read, run });
-	if (problem !== undefined) {
-		log(`release-check: ${problem}`);
-		return 1;
-	}
+	assertCleanOriginMain({ read, run });
 
 	// The real-Studio specs run only on Windows; CI never runs them.
 	const environment = platform === "win32" ? { RBX_FORGE_TEST_REAL_STUDIO: "1" } : undefined;
@@ -139,13 +124,8 @@ export function runReleaseCheck({ log, platform, read, run }: CheckDependencies)
 
 	for (const [command, args] of GATE_STEPS) {
 		log(`release-check: ${command} ${args.join(" ")}`);
-		if (run(command, args, environment) !== 0) {
-			log(`release-check: ${command} ${args.join(" ")} failed`);
-			return 1;
-		}
+		runOrThrow(run, command, args, environment);
 	}
-
-	return 0;
 }
 
 /**
@@ -246,10 +226,7 @@ export function bootstrapRelease(
 		throw new Error(`bootstrap publishes a prerelease only, not ${options.version}`);
 	}
 
-	if (readText(read, "git", ["status", "--porcelain"]) !== "") {
-		throw new Error("the working tree has changes");
-	}
-
+	assertClean(read);
 	const id = findCiRun(read, readText(read, "git", ["rev-parse", "HEAD"]));
 	dependencies.files.remove(options.artifacts);
 	runOrThrow(run, "gh", [
@@ -265,6 +242,18 @@ export function bootstrapRelease(
 	publishRelease(dependencies, { ...options, tag: "next" });
 }
 
+function runOrThrow(
+	run: Processes["run"],
+	command: string,
+	args: ReadonlyArray<string>,
+	environment?: Readonly<Record<string, string>>,
+): void {
+	const status = run(command, args, environment);
+	if (status !== 0) {
+		throw new Error(`${command} ${args.join(" ")} exited with ${String(status)}`);
+	}
+}
+
 function readText(read: Processes["read"], command: string, args: ReadonlyArray<string>): string {
 	const result = read(command, args);
 	if (result.status !== 0) {
@@ -274,27 +263,26 @@ function readText(read: Processes["read"], command: string, args: ReadonlyArray<
 	return result.stdout.trim();
 }
 
-function runOrThrow(run: Processes["run"], command: string, args: ReadonlyArray<string>): void {
-	const status = run(command, args);
-	if (status !== 0) {
-		throw new Error(`${command} ${args.join(" ")} exited with ${String(status)}`);
+function assertClean(read: Processes["read"]): void {
+	if (readText(read, "git", ["status", "--porcelain"]) !== "") {
+		throw new Error("the working tree has changes");
 	}
 }
 
-function findHeadProblem({ read, run }: Processes): string | undefined {
+function assertCleanOriginMain({ read, run }: Processes): void {
 	const branch = readText(read, "git", ["branch", "--show-current"]);
 	if (branch !== "main") {
-		return `release from main, not ${branch === "" ? "a detached HEAD" : branch}`;
+		throw new Error(`release from main, not ${branch === "" ? "a detached HEAD" : branch}`);
 	}
 
-	if (readText(read, "git", ["status", "--porcelain"]) !== "") {
-		return "the working tree has changes";
-	}
-
+	assertClean(read);
 	runOrThrow(run, "git", ["fetch", "origin", "main", "--quiet"]);
-	const head = readText(read, "git", ["rev-parse", "HEAD"]);
-	const remote = readText(read, "git", ["rev-parse", "origin/main"]);
-	return head === remote ? undefined : "HEAD is not origin/main; pull or push first";
+	if (
+		readText(read, "git", ["rev-parse", "HEAD"]) !==
+		readText(read, "git", ["rev-parse", "origin/main"])
+	) {
+		throw new Error("HEAD is not origin/main; pull or push first");
+	}
 }
 
 function reaperName(target: NativeTarget): string {
@@ -305,16 +293,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseJson(raw: string): unknown {
-	try {
-		return JSON.parse(raw);
-	} catch {
-		return undefined;
-	}
-}
-
 function readManifest(text: string): Manifest {
-	const manifest = parseJson(text);
+	const manifest: unknown = JSON.parse(text);
 	if (!isRecord(manifest) || typeof manifest["version"] !== "string") {
 		throw new TypeError("package.json has no version");
 	}
@@ -356,8 +336,9 @@ function stagePackage(
 	files.mkdir(directory);
 	files.copy(addon, path.join(directory, path.basename(addon)));
 	// Artifact downloads drop the exec bit; the reaper locator never sets it.
-	files.copy(reaper, path.join(directory, reaperName(target)));
-	files.chmod(path.join(directory, reaperName(target)), 0o755);
+	const staged = path.join(directory, reaperName(target));
+	files.copy(reaper, staged);
+	files.chmod(staged, 0o755);
 	files.copy(path.join(rootDirectory, "LICENSE"), path.join(directory, "LICENSE"));
 	files.write(
 		path.join(directory, "package.json"),
@@ -391,7 +372,7 @@ function stageNativePackages(
 }
 
 function findCiRun(read: Processes["read"], head: string): number {
-	const runs = parseJson(
+	const id = Number(
 		readText(read, "gh", [
 			"run",
 			"list",
@@ -405,11 +386,11 @@ function findCiRun(read: Processes["read"], head: string): number {
 			"1",
 			"--json",
 			"databaseId",
+			"--jq",
+			".[0].databaseId",
 		]),
 	);
-	const [first] = Array.isArray(runs) ? runs : [];
-	const id = isRecord(first) ? first["databaseId"] : undefined;
-	if (typeof id !== "number") {
+	if (!Number.isSafeInteger(id) || id <= 0) {
 		throw new TypeError(`no successful CI run for ${head}; push it and wait for CI`);
 	}
 

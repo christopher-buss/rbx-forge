@@ -95,7 +95,8 @@ macOS, logged in to npm:
 
 1. Push `main` and wait for CI to pass for HEAD.
 2. `pnpm release:bootstrap 2.0.0-rc.0`: downloads the `native-*` artifacts of
-   that CI run, builds, and publishes all 9 packages on dist-tag `next`.
+   that CI run, builds, and publishes every platform package, then `rbx-forge`,
+   on dist-tag `next`.
 3. On npmjs.com, add a trusted publisher to each package: this repository,
    workflow `release.yaml`.
 

@@ -1,3 +1,4 @@
+import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { spawnSync } from "node:child_process";
 import {
 	chmodSync,
@@ -18,35 +19,33 @@ import type { Processes, PublishDependencies, ReleaseFiles } from "./release.ts"
  * line needs no escaping.
  * @param command - The program.
  * @param args - Its arguments.
- * @returns What to pass to `spawnSync`.
+ * @param options - Output and environment.
+ * @returns The finished process.
  */
-function commandLine(
+function spawn(
 	command: string,
 	args: ReadonlyArray<string>,
-): [string, ReadonlyArray<string>, boolean] {
+	options: SpawnSyncOptionsWithStringEncoding,
+): SpawnSyncReturns<string> {
+	const hidden = { ...options, windowsHide: true };
 	return process.platform === "win32"
-		? [[command, ...args].join(" "), [], true]
-		: [command, args, false];
+		? spawnSync([command, ...args].join(" "), { ...hidden, shell: true })
+		: spawnSync(command, args, hidden);
 }
 
 const processes: Processes = {
 	read: (command, args) => {
-		const [file, rest, shouldUseShell] = commandLine(command, args);
-		const result = spawnSync(file, rest, {
+		const { status, stdout } = spawn(command, args, {
 			encoding: "utf8",
-			shell: shouldUseShell,
 			stdio: ["ignore", "pipe", "inherit"],
-			windowsHide: true,
 		});
-		return { status: result.status, stdout: result.stdout };
+		return { status, stdout };
 	},
 	run: (command, args, environment) => {
-		const [file, rest, shouldUseShell] = commandLine(command, args);
-		return spawnSync(file, rest, {
+		return spawn(command, args, {
+			encoding: "utf8",
 			env: { ...process.env, ...environment },
-			shell: shouldUseShell,
 			stdio: "inherit",
-			windowsHide: true,
 		}).status;
 	},
 };
@@ -81,11 +80,12 @@ export const STAGING = "reaper/target/npm";
  * Run a release step and turn a thrown error into exit code 1.
  * @param step - The release step to run.
  */
-export function main(step: () => 0 | 1 | void): void {
+export function main(step: () => void): void {
 	try {
-		process.exitCode = step() ?? 0;
+		step();
 	} catch (err) {
-		process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+		process.stderr.write(`${err instanceof Error ? err.message : String(err)}
+`);
 		process.exitCode = 1;
 	}
 }

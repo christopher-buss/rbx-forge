@@ -18,11 +18,11 @@ const OPTIONS = { artifacts: "artifacts", root: "repo", staging: "staging" } sat
 	"artifacts" | "root" | "staging"
 >;
 const RUN_LIST =
-	"gh run list --workflow ci.yaml --commit abc --status success --limit 1 --json databaseId";
+	"gh run list --workflow ci.yaml --commit abc --status success --limit 1 --json databaseId --jq .[0].databaseId";
 const BOOTSTRAP_READS = {
 	"git rev-parse HEAD": "abc\n",
 	"git status --porcelain": "",
-	[RUN_LIST]: '[{"databaseId":42}]',
+	[RUN_LIST]: "42\n",
 };
 
 interface FakeOptions {
@@ -118,10 +118,17 @@ function publishSetup(reads: Record<string, string> = {}, failing: ReadonlyArray
 }
 
 describe("native targets", () => {
-	it("should list every napi target in package.json", () => {
-		expect.assertions(1);
+	it("should name each napi target as napi does", () => {
+		expect.assertions(2);
 
 		expect(NATIVE_TARGETS.map((target) => target.rust)).toStrictEqual(packageJson.napi.targets);
+		expect(NATIVE_TARGETS).toContainEqual({
+			cpu: "arm64",
+			libc: "glibc",
+			os: "linux",
+			rust: "aarch64-unknown-linux-gnu",
+			target: "linux-arm64-gnu",
+		});
 	});
 });
 
@@ -193,18 +200,19 @@ describe(releaseVersion, () => {
 
 describe(runReleaseCheck, () => {
 	it("should run every gate step with real Studio on Windows", () => {
-		expect.assertions(3);
+		expect.assertions(2);
 
 		const processes = fakeProcesses({ reads: CLEAN_MAIN });
 
-		expect(runReleaseCheck({ ...processes, platform: "win32" })).toBe(0);
+		runReleaseCheck({ ...processes, platform: "win32" });
+
 		expect(processes.runs).toStrictEqual([
 			"git fetch origin main --quiet",
-			"pnpm build:all",
-			"cargo test --manifest-path reaper/Cargo.toml",
 			"pnpm typecheck",
 			"pnpm lint",
 			"pnpm knip",
+			"pnpm build:all",
+			"cargo test --manifest-path reaper/Cargo.toml",
 			"pnpm test:unit",
 			"pnpm test:integration",
 			"pnpm test:e2e",
@@ -219,7 +227,9 @@ describe(runReleaseCheck, () => {
 
 		const processes = fakeProcesses({ reads: CLEAN_MAIN });
 
-		expect(runReleaseCheck({ ...processes, platform: "darwin" })).toBe(0);
+		runReleaseCheck({ ...processes, platform: "darwin" });
+
+		expect(processes.runs).toHaveLength(9);
 		expect(processes.environments).toSatisfyAll((environment) => environment === undefined);
 		expect(processes.logs).toContain(
 			"release-check: real-Studio specs are Windows only; they skip on macOS",
@@ -231,35 +241,38 @@ describe(runReleaseCheck, () => {
 
 		const processes = fakeProcesses({ reads: CLEAN_MAIN });
 
-		expect(runReleaseCheck({ ...processes, platform: "linux" })).toBe(1);
+		expect(() => {
+			runReleaseCheck({ ...processes, platform: "linux" });
+		}).toThrow("release from Windows or macOS, not linux");
 		expect(processes.runs).toBeEmpty();
 	});
 
 	it("should stop at the first failing step", () => {
-		expect.assertions(3);
+		expect.assertions(2);
 
 		const processes = fakeProcesses({ failing: ["pnpm lint"], reads: CLEAN_MAIN });
 
-		expect(runReleaseCheck({ ...processes, platform: "win32" })).toBe(1);
+		expect(() => {
+			runReleaseCheck({ ...processes, platform: "win32" });
+		}).toThrow("pnpm lint exited with 1");
 		expect(processes.runs.at(-1)).toBe("pnpm lint");
-		expect(processes.logs.at(-1)).toBe("release-check: pnpm lint failed");
 	});
 
 	it.for([
 		{
-			message: "release-check: release from main, not feature",
+			message: "release from main, not feature",
 			reads: { ...CLEAN_MAIN, "git branch --show-current": "feature\n" },
 		},
 		{
-			message: "release-check: release from main, not a detached HEAD",
+			message: "release from main, not a detached HEAD",
 			reads: { ...CLEAN_MAIN, "git branch --show-current": "" },
 		},
 		{
-			message: "release-check: the working tree has changes",
+			message: "the working tree has changes",
 			reads: { ...CLEAN_MAIN, "git status --porcelain": " M package.json\n" },
 		},
 		{
-			message: "release-check: HEAD is not origin/main; pull or push first",
+			message: "HEAD is not origin/main; pull or push first",
 			reads: { ...CLEAN_MAIN, "git rev-parse origin/main": "def\n" },
 		},
 	])("should refuse with $message", ({ message, reads }) => {
@@ -267,8 +280,10 @@ describe(runReleaseCheck, () => {
 
 		const processes = fakeProcesses({ reads });
 
-		expect(runReleaseCheck({ ...processes, platform: "win32" })).toBe(1);
-		expect(processes.logs).toStrictEqual([message]);
+		expect(() => {
+			runReleaseCheck({ ...processes, platform: "win32" });
+		}).toThrow(message);
+		expect(processes.runs.filter((line) => line.startsWith("pnpm"))).toBeEmpty();
 	});
 
 	it("should throw when git cannot run", () => {
@@ -276,9 +291,9 @@ describe(runReleaseCheck, () => {
 
 		const processes = fakeProcesses();
 
-		expect(() => runReleaseCheck({ ...processes, platform: "win32" })).toThrow(
-			"git branch --show-current exited with 1",
-		);
+		expect(() => {
+			runReleaseCheck({ ...processes, platform: "win32" });
+		}).toThrow("git branch --show-current exited with 1");
 	});
 });
 
@@ -429,10 +444,8 @@ describe(bootstrapRelease, () => {
 	});
 
 	it.for([
-		{ stdout: "[]", what: "no run" },
-		{ stdout: "not json", what: "output that is not JSON" },
-		{ stdout: "{}", what: "output that is not a list" },
-		{ stdout: "[1]", what: "a run that is not an object" },
+		{ stdout: "null\n", what: "no run" },
+		{ stdout: "", what: "nothing" },
 	])("should refuse when gh lists $what", ({ stdout }) => {
 		expect.assertions(1);
 
