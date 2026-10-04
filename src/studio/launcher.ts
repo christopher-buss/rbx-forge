@@ -49,8 +49,8 @@ export interface StudioProcess {
  * what the user can do, when forge knows better than the default.
  */
 export type StudioLaunchOutcome =
-	| { hint?: string | undefined; message: string; type: "failed" }
-	| { studio?: StudioProcess; type: "launched" };
+	| { desktop?: StudioDesktop; studio?: StudioProcess; type: "launched"; warning?: string }
+	| { hint?: string | undefined; message: string; type: "failed" };
 
 /**
  * Opens a place in Roblox Studio, so Studio is never a child of forge and
@@ -181,9 +181,32 @@ function describeFailure(file: string, end: LauncherEnd): string | undefined {
 		: `${file} exited with code ${end.exitCode}.`;
 }
 
+/**
+ * The actual desktop after the platform launcher opens Studio.
+ *
+ * @param desktop - The requested desktop, when specified.
+ * @param platform - The host platform.
+ * @returns A launch result, including any hidden-desktop fallback warning.
+ */
+function platformLaunchOutcome(
+	desktop: StudioDesktop | undefined,
+	platform: NodeJS.Platform,
+): StudioLaunchOutcome {
+	return {
+		type: "launched",
+		...(desktop === undefined ? {} : { desktop: "user" }),
+		...(desktop === "hidden" && platform === "win32"
+			? {
+					warning:
+						"Studio opened on the user's desktop: the platform launcher cannot use the hidden desktop.",
+				}
+			: {}),
+	};
+}
+
 async function launchThroughPlatformAsync(
 	{ childProcess, clock, host }: ChildProcessBackend,
-	{ cwd, env, place }: StudioLaunch,
+	{ cwd, desktop, env, place }: StudioLaunch,
 ): Promise<StudioLaunchOutcome> {
 	const invocation = studioLaunchInvocation(place, host.platform, env);
 	const { file } = invocation;
@@ -210,7 +233,7 @@ async function launchThroughPlatformAsync(
 	}
 
 	child.unref();
-	return { type: "launched" };
+	return platformLaunchOutcome(desktop, host.platform);
 }
 
 function definedOnly(environment: Environment): Record<string, string> {

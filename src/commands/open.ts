@@ -3,13 +3,14 @@ import path from "node:path";
 import type { FlagDefinition } from "../cli/flags.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
+import { resolveStudioDesktop } from "../config/resolve.ts";
 import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
 import { runWithHooksAsync } from "../hooks/run-hooks.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
-import type { StudioProcess } from "../studio/launcher.ts";
+import type { StudioLaunchOutcome, StudioProcess } from "../studio/launcher.ts";
 import { pruneSnapshots, snapshotName } from "../studio/snapshots.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import { askAsync } from "./ask.ts";
@@ -17,7 +18,16 @@ import type { BuildOutcome } from "./build.ts";
 import { buildAsync } from "./build.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
-export const OPEN_FLAGS: ReadonlyArray<FlagDefinition> = [STUDIO_PATH_FLAG];
+export const OPEN_FLAGS: ReadonlyArray<FlagDefinition> = [
+	STUDIO_PATH_FLAG,
+	{
+		name: "desktop",
+		config: "studio.desktop",
+		kind: "string",
+		text: "Studio desktop (default: hidden on Windows).",
+		value: "user|hidden",
+	},
+];
 
 /** A build that ran before the place opened, with its `build` hooks. */
 export interface OpenBuild extends BuildOutcome {
@@ -27,6 +37,7 @@ export interface OpenBuild extends BuildOutcome {
 /** What `forge open` did. */
 export interface OpenedSnapshot {
 	build: OpenBuild;
+	desktop: StudioDesktop;
 	/** The `open` hook results. */
 	hooks: Array<HookResult>;
 	/** The absolute path of the snapshot. */
@@ -41,6 +52,7 @@ export interface OpenedSnapshot {
 export interface OpenedPlace {
 	/** The build that ran first, or `null`. */
 	build: null | OpenBuild;
+	desktop: StudioDesktop;
 	/** The `open` hook results. */
 	hooks: Array<HookResult>;
 	/** The absolute path of the place. */
@@ -113,11 +125,11 @@ export async function openPlaceAsync(
 			? null
 			: await prepareAsync(context, config, { output, place });
 		options.signal?.throwIfAborted();
-		const studio = await launchAsync(context, place, options);
-		return { built, studio };
+		const launched = await launchAsync(context, place, options);
+		return { built, ...launched };
 	});
 
-	return { build: value.built, hooks, place, studio: value.studio };
+	return { build: value.built, desktop: value.desktop, hooks, place, studio: value.studio };
 }
 
 /**
@@ -155,10 +167,11 @@ export async function runOpenAsync(
 			reporter.emit({ message, type: "warning" });
 		}
 
-		const studio = await launchAsync(context, place, {
+		const launched = await launchAsync(context, place, {
+			desktop: resolveStudioDesktop(config, seams.host.platform, "hidden"),
 			studioPath: typeof studioPath === "string" ? path.resolve(cwd, studioPath) : undefined,
 		});
-		return { build: { ...build.value, hooks: build.hooks }, pruned, studio };
+		return { build: { ...build.value, hooks: build.hooks }, pruned, ...launched };
 	});
 	const opened: OpenedSnapshot = { ...value, hooks, place };
 
@@ -227,6 +240,27 @@ async function prepareAsync(
 	return { ...value, hooks };
 }
 
+/**
+ * Report a fallback warning and return Studio's actual launch location.
+ *
+ * @param reporter - The command's reporter.
+ * @param outcome - The successful launch.
+ * @returns The actual desktop and any pinned Studio.
+ */
+function reportLaunch(
+	reporter: CommandContext["reporter"],
+	outcome: Extract<StudioLaunchOutcome, { type: "launched" }>,
+): Pick<OpenedPlace, "desktop" | "studio"> {
+	if (outcome.warning !== undefined) {
+		reporter.emit({ message: outcome.warning, type: "warning" });
+	}
+
+	return {
+		desktop: outcome.desktop ?? outcome.studio?.desktop ?? "user",
+		studio: outcome.studio ?? null,
+	};
+}
+
 async function launchAsync(
 	{ cwd, env, reporter, seams }: CommandContext,
 	place: string,
@@ -236,7 +270,7 @@ async function launchAsync(
 		runScript,
 		studioPath,
 	}: Pick<OpenOptions, "beforeLaunch" | "desktop" | "runScript" | "studioPath">,
-): Promise<null | StudioProcess> {
+): Promise<Pick<OpenedPlace, "desktop" | "studio">> {
 	reporter.emit({ name: STEP, status: "started", type: "step" });
 	const outcome = await seams.studioLauncher({
 		cwd,
@@ -264,5 +298,5 @@ async function launchAsync(
 		);
 	}
 
-	return outcome.studio ?? null;
+	return reportLaunch(reporter, outcome);
 }

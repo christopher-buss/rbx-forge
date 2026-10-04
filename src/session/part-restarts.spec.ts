@@ -95,6 +95,25 @@ const EVERY_PART: PartStops = {
 };
 
 describe(createPartRestarter, () => {
+	it.for(["hidden", "user"] as const)(
+		"should reopen Studio on its previous %s desktop",
+		async (desktop) => {
+			expect.assertions(1);
+
+			const services = servicesWith();
+			const { add, restart } = makeRestarter(EVERY_PART, {
+				services: { ...services, studio: { desktop, owner: null, status: "open" } },
+			});
+			await restart({ force: true });
+
+			expect(add).toHaveBeenCalledExactlyOnceWith({
+				desktop,
+				parts: ["compiler", "studio"],
+				studioPath: undefined,
+			});
+		},
+	);
+
 	it("should stop in the restart scope, then start the parts again, the compiler first", async () => {
 		expect.assertions(3);
 
