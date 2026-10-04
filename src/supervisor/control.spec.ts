@@ -106,15 +106,45 @@ describe(controlHandlers, () => {
 
 		await expect(
 			makeTarget().handlers.moveStudio!({ ...parameters, sessionId: "s1" }),
-		).rejects.toMatchObject({ code: "usage" });
+		).rejects.toMatchObject({
+			code: "usage",
+			message: "moveStudio takes a desktop and positive save timeoutMs.",
+		});
 	});
 
-	it("should reject a move on a session without a move handler", async () => {
+	it.for([undefined, "/opt/Studio"])(
+		"should reject unavailable Studio after accepting the optional path %s",
+		async (studioPath) => {
+			expect.assertions(1);
+
+			await expect(
+				makeTarget().handlers.moveStudio!({
+					desktop: "user",
+					sessionId: "s1",
+					studioPath,
+					timeoutMs: 100,
+				}),
+			).rejects.toMatchObject({
+				code: "studio_not_open",
+				message: "No session Studio is open.",
+			});
+		},
+	);
+
+	it("should reject a move addressed to a replaced session before looking for its Studio", async () => {
 		expect.assertions(1);
 
 		await expect(
-			makeTarget().handlers.moveStudio!({ desktop: "user", sessionId: "s1", timeoutMs: 100 }),
-		).rejects.toMatchObject({ code: "studio_not_open" });
+			makeTarget().handlers.moveStudio!({
+				desktop: "user",
+				sessionId: "old",
+				timeoutMs: 100,
+			}),
+		).rejects.toMatchObject({
+			code: "session_replaced",
+			details: { sessionId: "s1" },
+			message: "Session old is gone; session s1 runs in its place.",
+		});
 	});
 
 	it("should answer status with the status now, once merged compiles settled", () => {
