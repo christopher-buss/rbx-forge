@@ -28,9 +28,8 @@ else. forge reads it only from the project root.
   you add a key.
 - **Precedence**: flags, then the file, then the defaults. Objects merge key by
   key; arrays replace.
-- **Compiler**: `projectType: "rbxts"` runs `rbxts.command` (default `rbxtsc`;
-  for sloptor, `rbxts: { args: ["build", "--json"], command: "sloptor" }`). A
-  Luau project runs `luau.watch.command`, such as darklua; with none, its
+- **Compiler**: `projectType: "rbxts"` runs `rbxts.command` (default `rbxtsc`).
+  A Luau project runs `luau.watch.command`, such as darklua; with none, its
   session has no compiler part.
 - **`rojoPort`**: leave it unset. forge then takes 34872, else a free port, and
   keeps it for the session, so parallel worktrees each get their own. A set port
