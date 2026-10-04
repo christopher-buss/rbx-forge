@@ -32,6 +32,8 @@ export { STUDIO_OPEN_BOUND_MS } from "./studio-readiness.ts";
 export interface StudioState {
 	/** Ends a pending sync wait without ending the Studio follow. */
 	cancelReady?: (() => void) | undefined;
+	/** The current follow, settled before a desktop move closes Studio. */
+	followed?: Promise<void>;
 	isAttached: boolean;
 	/** Stops following the attached Studio, which stays open. */
 	letGo?: (() => void) | undefined;
@@ -139,7 +141,8 @@ export function followSessionStudio(
 		...opened,
 		onOpen: readiness.onLock,
 	});
-	scope.track(followed.finally(readiness.end));
+	follow.state.followed = followed.finally(readiness.end);
+	scope.track(follow.state.followed);
 	return { open: readiness.open };
 }
 
@@ -299,7 +302,7 @@ async function followAsync(
 	const { status } = setup;
 	const { place, studio } = opened;
 	const isClosed = await watchStudioAsync(setup, scope, opened);
-	if (!isClosed) {
+	if (!isClosed || scope.signal.aborted) {
 		return;
 	}
 

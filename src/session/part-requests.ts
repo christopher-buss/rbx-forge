@@ -7,6 +7,7 @@ import type { OwnerHandlers } from "./ownership.ts";
 import type { PartRestarter } from "./part-restarts.ts";
 import type { PartStopper } from "./part-stops.ts";
 import type { PartId } from "./status.ts";
+import type { StudioMover } from "./studio-move.ts";
 
 /**
  * A part a client can ask a running session to add: `studio` attaches
@@ -31,6 +32,7 @@ export interface PartHandlers extends OwnerHandlers {
 	add: PartAdder;
 	/** Interrupt a readiness wait before a stop enters the serialized queue. */
 	beforeStop?: (request: Parameters<PartStopper>[0]) => void;
+	move?: StudioMover;
 	restart: PartRestarter;
 	save?: (timeoutMs: number, signal?: AbortSignal) => Promise<StudioSave>;
 	stop: PartStopper;
@@ -61,6 +63,8 @@ export interface PartRequests {
 	 * fails.
 	 */
 	close: () => void;
+	/** Save and reopen Studio on the requested desktop in the session queue. */
+	moveAsync: StudioMover;
 	/**
 	 * A `start` joins as the owner.
 	 *
@@ -144,6 +148,9 @@ export function createPartRequests(): PartRequests {
 		close: () => {
 			link.isClosed = true;
 			attached.resolve(undefined);
+		},
+		moveAsync: async (request) => {
+			return whenAttachedAsync(link, async (handlers) => moveAsync(handlers, request));
 		},
 		ownAsync: async (request) => whenAttachedAsync(link, async ({ own }) => own(request)),
 		releaseAsync: async (reason) => nowAsync(link, async ({ release }) => release(reason)),
@@ -274,4 +281,15 @@ async function stopAsync(
 	const handlers = link.handlers ?? (await waitForHandlersAsync(link.attached, link));
 	handlers.beforeStop?.(request);
 	return whenAttachedAsync(link, async ({ stop }) => stop(request));
+}
+
+async function moveAsync(
+	{ move }: PartHandlers,
+	request: Parameters<StudioMover>[0],
+): Promise<Awaited<ReturnType<StudioMover>>> {
+	if (move === undefined) {
+		throw new ForgeError("studio_not_open", "No session Studio is open.");
+	}
+
+	return move(request);
 }

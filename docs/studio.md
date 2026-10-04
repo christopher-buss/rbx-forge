@@ -259,3 +259,23 @@ unchanged.
 Set `Lighting.Technology` explicitly in the Rojo project (for example,
 `Voxel`, `ShadowMap`, or `Future`) to avoid the migration prompt. forge keeps
 the place as the project builds it and never changes that property.
+
+## Showing and hiding Studio on Windows
+
+`forge show` saves the session Studio and reopens that saved place on the user's
+desktop. `forge hide` saves it and reopens it on forge's hidden desktop. Both
+wait until the replacement has the place open, keep Rojo running, and preserve
+the Studio's owner. They use the saved file without rebuilding it, so edits
+made in Studio survive. Undo history and open script tabs are lost when Studio
+reopens. Snapshot Studios are outside these commands.
+
+`--timeout <s>` controls the save wait (30 seconds by default).
+`--studio-path <exe>` selects the executable used to reopen Studio. A failed
+save leaves the original Studio open. Requests run in order with other session
+saves and lifecycle changes. If Studio already uses the requested desktop,
+forge saves it and retains its PID.
+
+If Windows cannot launch on the hidden desktop, forge warns and opens Studio
+on the user's desktop. The result's `to` and `forge status` report the actual
+desktop. `save.pid` identifies the saved Studio; `pid` identifies the Studio
+that now has the place open.

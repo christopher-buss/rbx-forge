@@ -43,6 +43,9 @@ export interface StudioProcess {
 	startTime: string;
 }
 
+/** A verified Studio process with its actual desktop. */
+export type LocatedStudio = StudioProcess & { desktop: StudioDesktop };
+
 /**
  * Whether Studio got the place. `studio`: the Studio forge started
  * directly; absent when the platform launcher opened the place. `hint`:
@@ -79,7 +82,7 @@ type LauncherEnd =
  * @param pinned - A process verified as Studio.
  * @returns Its process identity and desktop.
  */
-export function studioProcess(pinned: PinnedProcess): StudioProcess {
+export function studioProcess(pinned: PinnedProcess): LocatedStudio {
 	return { desktop: pinned.desktop(), pid: pinned.pid, startTime: pinned.startTime };
 }
 
