@@ -30,7 +30,7 @@ export type PartAdder = (request: PartRequest) => Promise<Array<PartId>>;
 /** What the session body adds, stops, and hands over parts with. */
 export interface PartHandlers extends OwnerHandlers {
 	add: PartAdder;
-	/** Interrupt a readiness wait before a stop enters the serialized queue. */
+	/** Interrupt a readiness wait before a stop runs. */
 	beforeStop?: (request: Parameters<PartStopper>[0]) => void;
 	move?: StudioMover;
 	restart: PartRestarter;
@@ -94,7 +94,10 @@ export interface PartRequests {
 	 * @returns What it stopped and kept.
 	 * @rejects {ForgeError} `not_running` once the session is stopping.
 	 */
-	stopAsync: PartStopper;
+	stopAsync: (
+		request: Parameters<PartStopper>[0],
+		shouldStop?: () => boolean,
+	) => ReturnType<PartStopper>;
 }
 
 /** The link between the control channel and the body. */
@@ -162,7 +165,7 @@ export function createPartRequests(): PartRequests {
 				return saveAsync(handlers, timeoutMs, signal);
 			});
 		},
-		stopAsync: async (request) => stopAsync(link, request),
+		stopAsync: async (request, shouldStop) => stopAsync(link, request, shouldStop),
 	};
 }
 
@@ -270,17 +273,36 @@ async function saveAsync(
 	return save(timeoutMs, signal);
 }
 
+function preflightStop(
+	handlers: PartHandlers,
+	request: Parameters<PartStopper>[0],
+	needed: boolean,
+): void {
+	if (needed) {
+		handlers.beforeStop?.(request);
+	}
+}
+
 async function stopAsync(
 	link: Link,
 	request: Parameters<PartStopper>[0],
+	shouldStop?: () => boolean,
 ): Promise<Awaited<ReturnType<PartStopper>>> {
 	if (link.isClosed) {
 		throw stopping();
 	}
 
 	const handlers = link.handlers ?? (await waitForHandlersAsync(link.attached, link));
-	handlers.beforeStop?.(request);
-	return whenAttachedAsync(link, async ({ stop }) => stop(request));
+	preflightStop(handlers, request, shouldStop === undefined);
+	return whenAttachedAsync(link, async ({ stop }) => {
+		// Queued idle stops must still be needed after an active save finishes.
+		if (shouldStop?.() === false) {
+			return { ending: false, kept: [], stopped: [] };
+		}
+
+		preflightStop(handlers, request, shouldStop !== undefined);
+		return stop(request);
+	});
 }
 
 async function moveAsync(

@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 import { compileAsync } from "../commands/compile.ts";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
@@ -323,7 +325,13 @@ function watchIdle({ config, context, idle, parts }: SessionSetup, scope: Sessio
 		idle,
 		minutes: config.session.idleTimeout,
 		reporter: context.reporter,
-		stopAsync: parts.stopAsync,
+		stopAsync: async (request: Parameters<PartRequests["stopAsync"]>[0]) => {
+			return parts.stopAsync(request, () => {
+				const at = idle.idleAt();
+				assert(at !== undefined);
+				return context.seams.clock.now() >= at;
+			});
+		},
 	};
 	scope.track(stopWhenIdleAsync(setup, scope.signal));
 }
