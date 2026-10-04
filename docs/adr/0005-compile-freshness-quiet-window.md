@@ -13,10 +13,10 @@ in the window restarts the wait. The quiet window is 750 ms: roblox-ts prints
 its start line about 61 ms after a save, and the session reads the compiler's
 output every 250 ms.
 
-A watcher can see a save much later than that: sloptor polls the tree and starts
-no compile while one runs, so its start line can come tens of seconds after an
-edit, after the quiet window. So the wait also reads the sources' modification
-times once, and a compile must start after the newest edit.
+A watcher can see a save much later than that: a watcher that polls the tree and
+starts no compile while one runs can print its start line tens of seconds after
+an edit, after the quiet window. So the wait also reads the sources'
+modification times once, and a compile must start after the newest edit.
 
 ## Decisions
 
@@ -24,10 +24,8 @@ times once, and a compile must start after the newest edit.
   (start, and end with the error count and diagnostics) and the time. The
   roblox-ts line parser turns output lines into these events, so an adapter for
   another compiler's output feeds the same tracker unchanged. The second adapter
-  reads the NDJSON events of `sloptor build -w --json`
-  ([howmanyslop/sloptor#67](https://github.com/howmanyslop/sloptor/issues/67)):
-  a line that is a JSON object with a string `event` field is a sloptor event,
-  and all other lines go to the roblox-ts parser.
+  reads NDJSON watch events: a line that is a JSON object with a string `event`
+  field is an event, and all other lines go to the roblox-ts parser.
 - **Unanswered start lines.** A roblox-ts fork prints a start line for a save
   during a compile and folds several of them into one trailing compile, so start
   lines and summary lines do not always pair. Each summary line ends the oldest
