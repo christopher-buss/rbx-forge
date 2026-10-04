@@ -7,7 +7,12 @@ import path from "node:path";
 import process from "node:process";
 import { assert, describe, expect, it } from "vitest";
 
-import { isProcessAlive, waitForDeathAsync, waitForWorkersAsync } from "../helpers/worker-log.ts";
+import {
+	isProcessAlive,
+	readRecords,
+	waitForDeathAsync,
+	waitForWorkersAsync,
+} from "../helpers/worker-log.ts";
 import {
 	COMPILER_ONLY,
 	currentIdentity,
@@ -24,16 +29,6 @@ interface Beat {
 	at: number;
 	pid: number;
 	session?: string;
-}
-
-function readBeats(file: string): Array<Beat> {
-	return readFileSync(file, "utf8")
-		.split("\n")
-		.filter((line) => line !== "")
-		.map((line) => {
-			// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- fake-worker.ts writes this shape
-			return JSON.parse(line) as unknown as Beat;
-		});
 }
 
 /**
@@ -174,11 +169,11 @@ describe("sessions", () => {
 		const next = currentIdentity(project);
 		second.stop("SIGINT");
 		const settled = await second.settled;
-		const lastOldBeat = Math.max(
-			...readBeats(beats)
-				.filter(({ session }) => session === old.sessionId)
-				.map(({ at }) => at),
+		const oldBeats = readRecords<Beat>(beats).filter(
+			({ session }) => session === old.sessionId,
 		);
+		assert(oldBeats.length > 0, "the old session's workers beat");
+		const lastOldBeat = Math.max(...oldBeats.map(({ at }) => at));
 		const firstNewStart = Math.min(...workersOf(project, next.sessionId).map(({ at }) => at));
 
 		expect(settled.ok).toBeTrue();
