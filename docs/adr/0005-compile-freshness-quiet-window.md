@@ -39,11 +39,12 @@ times once, and a compile must start after the newest edit.
 - **Source edits.** At the start of each wait, forge finds the newest
   modification time under the root directories of the compiler's tsconfig
   (`rootDirs`, else `rootDir`; `-p` or `--project` in `rbxts.args` names it),
-  outside `outDir`, `node_modules`, and hidden entries. Times after the wait
-  began do not count. When that edit is newer than the last compile start, the
-  wait also needs a compile that starts at or after it. A tsconfig forge cannot
-  read, or one with no root directory, gives no edit: the quiet window alone
-  answers.
+  outside `outDir`, `node_modules`, and hidden entries. A time well after the
+  wait began (a clock ahead) does not count; one a little after does, because a
+  file written just now can read ahead of the clock. When that edit is newer
+  than the last compile start, the wait also needs a compile that starts at or
+  after it. A tsconfig forge cannot read, or one with no root directory, gives
+  no edit: the quiet window alone answers.
 - **Edits with no compile.** The compiler can ignore an edited file. A pickup
   window, from the call or the end of the last compile, bounds the wait for a
   compile of the edit; after it the wait fails with `edit_not_compiled`, which

@@ -20,6 +20,13 @@ export interface SourceRoots {
 	cwd: string;
 }
 
+/**
+ * How far a file's time may run ahead of the clock and still be an edit:
+ * on Windows a file written just now can read a few milliseconds ahead of
+ * `Date.now()`.
+ */
+export const MTIME_SLACK_MS = 1000;
+
 type SourceFileSystem = Pick<FileSystem, "readdirSync" | "readFileSync" | "statSync">;
 
 /** The tsconfig fields that place the sources; the compiler checks the rest. */
@@ -51,8 +58,8 @@ interface Scan {
  *
  * @param fileSystem - Reads the tsconfig and the sources.
  * @param roots - The project root and the compiler's arguments.
- * @param before - Later times are no edit.
- * @returns The newest edit at or before `before`, if any.
+ * @param before - Times more than {@link MTIME_SLACK_MS} later are no edit.
+ * @returns The newest edit, if any.
  */
 export function newestSourceEdit(
 	fileSystem: SourceFileSystem,
@@ -62,6 +69,8 @@ export function newestSourceEdit(
 	const file = tsconfigPath(roots);
 	const options = readCompilerOptions(fileSystem, file);
 	const directory = path.dirname(file);
+	// Stryker disable next-line ArrayDeclaration: a missing root directory gives
+	// no edit too
 	const names = options?.rootDirs ?? (options?.rootDir === undefined ? [] : [options.rootDir]);
 	const scan: Scan = {
 		before,
@@ -116,7 +125,7 @@ function visit(scan: Scan, file: string): void {
 		return;
 	}
 
-	if (at <= scan.before && at > (scan.newest?.at ?? -Infinity)) {
+	if (at <= scan.before + MTIME_SLACK_MS && at > (scan.newest?.at ?? -Infinity)) {
 		scan.newest = { at, path: path.relative(scan.cwd, file) };
 	}
 }

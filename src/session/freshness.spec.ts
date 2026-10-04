@@ -328,6 +328,25 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.pickupBy(5000, 7000)).toBe(6400 + EDIT_PICKUP_MS);
 	});
 
+	it("should not take an end event with no start event as a compile after a later edit", () => {
+		expect.assertions(1);
+
+		expect(feed([[500, FOUND]]).freshAt(1000, 800)).toBeUndefined();
+	});
+
+	it("should count a compile that started at the time of the edit", () => {
+		expect.assertions(1);
+
+		const tracker = feed([
+			[0, START],
+			[400, FOUND],
+			[1000, CHANGE],
+			[1400, FOUND],
+		]);
+
+		expect(tracker.pickupBy(3000, 1000)).toBeUndefined();
+	});
+
 	it("should set no pickup bound once a compile started after the edit, while one runs, or before the first build", () => {
 		expect.assertions(3);
 
