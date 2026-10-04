@@ -26,8 +26,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # `docs-only` is true only for a pull request that changes nothing but
+  # Markdown and `docs/`; every other run builds and tests in full.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      docs-only: ${{ steps.diff.outputs.docs-only }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      # A pull request checks out its merge commit, whose first parent is the
+      # base branch.
+      - id: diff
+        if: github.event_name == 'pull_request'
+        name: Find a docs-only change
+        run: |
+          files="$(git diff --name-only --no-renames HEAD^1 HEAD)"
+          docs_only=true
+          if grep -vE '\.md$|^docs/' <<< "$files" > /dev/null; then docs_only=false; fi
+          echo "docs-only=$docs_only" >> "$GITHUB_OUTPUT"
+        shell: bash
+    timeout-minutes: 5
+
   check:
     name: Check (${{ matrix.os }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,8 +111,25 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
       fail-fast: false
 
+  docs:
+    name: Docs
+    needs: changes
+    if: needs.changes.outputs.docs-only == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup
+
+      # ESLint covers Markdown, with oxfmt and cspell.
+      - name: Lint
+        run: pnpm lint
+    timeout-minutes: 10
+
   native:
     name: Native (${{ matrix.target }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ${{ matrix.host }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -192,7 +237,9 @@ jobs:
   # channel. Needs a second local user, so it runs only here, never on a
   # developer machine.
   other-user:
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     name: Other user (${{ matrix.os }})
+    needs: changes
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
