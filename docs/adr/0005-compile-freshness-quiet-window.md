@@ -13,11 +13,10 @@ in the window restarts the wait. The quiet window is 750 ms: roblox-ts prints
 its start line about 61 ms after a save, and the session reads the compiler's
 output every 250 ms.
 
-A watcher can see a save much later than that: sloptor polls the tree and does
-not start a compile while one runs, so its start line came 6 s and 37 s after an
-edit, and the wait answered with the build before it. So the wait also reads the
-sources' modification times once, and a compile must start after the newest
-edit.
+A watcher can see a save much later than that: sloptor polls the tree and starts
+no compile while one runs, so its start line can come tens of seconds after an
+edit, after the quiet window. So the wait also reads the sources' modification
+times once, and a compile must start after the newest edit.
 
 ## Decisions
 
@@ -48,7 +47,8 @@ edit.
 - **Edits with no compile.** The compiler can ignore an edited file. A pickup
   window, from the call or the end of the last compile, bounds the wait for a
   compile of the edit; after it the wait fails with `edit_not_compiled`, which
-  names the file. It is long, because a watcher can take tens of seconds.
+  names the file. Later waits do not wait for that edit again. It is long,
+  because a watcher can take tens of seconds.
 - **No compiler to read.** A session with no roblox-ts compiler (Luau, or
   `--no-compiler`) answers at once. A session that is still starting waits for
   its first build.
@@ -83,3 +83,6 @@ edit.
   `edit_not_compiled` for an edit it would still compile.
 - A deleted file changes no file's modification time, so the wait does not wait
   for its compile.
+- A root directory that only an `extends` base names gives no edit.
+- The start time is when the session read the start line, up to one output read
+  late, so an edit in that gap counts as compiled.

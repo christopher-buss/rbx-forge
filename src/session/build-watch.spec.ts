@@ -439,6 +439,19 @@ describe(createBuildWatch, () => {
 		});
 	});
 
+	it("should not wait again for an edit that already failed its pickup window", async () => {
+		expect.assertions(1);
+
+		const { advanceAsync, wait } = await builtAsync(() => EDIT);
+		const first = wait(10 * EDIT_PICKUP_MS);
+		await advanceAsync(EDIT_PICKUP_MS);
+		await first.wait.catch(() => {});
+		const second = wait();
+		await advanceAsync(QUIET_WINDOW_MS);
+
+		await expect(second.wait).resolves.toBeUndefined();
+	});
+
 	it("should start the pickup window when a compile that started before the edit ends", async () => {
 		expect.assertions(2);
 

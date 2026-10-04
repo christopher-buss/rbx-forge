@@ -227,7 +227,8 @@ function sessionCompileError(
  * @param session - The session with its compiler running.
  * @returns The build's diagnostics, error count, log path, and hook results.
  * @rejects {ForgeError} `compile_failed` when the build has errors; the
- *   wait's failure, such as `compile_timeout` or `service_failed`.
+ *   wait's failure, such as `compile_timeout`, `edit_not_compiled`, or
+ *   `service_failed`.
  */
 async function sessionBuildAsync(
 	context: CommandContext,

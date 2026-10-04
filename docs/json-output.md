@@ -134,10 +134,11 @@ started a compile shows `false` too.
 An edit that starts no compile (a file the compiler does not watch) fails with
 `edit_not_compiled` (exit 1) once the compiler is idle for 90 s with no compile
 for it; `error.details` has `path` (relative to the project), `editedAt`, and
-`pickupSeconds`. Save the file again, or read `forge logs compiler`. With no
-tsconfig, or one with no root directory, step 1 finds no edit. A session that is
-still starting waits for its first compile. With no roblox-ts compiler (Luau, or
-`--no-compiler`), it returns at once.
+`pickupSeconds`. Later waits do not wait for that edit again. Save the file
+again, or read `forge logs compiler`. With no tsconfig, or one with no root
+directory, step 1 finds no edit. A session that is still starting waits for its
+first compile. With no roblox-ts compiler (Luau, or `--no-compiler`), it returns
+at once.
 
 `--timeout <seconds>` (default 300, at most 2147000; decimals are allowed)
 bounds the wait. `--timeout 0` does not wait: it returns the status now, with

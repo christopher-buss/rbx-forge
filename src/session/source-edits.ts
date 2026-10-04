@@ -31,13 +31,16 @@ const tsconfig = type({
 	},
 });
 
+const tsconfigText = type("string.json.parse").pipe(tsconfig);
+
 /** What a scan skips, and the newest edit it found so far. */
 interface Scan {
 	before: number;
+	/** The project root, which edit paths are relative to. */
+	cwd: string;
 	fileSystem: SourceFileSystem;
 	newest: SourceEdit | undefined;
 	outDir: string | undefined;
-	roots: SourceRoots;
 }
 
 /**
@@ -48,8 +51,7 @@ interface Scan {
  *
  * @param fileSystem - Reads the tsconfig and the sources.
  * @param roots - The project root and the compiler's arguments.
- * @param before - Later times are no edit: a file with a time ahead of the
- *   clock would hold every wait.
+ * @param before - Later times are no edit.
  * @returns The newest edit at or before `before`, if any.
  */
 export function newestSourceEdit(
@@ -63,10 +65,10 @@ export function newestSourceEdit(
 	const names = options?.rootDirs ?? (options?.rootDir === undefined ? [] : [options.rootDir]);
 	const scan: Scan = {
 		before,
+		cwd: roots.cwd,
 		fileSystem,
 		newest: undefined,
 		outDir: options?.outDir === undefined ? undefined : path.resolve(directory, options.outDir),
-		roots,
 	};
 	for (const name of names) {
 		walk(scan, path.resolve(directory, name));
@@ -90,16 +92,14 @@ function readCompilerOptions(
 	fileSystem: SourceFileSystem,
 	file: string,
 ): typeof tsconfig.infer.compilerOptions {
-	let value: unknown;
+	let text: string;
 	try {
-		value = JSON.parse(
-			stripJsonComments(fileSystem.readFileSync(file, "utf8"), { trailingCommas: true }),
-		);
+		text = fileSystem.readFileSync(file, "utf8");
 	} catch {
 		return undefined;
 	}
 
-	const config = tsconfig(value);
+	const config = tsconfigText(stripJsonComments(text, { trailingCommas: true }));
 	return config instanceof type.errors ? undefined : config.compilerOptions;
 }
 
@@ -117,7 +117,7 @@ function visit(scan: Scan, file: string): void {
 	}
 
 	if (at <= scan.before && at > (scan.newest?.at ?? -Infinity)) {
-		scan.newest = { at, path: path.relative(scan.roots.cwd, file) };
+		scan.newest = { at, path: path.relative(scan.cwd, file) };
 	}
 }
 

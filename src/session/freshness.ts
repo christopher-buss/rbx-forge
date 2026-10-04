@@ -12,8 +12,7 @@ export const QUIET_WINDOW_MS = 750;
 
 /**
  * The pickup window: how long an idle compiler may take to start a compile
- * for a source edit before a wait gives up on it. A watcher can notice a
- * save tens of seconds late.
+ * for a source edit before a wait gives up on it.
  */
 export const EDIT_PICKUP_MS = 90_000;
 
@@ -116,20 +115,30 @@ export function createFreshnessTracker(): FreshnessTracker {
 	};
 }
 
-function freshAt(state: TrackerState, since: number, editedAt = -Infinity): number | undefined {
-	if (state.lastBuild === undefined || state.starts.length > 0 || state.lastStartAt < editedAt) {
+/**
+ * One window after `since` or the end of the last compile, whichever is
+ * later.
+ *
+ * @param state - The tracker.
+ * @param since - When the wait began.
+ * @param windowMs - The window's length.
+ * @returns The time, or `undefined` while a compile runs or before the
+ *   first build.
+ */
+function idleWindowEnd(state: TrackerState, since: number, windowMs: number): number | undefined {
+	if (state.lastBuild === undefined || state.starts.length > 0) {
 		return undefined;
 	}
 
-	return Math.max(since, state.idleSince) + QUIET_WINDOW_MS;
+	return Math.max(since, state.idleSince) + windowMs;
+}
+
+function freshAt(state: TrackerState, since: number, editedAt = -Infinity): number | undefined {
+	return state.lastStartAt < editedAt ? undefined : idleWindowEnd(state, since, QUIET_WINDOW_MS);
 }
 
 function pickupBy(state: TrackerState, since: number, editedAt: number): number | undefined {
-	if (state.lastBuild === undefined || state.starts.length > 0 || state.lastStartAt >= editedAt) {
-		return undefined;
-	}
-
-	return Math.max(since, state.idleSince) + EDIT_PICKUP_MS;
+	return state.lastStartAt >= editedAt ? undefined : idleWindowEnd(state, since, EDIT_PICKUP_MS);
 }
 
 /**

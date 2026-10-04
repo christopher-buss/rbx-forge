@@ -3352,7 +3352,7 @@ describe("forge up control channel", () => {
 		await expect(waiting).rejects.toMatchObject({ code: "compile_timeout" });
 	});
 
-	it("should wait in freshStatus for a compile of a source edit after the last build", async () => {
+	it("should fail freshStatus naming an edit that no compile started for", async () => {
 		expect.assertions(1);
 
 		const run = startCommand({

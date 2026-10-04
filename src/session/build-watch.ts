@@ -74,6 +74,11 @@ interface Watch {
 	clock: Clock;
 	edits: BuildWatchOptions["edits"];
 	failure: ForgeError | undefined;
+	/**
+	 * The time of the last edit that failed its pickup window: a wait does
+	 * not wait again for an edit up to then.
+	 */
+	givenUpAt: number;
 	isClosed: boolean;
 	/** Turns each output line into its build event (rbxtsc or sloptor). */
 	parse: (line: string) => CompileEvent | undefined;
@@ -137,6 +142,7 @@ function initialWatch({ clock, edits, recorder, tracks }: BuildWatchOptions): Wa
 		clock,
 		edits,
 		failure: undefined,
+		givenUpAt: -Infinity,
 		isClosed: false,
 		parse: createCompilerOutputParser().read,
 		recorder,
@@ -278,6 +284,7 @@ function nextWake(watch: Watch, wait: FreshWait, now: number): number | undefine
 	}
 
 	if (pending !== undefined && now >= pending.by) {
+		watch.givenUpAt = pending.edit.at;
 		throw notCompiled(pending.edit);
 	}
 
@@ -301,7 +308,13 @@ function nextWake(watch: Watch, wait: FreshWait, now: number): number | undefine
 async function waitFreshAsync(watch: Watch, timeoutMs: number): Promise<void> {
 	const { clock } = watch;
 	const since = clock.now();
-	const wait = { deadline: since + timeoutMs, edit: watch.edits(since), since, timeoutMs };
+	const edit = watch.edits(since);
+	const wait = {
+		deadline: since + timeoutMs,
+		edit: edit !== undefined && edit.at > watch.givenUpAt ? edit : undefined,
+		since,
+		timeoutMs,
+	};
 	for (;;) {
 		const now = clock.now();
 		const wakeAt = nextWake(watch, wait, now);
