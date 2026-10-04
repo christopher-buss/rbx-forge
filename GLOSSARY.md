@@ -128,6 +128,11 @@ A Studio that already had the place open when the session attached it. Only
 `--force` closes it; otherwise the session lets it go, open.\
 _Avoid_: user Studio, external Studio
 
+**Hidden desktop**:\
+A Windows desktop that forge makes, apart from the user's desktop, for Studios
+that agents use. A Studio there changes nothing on the user's screen.\
+_Avoid_: forge desktop, background, invisible
+
 **Snapshot**:\
 A copy of the place that `forge open` builds and opens, outside every session
 and with no Rojo. forge keeps the newest five.\
