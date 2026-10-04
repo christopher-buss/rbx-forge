@@ -43,13 +43,9 @@ export function readRecords<T>(file: string): Array<T> {
 		return [];
 	}
 
-	const content = readFileSync(file, "utf8");
-	// A live append becomes a record only at its terminating newline. A
-	// record a kill cut short is a line of its own that does not parse.
-	return content
-		.slice(0, content.lastIndexOf("\n") + 1)
+	// A line that does not parse is a live append, or one a kill cut short.
+	return readFileSync(file, "utf8")
 		.split("\n")
-		.filter((line) => line.length > 0)
 		.flatMap((line) => {
 			try {
 				// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- fake-worker.ts writes this shape

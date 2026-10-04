@@ -10,7 +10,7 @@ import { readWorkerLog } from "../helpers/worker-log.ts";
 const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 
 describe("fixture worker log", () => {
-	it("should wait for a newline before reading a worker record being appended", () => {
+	it("should read a worker record being appended only once it is whole", () => {
 		expect.assertions(2);
 
 		const file = path.join(makeTemporaryDirectory(), "workers.ndjson");
