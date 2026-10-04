@@ -11,6 +11,7 @@
 mod model;
 #[allow(dead_code, reason = "the worker layer serves only the reaper binary")]
 mod os;
+mod studio_dialog;
 mod studio_save;
 #[cfg(windows)]
 mod windows_exports;
@@ -263,6 +264,30 @@ impl PinnedProcess {
         }))
     }
 
+    /// Invoke an exact button in a dialog on the pinned process desktop.
+    ///
+    /// # Errors
+    ///
+    /// When the identity changed or Windows refuses accessibility access.
+    #[napi]
+    pub fn dismiss_dialog(
+        &self,
+        title: String,
+        button: String,
+        desktop: String,
+        timeout_ms: Option<u32>,
+    ) -> Result<AsyncTask<StudioDialogTask>> {
+        Ok(AsyncTask::new(StudioDialogTask {
+            pid: self.pid(),
+            start_time: self.inner.start_time(),
+            title,
+            button,
+            desktop,
+            deadline: std::time::Instant::now()
+                + Duration::from_millis(u64::from(timeout_ms.unwrap_or(1000))),
+        }))
+    }
+
     /// Ask the pinned process to close its main windows.
     ///
     /// # Errors
@@ -457,6 +482,42 @@ impl Task for StudioSaveTask {
         match studio_save::request(self.pid, self.deadline) {
             _ if Instant::now() >= self.deadline => Ok("timeout".to_owned()),
             result => result.map_err(|err| to_napi("save Studio", &err)),
+        }
+    }
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+pub struct StudioDialogTask {
+    pid: u32,
+    start_time: u64,
+    title: String,
+    button: String,
+    desktop: String,
+    deadline: std::time::Instant,
+}
+impl Task for StudioDialogTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<Self::Output> {
+        let pinned = os::process::PinnedProcess::open(self.pid)
+            .map_err(|err| to_napi("pin Studio for dialog", &err))?;
+        let Some(pinned) = pinned else {
+            return Ok(false);
+        };
+        if pinned.start_time() != self.start_time {
+            return Ok(false);
+        }
+        match studio_dialog::dismiss(
+            self.pid,
+            &self.title,
+            &self.button,
+            &self.desktop,
+            self.deadline,
+        ) {
+            _ if Instant::now() >= self.deadline => Ok(false),
+            result => result.map_err(|err| to_napi("dismiss Studio dialog", &err)),
         }
     }
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {

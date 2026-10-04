@@ -7,6 +7,7 @@ import type {
 	SessionProcess,
 	SessionTarget,
 } from "../../src/native/addon.ts";
+import { dismissDialogAsync } from "./native-dialog.ts";
 
 /** One process in the fake process table. */
 export interface FakeProcess {
@@ -19,6 +20,7 @@ export interface FakeProcess {
 	/** How many times `requestClose` reached it while it ran. */
 	closeRequests?: number;
 	desktop?: "hidden" | "user";
+	dialog?: { button: string; title: string };
 	executablePath: string;
 	/** It exits right after it is pinned, before any query on the pin. */
 	exitsAfterPin?: boolean;
@@ -231,26 +233,29 @@ async function requestSaveAsync(
 	return timeoutMs <= 0 ? "timeout" : requestSave(entry);
 }
 
+function killEntry(entry: FakeProcess): boolean {
+	const wasAlive = entry.alive;
+	entry.alive = entry.ignoresKill === true && wasAlive;
+	return wasAlive;
+}
+
 function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 	if (entry.exitsAfterPin === true) {
 		entry.alive = false;
 	}
 
-	function kill(): boolean {
-		const wasAlive = entry.alive;
-		entry.alive = entry.ignoresKill === true && wasAlive;
-		return wasAlive;
-	}
-
 	return {
 		desktop: () => entry.desktop ?? "user",
+		dismissDialog: async (title, button, desktop) => {
+			return dismissDialogAsync(entry, title, button, desktop);
+		},
 		executablePath: () => (entry.alive ? entry.executablePath : null),
 		isAlive: () => entry.alive,
 		isBlocked: () => blockedNow(pid, entry),
-		kill,
+		kill: () => killEntry(entry),
 		killGroup: () => {
 			entry.groupKilled = true;
-			return kill();
+			return killEntry(entry);
 		},
 		pid,
 		requestClose: () => requestClose(entry),

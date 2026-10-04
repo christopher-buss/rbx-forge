@@ -29,6 +29,15 @@ export interface FileLock {
 export interface PinnedProcess {
 	/** The pinned process desktop. Always user on POSIX. */
 	desktop: () => "hidden" | "user";
+	/**
+	 * Invoke an exact button in an exact dialog on the pinned process desktop.
+	 */
+	dismissDialog: (
+		title: string,
+		button: string,
+		desktop: "hidden" | "user",
+		timeoutMs?: number,
+	) => Promise<boolean>;
 	/** Full path of the executable, or `null` once the process has exited. */
 	executablePath: () => null | string;
 	/** Whether the pinned process still runs. */

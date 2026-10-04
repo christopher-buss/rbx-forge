@@ -76,6 +76,121 @@ describe(runSaveAsync, () => {
 		},
 	);
 
+	it("dismisses the hidden Lighting migration dialog before checking whether Studio is busy", async () => {
+		expect.assertions(2);
+
+		const memory = createMemoryFileSystem({
+			"game.rbxl": "place",
+			"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+		});
+		memory.setModifiedTime("game.rbxl", 1000);
+		const native = createFakeNative({
+			42: {
+				alive: true,
+				blocked: true,
+				desktop: "hidden",
+				dialog: { button: "Continue", title: "Lighting Technology Migration" },
+				executablePath: "RobloxStudioBeta.exe",
+				onSave: () => {
+					memory.setModifiedTime("game.rbxl", 2000);
+				},
+			},
+		});
+		let now = 0;
+		const seams = createTestSeams({
+			clock: {
+				now: () => now,
+				sleep: async (ms) => {
+					now += ms;
+				},
+			},
+			fileSystem: memory.fileSystem,
+			native: () => native.addon,
+		});
+
+		await expect(
+			saveStudioAsync(seams, { place: path.join(PROJECT, "game.rbxl") }),
+		).resolves.toMatchObject({ desktop: "hidden", mtime: "1970-01-01T00:00:02.000Z" });
+		expect(memory.fileSystem.readFileSync(path.join(PROJECT, "game.rbxl"), "utf8")).toBe(
+			"place",
+		);
+	});
+
+	it.for([
+		{ button: "Continue", desktop: "hidden", title: "Save changes?" },
+		{ button: "Cancel", desktop: "hidden", title: "Lighting Technology Migration" },
+		{ button: "Continue", desktop: "user", title: "Lighting Technology Migration" },
+	] as const)(
+		"preserves the $title dialog on the $desktop desktop with button $button",
+		async ({ button, desktop, title }) => {
+			expect.assertions(2);
+
+			const memory = createMemoryFileSystem({
+				"game.rbxl": "place",
+				"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+			});
+			const native = createFakeNative({
+				42: {
+					alive: true,
+					blocked: true,
+					desktop,
+					dialog: { button, title },
+					executablePath: "RobloxStudioBeta.exe",
+				},
+			});
+			const seams = createTestSeams({
+				fileSystem: memory.fileSystem,
+				native: () => native.addon,
+			});
+
+			await expect(
+				saveStudioAsync(seams, { place: path.join(PROJECT, "game.rbxl") }),
+			).rejects.toMatchObject({ code: "studio_busy" });
+			expect(native.addon.pinProcess(42)!.isBlocked()).toBeTrue();
+		},
+	);
+
+	it("reports timeout when hidden dialog inspection consumes the remaining deadline", async () => {
+		expect.assertions(1);
+
+		const memory = createMemoryFileSystem({
+			"game.rbxl": "place",
+			"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+		});
+		const native = createFakeNative({
+			42: {
+				alive: true,
+				blocked: true,
+				desktop: "hidden",
+				executablePath: "RobloxStudioBeta.exe",
+			},
+		});
+		let now = 0;
+		const { pinProcess } = native.addon;
+		native.addon.pinProcess = (pid) => {
+			const pinned = pinProcess(pid);
+			assert(pinned !== null);
+			return {
+				...pinned,
+				dismissDialog: async () => {
+					await Promise.resolve();
+					now = 100;
+					return false;
+				},
+			};
+		};
+
+		const seams = createTestSeams({
+			clock: { now: () => now, sleep: async () => {} },
+			fileSystem: memory.fileSystem,
+			native: () => native.addon,
+		});
+
+		await expect(
+			saveStudioAsync(seams, { place: path.join(PROJECT, "game.rbxl") }, 100),
+		).rejects.toMatchObject({ code: "save_failed", details: { reason: "timeout" } });
+	});
+
 	it("reports studio_busy for a modal before saving", async () => {
 		expect.assertions(1);
 

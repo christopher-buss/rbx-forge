@@ -236,3 +236,94 @@ pub fn set_window_enabled(window: isize, enabled: bool) {
 pub fn close_requests() -> u32 {
     CLOSE_REQUESTS.load(Ordering::SeqCst)
 }
+
+/// An owned modal with a standard accessibility button, on the fixture desktop.
+pub fn open_test_dialog(owner: isize, title: &str, button: &str) -> io::Result<isize> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WS_CAPTION, WS_CHILD, WS_VISIBLE};
+    let (sender, receiver) = mpsc::channel();
+    let title = wide(title);
+    let button = wide(button);
+    thread::spawn(move || {
+        let class = wide("ForgeTestDialog");
+        let button_class = wide("BUTTON");
+        // SAFETY: null names the current module, and zero initializes plain fields.
+        let instance = unsafe { GetModuleHandleW(null()) };
+        let mut description: WNDCLASSW = unsafe { zeroed() };
+        description.lpfnWndProc = Some(test_dialog_proc);
+        description.hInstance = instance;
+        description.lpszClassName = class.as_ptr();
+        unsafe { RegisterClassW(&raw const description) };
+        // SAFETY: registered class, terminated strings, and an owned main window.
+        let dialog = unsafe {
+            CreateWindowExW(
+                WS_EX_NOACTIVATE,
+                class.as_ptr(),
+                title.as_ptr(),
+                WS_POPUP | WS_CAPTION,
+                -32_000,
+                -32_000,
+                300,
+                100,
+                owner as HWND,
+                null_mut(),
+                instance,
+                null(),
+            )
+        };
+        if dialog.is_null() {
+            let _ = sender.send(Err(io::Error::last_os_error()));
+            return;
+        }
+        unsafe {
+            CreateWindowExW(
+                0,
+                button_class.as_ptr(),
+                button.as_ptr(),
+                WS_CHILD | WS_VISIBLE,
+                20,
+                20,
+                100,
+                30,
+                dialog,
+                1_isize as *mut _,
+                instance,
+                null(),
+            );
+            EnableWindow(owner as HWND, 0);
+            ShowWindow(dialog, SW_SHOWNOACTIVATE);
+            ShowWindow(dialog, SW_SHOWNOACTIVATE);
+        }
+        let _ = sender.send(Ok(dialog as isize));
+        let mut message: MSG = unsafe { zeroed() };
+        while unsafe { GetMessageW(&raw mut message, null_mut(), 0, 0) } > 0 {
+            unsafe {
+                TranslateMessage(&raw const message);
+                DispatchMessageW(&raw const message);
+            }
+        }
+    });
+    receiver
+        .recv()
+        .map_err(|_| io::Error::other("the dialog thread ended"))?
+}
+
+unsafe extern "system" fn test_dialog_proc(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DestroyWindow, GW_OWNER, GetWindow, PostQuitMessage, WM_COMMAND,
+    };
+    if message == WM_COMMAND && wparam & 0xffff == 1 {
+        // SAFETY: the dialog owns its window and references its live main owner.
+        unsafe {
+            EnableWindow(GetWindow(window, GW_OWNER), 1);
+            DestroyWindow(window);
+            PostQuitMessage(0);
+        }
+        return 0;
+    }
+    unsafe { DefWindowProcW(window, message, wparam, lparam) }
+}

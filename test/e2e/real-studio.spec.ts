@@ -20,11 +20,11 @@
  * Timings go to `RBX_FORGE_TEST_REAL_STUDIO_LOG` (NDJSON), when set.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, expect, it, onTestFinished } from "vitest";
 
 import { pinNow, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
@@ -125,10 +125,18 @@ async function makeRealProjectAsync(fixturePlace: string): Promise<Fixture> {
  * installed Studio.
  *
  * @param fixture - The project.
+ * @param desktop - Where Studio opens.
  * @returns The session's id.
  */
-async function upStudioAsync(fixture: Fixture): Promise<string> {
-	const up = await runForgeAsync(fixture, ["up", "--studio", "--json"], realVariables(fixture));
+async function upStudioAsync(
+	fixture: Fixture,
+	desktop: "hidden" | "user" = "user",
+): Promise<string> {
+	const up = await runForgeAsync(
+		fixture,
+		["up", "--studio", "--desktop", desktop, "--json"],
+		realVariables(fixture),
+	);
 	return String(up.result.data!["sessionId"]);
 }
 
@@ -174,7 +182,78 @@ async function waitForLoadedAsync(fixture: Fixture, sessionId: string): Promise<
 	return [status.services.studio.pid, lockPid];
 }
 
+/**
+ * Read focus without activating or switching any desktop.
+ * @returns The foreground window handle.
+ */
+function foregroundWindow(): string {
+	const { status, stdout } = spawnSync(
+		"powershell.exe",
+		[
+			"-NoProfile",
+			"-NonInteractive",
+			"-Command",
+			"Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class ForgeForeground { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); }'; [ForgeForeground]::GetForegroundWindow().ToInt64().ToString()",
+		],
+		{ encoding: "utf8", windowsHide: true },
+	);
+	assert(status === 0);
+	return stdout.trim();
+}
+
 describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
+	it.for([
+		{
+			desktop: "user",
+			expectedFocus: (_focus: string): unknown => expect.any(String),
+		},
+		{ desktop: "hidden", expectedFocus: (focus: string) => focus },
+	] as const)(
+		"saves Studio on the $desktop desktop",
+		{ timeout: 240_000 },
+		async ({ desktop, expectedFocus }) => {
+			expect.assertions(4);
+
+			killNewStudiosAtEnd();
+			const fixture = await makeRealProjectAsync("unsaved.rbxl");
+			const sessionId = await upStudioAsync(fixture, desktop);
+			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
+			const before = statSync(fixture.place).mtimeMs;
+			const focus = foregroundWindow();
+			const save = await runForgeAsync(
+				fixture,
+				["save", "--timeout", "30", "--json"],
+				realVariables(fixture),
+			);
+			const after = foregroundWindow();
+
+			expect(save.status).toBe(0);
+			expect(save.result.data).toMatchObject({ desktop, pid: lockPid, place: fixture.place });
+			expect(statSync(fixture.place).mtimeMs).toBeGreaterThan(before);
+			expect(after).toStrictEqual(expectedFocus(focus));
+		},
+	);
+
+	it(
+		"dismisses delayed Compatibility lighting migration on the hidden desktop",
+		{ timeout: 240_000 },
+		async () => {
+			expect.assertions(3);
+
+			killNewStudiosAtEnd();
+			const fixture = await makeRealProjectAsync("compatibility.rbxl");
+			const sessionId = await upStudioAsync(fixture, "hidden");
+			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
+			await sleep(10_000);
+			const focus = foregroundWindow();
+			const save = await runForgeAsync(fixture, ["save", "--json"], realVariables(fixture));
+
+			expect(save.status).toBe(0);
+			expect(save.result.data).toMatchObject({ desktop: "hidden", pid: lockPid });
+			expect(foregroundWindow()).toBe(focus);
+		},
+	);
+
 	it(
 		"should open Studio directly with up --studio, and close it with down",
 		{ timeout: 240_000 },

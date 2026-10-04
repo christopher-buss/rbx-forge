@@ -89,6 +89,50 @@ pub fn is_blocked(pid: u32) -> io::Result<bool> {
         .any(|window| unsafe { IsWindowEnabled(window) } == 0))
 }
 
+/// The titled Studio main window, rather than a tooltip or helper window.
+pub fn studio_main_window(pid: u32) -> io::Result<Option<HWND>> {
+    Ok(main_windows(pid)?
+        .into_iter()
+        .find(|window| title(*window).ends_with(HIDDEN_MAIN_TITLE_SUFFIX)))
+}
+
+/// An exact top-level title belonging to this PID, on its desktop.
+pub fn titled_window(pid: u32, wanted: &str) -> io::Result<Option<HWND>> {
+    struct TitledSearch<'a> {
+        pid: u32,
+        wanted: &'a str,
+        found: Option<HWND>,
+    }
+    unsafe extern "system" fn collect_title(window: HWND, context: LPARAM) -> i32 {
+        // SAFETY: the caller keeps this search alive during enumeration.
+        let search = unsafe { &mut *(context as *mut TitledSearch<'_>) };
+        let mut owner = 0;
+        // SAFETY: a window query writes a local PID.
+        unsafe { GetWindowThreadProcessId(window, &raw mut owner) };
+        if owner == search.pid && title(window) == search.wanted {
+            search.found = Some(window);
+        }
+        TRUE
+    }
+    let mut search = TitledSearch {
+        pid,
+        wanted,
+        found: None,
+    };
+    let desktop = super::desktop::for_process(pid)?;
+    let ok = unsafe {
+        EnumDesktopWindows(
+            desktop.raw(),
+            Some(collect_title),
+            (&raw mut search) as LPARAM,
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(search.found)
+}
+
 /// The main windows of the process `pid`, in Z order: the visible ones, or
 /// when there are none, the hidden titled ones.
 fn main_windows(pid: u32) -> io::Result<Vec<HWND>> {

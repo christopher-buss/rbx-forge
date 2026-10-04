@@ -4,6 +4,7 @@ import { ForgeError } from "../errors.ts";
 import type { PinnedProcess } from "../native/addon.ts";
 import type { StudioSeams, StudioTarget } from "./close-studio.ts";
 import { findPlaceStudio } from "./close-studio.ts";
+import { dismissLightingDialogAsync } from "./lighting-dialog.ts";
 
 export interface StudioSave {
 	bytes: number;
@@ -40,24 +41,10 @@ export async function saveStudioAsync(
 	const before = writableMtime(seams, target.place);
 
 	try {
-		if (pinned.isBlocked()) {
-			throw new ForgeError("studio_busy", "A modal dialog blocks Roblox Studio.");
-		}
-
-		signal?.throwIfAborted();
-		const remainingMs = timeoutMs - (seams.clock.now() - started);
-		if (remainingMs <= 0) {
-			throw saveFailure(target.place, "timeout");
-		}
-
-		const outcome = await pinned.requestSave(remainingMs);
-		if (outcome === "timeout") {
-			throw saveFailure(target.place, "timeout");
-		}
-
-		if (outcome === "no_menu_item") {
-			throw saveFailure(target.place, "no_menu_item");
-		}
+		await requestStudioSaveAsync(seams, pinned, target.place, {
+			deadline: started + timeoutMs,
+			signal,
+		});
 
 		return await waitForSaveAsync(seams, pinned, target, {
 			before,
@@ -79,6 +66,34 @@ function saveFailure(
 		cause,
 		details: { place, reason },
 	});
+}
+
+async function requestStudioSaveAsync(
+	seams: StudioSeams,
+	pinned: PinnedProcess,
+	place: string,
+	{ deadline, signal }: { deadline: number; signal: AbortSignal | undefined },
+): Promise<void> {
+	signal?.throwIfAborted();
+	if (seams.clock.now() >= deadline) {
+		throw saveFailure(place, "timeout");
+	}
+
+	await dismissLightingDialogAsync(pinned, deadline - seams.clock.now());
+	signal?.throwIfAborted();
+	const remainingMs = deadline - seams.clock.now();
+	if (remainingMs <= 0) {
+		throw saveFailure(place, "timeout");
+	}
+
+	if (pinned.isBlocked()) {
+		throw new ForgeError("studio_busy", "A modal dialog blocks Roblox Studio.");
+	}
+
+	const outcome = await pinned.requestSave(remainingMs);
+	if (outcome !== "requested") {
+		throw saveFailure(place, outcome);
+	}
 }
 
 function savedResult(

@@ -1,0 +1,15 @@
+{
+	"name": "compatibility",
+	"tree": {
+		"$className": "DataModel",
+		"Lighting": {
+			"$className": "Lighting"
+		},
+		"Workspace": {
+			"$className": "Workspace",
+			"MigrationPart": {
+				"$className": "Part"
+			}
+		}
+	}
+}
