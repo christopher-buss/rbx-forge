@@ -94,6 +94,29 @@ function makeTarget() {
 }
 
 describe(controlHandlers, () => {
+	it.for([
+		{},
+		{ desktop: "other", timeoutMs: 100 },
+		{ desktop: "user", timeoutMs: "100" },
+		{ desktop: "user", timeoutMs: NaN },
+		{ desktop: "user", timeoutMs: 0 },
+		{ desktop: "user", studioPath: 7, timeoutMs: 100 },
+	])("should reject malformed move parameters %j", async (parameters) => {
+		expect.assertions(1);
+
+		await expect(
+			makeTarget().handlers.moveStudio!({ ...parameters, sessionId: "s1" }),
+		).rejects.toMatchObject({ code: "usage" });
+	});
+
+	it("should reject a move on a session without a move handler", async () => {
+		expect.assertions(1);
+
+		await expect(
+			makeTarget().handlers.moveStudio!({ desktop: "user", sessionId: "s1", timeoutMs: 100 }),
+		).rejects.toMatchObject({ code: "studio_not_open" });
+	});
+
 	it("should answer status with the status now, once merged compiles settled", () => {
 		expect.assertions(2);
 

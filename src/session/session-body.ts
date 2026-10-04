@@ -20,6 +20,7 @@ import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
 import { checkSyncbackOnce, startSyncback, watchSavesForSyncback } from "./session-syncback.ts";
 import type { PartOwner, StatusRecorder, StatusStore } from "./status.ts";
+import { createStudioMover } from "./studio-move.ts";
 import type { PreparedStudio, StudioSetup, StudioState } from "./studio-part.ts";
 import {
 	createStudioAdder,
@@ -355,6 +356,7 @@ function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: B
 				state.studio.cancelReady?.();
 			}
 		},
+		move: createStudioMover(session, scope, { ...state, state: state.studio }),
 		restart: createPartRestarter(session, { add, parts, stop }),
 		save: async (timeoutMs, signal) => {
 			return saveSessionStudioAsync(session, scope, timeoutMs, signal);

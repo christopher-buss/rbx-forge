@@ -8,7 +8,7 @@ import type { Host } from "../seams/host.ts";
 import type { Environment, Seams } from "../seams/seams.ts";
 import type { RecoveryReport } from "./auto-recovery.ts";
 import { autoSaveDirectories, handleAutoRecoveryAsync } from "./auto-recovery.ts";
-import type { StudioProcess } from "./launcher.ts";
+import type { LocatedStudio, StudioProcess } from "./launcher.ts";
 import { studioProcess } from "./launcher.ts";
 import type { StudioLock } from "./lock-file.ts";
 import {
@@ -198,7 +198,7 @@ export async function closeStudioAsync(
  *   that names no verified Studio.
  * @throws {ForgeError} `native_missing`.
  */
-export function findPlaceStudio(seams: StudioSeams, place: string): StudioProcess | undefined {
+export function findPlaceStudio(seams: StudioSeams, place: string): LocatedStudio | undefined {
 	const lockPath = studioLockPath(place);
 	const text = readLockFile(seams.fileSystem, lockPath);
 	if (text === undefined) {

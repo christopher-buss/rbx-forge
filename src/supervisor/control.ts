@@ -14,10 +14,11 @@ import type { StopSource } from "../session/stop-source.ts";
 export interface ControlTarget {
 	builds: Pick<BuildWatch, "tick" | "waitAsync">;
 	clock: Clock;
-	parts: Pick<
-		PartRequests,
-		"addAsync" | "ownAsync" | "releaseAsync" | "restartAsync" | "saveAsync" | "stopAsync"
-	>;
+	parts: Partial<Pick<PartRequests, "moveAsync">> &
+		Pick<
+			PartRequests,
+			"addAsync" | "ownAsync" | "releaseAsync" | "restartAsync" | "saveAsync" | "stopAsync"
+		>;
 	sessionId: string;
 	status: Pick<StatusStore, "snapshot">;
 	stop: Pick<StopSource, "request">;
@@ -77,6 +78,7 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 			);
 			return snapshot(target);
 		},
+		moveStudio: async (parameters) => moveStudioAsync(target, parameters),
 		restartParts: async (parameters) => restartPartsAsync(target, parameters),
 		save: async (parameters) => saveAsync(target, parameters),
 		shutdown: (parameters) => {
@@ -184,4 +186,27 @@ async function saveAsync(
 	} finally {
 		timer.abort();
 	}
+}
+
+async function moveStudioAsync(
+	target: ControlTarget,
+	parameters: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+	requireSession(target, parameters);
+	const { desktop, studioPath, timeoutMs } = parameters;
+	if (
+		typeof timeoutMs !== "number" ||
+		!Number.isFinite(timeoutMs) ||
+		timeoutMs <= 0 ||
+		(desktop !== "hidden" && desktop !== "user") ||
+		(studioPath !== undefined && typeof studioPath !== "string")
+	) {
+		throw new ForgeError("usage", "moveStudio takes a desktop and positive save timeoutMs.");
+	}
+
+	if (target.parts.moveAsync === undefined) {
+		throw new ForgeError("studio_not_open", "No session Studio is open.");
+	}
+
+	return { ...(await target.parts.moveAsync({ desktop, studioPath, timeoutMs })) };
 }

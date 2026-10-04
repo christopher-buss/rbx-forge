@@ -30,6 +30,19 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(createPartRequests, () => {
+	it("should reject a move when its attached session has no Studio mover", async () => {
+		expect.assertions(1);
+
+		const requests = createPartRequests();
+		requests.attach({ add: vi.fn<PartAdder>(), restart: noRestart, stop: noStop, ...NO_OWNER });
+
+		await expect(requests.moveAsync({ desktop: "user", timeoutMs: 100 })).rejects.toMatchObject(
+			{
+				code: "studio_not_open",
+			},
+		);
+	});
+
 	it("should reject a stop after close without invoking its preflight", async () => {
 		expect.assertions(2);
 

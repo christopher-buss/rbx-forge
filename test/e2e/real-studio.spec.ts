@@ -207,6 +207,66 @@ function saveOutcome(run: UpRun): string {
 }
 
 describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
+	it(
+		"moves the saved session Studio between desktops without restarting Rojo",
+		{ timeout: 600_000 },
+		async () => {
+			expect.assertions(5);
+
+			killNewStudiosAtEnd();
+			const fixture = await makeRealProjectAsync("saved.rbxl");
+			const sessionId = await upStudioAsync(fixture, "hidden");
+			const [, original] = await waitForLoadedAsync(fixture, sessionId);
+			const before = await runForgeAsync(
+				fixture,
+				["status", "--json"],
+				realVariables(fixture),
+			);
+			assert(before.result.data !== undefined, "status returns data");
+			const { services } = before.result.data;
+			assert(
+				typeof services === "object" && services !== null && "rojo" in services,
+				"Rojo status recorded",
+			);
+			const shown = await runForgeAsync(fixture, ["show", "--json"], realVariables(fixture));
+			const [, visible] = await waitForLoadedAsync(fixture, sessionId);
+
+			expect(shown.status).toBe(0);
+			expect(shown.result.data).toMatchObject({
+				from: "hidden",
+				pid: visible,
+				save: { pid: original, place: fixture.place },
+				to: "user",
+			});
+
+			assert(visible !== original, "show replaces Studio");
+
+			const hidden = await runForgeAsync(fixture, ["hide", "--json"], realVariables(fixture));
+			const [, replacement] = await waitForLoadedAsync(fixture, sessionId);
+
+			expect(hidden.status).toBe(0);
+			expect(hidden.result.data).toMatchObject({
+				from: "user",
+				pid: replacement,
+				save: { pid: visible, place: fixture.place },
+				to: "hidden",
+			});
+
+			assert(replacement !== visible, "hide replaces Studio");
+
+			const after = await runForgeAsync(
+				fixture,
+				["status", "--json"],
+				realVariables(fixture),
+			);
+
+			expect(after.result.data).toMatchObject({
+				services: { rojo: services.rojo },
+				sessionId,
+			});
+		},
+	);
+
 	it.for([
 		{
 			desktop: "user",

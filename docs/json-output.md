@@ -257,3 +257,15 @@ Studio. `--timeout <s>` defaults to 30 seconds.
 
 The writable check runs before the save request; a read-only place returns
 `save_failed` with `permission_denied` without triggering a Studio save dialog.
+
+## The `show` and `hide` result
+
+On Windows, `forge show --json` and `forge hide --json` return `data.from` and
+`data.to` as `user` or `hidden`, `data.pid` for the resulting Studio, and
+`data.durationMs` for the whole operation. `data.save` is the preceding save
+result (`place`, `pid`, `desktop`, `bytes`, `mtime`, `durationMs`). Its PID is
+the original Studio's; the outer PID changes when forge reopens it.
+
+`to` reports the actual desktop, including a warned fallback to `user` when
+hidden launch is unavailable. A save failure returns the save error and leaves
+the original Studio open.

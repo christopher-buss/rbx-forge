@@ -5334,3 +5334,348 @@ describe("forge restart control channel", () => {
 		});
 	});
 });
+
+describe("session Studio desktop moves", () => {
+	it("should save edits, reopen the same place without a build, and keep Rojo and the owner", async () => {
+		expect.assertions(5);
+
+		const run = startCommand({
+			files: { "game.rbxl": "original", "game.rbxl.lock": STUDIO_LOCK, "tools/rojo.exe": "" },
+			owned: true,
+			platform: "win32",
+			processes: {
+				900: {
+					alive: true,
+					desktop: "user",
+					executablePath: "/opt/RobloxStudio",
+					startTime: "0",
+				},
+				[STUDIO_PID]: {
+					...OPEN_STUDIO[STUDIO_PID]!,
+					desktop: "hidden",
+					onClose: () => {
+						run.memory.fileSystem.rmSync(LOCK, { force: true });
+					},
+					onSave: () => {
+						run.memory.fileSystem.writeFileSync(PLACE, "saved edits");
+						run.memory.setModifiedTime("game.rbxl", run.clock.clock.now() + 1);
+					},
+				},
+			},
+			writePrivateFile: () => {},
+		});
+		onTestFinished(() => {
+			run.signals.fire("SIGINT");
+		});
+		await passAsync(run, FILE_POLL_MS);
+		run.studioLauncher.mockResolvedValue({
+			studio: { desktop: "user", pid: 900, startTime: "0" },
+			type: "launched",
+		});
+		const moved = callSessionAsync(
+			run.ipc,
+			{
+				...CONTROL_TARGET,
+				endpoint: endpointFor({
+					buildOutputPath: "game.rbxl",
+					env: {},
+					platform: "win32",
+					projectRoot: PROJECT,
+					userId: 1000,
+				}),
+			},
+			"moveStudio",
+			{ params: { desktop: "user", timeoutMs: 30_000 }, responseTimeoutMs: 600_000 },
+		);
+		let moveError: unknown;
+		moved.catch((err: unknown) => {
+			moveError = err;
+		});
+		await vi.waitFor(async () => {
+			await passAsync(run, 100);
+			assert(
+				run.studioLauncher.mock.calls.length === 1,
+				`replacement launched: ${JSON.stringify(moveError)}`,
+			);
+		});
+
+		expect(run.fake.calls).not.toContain("stop rojo 3000");
+		expect(run.fake.spawned.filter(({ args }) => args[0] === "build")).toHaveLength(0);
+		expect(run.memory.fileSystem.readFileSync(PLACE, "utf8")).toBe("saved edits");
+
+		run.memory.fileSystem.writeFileSync(LOCK, `900\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+
+		await expect(moved).resolves.toMatchObject({
+			from: "hidden",
+			pid: 900,
+			save: { bytes: 11, pid: STUDIO_PID },
+			to: "user",
+		});
+		expect(stateOf(run)).toMatchObject({
+			services: {
+				rojo: { owner: "start", status: "ready" },
+				studio: { desktop: "user", owner: "start", status: "open" },
+			},
+		});
+	});
+});
+
+function moveTarget() {
+	return {
+		...CONTROL_TARGET,
+		endpoint: endpointFor({
+			buildOutputPath: "game.rbxl",
+			env: {},
+			platform: "win32",
+			projectRoot: PROJECT,
+			userId: 1000,
+		}),
+	};
+}
+
+function movableStudio(desktop: "hidden" | "user" = "hidden") {
+	const run = startCommand({
+		files: { "game.rbxl": "original", "game.rbxl.lock": STUDIO_LOCK, "tools/rojo.exe": "" },
+		platform: "win32",
+		processes: {
+			[STUDIO_PID]: {
+				...OPEN_STUDIO[STUDIO_PID]!,
+				desktop,
+				onClose: () => {
+					run.memory.fileSystem.rmSync(LOCK, { force: true });
+				},
+				onSave: () => {
+					run.memory.setModifiedTime("game.rbxl", run.clock.clock.now() + 1);
+				},
+			},
+		},
+		writePrivateFile: () => {},
+	});
+	onTestFinished(() => {
+		run.signals.fire("SIGINT");
+	});
+	return run;
+}
+
+async function finishMoveAsync(run: StartRun, request: Record<string, unknown>) {
+	const moved = callSessionAsync(run.ipc, moveTarget(), "moveStudio", {
+		params: request,
+		responseTimeoutMs: 600_000,
+	});
+	let isDone = false;
+	moved
+		.finally(() => {
+			isDone = true;
+		})
+		.catch(ignoreFailure);
+	await vi.waitFor(
+		async () => {
+			await passAsync(run, 2000);
+			assert(isDone, "move answered");
+		},
+		{ interval: 5, timeout: 5000 },
+	);
+	return moved;
+}
+
+describe("session Studio move failures and retained desktops", () => {
+	it("should leave Studio and Rojo open when the save fails", async () => {
+		expect.assertions(3);
+
+		const run = movableStudio();
+		run.native.processes.get(STUDIO_PID)!.onSaveRequest = "no_menu_item";
+		await passAsync(run, FILE_POLL_MS);
+
+		await expect(
+			finishMoveAsync(run, { desktop: "user", timeoutMs: 30_000 }),
+		).rejects.toMatchObject({ code: "save_failed", details: { reason: "no_menu_item" } });
+		expect(run.native.processes.get(STUDIO_PID)).toMatchObject({ alive: true });
+		expect(stateOf(run)).toMatchObject({
+			services: { rojo: { status: "ready" }, studio: { desktop: "hidden", status: "open" } },
+		});
+	});
+
+	it("should save and keep the PID when Studio is already on the requested desktop", async () => {
+		expect.assertions(2);
+
+		const run = movableStudio("user");
+		await passAsync(run, FILE_POLL_MS);
+
+		await expect(
+			finishMoveAsync(run, { desktop: "user", timeoutMs: 30_000 }),
+		).resolves.toMatchObject({
+			from: "user",
+			pid: STUDIO_PID,
+			save: { mtime: fromAny(expect.any(String)) },
+			to: "user",
+		});
+		expect(run.native.processes.get(STUDIO_PID)).toMatchObject({ alive: true });
+	});
+});
+
+describe("session Studio replacement outcomes", () => {
+	it("should report the actual user desktop after a hidden launch falls back", async () => {
+		expect.assertions(2);
+
+		const run = movableStudio("user");
+		await passAsync(run, FILE_POLL_MS);
+		run.native.processes.set(900, {
+			alive: true,
+			desktop: "user",
+			executablePath: "/opt/RobloxStudio",
+			startTime: "0",
+		});
+		run.studioLauncher.mockImplementation(async () => {
+			run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+			return {
+				desktop: "user",
+				type: "launched",
+				warning: "Hidden desktop unavailable; opened on user desktop.",
+			};
+		});
+
+		await expect(
+			finishMoveAsync(run, { desktop: "hidden", timeoutMs: 30_000 }),
+		).resolves.toMatchObject({ from: "user", pid: 900, to: "user" });
+		expect(stateOf(run)).toMatchObject({
+			services: {
+				rojo: { status: "ready" },
+				studio: { desktop: "user", pid: 900, status: "open" },
+			},
+		});
+	});
+
+	it("should retain Rojo and report Studio closed when replacement launch fails", async () => {
+		expect.assertions(2);
+
+		const run = movableStudio();
+		await passAsync(run, FILE_POLL_MS);
+		run.studioLauncher.mockResolvedValue({ message: "Studio cannot launch", type: "failed" });
+
+		await expect(
+			finishMoveAsync(run, { desktop: "user", timeoutMs: 30_000 }),
+		).rejects.toMatchObject({ code: "studio_launch_failed" });
+		expect(stateOf(run)).toMatchObject({
+			services: { rojo: { status: "ready" }, studio: { status: "closed" } },
+		});
+	});
+
+	it("should continue following the original Studio if the close fails", async () => {
+		expect.assertions(2);
+
+		const run = movableStudio();
+		Object.assign(run.native.processes.get(STUDIO_PID)!, {
+			ignoresKill: true,
+			onCloseRequest: "refuse",
+		});
+		await passAsync(run, FILE_POLL_MS);
+
+		await expect(
+			finishMoveAsync(run, { desktop: "user", timeoutMs: 30_000 }),
+		).rejects.toMatchObject({ code: "process_failed" });
+
+		await passAsync(run, FILE_POLL_MS);
+
+		expect(stateOf(run)).toMatchObject({
+			services: { rojo: { status: "ready" }, studio: { desktop: "hidden", status: "open" } },
+		});
+	});
+});
+
+describe("serialized Studio moves", () => {
+	it("should fail a move when the replacement never opens its saved place", async () => {
+		expect.assertions(2);
+
+		const run = movableStudio();
+		await passAsync(run, FILE_POLL_MS);
+		run.native.processes.set(900, {
+			alive: true,
+			desktop: "user",
+			executablePath: "/opt/RobloxStudio",
+			startTime: "0",
+		});
+		run.studioLauncher.mockResolvedValue({
+			studio: { desktop: "user", pid: 900, startTime: "0" },
+			type: "launched",
+		});
+
+		await expect(
+			finishMoveAsync(run, { desktop: "user", timeoutMs: 30_000 }),
+		).rejects.toMatchObject({
+			code: "studio_launch_failed",
+		});
+		expect(stateOf(run)).toMatchObject({ services: { rojo: { status: "ready" } } });
+	});
+
+	it("should save each replacement in order when show, hide, and save arrive together", async () => {
+		expect.assertions(3);
+
+		const run = movableStudio();
+		await passAsync(run, FILE_POLL_MS);
+		let nextPid = 900;
+		run.studioLauncher.mockImplementation(async ({ desktop, place }) => {
+			assert(desktop !== undefined, "move specifies its target desktop");
+			const pid = nextPid;
+			nextPid += 1;
+			run.native.processes.set(pid, {
+				alive: true,
+				desktop,
+				executablePath: "/opt/RobloxStudio",
+				onClose: () => {
+					run.memory.fileSystem.rmSync(LOCK, { force: true });
+				},
+				onSave: () => {
+					run.memory.setModifiedTime("game.rbxl", run.clock.clock.now() + 1);
+				},
+				startTime: "0",
+			});
+			run.memory.fileSystem.writeFileSync(
+				`${place}.lock`,
+				`${pid}\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+			);
+			return { studio: { desktop, pid, startTime: "0" }, type: "launched" };
+		});
+		const shown = callSessionAsync(run.ipc, moveTarget(), "moveStudio", {
+			params: { desktop: "user", timeoutMs: 30_000 },
+			responseTimeoutMs: 600_000,
+		});
+		const hidden = callSessionAsync(run.ipc, moveTarget(), "moveStudio", {
+			params: { desktop: "hidden", timeoutMs: 30_000 },
+			responseTimeoutMs: 600_000,
+		});
+		const saved = callSessionAsync(run.ipc, moveTarget(), "save", {
+			params: { timeoutMs: 30_000 },
+			responseTimeoutMs: 600_000,
+		});
+		const completed = Promise.all([shown, hidden, saved]);
+		let isDone = false;
+		completed
+			.finally(() => {
+				isDone = true;
+			})
+			.catch(ignoreFailure);
+		await vi.waitFor(
+			async () => {
+				await passAsync(run, 1000);
+				assert(isDone, "all requests answered");
+			},
+			{ interval: 5 },
+		);
+		const results = await completed;
+
+		expect(results[0]).toMatchObject({
+			from: "hidden",
+			pid: 900,
+			save: { pid: STUDIO_PID },
+			to: "user",
+		});
+		expect(results[1]).toMatchObject({
+			from: "user",
+			pid: 901,
+			save: { pid: 900 },
+			to: "hidden",
+		});
+		expect(results[2]).toMatchObject({ desktop: "hidden", pid: 901 });
+	});
+});

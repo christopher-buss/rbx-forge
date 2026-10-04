@@ -3,14 +3,17 @@ import { runCompileCommandAsync } from "../commands/compile.ts";
 import { runConfigAsync } from "../commands/config.ts";
 import type { CommandRun } from "../commands/context.ts";
 import { DOWN_FLAGS, runDownAsync } from "../commands/down.ts";
+import { runHideAsync } from "../commands/hide.ts";
 import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts";
 import { LOG_NAMES, LOGS_FLAGS, runLogsAsync } from "../commands/logs.ts";
 import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
 import { RESTART_FLAGS, runRestartAsync } from "../commands/restart.ts";
 import { runSaveAsync, SAVE_FLAGS } from "../commands/save.ts";
+import { runShowAsync } from "../commands/show.ts";
 import { runStartAsync, START_FLAGS } from "../commands/start.ts";
 import { runStatusAsync, STATUS_FLAGS } from "../commands/status.ts";
 import { runStopAsync, STOP_FLAGS } from "../commands/stop.ts";
+import { STUDIO_MOVE_FLAGS } from "../commands/studio-move.ts";
 import { runSyncAsync } from "../commands/sync.ts";
 import { runSyncbackCommandAsync, SYNCBACK_FLAGS } from "../commands/syncback.ts";
 import { runTypegenCommandAsync, TYPEGEN_FLAGS } from "../commands/typegen.ts";
@@ -91,6 +94,20 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		flags: SAVE_FLAGS,
 		run: runSaveAsync,
 		summary: "Save the session Studio place to disk before syncback.",
+	},
+	{
+		name: "show",
+		flags: STUDIO_MOVE_FLAGS,
+		run: runShowAsync,
+		summary:
+			"Save and reopen the session Studio on the user desktop. Undo history and open script tabs are lost.",
+	},
+	{
+		name: "hide",
+		flags: STUDIO_MOVE_FLAGS,
+		run: runHideAsync,
+		summary:
+			"Save and reopen the session Studio on the hidden desktop. Undo history and open script tabs are lost.",
 	},
 	{
 		name: "sync",
