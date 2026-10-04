@@ -47,7 +47,9 @@ docs/agents/domain.md.
 
 Conventional Commits
 ([.github/commit-instructions.md](.github/commit-instructions.md)); hk's
-commit-msg hook checks the format. Merge commits too (`chore: merge ...`).
+commit-msg hook checks the format. Merge commits too (`chore: merge ...`). A
+pull request is squash merged: its title is the commit, so commitlint
+(`commitlint.config.ts`) checks it in CI.
 
 ## Commands
 

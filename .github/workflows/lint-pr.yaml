@@ -1,0 +1,28 @@
+name: Lint PR
+
+on:
+  pull_request:
+    types: [edited, opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # A squash merge makes the title the commit that changelogithub reads.
+  title:
+    name: Title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup
+
+      - name: Lint title with commitlint
+        run: printf '%s\n' "$TITLE" | pnpm exec commitlint
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+    timeout-minutes: 5

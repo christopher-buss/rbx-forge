@@ -108,10 +108,15 @@ macOS, logged in to npm:
    that CI run, builds, and publishes every platform package, then `rbx-forge`,
    on dist-tag `next`.
 3. On npmjs.com, add a trusted publisher to each package: this repository,
-   workflow `release.yaml`.
+   workflow `release.yaml`, with publish allowed. A stage-publish-only publisher
+   refuses the `npm publish` of the release workflow.
 
 ## Commit messages
 
 [Conventional Commits](https://www.conventionalcommits.org/):
 `<type>(<scope>): <subject>`. The commit-msg hook checks the format. See
 [.github/commit-instructions.md](./.github/commit-instructions.md).
+
+A pull request is squash merged, and its title becomes the commit that the
+release notes list. The Lint PR workflow checks the title with commitlint; check
+one locally with `echo "<title>" | pnpm exec commitlint`.
