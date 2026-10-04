@@ -3,6 +3,9 @@ import { defaultExclude, defineConfig } from "vitest/config";
 
 const setupFiles = ["./test/setup/jest-extended.ts"];
 
+/** Swaps the global managed plugin; no Studio, real or stand-in, may run. */
+const REAL_STUDIO_SPEC = "test/integration/real-studio-sync.spec.ts";
+
 /**
  * The coverage-measured suite. Never spawns a process: every I/O goes through
  * injected seams. `vitest.stryker.config.ts` runs the same project.
@@ -55,10 +58,25 @@ export default defineConfig({
 				test: {
 					name: "integration",
 					clearMocks: true,
+					exclude: [...defaultExclude, REAL_STUDIO_SPEC],
 					include: ["test/integration/**/*.spec.ts"],
 					restoreMocks: true,
 					setupFiles,
 					// Real processes; Windows spawns are slow under load.
+					testTimeout: 15_000,
+					unstubEnvs: true,
+				},
+			},
+			{
+				extends: true,
+				test: {
+					// Runs after `integration`: its specs spawn Studio stand-ins.
+					name: "integration-real-studio",
+					clearMocks: true,
+					include: [REAL_STUDIO_SPEC],
+					restoreMocks: true,
+					sequence: { groupOrder: 1 },
+					setupFiles,
 					testTimeout: 15_000,
 					unstubEnvs: true,
 				},
