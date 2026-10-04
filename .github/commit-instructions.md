@@ -20,15 +20,20 @@
 
 Use "<type>(<scope>)!" for breaking changes
 
-## Scope is optional, but should be one of the following:
+## Scope is optional: the area changed
 
-- assets: changes to assets (images, fonts, etc.)
-- audio: changes relating to sound or music
-- core: changes to the core game functionality
-- deps: changes to dependencies
-- dev: changes to the development environment
-- lint: changes that only affect linting such as auto-formatting
-- mtx: changes to monetization or in-game purchases
+- core: the session, its parts, and the commands that drive them
+- dev: the development environment
+- deps: dependencies
+- lint: linting and formatting only
+- a command (`open`, `status`, `syncback`) or a part (`studio`, `reaper`,
+  `native`, `supervisor`)
+
+## Pull request titles
+
+A pull request merges as one squash commit, titled with the pull request title.
+changelogithub writes the release notes from these titles, so a title follows
+the rules below; the Lint PR workflow checks it with commitlint.
 
 ## Subject line rules:
 

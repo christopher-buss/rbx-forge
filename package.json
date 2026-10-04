@@ -75,6 +75,9 @@
 		"strip-json-comments": "catalog:runtime"
 	},
 	"devDependencies": {
+		"@commitlint/cli": "catalog:lint",
+		"@commitlint/config-conventional": "catalog:lint",
+		"@commitlint/types": "catalog:lint",
 		"@isentinel/eslint-config": "catalog:lint",
 		"@isentinel/tsconfig": "catalog:tsc",
 		"@napi-rs/cli": "catalog:native",
