@@ -41,6 +41,12 @@ function precedenceCase<T>({ read, set, type, values }: OptionUnderTest<T>): Pre
 // defaults, so a changed default fails here.
 const CASES: ReadonlyArray<PrecedenceCase> = [
 	precedenceCase({
+		read: (config) => config.studio.desktop,
+		set: (value: "hidden" | "user") => ({ studio: { desktop: value } }),
+		type: "Studio desktop",
+		values: { default: undefined, file: "hidden", flag: "user" },
+	}),
+	precedenceCase({
 		read: (config) => config.buildOutputPath,
 		set: (value: string) => ({ buildOutputPath: value }),
 		type: "string",

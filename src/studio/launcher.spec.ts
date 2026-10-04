@@ -155,6 +155,18 @@ describe(studioLaunchInvocation, () => {
 });
 
 describe(createStudioLauncher, () => {
+	it("should launch and report a Studio on the hidden Windows desktop", async () => {
+		expect.assertions(2);
+
+		const { native, spawns } = windowsNative();
+		const { launch } = makeLauncher({ files: { [STUDIO_EXE]: "" }, native, platform: "win32" });
+
+		await expect(
+			launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden" }),
+		).resolves.toMatchObject({ studio: { desktop: "hidden" } });
+		expect(spawns[0]).toMatchObject({ desktop: "hidden" });
+	});
+
 	it("should pass the session RunScript arguments to Studio on Windows", async () => {
 		expect.assertions(1);
 

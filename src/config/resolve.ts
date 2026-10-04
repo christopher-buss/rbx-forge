@@ -5,6 +5,7 @@ import type {
 	HookCommand,
 	HookPhases,
 	ProjectType,
+	StudioDesktop,
 } from "./schema.ts";
 
 /**
@@ -27,7 +28,7 @@ export interface ConfigDefaults {
 	rojoPort: number | undefined;
 	rojoProjectPath: string;
 	session: { idleTimeout: number };
-	studio: { autoRecovery: AutoRecoveryMode };
+	studio: { autoRecovery: AutoRecoveryMode; desktop: StudioDesktop | undefined };
 	syncback: {
 		inputPath: string | undefined;
 		projectPath: string | undefined;
@@ -59,7 +60,7 @@ export const DEFAULT_CONFIG: Readonly<ConfigDefaults> = {
 	rojoPort: undefined,
 	rojoProjectPath: "default.project.json",
 	session: { idleTimeout: 30 },
-	studio: { autoRecovery: "move" },
+	studio: { autoRecovery: "move", desktop: undefined },
 	syncback: { inputPath: undefined, projectPath: undefined, runOnStart: false },
 	typegen: {
 		exclude: ["**/node_modules/**"],
@@ -87,6 +88,24 @@ export function resolveConfig(file: ForgeConfig, flags: ConfigLayer): ResolvedCo
 	);
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- The file sets `projectType`, both layers passed the schema, and the defaults fill every other key.
 	return merged as unknown as ResolvedConfig;
+}
+
+/**
+ * Resolve a command's Studio desktop after flag and file precedence.
+ *
+ * @param config - The file and flag config layers, resolved.
+ * @param platform - The host OS; hidden is Windows only.
+ * @param defaultDesktop - The command's choice when no layer sets it.
+ * @param override - A later client's desktop flag when attaching Studio.
+ * @returns The effective desktop.
+ */
+export function resolveStudioDesktop(
+	config: Pick<ResolvedConfig, "studio">,
+	platform: NodeJS.Platform,
+	defaultDesktop: StudioDesktop = "user",
+	override?: StudioDesktop,
+): StudioDesktop {
+	return platform === "win32" ? (override ?? config.studio.desktop ?? defaultDesktop) : "user";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

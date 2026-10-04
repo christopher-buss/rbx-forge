@@ -53,10 +53,15 @@ export interface OpenOptions {
  */
 export type AutoRecoveryMode = "delete" | "keep" | "move";
 
+/** Where a Studio runs. Hidden is available only on Windows. */
+export type StudioDesktop = "hidden" | "user";
+
 /** Options for the Roblox Studio forge opens and closes. */
 export interface StudioOptions {
 	/** What to do with the auto-recovery files of a Studio forge ends. */
 	autoRecovery?: AutoRecoveryMode;
+	/** Override the desktop selected by the command. */
+	desktop?: StudioDesktop;
 }
 
 /** Options for the sessions of `forge start` and `forge up`. */
@@ -167,7 +172,11 @@ const fileSchema = type({
 	"rojoPort?": "1 <= number.integer <= 65535",
 	"rojoProjectPath?": PATH,
 	"session?": { "+": "reject", "idleTimeout?": "number >= 0" },
-	"studio?": { "+": "reject", "autoRecovery?": "'delete' | 'keep' | 'move'" },
+	"studio?": {
+		"+": "reject",
+		"autoRecovery?": "'delete' | 'keep' | 'move'",
+		"desktop?": "'user' | 'hidden'",
+	},
 	"syncback?": {
 		"+": "reject",
 		"inputPath?": PATH,

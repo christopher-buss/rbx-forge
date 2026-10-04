@@ -266,6 +266,7 @@ pub struct DetachedSpawn {
     pub env: HashMap<String, String>,
     /// A file stdout and stderr append to; `NUL` when missing.
     pub output: Option<String>,
+    pub desktop: Option<String>,
 }
 
 /// Start a process outside this process's job, with no console. Returns its
@@ -283,6 +284,7 @@ pub fn spawn_detached(spawn: DetachedSpawn) -> Result<Option<u32>> {
         cwd: &spawn.cwd,
         env: &env,
         output: spawn.output.as_deref(),
+        desktop: spawn.desktop.as_deref(),
     })
     .map_err(|err| to_napi(&format!("start {}", spawn.program), &err))
 }

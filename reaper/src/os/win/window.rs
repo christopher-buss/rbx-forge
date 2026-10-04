@@ -10,13 +10,13 @@
 //! unowned helper windows.
 
 use std::io;
+use windows_sys::Win32::System::StationsAndDesktops::EnumDesktopWindows;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, TRUE};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GW_OWNER, GWL_EXSTYLE, GetClassNameW, GetWindow, GetWindowLongPtrW,
-    GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_CLOSE,
-    WS_EX_TOOLWINDOW,
+    GW_OWNER, GWL_EXSTYLE, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowTextW,
+    GetWindowThreadProcessId, IsWindowVisible, PostMessageW, WM_CLOSE, WS_EX_TOOLWINDOW,
 };
 
 /// Window classes of console windows.
@@ -98,7 +98,9 @@ fn main_windows(pid: u32) -> io::Result<Vec<HWND>> {
         hidden: Vec::new(),
     };
     // SAFETY: the callback reads `search` only during this call.
-    let ok = unsafe { EnumWindows(Some(collect), (&raw mut search) as LPARAM) };
+    let desktop = super::desktop::for_process(pid)?;
+    let ok =
+        unsafe { EnumDesktopWindows(desktop.raw(), Some(collect), (&raw mut search) as LPARAM) };
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }

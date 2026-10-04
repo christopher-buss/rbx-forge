@@ -3,6 +3,7 @@ import path from "node:path";
 import type { FlagDefinition } from "../cli/flags.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
+import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
 import { runWithHooksAsync } from "../hooks/run-hooks.ts";
@@ -52,6 +53,7 @@ export interface OpenedPlace {
 export interface OpenOptions {
 	/** Prepare a session plugin immediately before a direct launch attempt. */
 	beforeLaunch?: (() => Promise<void>) | undefined;
+	desktop?: StudioDesktop | undefined;
 	/** The caller already built this place, so it is opened as it is. */
 	isBuilt: boolean;
 	/** A session's marker script; snapshots do not use one. */
@@ -230,9 +232,10 @@ async function launchAsync(
 	place: string,
 	{
 		beforeLaunch,
+		desktop,
 		runScript,
 		studioPath,
-	}: Pick<OpenOptions, "beforeLaunch" | "runScript" | "studioPath">,
+	}: Pick<OpenOptions, "beforeLaunch" | "desktop" | "runScript" | "studioPath">,
 ): Promise<null | StudioProcess> {
 	reporter.emit({ name: STEP, status: "started", type: "step" });
 	const outcome = await seams.studioLauncher({
@@ -240,6 +243,7 @@ async function launchAsync(
 		env,
 		place,
 		studioPath,
+		...(desktop === undefined ? {} : { desktop }),
 		...(runScript === undefined ? {} : { runScript }),
 		...(beforeLaunch === undefined ? {} : { beforeLaunch }),
 	});

@@ -11,6 +11,7 @@
 //! - [`testing`]: helpers that only tests call (jobs, other-user connects,
 //!   a window that counts close requests).
 
+pub mod desktop;
 pub mod detach;
 pub mod pipe;
 pub mod registry;

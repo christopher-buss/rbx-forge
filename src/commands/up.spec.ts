@@ -120,6 +120,7 @@ describe("up flags", () => {
 		expect.assertions(1);
 
 		expect(UP_FLAGS.map(({ name }) => name)).toStrictEqual([
+			"desktop",
 			"compiler",
 			"force",
 			"studio",
@@ -254,7 +255,7 @@ describe(runUpAsync, () => {
 			data: { ...compilerStatus("ready"), added: ["compiler"], started: false },
 			summary: "Found session s1 and started the compiler: the compiler is ready.",
 		});
-		expect(asked).toStrictEqual([{ parts: ["compiler"] }]);
+		expect(asked).toStrictEqual([{ defaultDesktop: "hidden", parts: ["compiler"] }]);
 		expect(up.detachedSupervisor).not.toHaveBeenCalled();
 		expect(up.now()).toBe(UP_POLL_MS);
 	});
@@ -279,7 +280,7 @@ describe(runUpAsync, () => {
 		).resolves.toMatchObject({
 			summary: "Found session s1 and added no part: no part runs.",
 		});
-		expect(asked).toStrictEqual([{ parts: [] }]);
+		expect(asked).toStrictEqual([{ defaultDesktop: "hidden", parts: [] }]);
 	});
 
 	it("should name each part that runs, and how", async () => {
@@ -346,7 +347,10 @@ describe(runUpAsync, () => {
 				});
 				return 700;
 			},
-			{ config: {}, flags: { "studio": true, "studio-path": "Studio.exe" } },
+			{
+				config: { studio: { desktop: "user" } },
+				flags: { "studio": true, "studio-path": "Studio.exe" },
+			},
 		);
 
 		await expect(run()).resolves.toStrictEqual({
@@ -354,7 +358,12 @@ describe(runUpAsync, () => {
 			summary: `Started session s1: the compiler is ready, Rojo serves on port 34872, Studio has ${PLACE} open.`,
 		});
 		expect(asked).toStrictEqual([
-			{ parts: ["compiler", "studio"], studioPath: path.join(PROJECT, "Studio.exe") },
+			{
+				defaultDesktop: "hidden",
+				desktop: "user",
+				parts: ["compiler", "studio"],
+				studioPath: path.join(PROJECT, "Studio.exe"),
+			},
 		]);
 	});
 

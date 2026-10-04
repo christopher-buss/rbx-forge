@@ -1689,6 +1689,7 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).toHaveBeenCalledExactlyOnceWith({
 			beforeLaunch: fromAny(expect.any(Function)),
 			cwd: PROJECT,
+			desktop: "user",
 			env: { PATH: TOOLS },
 			place: PLACE,
 			runScript: path.join(SESSION, "studio-marker.lua"),
@@ -3142,6 +3143,7 @@ describe("forge up control channel", () => {
 				compiler: { building: false, owner: null, status: "off" },
 				rojo: { owner: null, port: 4000, status: "ready" },
 				studio: {
+					desktop: "user",
 					origin: "found",
 					owner: null,
 					pid: STUDIO_PID,

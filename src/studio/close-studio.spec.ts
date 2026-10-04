@@ -27,14 +27,21 @@ function seamsWith(lock: string, native: NativeLoader): StudioSeams {
 }
 
 describe(findPlaceStudio, () => {
-	it("should return the verified Studio the lock file names", () => {
-		expect.assertions(1);
+	it.for(["user", "hidden"] as const)(
+		"should return the verified Studio on the %s desktop",
+		(desktop) => {
+			expect.assertions(1);
 
-		const native = createFakeNative({ 7: STUDIO });
-		const seams = seamsWith(`7\nRobloxStudio\n${TEST_HOSTNAME}\n`, () => native.addon);
+			const native = createFakeNative({ 7: { ...STUDIO, desktop } });
+			const seams = seamsWith(`7\nRobloxStudio\n${TEST_HOSTNAME}\n`, () => native.addon);
 
-		expect(findPlaceStudio(seams, PLACE)).toStrictEqual({ pid: 7, startTime: "0" });
-	});
+			expect(findPlaceStudio(seams, PLACE)).toStrictEqual({
+				desktop,
+				pid: 7,
+				startTime: "0",
+			});
+		},
+	);
 
 	it("should return undefined when the lock file names another computer", () => {
 		expect.assertions(1);
