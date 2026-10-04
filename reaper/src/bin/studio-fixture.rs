@@ -2,6 +2,7 @@
 //! A marker's ReadyUrl receives one GET after the place lock exists.
 //! FIXTURE_STUDIO_ACK=none omits the GET; wrong sends an invalid token.
 //! FIXTURE_STUDIO_ACK_DELAY_MS delays the GET from the lock's creation.
+//! FIXTURE_STUDIO_PLATFORM_LAUNCHER=1 reads the place from RBX_FORGE_PLACE.
 
 #[allow(
     dead_code,
@@ -22,11 +23,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
-    let place = args
-        .windows(2)
-        .find(|pair| pair[0] == "--localPlaceFile")
-        .map(|pair| pair[1].as_str())
-        .or_else(|| args.first().map(String::as_str))
+    let platform_place = (env::var("FIXTURE_STUDIO_PLATFORM_LAUNCHER").as_deref() == Ok("1"))
+        .then(|| env::var("RBX_FORGE_PLACE"))
+        .transpose()
+        .map_err(io::Error::other)?;
+    let place = platform_place
+        .as_deref()
+        .or_else(|| {
+            args.windows(2)
+                .find(|pair| pair[0] == "--localPlaceFile")
+                .map(|pair| pair[1].as_str())
+                .or_else(|| args.first().map(String::as_str))
+        })
         .ok_or_else(|| io::Error::other("missing place"))?;
     let mut ready_url = args
         .windows(2)

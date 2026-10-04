@@ -1,21 +1,38 @@
-import { mkdirSync, readdirSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it } from "vitest";
+import { pathToFileURL } from "node:url";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
+import { withVariables } from "../../src/process/environment.ts";
 import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
 import type { FixtureProject } from "../helpers/fixture-project.ts";
 import { makeFixtureProject } from "../helpers/fixture-project.ts";
-import { parseOpened, parseResult } from "../helpers/output.ts";
-import { NATIVE_DIRECTORY, waitForFileAsync } from "../helpers/real-native.ts";
+import { parseLines, parseOpened, parseResult } from "../helpers/output.ts";
+import {
+	makeRunScriptStudioExecutable,
+	NATIVE_DIRECTORY,
+	waitForFileAsync,
+} from "../helpers/real-native.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
+import { BIN } from "./run-bin.ts";
 import { makeFixtureAsync, wrapperPath } from "./session-fixture.ts";
 import { runForgeAsync, WATCH_COMMAND } from "./up-fixture.ts";
 
+const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
+const FORBID_BREAKAWAY = path.join(
+	import.meta.dirname,
+	"..",
+	"fixtures",
+	"bin",
+	"forbid-breakaway.ts",
+);
 const IS_WINDOWS = process.platform === "win32";
+const SNAPSHOT_DESKTOP = IS_WINDOWS ? "hidden" : "user";
 /** The fixture role that stands in for the POSIX platform launcher. */
 const LAUNCHER = process.platform === "darwin" ? "open" : "xdg-open";
 
@@ -85,7 +102,97 @@ async function waitForStudioAsync(log: string): Promise<WorkerRecord> {
 	return studio!;
 }
 
+/**
+ * Install the fixture Rojo as a Node dependency so builds do not use ComSpec.
+ *
+ * @param project - The fixture project.
+ */
+function installNodeRojo(project: string): void {
+	const directory = path.join(project, "node_modules", "fake-rojo");
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(
+		path.join(project, "package.json"),
+		JSON.stringify({ devDependencies: { "fake-rojo": "1.0.0" } }),
+	);
+	writeFileSync(
+		path.join(directory, "package.json"),
+		JSON.stringify({ name: "fake-rojo", bin: { rojo: "cli.mjs" } }),
+	);
+	writeFileSync(
+		path.join(directory, "cli.mjs"),
+		`process.argv.splice(2, 0, "rojo");\nawait import(${JSON.stringify(pathToFileURL(FAKE_WORKER).href)});\n`,
+	);
+}
+
 describe("forge open", () => {
+	it("should open a snapshot on the user desktop when the flag overrides hidden config", async () => {
+		expect.assertions(3);
+
+		const { forge, log } = makeFixture({
+			"rbx-forge.config.json": JSON.stringify({
+				buildOutputPath: PLACE,
+				projectType: "luau",
+				studio: { desktop: "hidden" },
+			}),
+		});
+		const { status, stdout } = await forge(["open", "--desktop", "user", "--json"]);
+		await waitForStudioAsync(log);
+
+		expect(status).toBe(EXIT_SUCCESS);
+		expect(parseResult(stdout).data).toMatchObject({
+			desktop: "user",
+			studio: { desktop: "user" },
+		});
+	});
+
+	it.skipIf(!IS_WINDOWS)(
+		"should warn and open the snapshot on the user desktop when a job forbids breakaway",
+		async () => {
+			expect.assertions(5);
+
+			const fixture = await makeFixtureAsync({ projectType: "luau" }, { studio: true });
+			installNodeRojo(fixture.project);
+			const shell = makeRunScriptStudioExecutable();
+			const child = spawn(process.execPath, [BIN, "open", "--json"], {
+				cwd: fixture.project,
+				env: withVariables(
+					fixture.environment(),
+					{
+						ComSpec: shell,
+						FIXTURE_STUDIO_PLATFORM_LAUNCHER: "1",
+						NODE_OPTIONS: `--import ${pathToFileURL(FORBID_BREAKAWAY).href}`,
+					},
+					"win32",
+				),
+				windowsHide: true,
+			});
+			onTestFinished(() => {
+				child.kill();
+			});
+			let stdout = "";
+			child.stdout.setEncoding("utf8");
+			child.stdout.on("data", (chunk: string) => {
+				stdout += chunk;
+			});
+			const code = await new Promise((resolve) => {
+				child.once("close", resolve);
+			});
+			const { data } = parseResult(stdout);
+
+			expect(code).toBe(EXIT_SUCCESS);
+			expect(data).toMatchObject({ desktop: "user", studio: null });
+			expect(parseLines(stdout)).toContainEqual({
+				message:
+					"Studio opened on the user's desktop: the platform launcher cannot use the hidden desktop.",
+				type: "warning",
+			});
+			expect(readWorkerLog(fixture.log)).toContainEqual(
+				expect.objectContaining({ role: "studio" }),
+			);
+			expect(existsSync(`${String(data!["place"])}.lock`)).toBeTrue();
+		},
+	);
+
 	it("should build a snapshot, then start Studio with it directly, and Studio outlives forge", async () => {
 		expect.assertions(5);
 
@@ -100,6 +207,7 @@ describe("forge open", () => {
 		expect({ data, status }).toMatchObject({
 			data: {
 				build: { hooks: [], output: snapshot },
+				desktop: SNAPSHOT_DESKTOP,
 				hooks: [],
 				place: snapshot,
 				pruned: [],

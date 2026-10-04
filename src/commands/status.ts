@@ -107,6 +107,18 @@ function portOf({ port }: SessionStatus["services"]["rojo"]): string {
 }
 
 /**
+ * Studio's desktop when the session knows where it opened.
+ *
+ * @param studio - Studio's status and actual desktop.
+ * @returns A suffix for an active Studio, or no suffix.
+ */
+function desktopOf(studio: SessionStatus["services"]["studio"]): string {
+	return studio.desktop === undefined || studio.status === "off"
+		? ""
+		: ` on the ${studio.desktop} desktop`;
+}
+
+/**
  * The TTY lines of a status: the session, then one line per service.
  *
  * @param status - The session's status.
@@ -126,7 +138,7 @@ function describeStatus({ phase, pid, services, sessionId }: SessionStatus): str
 		`  rojo: ${describePart(rojo)}${portOf(rojo)}`,
 		`  compiler: ${describePart(compiler)}${building}${built}`,
 		`  syncback: ${syncback.status}${synced}`,
-		`  studio: ${studio.status}`,
+		`  studio: ${studio.status}${desktopOf(studio)}`,
 	];
 	return lines.join("\n");
 }

@@ -63,17 +63,22 @@ with `studio_found`.
 
 ## Hidden desktop
 
-On Windows, `forge up --studio` opens a new Studio on a hidden desktop, apart
-from the user's desktop. It loads plugins and serves the Studio MCP without
+On Windows, `forge up --studio` and `forge open` open a new Studio on a
+hidden desktop, apart from the user's desktop. It loads plugins and serves the Studio MCP without
 changing the user's screen. All projects share one named desktop in the Windows
 user session. Forge opens it or makes it and keeps it for later launches.
 
 `forge start` opens Studio on the user's desktop by default. Set
 `studio.desktop` in the config or pass `--desktop user` / `--desktop hidden` to
-`start` or `up --studio`; the flag wins. On macOS and Linux the effective desktop
-is always `user`. A found Studio stays on its existing desktop.
+`start`, `up --studio`, or `open`; the flag wins. On macOS and Linux the effective
+desktop is always `user`. A found Studio stays on its existing desktop.
 
-`forge status --json` records the actual desktop as
+`restart` reopens Studio on its previous desktop. When Windows cannot launch
+a hidden Studio directly, forge uses the platform launcher on the user desktop
+and emits a warning. Snapshot results and session status report this actual
+desktop.
+
+`forge status` displays the desktop; `forge status --json` records it as
 `services.studio.desktop`. `stop` and `down` close windows on that desktop and
 end a Studio blocked by a modal dialog there at once.
 

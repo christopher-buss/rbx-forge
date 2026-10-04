@@ -34,6 +34,50 @@ function makeContext(): {
 }
 
 describe(runStatusAsync, () => {
+	it("should omit the desktop for a Studio that is off", async () => {
+		expect.assertions(1);
+
+		const { context, ipc, memory } = makeContext();
+		const { services } = makeStatus();
+		await serveFakeSessionAsync(
+			memory,
+			ipc,
+			makeStatus({
+				services: {
+					...services,
+					studio: { desktop: "hidden", owner: null, status: "off" },
+				},
+			}),
+		);
+
+		const { summary } = await runStatusAsync(context);
+
+		expect(summary.split("\n").at(-1)).toBe("  studio: off");
+	});
+
+	it.for(["hidden", "user"] as const)(
+		"should show Studio's actual %s desktop in text status",
+		async (desktop) => {
+			expect.assertions(1);
+
+			const { context, ipc, memory } = makeContext();
+			const { services } = makeStatus();
+			await serveFakeSessionAsync(
+				memory,
+				ipc,
+				makeStatus({
+					services: {
+						...services,
+						studio: { desktop, owner: null, status: "open" },
+					},
+				}),
+			);
+			const result = await runStatusAsync(context);
+
+			expect(result.summary).toContain(`studio: open on the ${desktop} desktop`);
+		},
+	);
+
 	it("should return the running session's status", async () => {
 		expect.assertions(1);
 

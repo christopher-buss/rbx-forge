@@ -103,7 +103,7 @@ flags:
 - `--force`: when a crashed earlier session still has processes after the wait,
   kill them, each verified as that session's own.
 - `--desktop <user|hidden>`: where Studio opens on Windows. `start` defaults to
-  `user`; `up --studio` defaults to `hidden`.
+  `user`; `up --studio` and `open` default to `hidden`.
 - `--studio-path <path>`: the Roblox Studio executable to start (see
   [Opening Studio](./docs/studio.md#opening-studio)).
 
@@ -177,16 +177,16 @@ leaves a found Studio open; set it with `session.idleTimeout`.
 
 One-shot commands:
 
-| Command          | What it does                                                                                              |
-| ---------------- | --------------------------------------------------------------------------------------------------------- |
-| `forge init`     | Create `rbx-forge.config.ts`. `--type <rbxts\|luau>`, `--force` to replace.                               |
-| `forge config`   | Print the resolved config.                                                                                |
-| `forge build`    | Build the Rojo project. `-o, --output <path>`, or `--plugin <name>` for Studio's plugins folder.          |
-| `forge compile`  | Compile roblox-ts once and report errors (rbxts only). While a session runs: see below.                   |
-| `forge open`     | Build a snapshot of the place and open it in Studio, outside every session. `--studio-path <path>`.       |
-| `forge stop`     | Close the session's Studio (and stop its Rojo) or the Studio of a place, after it verifies it. See below. |
-| `forge syncback` | Sync the place back into the project once. `--input <path>`, `--project <path>`.                          |
-| `forge typegen`  | Write service types from the Rojo sourcemap. `-o`, `--include`, `--exclude`, `--max-depth` (rbxts only).  |
+| Command          | What it does                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `forge init`     | Create `rbx-forge.config.ts`. `--type <rbxts\|luau>`, `--force` to replace.                                                     |
+| `forge config`   | Print the resolved config.                                                                                                      |
+| `forge build`    | Build the Rojo project. `-o, --output <path>`, or `--plugin <name>` for Studio's plugins folder.                                |
+| `forge compile`  | Compile roblox-ts once and report errors (rbxts only). While a session runs: see below.                                         |
+| `forge open`     | Build a snapshot of the place and open it in Studio, outside every session. `--studio-path <path>`, `--desktop <user\|hidden>`. |
+| `forge stop`     | Close the session's Studio (and stop its Rojo) or the Studio of a place, after it verifies it. See below.                       |
+| `forge syncback` | Sync the place back into the project once. `--input <path>`, `--project <path>`.                                                |
+| `forge typegen`  | Write service types from the Rojo sourcemap. `-o`, `--include`, `--exclude`, `--max-depth` (rbxts only).                        |
 
 `stop` closes the session's Studio and stops its Rojo; the compiler keeps
 running, and an `up` session with no part left ends. A Studio that a
