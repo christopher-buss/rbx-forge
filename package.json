@@ -60,7 +60,7 @@
 		"release:publish": "node scripts/release/publish.ts",
 		"test": "pnpm test:unit && pnpm test:integration",
 		"test:e2e": "vitest run --project e2e",
-		"test:integration": "vitest run --project integration",
+		"test:integration": "vitest run --project integration --project integration-real-studio",
 		"test:other-user": "vitest run --project other-user",
 		"test:unit": "vitest run --project unit --coverage",
 		"typecheck": "tsc --build",
