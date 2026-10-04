@@ -242,9 +242,10 @@ Window states after `WM_CLOSE` to the main window:
      tarball, not the file system, carries the mode.
   2. It publishes each platform package, then `rbx-forge` with them as
      `optionalDependencies`. Those are written only for the publish, so the
-     lockfile never names a version that is not on npm. `packageName`
-     `@rbx-forge/native` is only the name prefix; there is no separate umbrella
-     package.
+     lockfile never names a version that is not on npm. `pnpm pack` writes each
+     tarball (it resolves `catalog:` versions) and `npm publish` sends it with
+     its README. `packageName` `@rbx-forge/native` is only the name prefix;
+     there is no separate umbrella package.
 - **Loader.** A TypeScript module in the native-bindings area (no napi generated
   JS; the build already uses `--no-js`) picks the package from
   `process.platform`, `process.arch`, and glibc or musl. It loads the addon with
