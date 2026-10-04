@@ -2,6 +2,7 @@ import path from "node:path";
 
 import type { FlagDefinition, FlagValues } from "../cli/flags.ts";
 import { ForgeError } from "../errors.ts";
+import type { NativeAddon } from "../native/addon.ts";
 import { readVariable, withVariables } from "../process/environment.ts";
 import type { FileSystem } from "../seams/file-system.ts";
 import type { Host } from "../seams/host.ts";
@@ -74,7 +75,7 @@ export function commandExecutable(command: string): string | undefined {
  * @returns The executable, or `undefined` when none is found: forge then
  *   opens the place through the platform launcher.
  * @throws {ForgeError} `studio_launch_failed` when the flag or the variable
- *   names no file.
+ *   names no file; `native_missing` when Windows has no addon.
  */
 export function findStudioExecutable(
 	seams: DiscoverySeams,
@@ -153,24 +154,29 @@ function override(
 }
 
 /**
- * Read one registry key. A missing addon or a failed read counts as no
- * value: forge then falls back to the platform launcher.
+ * Read one registry key. A failed read counts as no value.
  *
- * @param seams - The addon.
+ * @param read - The addon's registry read.
  * @param key - The key under `HKEY_CURRENT_USER`.
  * @returns Its default value, or `undefined`.
  */
-function readRegistry(seams: Pick<DiscoverySeams, "native">, key: string): string | undefined {
+function readRegistry(
+	read: NativeAddon["readUserRegistryDefault"],
+	key: string,
+): string | undefined {
 	try {
-		return seams.native().readUserRegistryDefault?.(key) ?? undefined;
+		return read?.(key) ?? undefined;
 	} catch {
 		return undefined;
 	}
 }
 
 function fromRegistry(seams: DiscoverySeams): StudioExecutable | undefined {
+	// Outside the read's catch: a missing addon is `native_missing`, never "no
+	// Studio".
+	const { readUserRegistryDefault } = seams.native();
 	for (const key of STUDIO_REGISTRY_KEYS) {
-		const command = readRegistry(seams, key);
+		const command = readRegistry(readUserRegistryDefault, key);
 		const file = command === undefined ? undefined : commandExecutable(command);
 		if (file !== undefined && isFile(seams, file)) {
 			return { path: file, source: "registry" };

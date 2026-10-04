@@ -370,8 +370,12 @@ async function launchStudioAsync(
 	try {
 		executable = findStudioExecutable(backend, launch);
 	} catch (err) {
-		const { hint, message } = toForgeError(err);
-		return { hint, message, type: "failed" };
+		const error = toForgeError(err);
+		if (error.code === "native_missing") {
+			throw error;
+		}
+
+		return { hint: error.hint, message: error.message, type: "failed" };
 	}
 
 	return executable === undefined
