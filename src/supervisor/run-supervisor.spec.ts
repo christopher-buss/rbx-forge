@@ -1780,6 +1780,18 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(run.reporter.events.at(-1)).toStrictEqual({
+			message: 'Rojo serves default.project.json on port 4000. Stop it with "forge down".',
+			type: "info",
+		});
+	});
+
+	it("should tell an owning start to press Ctrl+C once ready", async () => {
+		expect.assertions(1);
+
+		const run = await stoppedAsync({ owned: true });
+		await run.result;
+
+		expect(run.reporter.events.at(-1)).toStrictEqual({
 			message: "Rojo serves default.project.json on port 4000. Press Ctrl+C to stop.",
 			type: "info",
 		});
@@ -1870,7 +1882,7 @@ describe(runSupervisorAsync, () => {
 			},
 			{
 				message:
-					"Rojo serves default.project.json on port 4000. The compiler watches your code. Press Ctrl+C to stop.",
+					'Rojo serves default.project.json on port 4000. The compiler watches your code. Stop it with "forge down".',
 				type: "info",
 			},
 		]);
@@ -2275,7 +2287,7 @@ describe(runSupervisorAsync, () => {
 			type: "warning",
 		});
 		expect(run.reporter.events).toContainEqual({
-			message: "Press Ctrl+C to stop.",
+			message: 'Stop it with "forge down".',
 			type: "info",
 		});
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
@@ -2300,7 +2312,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(run.isListeningAsync).toHaveBeenCalledTimes(checks);
 		expect(run.reporter.events).toContainEqual({
-			message: "The compiler watches your code. Press Ctrl+C to stop.",
+			message: 'The compiler watches your code. Stop it with "forge down".',
 			type: "info",
 		});
 	});
@@ -2322,7 +2334,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(state).toMatchObject({ services: { rojo: { status: "failed" } } });
 		expect(run.reporter.events).toContainEqual({
-			message: "Press Ctrl+C to stop.",
+			message: 'Stop it with "forge down".',
 			type: "info",
 		});
 	});
