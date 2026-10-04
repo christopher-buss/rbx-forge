@@ -1,4 +1,5 @@
-//! AX presses do not activate, unhide, or restore Studio's windows.
+//! AX presses do not activate or unhide Studio. Studio restores a minimized
+//! window when it saves, so the save minimizes such windows again.
 
 use std::ffi::c_void;
 use std::io;
@@ -11,6 +12,9 @@ const UTF8: u32 = 0x0800_0100;
 const ATTRIBUTE_UNSUPPORTED: AxError = -25205;
 const NO_VALUE: AxError = -25212;
 const API_DISABLED: AxError = -25211;
+/// How long after the press Studio may restore a minimized window.
+const RESTORE_GRACE: Duration = Duration::from_secs(2);
+const RESTORE_POLL: Duration = Duration::from_millis(10);
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -20,10 +24,12 @@ unsafe extern "C" {
     fn AXUIElementSetMessagingTimeout(element: CfRef, seconds: f32) -> AxError;
     fn AXUIElementCopyAttributeValue(element: CfRef, name: CfRef, value: *mut CfRef) -> AxError;
     fn AXUIElementPerformAction(element: CfRef, action: CfRef) -> AxError;
+    fn AXUIElementSetAttributeValue(element: CfRef, name: CfRef, value: CfRef) -> AxError;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
+    static kCFBooleanTrue: CfRef;
     fn CFRelease(value: CfRef);
     fn CFRetain(value: CfRef) -> CfRef;
     fn CFGetTypeID(value: CfRef) -> usize;
@@ -160,6 +166,24 @@ impl Access {
         Ok(children)
     }
 
+    fn flag(&self, element: &Owned, name: &str) -> io::Result<bool> {
+        Ok(self.attribute(element, name)?.is_some_and(|value| {
+            // SAFETY: type IDs do not require a reference.
+            value.is_type(unsafe { CFBooleanGetTypeID() })
+                // SAFETY: the type check proves value is a live CFBoolean.
+                && unsafe { CFBooleanGetValue(value.as_ref()) }
+        }))
+    }
+
+    fn minimize(&self, window: &Owned) -> io::Result<()> {
+        self.prepare(window)?;
+        let name = Owned::text("AXMinimized")?;
+        // SAFETY: the window and name are live, and kCFBooleanTrue is a static CFBoolean.
+        check(unsafe {
+            AXUIElementSetAttributeValue(window.as_ref(), name.as_ref(), kCFBooleanTrue)
+        })
+    }
+
     fn named_child(&self, element: &Owned, name: &str) -> io::Result<Option<Owned>> {
         for child in self.elements(element, "AXChildren")? {
             if let Some(title) = self.attribute(&child, "AXTitle")?
@@ -210,13 +234,51 @@ pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
             if !pinned.is_alive()? {
                 return Err(io::Error::other("Studio identity changed"));
             }
+            let minimized = minimized_windows(&access, &app)?;
             access.prepare(&save)?;
             // SAFETY: AXPress targets the live, exact File > Save to File item.
             check(unsafe { AXUIElementPerformAction(save.as_ref(), action.as_ref()) })?;
+            keep_minimized(&pinned, minimized, deadline);
             return Ok("requested".to_owned());
         }
     }
     Ok("no_menu_item".to_owned())
+}
+
+fn minimized_windows(access: &Access, app: &Owned) -> io::Result<Vec<Owned>> {
+    let mut minimized = Vec::new();
+    for window in access.elements(app, "AXWindows")? {
+        if access.flag(&window, "AXMinimized")? {
+            minimized.push(window);
+        }
+    }
+    Ok(minimized)
+}
+
+/// Minimize again each window that Studio restores while it saves. The save
+/// already succeeded, so a window that closes or stops answering is skipped.
+fn keep_minimized(
+    pinned: &super::process::PinnedProcess,
+    mut windows: Vec<Owned>,
+    deadline: Instant,
+) {
+    let access = Access {
+        deadline: deadline.min(Instant::now() + RESTORE_GRACE),
+    };
+    while !windows.is_empty() && Instant::now() < access.deadline {
+        std::thread::sleep(RESTORE_POLL);
+        if !pinned.is_alive().unwrap_or(false) {
+            return;
+        }
+        windows.retain(|window| match access.flag(window, "AXMinimized") {
+            Ok(true) => true,
+            Ok(false) => {
+                let _ = access.minimize(window);
+                false
+            }
+            Err(_) => false,
+        });
+    }
 }
 
 pub fn is_blocked(pid: u32) -> bool {

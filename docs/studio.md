@@ -229,7 +229,10 @@ the desktop so an agent can tell whether the user saw the save.
 
 On macOS, forge presses the menu through Accessibility (AX) without activating
 Studio. It saves in the background, while minimized, and while the app is hidden;
-Studio keeps its focus and visibility. Grant Accessibility access to the terminal
+Studio keeps its focus and visibility. Studio restores a window minimized to
+the Dock when it saves, so forge minimizes that window again for up to two
+seconds after the press; the window can show briefly. Saves fail with `timeout`
+while the screen is locked. Grant Accessibility access to the terminal
 running forge in System Settings > Privacy & Security > Accessibility, then
 restart that terminal if needed. forge never prompts for this permission. Menu
 names must be English. The writable check runs before any AX action, because a
