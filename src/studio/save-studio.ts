@@ -44,7 +44,18 @@ export async function saveStudioAsync(
 			throw new ForgeError("studio_busy", "A modal dialog blocks Roblox Studio.");
 		}
 
-		if ((await pinned.requestSave()) === "no_menu_item") {
+		signal?.throwIfAborted();
+		const remainingMs = timeoutMs - (seams.clock.now() - started);
+		if (remainingMs <= 0) {
+			throw saveFailure(target.place, "timeout");
+		}
+
+		const outcome = await pinned.requestSave(remainingMs);
+		if (outcome === "timeout") {
+			throw saveFailure(target.place, "timeout");
+		}
+
+		if (outcome === "no_menu_item") {
 			throw saveFailure(target.place, "no_menu_item");
 		}
 
@@ -78,7 +89,7 @@ function savedResult(
 ): StudioSave {
 	return {
 		bytes: stat.size,
-		desktop: target.desktop ?? "user",
+		desktop: pinned.desktop(),
 		durationMs,
 		mtime: stat.mtime.toISOString(),
 		pid: pinned.pid,

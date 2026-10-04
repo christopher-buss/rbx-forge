@@ -150,7 +150,8 @@ windows; `SIGTERM` on macOS and Linux), then looks at Studio every 50 ms:
 
 - When the place's lock file goes, Studio has closed the place: forge ends the
   process at once, instead of waiting for Studio's slow exit.
-- When a modal dialog blocks Studio (Windows), forge ends it at once, without a
+- When a modal dialog blocks Studio (Windows, or macOS with Accessibility
+  access), forge ends it at once, without a
   save. A place fresh from `rojo build` always counts as changed in Studio, so
   "Save changes?" is the common case. Studio also shows a modal dialog while it
   opens a place.
@@ -224,6 +225,14 @@ saves run one at a time and count as activity for the idle timeout.
 On Windows, saving Studio on the user's desktop takes focus. The result names
 the desktop so an agent can tell whether the user saw the save.
 
+On macOS, forge presses the menu through Accessibility (AX) without activating
+Studio. It saves in the background, while minimized, and while the app is hidden;
+Studio keeps its focus and visibility. Grant Accessibility access to the terminal
+running forge in System Settings > Privacy & Security > Accessibility, then
+restart that terminal if needed. forge never prompts for this permission. Menu
+names must be English. The writable check runs before any AX action, because a
+read-only save can activate Studio and switch Space.
+
 An agent edits through Studio, then runs `forge save --json`, then
 `forge syncback --json`. Syncback reads the saved place on disk.
 
@@ -231,3 +240,10 @@ A Studio that is not open fails with `studio_not_open`; a modal before the
 request fails with `studio_busy`. `save_failed` carries `details.reason`:
 `timeout`, `studio_error`, `no_menu_item`, or `permission_denied`. The writable
 check stops a read-only place before Studio can show a save error.
+
+`forge save --place <snapshot>` saves the Studio that has that snapshot open,
+without using a session. The snapshot's lock must identify a verified Studio
+on this computer; a missing or stale lock returns `studio_not_open`. Paths are
+relative to the project directory unless absolute. The result reports Studio's
+actual desktop. Run `forge syncback --input <snapshot>` after the save to read
+its edits back into the project.

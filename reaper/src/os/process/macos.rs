@@ -329,14 +329,11 @@ impl Pin {
         self.signal_live(libc::SIGTERM)
     }
 
-    /// POSIX has no window state to read: never blocked.
-    #[allow(
-        clippy::unused_self,
-        clippy::unnecessary_wraps,
-        reason = "same shape as on Windows"
-    )]
     pub fn is_blocked(&self) -> io::Result<bool> {
-        Ok(false)
+        if !self.is_alive()? {
+            return Ok(false);
+        }
+        Ok(crate::os::macos_accessibility::is_blocked(self.pid))
     }
 
     /// Send `signal` to the process, once its start time still names it.

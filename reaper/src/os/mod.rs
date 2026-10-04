@@ -11,6 +11,8 @@
 //! - [`worker`]: one job or process group per worker (reaper binary only).
 
 pub mod lock;
+#[cfg(target_os = "macos")]
+pub mod macos_accessibility;
 pub mod process;
 pub mod session;
 #[cfg(windows)]

@@ -16,7 +16,7 @@ mod studio_save;
 mod windows_exports;
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use napi::bindgen_prelude::AsyncTask;
 use napi::{Env, Error, Result, Task};
@@ -250,13 +250,16 @@ impl PinnedProcess {
     ///
     /// When Studio exited or the native accessibility action fails.
     #[napi]
-    pub fn request_save(&self) -> Result<AsyncTask<StudioSaveTask>> {
+    pub fn request_save(&self, timeout_ms: Option<u32>) -> Result<AsyncTask<StudioSaveTask>> {
+        let deadline =
+            Instant::now() + Duration::from_millis(u64::from(timeout_ms.unwrap_or(30_000)));
         if !self.is_alive()? {
             return Err(Error::from_reason("Studio exited"));
         }
         Ok(AsyncTask::new(StudioSaveTask {
             pid: self.pid(),
             start_time: self.inner.start_time(),
+            deadline,
         }))
     }
 
@@ -273,8 +276,8 @@ impl PinnedProcess {
     }
 
     /// Whether a modal dialog blocks the process's main windows: on Windows
-    /// one of them is disabled, and ignores a close request. Always
-    /// `false` on POSIX, and once the process has exited.
+    /// one of them is disabled; on macOS AX reports a modal window or sheet.
+    /// `false` on Linux, without macOS Accessibility access, and after exit.
     ///
     /// # Errors
     ///
@@ -434,11 +437,15 @@ pub fn force_cleanup(target: SessionTarget, bound_ms: u32) -> AsyncTask<CleanupT
 pub struct StudioSaveTask {
     pid: u32,
     start_time: u64,
+    deadline: Instant,
 }
 impl Task for StudioSaveTask {
     type Output = String;
     type JsValue = String;
     fn compute(&mut self) -> Result<Self::Output> {
+        if Instant::now() >= self.deadline {
+            return Ok("timeout".to_owned());
+        }
         let pinned = os::process::PinnedProcess::open(self.pid)
             .map_err(|err| to_napi("pin Studio for save", &err))?;
         let Some(pinned) = pinned else {
@@ -447,7 +454,10 @@ impl Task for StudioSaveTask {
         if pinned.start_time() != self.start_time {
             return Err(Error::from_reason("Studio identity changed"));
         }
-        studio_save::request(self.pid).map_err(|err| to_napi("save Studio", &err))
+        match studio_save::request(self.pid, self.deadline) {
+            _ if Instant::now() >= self.deadline => Ok("timeout".to_owned()),
+            result => result.map_err(|err| to_napi("save Studio", &err)),
+        }
     }
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output)
