@@ -58,7 +58,15 @@ function makeTarget() {
 		builds,
 		handlers: controlHandlers({
 			builds,
-			parts: { addAsync, ownAsync, releaseAsync, restartAsync, stopAsync },
+			clock: { now: () => 0, sleep: async () => new Promise(() => {}) },
+			parts: {
+				addAsync,
+				ownAsync,
+				releaseAsync,
+				restartAsync,
+				saveAsync: vi.fn<PartRequests["saveAsync"]>(),
+				stopAsync,
+			},
 			sessionId: "s1",
 			status,
 			stop: { request },
@@ -66,7 +74,14 @@ function makeTarget() {
 		}),
 		ownAsync,
 		owner: controlOwner({
-			parts: { addAsync, ownAsync, releaseAsync, restartAsync, stopAsync },
+			parts: {
+				addAsync,
+				ownAsync,
+				releaseAsync,
+				restartAsync,
+				saveAsync: vi.fn<PartRequests["saveAsync"]>(),
+				stopAsync,
+			},
 			sessionId: "s1",
 		}),
 		releaseAsync,

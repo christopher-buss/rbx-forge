@@ -27,6 +27,7 @@ export interface FakeSession {
 	leave: IpcOwner["leave"];
 	/** Answers `restartParts`; restarts no part by default. */
 	restartParts: IpcHandler;
+	save: IpcHandler;
 	/** What `status` answers; change it to move the session on. */
 	status: SessionStatus;
 	/** Stop answering, as a dead supervisor does. Its files stay. */
@@ -101,6 +102,9 @@ export async function serveFakeSessionAsync(
 		restartParts: () => {
 			return { added: [], kept: [], stopped: [] };
 		},
+		save: () => {
+			throw new Error("save is not configured");
+		},
 		status,
 		stop: async () => {
 			await server.closeAsync();
@@ -132,6 +136,7 @@ function serverOptions(session: FakeSession): IpcServerOptions {
 			addParts: async (parameters) => session.addParts(parameters),
 			freshStatus: async (parameters) => session.freshStatus(parameters),
 			restartParts: async (parameters) => session.restartParts(parameters),
+			save: async (parameters) => session.save(parameters),
 			status: () => answerOf(session),
 			sync: async (parameters) => session.sync(parameters),
 		},

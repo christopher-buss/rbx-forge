@@ -39,6 +39,7 @@ export interface MemoryFileSystem {
 	/** Every file in the project, by path relative to {@link PROJECT}. */
 	files: () => Record<string, null | string>;
 	fileSystem: FileSystem;
+	setMode: (file: string, mode: number) => void;
 	/** Set a file's modification time, in milliseconds since the Unix epoch. */
 	setModifiedTime: (file: string, mtimeMs: number) => void;
 	watch: FakeFileWatch;
@@ -68,6 +69,9 @@ export function createMemoryFileSystem(files: Record<string, string> = {}): Memo
 		// memfs implements the members the seam picks; its typings lag
 		// `@types/node` under `exactOptionalPropertyTypes`.
 		fileSystem: fromAny({ ...fs, watch: watch.watch }),
+		setMode: (file, mode) => {
+			vol.chmodSync(path.resolve(PROJECT, file), mode);
+		},
 		setModifiedTime: (file, mtimeMs) => {
 			vol.utimesSync(path.resolve(PROJECT, file), mtimeMs / 1000, mtimeMs / 1000);
 		},

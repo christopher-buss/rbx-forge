@@ -191,3 +191,22 @@ warning in `recovery.warnings`; it never fails `stop` or `down`.
 
 Limit: two projects with the same place file name, open at the same time, can
 match each other's file. `move` keeps the file, so nothing is lost.
+
+## Saving
+
+`forge save` saves the session's Studio, whether forge opened it or found it
+already open. It waits while Studio opens, checks that the place is writable,
+presses the English File > Save to File menu, and waits for the changed mtime
+to settle. `--timeout <s>` controls the wait (30 seconds by default). Session
+saves run one at a time and count as activity for the idle timeout.
+
+On Windows, saving Studio on the user's desktop takes focus. The result names
+the desktop so an agent can tell whether the user saw the save.
+
+An agent edits through Studio, then runs `forge save --json`, then
+`forge syncback --json`. Syncback reads the saved place on disk.
+
+A Studio that is not open fails with `studio_not_open`; a modal before the
+request fails with `studio_busy`. `save_failed` carries `details.reason`:
+`timeout`, `studio_error`, `no_menu_item`, or `permission_denied`. The writable
+check stops a read-only place before Studio can show a save error.

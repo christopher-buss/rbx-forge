@@ -34,6 +34,7 @@ export type IpcMethod =
 	| "freshStatus"
 	| "own"
 	| "restartParts"
+	| "save"
 	| "shutdown"
 	| "status"
 	| "stopParts"
@@ -79,7 +80,7 @@ const helloLine = jsonLine.pipe(type({ protocol: "number", token: "string", type
 const requestLine = jsonLine.pipe(
 	type({
 		"method":
-			"'addParts' | 'freshStatus' | 'own' | 'restartParts' | 'shutdown' | 'status' | 'stopParts' | 'sync'",
+			"'addParts' | 'freshStatus' | 'own' | 'restartParts' | 'save' | 'shutdown' | 'status' | 'stopParts' | 'sync'",
 		"params?": RECORD,
 		"type": "'request'",
 	}),

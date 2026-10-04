@@ -65,6 +65,8 @@ export interface PinnedProcess {
 	 *   window.
 	 */
 	requestClose: () => boolean;
+	/** Press the English File > Save to File menu on the pinned Studio. */
+	requestSave: () => Promise<"no_menu_item" | "requested">;
 	/** The start time read when it was pinned (see `processStartTime`). */
 	readonly startTime: string;
 	/**

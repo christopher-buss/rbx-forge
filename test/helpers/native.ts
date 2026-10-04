@@ -39,6 +39,8 @@ export interface FakeProcess {
 	 * or `throw` (the OS refuses the request).
 	 */
 	onCloseRequest?: "dialog" | "exit" | "exit_first" | "linger" | "no_window" | "refuse" | "throw";
+	onSave?: () => void;
+	onSaveRequest?: "dialog" | "ignore" | "no_menu_item" | "save" | "throw";
 	/** `pinProcess` throws this message (for example, access denied). */
 	pinError?: string;
 	/** Its start time as the addon reports it; the PID when not set. */
@@ -197,6 +199,29 @@ function blockedNow(pid: number, entry: FakeProcess): boolean {
 	return entry.alive && entry.blocked === true;
 }
 
+function requestSave(entry: FakeProcess): "no_menu_item" | "requested" {
+	if (!entry.alive || entry.onSaveRequest === "throw") {
+		throw new Error("Studio save failed");
+	}
+
+	if (entry.onSaveRequest === "no_menu_item") {
+		return "no_menu_item";
+	}
+
+	if (entry.onSaveRequest === "dialog") {
+		entry.blocked = true;
+	} else if (entry.onSaveRequest !== "ignore") {
+		entry.onSave?.();
+	}
+
+	return "requested";
+}
+
+async function requestSaveAsync(entry: FakeProcess): Promise<"no_menu_item" | "requested"> {
+	await Promise.resolve();
+	return requestSave(entry);
+}
+
 function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 	if (entry.exitsAfterPin === true) {
 		entry.alive = false;
@@ -219,6 +244,7 @@ function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 		},
 		pid,
 		requestClose: () => requestClose(entry),
+		requestSave: async () => requestSaveAsync(entry),
 		startTime: startTimeOf(pid, entry),
 		waitForExit: (timeoutMs) => {
 			entry.waits?.push(timeoutMs);

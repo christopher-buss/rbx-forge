@@ -1,6 +1,7 @@
 import { type } from "arktype";
 
 import { ForgeError } from "../errors.ts";
+import type { StudioSave } from "../studio/save-studio.ts";
 import type { OwnerHandlers } from "./ownership.ts";
 import type { PartRestarter } from "./part-restarts.ts";
 import type { PartStopper } from "./part-stops.ts";
@@ -28,6 +29,7 @@ export interface PartHandlers extends OwnerHandlers {
 	/** Interrupt a readiness wait before a stop enters the serialized queue. */
 	beforeStop?: (request: Parameters<PartStopper>[0]) => void;
 	restart: PartRestarter;
+	save?: (timeoutMs: number, signal?: AbortSignal) => Promise<StudioSave>;
 	stop: PartStopper;
 }
 
@@ -78,6 +80,7 @@ export interface PartRequests {
 	 *   restart's failure, such as `cleanup_in_progress`.
 	 */
 	restartAsync: PartRestarter;
+	saveAsync: (timeoutMs: number, signal?: AbortSignal) => Promise<StudioSave>;
 	/**
 	 * Stop the parts a request may stop.
 	 *
@@ -142,15 +145,12 @@ export function createPartRequests(): PartRequests {
 		restartAsync: async (request) => {
 			return whenAttachedAsync(link, async ({ restart }) => restart(request));
 		},
-		stopAsync: async (request) => {
-			if (link.isClosed) {
-				throw stopping();
-			}
-
-			const handlers = link.handlers ?? (await waitForHandlersAsync(link.attached, link));
-			handlers.beforeStop?.(request);
-			return whenAttachedAsync(link, async ({ stop }) => stop(request));
+		saveAsync: async (timeoutMs, signal) => {
+			return whenAttachedAsync(link, async (handlers) => {
+				return saveAsync(handlers, timeoutMs, signal);
+			});
 		},
+		stopAsync: async (request) => stopAsync(link, request),
 	};
 }
 
@@ -243,4 +243,30 @@ async function nowAsync<T>(link: Link, run: (handlers: PartHandlers) => Promise<
 	}
 
 	return link.enqueueAsync(async () => run(handlers));
+}
+
+async function saveAsync(
+	{ save }: PartHandlers,
+	timeoutMs: number,
+	signal?: AbortSignal,
+): Promise<StudioSave> {
+	if (save === undefined) {
+		throw new ForgeError("studio_not_open", "No session Studio is open.");
+	}
+
+	signal?.throwIfAborted();
+	return save(timeoutMs, signal);
+}
+
+async function stopAsync(
+	link: Link,
+	request: Parameters<PartStopper>[0],
+): Promise<Awaited<ReturnType<PartStopper>>> {
+	if (link.isClosed) {
+		throw stopping();
+	}
+
+	const handlers = link.handlers ?? (await waitForHandlersAsync(link.attached, link));
+	handlers.beforeStop?.(request);
+	return whenAttachedAsync(link, async ({ stop }) => stop(request));
 }
