@@ -3126,6 +3126,41 @@ const CONTROL_TARGET = {
 };
 
 describe("forge up control channel", () => {
+	it("should save its found Studio through the session control channel", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			...ATTACHED,
+			files: { ...ATTACHED.files, "game.rbxl": "place" },
+			processes: {
+				[STUDIO_PID]: {
+					...OPEN_STUDIO[STUDIO_PID]!,
+					onSave: () => {
+						run.memory.setModifiedTime("game.rbxl", 2000);
+					},
+				},
+			},
+		});
+		run.memory.setModifiedTime("game.rbxl", 1000);
+		await flushAsync();
+		const saving = callSessionAsync(run.ipc, CONTROL_TARGET, "save", {
+			params: { sessionId: "session-1", timeoutMs: 1000 },
+		});
+		await passAsync(run, 100);
+		await passAsync(run, 300);
+		const saved = await saving;
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(saved).toMatchObject({
+			bytes: 5,
+			desktop: "user",
+			mtime: "1970-01-01T00:00:02.000Z",
+			pid: STUDIO_PID,
+			place: PLACE,
+		});
+	});
+
 	it("should serve its status on the control endpoint while it runs, then close it", async () => {
 		expect.assertions(2);
 
@@ -4874,6 +4909,105 @@ async function jumpAsync(run: StartRun, ms: number): Promise<void> {
 }
 
 describe("idle timeout", () => {
+	it("should preserve opening readiness while a save waits past the idle timeout", async () => {
+		expect.assertions(1);
+
+		const { ready, run } = pendingStudio({
+			file: { session: { idleTimeout: 1 } },
+			files: {
+				...TOOL_FILES,
+				"Documents/Roblox/Plugins/RojoManagedPlugin.rbxm": "model",
+				"game.rbxl": "place",
+			},
+		});
+		run.memory.setModifiedTime("game.rbxl", 1000);
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		const pin = run.native.addon.pinProcess;
+		run.native.addon.pinProcess = (pid) => {
+			const pinned = pin(pid);
+			assert(pinned !== null);
+			return {
+				...pinned,
+				requestSave: async () => {
+					run.memory.setModifiedTime("game.rbxl", 2000);
+					return "requested";
+				},
+			};
+		};
+
+		await passAsync(run, FILE_POLL_MS);
+		let answer: Record<string, unknown> | undefined;
+		const saving = callSessionAsync(run.ipc, CONTROL_TARGET, "save", {
+			params: { timeoutMs: 120_000 },
+			responseTimeoutMs: 125_000,
+		})
+			.then((value) => {
+				answer = value;
+				return value;
+			})
+			.catch(() => {});
+		await flushAsync();
+		await jumpAsync(run, 61_000);
+		ready.resolve(true);
+		for (let tick = 0; tick < 5; tick++) {
+			await passAsync(run, 100);
+		}
+
+		const savedBeforeEnd = answer;
+		run.signals.fire("SIGINT");
+		await Promise.all([run.result, saving]);
+
+		expect(savedBeforeEnd).toMatchObject({ mtime: "1970-01-01T00:00:02.000Z", pid: 1 });
+	});
+
+	it("should keep a session active after a save outlasts its idle timeout", async () => {
+		expect.assertions(1);
+
+		const released = Promise.withResolvers<void>();
+		const run = startCommand({
+			...IDLE_UP,
+			...ATTACHED,
+			files: { ...ATTACHED.files, "game.rbxl": "place" },
+			flags: NO_COMPILER,
+		});
+		run.memory.setModifiedTime("game.rbxl", 1000);
+		const pin = run.native.addon.pinProcess;
+		run.native.addon.pinProcess = (pid) => {
+			const pinned = pin(pid);
+			assert(pinned !== null);
+			return {
+				...pinned,
+				requestSave: async () => {
+					await released.promise;
+					run.memory.setModifiedTime("game.rbxl", 2000);
+					return "requested";
+				},
+			};
+		};
+
+		await flushAsync();
+		const saving = callSessionAsync(run.ipc, CONTROL_TARGET, "save", {
+			params: { timeoutMs: 90_000 },
+			responseTimeoutMs: 100_000,
+		});
+		await flushAsync();
+		await jumpAsync(run, 61_000);
+		released.resolve();
+		await passAsync(run, 100);
+		await passAsync(run, 300);
+		await saving;
+		await passAsync(run, OUTPUT_POLL_MS);
+		const afterSave = await callSessionAsync(run.ipc, CONTROL_TARGET, "status");
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(afterSave).toMatchObject({
+			phase: "ready",
+			services: { rojo: { status: "ready" }, studio: { status: "open" } },
+		});
+	});
+
 	it("should stop the compiler with no owner and end the up session after the timeout", async () => {
 		expect.assertions(3);
 
@@ -5515,6 +5649,28 @@ describe("session Studio move failures and retained desktops", () => {
 });
 
 describe("session Studio replacement outcomes", () => {
+	it.for(["handle", "path"] as const)(
+		"should reopen through discovery when the saved Studio %s lookup is unavailable",
+		async (lookup) => {
+			expect.assertions(3);
+
+			const run = movableStudio("user");
+			await passAsync(run, FILE_POLL_MS);
+			configureUnavailableMoveLookup(run, lookup);
+
+			await expect(
+				finishMoveAsync(run, { desktop: "hidden", timeoutMs: 30_000 }),
+			).resolves.toMatchObject({ from: "user", pid: 900, to: "hidden" });
+			expect(run.native.processes.get(STUDIO_PID)).toMatchObject({ alive: false });
+			expect(stateOf(run)).toMatchObject({
+				services: {
+					rojo: { status: "ready" },
+					studio: { desktop: "hidden", pid: 900, status: "open" },
+				},
+			});
+		},
+	);
+
 	it("should report the actual user desktop after a hidden launch falls back", async () => {
 		expect.assertions(2);
 
@@ -5582,6 +5738,60 @@ describe("session Studio replacement outcomes", () => {
 		});
 	});
 });
+
+function configureUnavailableMoveLookup(run: StartRun, lookup: "handle" | "path"): void {
+	const process = run.native.processes.get(STUDIO_PID);
+	assert(process !== undefined);
+	const { onSave } = process;
+	let hasSaved = false;
+	let willLoseLookup = false;
+
+	process.onSave = () => {
+		onSave?.();
+		hasSaved = true;
+	};
+
+	const pin = run.native.addon.pinProcess;
+	run.native.addon.pinProcess = (pid) => {
+		const pinned = pin(pid);
+		if (pid !== STUDIO_PID || pinned === null) {
+			return pinned;
+		}
+
+		if (willLoseLookup) {
+			willLoseLookup = false;
+			return lookup === "handle" ? null : { ...pinned, executablePath: () => null };
+		}
+
+		return {
+			...pinned,
+			executablePath: () => {
+				const executable = pinned.executablePath();
+				if (hasSaved) {
+					hasSaved = false;
+					willLoseLookup = true;
+				}
+
+				return executable;
+			},
+		};
+	};
+
+	run.native.processes.set(900, {
+		alive: true,
+		desktop: "hidden",
+		executablePath: "/opt/RobloxStudio",
+		startTime: "0",
+	});
+	run.studioLauncher.mockImplementation(async ({ studioPath }) => {
+		if (studioPath !== undefined) {
+			return { message: "Studio discovery requires no executable override.", type: "failed" };
+		}
+
+		run.memory.fileSystem.writeFileSync(LOCK, LAUNCHED_LOCK);
+		return { studio: { desktop: "hidden", pid: 900, startTime: "0" }, type: "launched" };
+	});
+}
 
 describe("serialized Studio moves", () => {
 	it("should fail a move when the replacement never opens its saved place", async () => {
