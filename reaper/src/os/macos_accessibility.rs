@@ -1,0 +1,252 @@
+//! AX presses do not activate, unhide, or restore Studio's windows.
+
+use std::ffi::c_void;
+use std::io;
+use std::ptr::{self, NonNull};
+use std::time::{Duration, Instant};
+
+type CfRef = *const c_void;
+type AxError = i32;
+const UTF8: u32 = 0x0800_0100;
+const ATTRIBUTE_UNSUPPORTED: AxError = -25205;
+const NO_VALUE: AxError = -25212;
+const API_DISABLED: AxError = -25211;
+
+#[link(name = "ApplicationServices", kind = "framework")]
+unsafe extern "C" {
+    fn AXIsProcessTrusted() -> bool;
+    fn AXUIElementCreateApplication(pid: i32) -> CfRef;
+    fn AXUIElementGetTypeID() -> usize;
+    fn AXUIElementSetMessagingTimeout(element: CfRef, seconds: f32) -> AxError;
+    fn AXUIElementCopyAttributeValue(element: CfRef, name: CfRef, value: *mut CfRef) -> AxError;
+    fn AXUIElementPerformAction(element: CfRef, action: CfRef) -> AxError;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFRelease(value: CfRef);
+    fn CFRetain(value: CfRef) -> CfRef;
+    fn CFGetTypeID(value: CfRef) -> usize;
+    fn CFArrayGetTypeID() -> usize;
+    fn CFArrayGetCount(array: CfRef) -> isize;
+    fn CFArrayGetValueAtIndex(array: CfRef, index: isize) -> CfRef;
+    fn CFBooleanGetTypeID() -> usize;
+    fn CFBooleanGetValue(boolean: CfRef) -> bool;
+    fn CFStringGetTypeID() -> usize;
+    fn CFStringCreateWithBytes(
+        allocator: CfRef,
+        bytes: *const u8,
+        length: isize,
+        encoding: u32,
+        external: bool,
+    ) -> CfRef;
+    fn CFStringGetLength(string: CfRef) -> isize;
+    fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
+    fn CFStringGetCString(string: CfRef, buffer: *mut u8, capacity: isize, encoding: u32) -> bool;
+}
+
+/// Owns one Create, Copy, or Retain reference, including during early returns.
+struct Owned(NonNull<c_void>);
+
+impl Owned {
+    fn take(value: CfRef) -> io::Result<Self> {
+        NonNull::new(value.cast_mut())
+            .map(Self)
+            .ok_or_else(|| io::Error::other("AX returned a null object"))
+    }
+
+    fn as_ref(&self) -> CfRef {
+        self.0.as_ptr().cast_const()
+    }
+
+    fn text(value: &str) -> io::Result<Self> {
+        let length = isize::try_from(value.len()).map_err(io::Error::other)?;
+        // SAFETY: the bytes remain valid throughout the copying constructor.
+        Self::take(unsafe {
+            CFStringCreateWithBytes(ptr::null(), value.as_ptr(), length, UTF8, false)
+        })
+    }
+
+    fn is_type(&self, type_id: usize) -> bool {
+        // SAFETY: Owned always holds a live Core Foundation object.
+        unsafe { CFGetTypeID(self.as_ref()) == type_id }
+    }
+
+    fn string(&self) -> io::Result<Option<String>> {
+        // SAFETY: type IDs do not require a reference.
+        if !self.is_type(unsafe { CFStringGetTypeID() }) {
+            return Ok(None);
+        }
+        // SAFETY: the type check proves this is a live CFString.
+        let capacity =
+            unsafe { CFStringGetMaximumSizeForEncoding(CFStringGetLength(self.as_ref()), UTF8) }
+                .checked_add(1)
+                .ok_or_else(|| io::Error::other("AX title is too long"))?;
+        let mut buffer = vec![0; usize::try_from(capacity).map_err(io::Error::other)?];
+        // SAFETY: the output buffer holds capacity bytes, and self is a CFString.
+        if !unsafe { CFStringGetCString(self.as_ref(), buffer.as_mut_ptr(), capacity, UTF8) } {
+            return Err(io::Error::other("AX title is not UTF-8"));
+        }
+        buffer.truncate(
+            buffer
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(buffer.len()),
+        );
+        String::from_utf8(buffer)
+            .map(Some)
+            .map_err(io::Error::other)
+    }
+}
+
+impl Drop for Owned {
+    fn drop(&mut self) {
+        // SAFETY: this is exactly the reference adopted by Owned::take.
+        unsafe { CFRelease(self.as_ref()) };
+    }
+}
+
+struct Access {
+    deadline: Instant,
+}
+
+impl Access {
+    fn prepare(&self, element: &Owned) -> io::Result<()> {
+        // SAFETY: type IDs do not require a reference.
+        if !element.is_type(unsafe { AXUIElementGetTypeID() }) {
+            return Err(io::Error::other("AX returned an unexpected element type"));
+        }
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "AX save timed out"));
+        }
+        // An application's timeout is not inherited by elements copied from it.
+        check(unsafe { AXUIElementSetMessagingTimeout(element.as_ref(), remaining.as_secs_f32()) })
+    }
+
+    fn attribute(&self, element: &Owned, name: &str) -> io::Result<Option<Owned>> {
+        self.prepare(element)?;
+        let name = Owned::text(name)?;
+        let mut value = ptr::null();
+        // SAFETY: the element and attribute name are live, and value is an output slot.
+        let result =
+            unsafe { AXUIElementCopyAttributeValue(element.as_ref(), name.as_ref(), &mut value) };
+        if matches!(result, ATTRIBUTE_UNSUPPORTED | NO_VALUE) {
+            return Ok(None);
+        }
+        check(result)?;
+        Owned::take(value).map(Some)
+    }
+
+    fn elements(&self, element: &Owned, attribute: &str) -> io::Result<Vec<Owned>> {
+        let Some(array) = self.attribute(element, attribute)? else {
+            return Ok(Vec::new());
+        };
+        // SAFETY: type IDs do not require a reference.
+        if !array.is_type(unsafe { CFArrayGetTypeID() }) {
+            return Err(io::Error::other("AX elements are not an array"));
+        }
+        // SAFETY: array is a live CFArray, retained throughout iteration.
+        let count = unsafe { CFArrayGetCount(array.as_ref()) };
+        let mut children = Vec::new();
+        for index in 0..count {
+            // SAFETY: index is within the retained array.
+            let child = unsafe { CFArrayGetValueAtIndex(array.as_ref(), index) };
+            // SAFETY: children are live CF objects borrowed from the retained array.
+            if !child.is_null() && unsafe { CFGetTypeID(child) == AXUIElementGetTypeID() } {
+                children.push(Owned::take(unsafe { CFRetain(child) })?);
+            }
+        }
+        Ok(children)
+    }
+
+    fn named_child(&self, element: &Owned, name: &str) -> io::Result<Option<Owned>> {
+        for child in self.elements(element, "AXChildren")? {
+            if let Some(title) = self.attribute(&child, "AXTitle")?
+                && title.string()?.as_deref() == Some(name)
+            {
+                return Ok(Some(child));
+            }
+        }
+        Ok(None)
+    }
+}
+
+fn check(error: AxError) -> io::Result<()> {
+    match error {
+        0 => Ok(()),
+        API_DISABLED => Err(accessibility_denied()),
+        error => Err(io::Error::other(format!("AX save failed ({error})"))),
+    }
+}
+
+fn accessibility_denied() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        "Grant Accessibility access to the terminal running forge in System Settings",
+    )
+}
+
+pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
+    let pinned = super::process::PinnedProcess::open(pid)?
+        .ok_or_else(|| io::Error::other("Studio exited"))?;
+    // SAFETY: this query neither prompts nor changes the accessibility permission.
+    if !unsafe { AXIsProcessTrusted() } {
+        return Err(accessibility_denied());
+    }
+    let pid = i32::try_from(pid).map_err(io::Error::other)?;
+    let access = Access { deadline };
+    // SAFETY: the constructor returns an owned AX application for this PID.
+    let app = Owned::take(unsafe { AXUIElementCreateApplication(pid) })?;
+    let Some(bar) = access.attribute(&app, "AXMenuBar")? else {
+        return Ok("no_menu_item".to_owned());
+    };
+    let Some(file) = access.named_child(&bar, "File")? else {
+        return Ok("no_menu_item".to_owned());
+    };
+    for menu in access.elements(&file, "AXChildren")? {
+        if let Some(save) = access.named_child(&menu, "Save to File")? {
+            let action = Owned::text("AXPress")?;
+            if !pinned.is_alive()? {
+                return Err(io::Error::other("Studio identity changed"));
+            }
+            access.prepare(&save)?;
+            // SAFETY: AXPress targets the live, exact File > Save to File item.
+            check(unsafe { AXUIElementPerformAction(save.as_ref(), action.as_ref()) })?;
+            return Ok("requested".to_owned());
+        }
+    }
+    Ok("no_menu_item".to_owned())
+}
+
+pub fn is_blocked(pid: u32) -> bool {
+    // Closing a nongraphical process does not require Accessibility access.
+    blocked_windows(pid).unwrap_or(false)
+}
+
+fn blocked_windows(pid: u32) -> io::Result<bool> {
+    // SAFETY: this query neither prompts nor changes the accessibility permission.
+    if !unsafe { AXIsProcessTrusted() } {
+        return Ok(false);
+    }
+    let pid = i32::try_from(pid).map_err(io::Error::other)?;
+    let access = Access {
+        deadline: Instant::now() + Duration::from_millis(250),
+    };
+    // SAFETY: the constructor returns an owned AX application for this PID.
+    let app = Owned::take(unsafe { AXUIElementCreateApplication(pid) })?;
+    for window in access.elements(&app, "AXWindows")? {
+        if let Some(modal) = access.attribute(&window, "AXModal")?
+            // SAFETY: type IDs do not require a reference.
+            && modal.is_type(unsafe { CFBooleanGetTypeID() })
+            // SAFETY: the type check proves modal is a live CFBoolean.
+            && unsafe { CFBooleanGetValue(modal.as_ref()) }
+        {
+            return Ok(true);
+        }
+        if !access.elements(&window, "AXSheets")?.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}

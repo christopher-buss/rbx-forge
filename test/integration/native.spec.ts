@@ -130,6 +130,15 @@ describe("native file locks", () => {
 });
 
 describe("native process identity", () => {
+	it("should send no save after its accessibility deadline expires", async () => {
+		expect.assertions(2);
+
+		const pinned = native.pinProcess(pidOf(spawnSleeper()))!;
+
+		await expect(pinned.requestSave(0)).resolves.toBe("timeout");
+		expect(pinned.isAlive()).toBeTrue();
+	});
+
 	it("should read the same start time as the pin", () => {
 		expect.assertions(1);
 

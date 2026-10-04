@@ -41,7 +41,7 @@ export interface FakeProcess {
 	 */
 	onCloseRequest?: "dialog" | "exit" | "exit_first" | "linger" | "no_window" | "refuse" | "throw";
 	onSave?: () => void;
-	onSaveRequest?: "dialog" | "ignore" | "no_menu_item" | "save" | "throw";
+	onSaveRequest?: "dialog" | "ignore" | "no_menu_item" | "save" | "throw" | "timeout";
 	/** `pinProcess` throws this message (for example, access denied). */
 	pinError?: string;
 	/** Its start time as the addon reports it; the PID when not set. */
@@ -200,13 +200,18 @@ function blockedNow(pid: number, entry: FakeProcess): boolean {
 	return entry.alive && entry.blocked === true;
 }
 
-function requestSave(entry: FakeProcess): "no_menu_item" | "requested" {
+function requestSave(entry: FakeProcess): "no_menu_item" | "requested" | "timeout" {
 	if (!entry.alive || entry.onSaveRequest === "throw") {
 		throw new Error("Studio save failed");
 	}
 
 	if (entry.onSaveRequest === "no_menu_item") {
 		return "no_menu_item";
+	}
+
+	if (entry.onSaveRequest === "timeout") {
+		entry.onSave?.();
+		return "timeout";
 	}
 
 	if (entry.onSaveRequest === "dialog") {
@@ -218,9 +223,12 @@ function requestSave(entry: FakeProcess): "no_menu_item" | "requested" {
 	return "requested";
 }
 
-async function requestSaveAsync(entry: FakeProcess): Promise<"no_menu_item" | "requested"> {
+async function requestSaveAsync(
+	entry: FakeProcess,
+	timeoutMs = 30_000,
+): Promise<"no_menu_item" | "requested" | "timeout"> {
 	await Promise.resolve();
-	return requestSave(entry);
+	return timeoutMs <= 0 ? "timeout" : requestSave(entry);
 }
 
 function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
@@ -246,7 +254,7 @@ function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 		},
 		pid,
 		requestClose: () => requestClose(entry),
-		requestSave: async () => requestSaveAsync(entry),
+		requestSave: async (timeoutMs) => requestSaveAsync(entry, timeoutMs),
 		startTime: startTimeOf(pid, entry),
 		waitForExit: (timeoutMs) => {
 			entry.waits?.push(timeoutMs);
