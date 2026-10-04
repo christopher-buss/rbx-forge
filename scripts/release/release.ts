@@ -328,7 +328,7 @@ function publishOnce(
 	name: string,
 	directory: string,
 ): void {
-	const published = read("npm", ["view", `${name}@${version}`, "version"]);
+	const published = read("npm", ["view", `${name}@${version}`, "version", "--loglevel=silent"]);
 	if (published.status === 0 && published.stdout.trim() === version) {
 		log(`release: ${name}@${version} is on npm; skipped`);
 		return;

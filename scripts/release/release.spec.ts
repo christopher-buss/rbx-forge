@@ -348,7 +348,7 @@ describe(publishRelease, () => {
 		expect.assertions(2);
 
 		const { dependencies, processes } = publishSetup({
-			"npm view @rbx-forge/native-win32-x64-msvc@1.0.0 version": "1.0.0\n",
+			"npm view @rbx-forge/native-win32-x64-msvc@1.0.0 version --loglevel=silent": "1.0.0\n",
 		});
 		publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
 
