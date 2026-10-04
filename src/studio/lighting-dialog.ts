@@ -49,7 +49,11 @@ export async function watchHiddenLightingAsync(
 					return;
 				}
 			}
+		} catch {
+			// Accessibility providers can fail while Studio is still loading.
+		}
 
+		try {
 			await seams.clock.sleep(500, signal);
 		} catch {
 			return;

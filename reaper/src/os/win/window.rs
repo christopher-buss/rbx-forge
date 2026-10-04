@@ -56,7 +56,8 @@ struct Search {
 /// When the windows cannot be listed, or every post failed (for example to
 /// an elevated process).
 pub fn close_main_windows(pid: u32) -> io::Result<bool> {
-    let windows = main_windows(pid)?;
+    let desktop = super::desktop::for_process(pid)?;
+    let windows = main_windows(pid, &desktop)?;
     let mut last_error = None;
     let mut posted = 0_usize;
     for window in &windows {
@@ -83,7 +84,8 @@ pub fn close_main_windows(pid: u32) -> io::Result<bool> {
 ///
 /// When the windows cannot be listed.
 pub fn is_blocked(pid: u32) -> io::Result<bool> {
-    Ok(main_windows(pid)?
+    let desktop = super::desktop::for_process(pid)?;
+    Ok(main_windows(pid, &desktop)?
         .into_iter()
         // SAFETY: plain call; a closed window reads as enabled.
         .any(|window| unsafe { IsWindowEnabled(window) } == 0))
@@ -91,7 +93,8 @@ pub fn is_blocked(pid: u32) -> io::Result<bool> {
 
 /// The titled Studio main window, rather than a tooltip or helper window.
 pub fn studio_main_window(pid: u32) -> io::Result<Option<HWND>> {
-    Ok(main_windows(pid)?
+    let desktop = super::desktop::for_process(pid)?;
+    Ok(main_windows(pid, &desktop)?
         .into_iter()
         .find(|window| title(*window).ends_with(HIDDEN_MAIN_TITLE_SUFFIX)))
 }
@@ -109,7 +112,10 @@ pub fn titled_window(pid: u32, wanted: &str) -> io::Result<Option<HWND>> {
         let mut owner = 0;
         // SAFETY: a window query writes a local PID.
         unsafe { GetWindowThreadProcessId(window, &raw mut owner) };
-        if owner == search.pid && title(window) == search.wanted {
+        if owner == search.pid
+            && unsafe { IsWindowVisible(window) } != 0
+            && title(window) == search.wanted
+        {
             search.found = Some(window);
         }
         TRUE
@@ -134,15 +140,15 @@ pub fn titled_window(pid: u32, wanted: &str) -> io::Result<Option<HWND>> {
 }
 
 /// The main windows of the process `pid`, in Z order: the visible ones, or
-/// when there are none, the hidden titled ones.
-fn main_windows(pid: u32) -> io::Result<Vec<HWND>> {
+/// when there are none, the hidden titled ones. The caller keeps the desktop
+/// open until every query or post on these handles has finished.
+fn main_windows(pid: u32, desktop: &super::desktop::Desktop) -> io::Result<Vec<HWND>> {
     let mut search = Search {
         pid,
         visible: Vec::new(),
         hidden: Vec::new(),
     };
     // SAFETY: the callback reads `search` only during this call.
-    let desktop = super::desktop::for_process(pid)?;
     let ok =
         unsafe { EnumDesktopWindows(desktop.raw(), Some(collect), (&raw mut search) as LPARAM) };
     if ok == 0 {

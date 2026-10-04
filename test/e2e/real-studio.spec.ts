@@ -29,6 +29,7 @@ import { assert, describe, expect, it, onTestFinished } from "vitest";
 import { pinNow, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
 import { makeFixtureAsync } from "./session-fixture.ts";
+import type { UpRun } from "./up-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
 const { env } = process;
@@ -201,6 +202,10 @@ function foregroundWindow(): string {
 	return stdout.trim();
 }
 
+function saveOutcome(run: UpRun): string {
+	return run.status === 0 ? "saved" : JSON.stringify(run.result);
+}
+
 describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 	it.for([
 		{
@@ -212,7 +217,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 		"saves Studio on the $desktop desktop",
 		{ timeout: 240_000 },
 		async ({ desktop, expectedFocus }) => {
-			expect.assertions(4);
+			expect.assertions(5);
 
 			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("unsaved.rbxl");
@@ -227,10 +232,18 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			);
 			const after = foregroundWindow();
 
-			expect(save.status).toBe(0);
+			expect(saveOutcome(save)).toBe("saved");
 			expect(save.result.data).toMatchObject({ desktop, pid: lockPid, place: fixture.place });
 			expect(statSync(fixture.place).mtimeMs).toBeGreaterThan(before);
 			expect(after).toStrictEqual(expectedFocus(focus));
+
+			const firstSavedAt = statSync(fixture.place).mtimeMs;
+			const again = await runForgeAsync(fixture, ["save", "--json"], realVariables(fixture));
+
+			expect({
+				changed: statSync(fixture.place).mtimeMs > firstSavedAt,
+				result: again.result,
+			}).toMatchObject({ changed: true, result: { ok: true } });
 		},
 	);
 
@@ -248,7 +261,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const focus = foregroundWindow();
 			const save = await runForgeAsync(fixture, ["save", "--json"], realVariables(fixture));
 
-			expect(save.status).toBe(0);
+			expect(saveOutcome(save)).toBe("saved");
 			expect(save.result.data).toMatchObject({ desktop: "hidden", pid: lockPid });
 			expect(foregroundWindow()).toBe(focus);
 		},

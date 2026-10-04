@@ -1,7 +1,7 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
@@ -34,6 +34,12 @@ describe("hidden Studio startup dialogs", () => {
 			const native = createFakeNative({
 				42: { alive: true, desktop: "hidden", executablePath: "RobloxStudioBeta.exe" },
 			});
+			const pinned = native.addon.pinProcess(42);
+			assert(pinned !== null);
+			const dismissDialog = vi
+				.fn<typeof pinned.dismissDialog>(pinned.dismissDialog)
+				.mockRejectedValueOnce(new Error("UIA provider is still loading"));
+			native.addon.pinProcess = () => ({ ...pinned, dismissDialog });
 			const manual = createManualClock();
 			const seams = createTestSeams({
 				clock: manual.clock,
