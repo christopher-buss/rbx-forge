@@ -12,7 +12,8 @@ const UTF8: u32 = 0x0800_0100;
 const ATTRIBUTE_UNSUPPORTED: AxError = -25205;
 const NO_VALUE: AxError = -25212;
 const API_DISABLED: AxError = -25211;
-/// How long after the press Studio may restore a minimized window.
+/// How long after the press Studio may restore its minimized main window. The
+/// wait also takes at most half of the save's remaining time.
 const RESTORE_GRACE: Duration = Duration::from_secs(2);
 const RESTORE_POLL: Duration = Duration::from_millis(10);
 
@@ -234,7 +235,8 @@ pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
             if !pinned.is_alive()? {
                 return Err(io::Error::other("Studio identity changed"));
             }
-            let minimized = minimized_windows(&access, &app)?;
+            // Keeping the window minimized is best effort and never blocks the save.
+            let minimized = minimized_windows(&access, &app).unwrap_or_default();
             access.prepare(&save)?;
             // SAFETY: AXPress targets the live, exact File > Save to File item.
             check(unsafe { AXUIElementPerformAction(save.as_ref(), action.as_ref()) })?;
@@ -245,10 +247,17 @@ pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
     Ok("no_menu_item".to_owned())
 }
 
+/// Studio restores only its place windows, titled `<place> - Roblox Studio`.
 fn minimized_windows(access: &Access, app: &Owned) -> io::Result<Vec<Owned>> {
     let mut minimized = Vec::new();
     for window in access.elements(app, "AXWindows")? {
-        if access.flag(&window, "AXMinimized")? {
+        let title = match access.attribute(&window, "AXTitle")? {
+            Some(title) => title.string()?,
+            None => None,
+        };
+        if title.is_some_and(|title| title.ends_with(" - Roblox Studio"))
+            && access.flag(&window, "AXMinimized")?
+        {
             minimized.push(window);
         }
     }
@@ -262,8 +271,11 @@ fn keep_minimized(
     mut windows: Vec<Owned>,
     deadline: Instant,
 ) {
+    let now = Instant::now();
+    // Leave the save its remaining time, so the wait never turns it into a timeout.
+    let remaining = deadline.saturating_duration_since(now) / 2;
     let access = Access {
-        deadline: deadline.min(Instant::now() + RESTORE_GRACE),
+        deadline: now + remaining.min(RESTORE_GRACE),
     };
     while !windows.is_empty() && Instant::now() < access.deadline {
         std::thread::sleep(RESTORE_POLL);
