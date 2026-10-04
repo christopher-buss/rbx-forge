@@ -59,7 +59,7 @@
 		"release:bootstrap": "node scripts/release/bootstrap.ts",
 		"release:publish": "node scripts/release/publish.ts",
 		"test": "pnpm test:unit && pnpm test:integration",
-		"test:e2e": "vitest run --project e2e",
+		"test:e2e": "vitest run --project e2e --project e2e-real-studio",
 		"test:integration": "vitest run --project integration --project integration-real-studio",
 		"test:other-user": "vitest run --project other-user",
 		"test:unit": "tsc --build tsconfig.lib.json && vitest run --project unit --coverage",
