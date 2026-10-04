@@ -247,3 +247,15 @@ on this computer; a missing or stale lock returns `studio_not_open`. Paths are
 relative to the project directory unless absolute. The result reports Studio's
 actual desktop. Run `forge syncback --input <snapshot>` after the save to read
 its edits back into the project.
+
+
+A place with Compatibility lighting can show **Lighting Technology Migration**
+after its lock file appears. On the hidden Windows desktop, forge watches for
+that prompt during startup and presses its exact **Continue** button there;
+save also checks for it before reporting `studio_busy`. Other dialogs still
+require attention. Hidden saves and this dismissal leave the user's focus
+unchanged.
+
+Set `Lighting.Technology` explicitly in the Rojo project (for example,
+`Voxel`, `ShadowMap`, or `Future`) to avoid the migration prompt. forge keeps
+the place as the project builds it and never changes that property.

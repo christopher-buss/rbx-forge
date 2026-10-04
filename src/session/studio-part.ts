@@ -7,6 +7,7 @@ import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import type { StudioReadyListener } from "../seams/network.ts";
+import { watchHiddenLightingAsync } from "../studio/lighting-dialog.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
 import type { OpenedStudio } from "./attach.ts";
 import { attachStudio } from "./attach.ts";
@@ -223,6 +224,23 @@ async function buildPlaceAsync(steps: CommandContext, config: ResolvedConfig): P
 	});
 }
 
+async function watchStartupLightingAsync(
+	context: CommandContext,
+	opened: OpenedStudio,
+	signal: AbortSignal,
+): Promise<void> {
+	return context.seams.host.platform === "win32"
+		? watchHiddenLightingAsync(
+				context.seams,
+				{ place: opened.place, process: opened.studio ?? undefined },
+				{
+					openingTimeoutMs: STUDIO_OPEN_BOUND_MS,
+					signal,
+				},
+			)
+		: undefined;
+}
+
 /**
  * Wait until Studio closes the place, and count each save of it as
  * activity meanwhile.
@@ -248,6 +266,11 @@ async function watchStudioAsync(
 			idle.activity(context.seams.clock.now());
 		},
 	);
+	const lighting = watchStartupLightingAsync(
+		context,
+		opened,
+		AbortSignal.any([options.signal, followed.signal]),
+	);
 	const lock = { path: studioLockPath(place), pid: studio?.pid };
 	try {
 		return await waitForStudioCloseAsync(options, lock, () => {
@@ -255,7 +278,7 @@ async function watchStudioAsync(
 		});
 	} finally {
 		followed.abort();
-		await saves.done;
+		await Promise.all([saves.done, lighting]);
 	}
 }
 

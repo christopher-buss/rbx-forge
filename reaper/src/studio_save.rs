@@ -18,15 +18,28 @@ pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
 
 #[cfg(windows)]
 pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
-    // UI Automation requires its own COM apartment, away from Node's event loop.
-    std::thread::spawn(move || unsafe { windows_save(pid, deadline) })
-        .join()
-        .map_err(|_| io::Error::other("Studio save thread panicked"))?
-        .map_err(|err| io::Error::other(err.to_string()))
+    use crate::os::win::{desktop, window};
+    let desktop = desktop::for_process(pid)?;
+    let Some(window) = window::studio_main_window(pid)? else {
+        return Ok("no_menu_item".to_owned());
+    };
+    let window = window as isize;
+    // Keep the handle in the parent until the attached COM thread exits.
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                desktop.attach()?;
+                unsafe { windows_save(window, deadline) }
+                    .map_err(|err| io::Error::other(err.to_string()))
+            })
+            .join()
+            .map_err(|_| io::Error::other("Studio save thread panicked"))?
+    })
 }
 
 #[cfg(windows)]
-unsafe fn windows_save(pid: u32, deadline: Instant) -> windows::core::Result<String> {
+unsafe fn windows_save(handle: isize, deadline: Instant) -> windows::core::Result<String> {
+    use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
         CoUninitialize,
@@ -34,9 +47,9 @@ unsafe fn windows_save(pid: u32, deadline: Instant) -> windows::core::Result<Str
     use windows::Win32::System::Variant::VARIANT;
     use windows::Win32::UI::Accessibility::{
         CUIAutomation8, IUIAutomation2, IUIAutomationExpandCollapsePattern,
-        IUIAutomationInvokePattern, TreeScope_Children, TreeScope_Descendants,
-        UIA_ControlTypePropertyId, UIA_ExpandCollapsePatternId, UIA_InvokePatternId,
-        UIA_MenuItemControlTypeId, UIA_NamePropertyId, UIA_ProcessIdPropertyId,
+        IUIAutomationInvokePattern, TreeScope_Descendants, UIA_ControlTypePropertyId,
+        UIA_ExpandCollapsePatternId, UIA_InvokePatternId, UIA_MenuItemControlTypeId,
+        UIA_NamePropertyId,
     };
     use windows::core::BSTR;
 
@@ -56,11 +69,7 @@ unsafe fn windows_save(pid: u32, deadline: Instant) -> windows::core::Result<Str
         let automation: IUIAutomation2 =
             CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER)?;
         windows_deadline(&automation, deadline)?;
-        let root = automation.GetRootElement()?;
-        let pid_condition = automation
-            .CreatePropertyCondition(UIA_ProcessIdPropertyId, &VARIANT::from(pid as i32))?;
-        windows_deadline(&automation, deadline)?;
-        let window = root.FindFirst(TreeScope_Children, &pid_condition)?;
+        let window = automation.ElementFromHandle(HWND(handle as *mut _))?;
         let menu_condition = automation.CreatePropertyCondition(
             UIA_ControlTypePropertyId,
             &VARIANT::from(UIA_MenuItemControlTypeId.0),
@@ -71,7 +80,7 @@ unsafe fn windows_save(pid: u32, deadline: Instant) -> windows::core::Result<Str
         windows_deadline(&automation, deadline)?;
         let file = match window.FindFirst(TreeScope_Descendants, &condition) {
             Ok(item) => item,
-            Err(err) if err.code().0 == 0x80004003_u32 as i32 => {
+            Err(err) if matches!(err.code().0 as u32, 0 | 0x80004003) => {
                 return Ok("no_menu_item".to_owned());
             }
             Err(err) => return Err(err),
@@ -97,7 +106,7 @@ unsafe fn windows_save(pid: u32, deadline: Instant) -> windows::core::Result<Str
                     invoke.Invoke()?;
                     break Ok("requested".to_owned());
                 }
-                Err(err) if err.code().0 == 0x80004003_u32 as i32 => {
+                Err(err) if matches!(err.code().0 as u32, 0 | 0x80004003) => {
                     if Instant::now() >= menu_deadline {
                         break Ok("no_menu_item".to_owned());
                     }
