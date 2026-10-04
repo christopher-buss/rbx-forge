@@ -63,6 +63,7 @@ pnpm test:unit         # 100% coverage threshold
 pnpm test:integration  # needs build:native and build:reaper
 pnpm test:e2e          # needs build:all
 pnpm mutation          # Stryker; the floor only moves up
+pnpm release           # bumpp; the preversion gate runs every local test first
 cargo test --manifest-path reaper/Cargo.toml
 ```
 

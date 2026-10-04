@@ -232,16 +232,17 @@ Window states after `WM_CLOSE` to the main window:
 - **One crate, two artifacts.** `reaper/` builds the `forge_native` cdylib
   (napi) and the `forge-reaper` binary. The binary never links napi.
 - **Per-platform packages.** The release workflow builds both artifacts per
-  target (the existing `native` CI matrix), then in one publish job:
-  1. `napi create-npm-dirs` makes `npm/<platform>/`.
-  2. `napi artifacts` copies each `.node` file into its directory.
-  3. A small repo script copies `forge-reaper` (`.exe` on Windows) into the same
-     directory, adds it to `files`, and sets mode 0755. Upload and download
-     artifact steps do not keep file modes, so this step must set the mode.
-  4. The workflow checks each tarball (`npm pack --dry-run` and `tar tvzf`):
-     both files are present and the reaper is 0755.
-  5. `napi pre-publish` publishes `@rbx-forge/native-<platform>` and writes them
-     to the `optionalDependencies` of `rbx-forge`. `packageName`
+  target (`native.yaml`, the same matrix as CI), then one publish job runs
+  `scripts/release/release.ts`:
+  1. For each `package.json#napi` target it stages
+     `@rbx-forge/native-<platform>`: the `.node` file, `forge-reaper` (`.exe` on
+     Windows), and a generated `package.json` that lists both in `files`. It
+     packs each package and sets the reaper entry to mode 0755 in the tarball.
+     Artifact downloads and a pack on Windows both drop the exec bit, so the
+     tarball, not the file system, carries the mode.
+  2. It publishes each platform package, then `rbx-forge` with them as
+     `optionalDependencies`. Those are written only for the publish, so the
+     lockfile never names a version that is not on npm. `packageName`
      `@rbx-forge/native` is only the name prefix; there is no separate umbrella
      package.
 - **Loader.** A TypeScript module in the native-bindings area (no napi generated

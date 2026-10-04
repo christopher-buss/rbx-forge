@@ -38,6 +38,7 @@ export default defineConfig({
 				"src/**/*.spec-d.ts",
 				// Hook entries, like `src/cli.ts`, touch the process.
 				"scripts/worktree/{create,remove}.ts",
+				"scripts/release/{bootstrap,check,effects,publish}.ts",
 			],
 			include: ["src/**/*.ts", "scripts/**/*.ts"],
 			thresholds: {
