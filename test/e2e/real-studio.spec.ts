@@ -246,21 +246,30 @@ async function waitForLoadedAsync(fixture: Fixture, sessionId: string): Promise<
 
 /**
  * Read focus without activating or switching any desktop.
- * @returns The foreground window handle.
+ * @returns The PID that owns the foreground window.
  */
-function foregroundWindow(): string {
+function foregroundOwner(): number {
 	const { status, stdout } = spawnSync(
 		"powershell.exe",
 		[
 			"-NoProfile",
 			"-NonInteractive",
 			"-Command",
-			"Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class ForgeForeground { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); }'; [ForgeForeground]::GetForegroundWindow().ToInt64().ToString()",
+			'Add-Type -TypeDefinition \'using System; using System.Runtime.InteropServices; public static class ForgeForeground { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint owner); }\'; $owner = 0; [void][ForgeForeground]::GetWindowThreadProcessId([ForgeForeground]::GetForegroundWindow(), [ref]$owner); $owner',
 		],
 		{ encoding: "utf8", windowsHide: true },
 	);
 	assert(status === 0);
-	return stdout.trim();
+	return Number(stdout.trim());
+}
+
+/**
+ * Studio must not take focus; the user may move it during a run.
+ * @param studio - The Studio PID.
+ * @returns A matcher for {@link foregroundOwner}.
+ */
+function notOwnedBy(studio: number): unknown {
+	return expect.toSatisfy((owner: number) => owner !== studio);
 }
 
 function saveOutcome(run: UpRun): string {
@@ -277,7 +286,6 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			killNewStudiosAtEnd();
 			const fixture = await compatibilitySnapshotAsync();
 			const pinSnapshot = snapshotCleanup(fixture.project);
-			const focus = foregroundWindow();
 			const opened = await runForgeAsync(fixture, ["open", "--json"], realVariables(fixture));
 
 			expect(opened.status).toBe(0);
@@ -305,7 +313,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 				.poll(() => pinned.isBlocked(), { interval: 500, timeout: 30_000 })
 				.toBeFalse();
 			expect(pinned.isAlive()).toBeTrue();
-			expect(foregroundWindow()).toBe(focus);
+			expect(foregroundOwner()).toStrictEqual(notOwnedBy(studio.pid));
 		},
 	);
 
@@ -372,9 +380,9 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 	it.for([
 		{
 			desktop: "user",
-			expectedFocus: (_focus: string): unknown => expect.any(String),
+			expectedFocus: (_studio: number): unknown => expect.any(Number),
 		},
-		{ desktop: "hidden", expectedFocus: (focus: string) => focus },
+		{ desktop: "hidden", expectedFocus: notOwnedBy },
 	] as const)(
 		"saves Studio on the $desktop desktop",
 		{ timeout: 240_000 },
@@ -386,18 +394,17 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const sessionId = await upStudioAsync(fixture, desktop);
 			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			const before = statSync(fixture.place).mtimeMs;
-			const focus = foregroundWindow();
 			const save = await runForgeAsync(
 				fixture,
 				["save", "--timeout", "30", "--json"],
 				realVariables(fixture),
 			);
-			const after = foregroundWindow();
+			const after = foregroundOwner();
 
 			expect(saveOutcome(save)).toBe("saved");
 			expect(save.result.data).toMatchObject({ desktop, pid: lockPid, place: fixture.place });
 			expect(statSync(fixture.place).mtimeMs).toBeGreaterThan(before);
-			expect(after).toStrictEqual(expectedFocus(focus));
+			expect(after).toStrictEqual(expectedFocus(lockPid));
 
 			const firstSavedAt = statSync(fixture.place).mtimeMs;
 			const again = await runForgeAsync(fixture, ["save", "--json"], realVariables(fixture));
@@ -420,12 +427,11 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const sessionId = await upStudioAsync(fixture, "hidden");
 			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			await sleep(10_000);
-			const focus = foregroundWindow();
 			const save = await runForgeAsync(fixture, ["save", "--json"], realVariables(fixture));
 
 			expect(saveOutcome(save)).toBe("saved");
 			expect(save.result.data).toMatchObject({ desktop: "hidden", pid: lockPid });
-			expect(foregroundWindow()).toBe(focus);
+			expect(foregroundOwner()).toStrictEqual(notOwnedBy(lockPid));
 		},
 	);
 
