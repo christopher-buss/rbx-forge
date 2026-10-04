@@ -40,21 +40,33 @@ local typecheck = new Step {
     check = "pnpm typecheck"
 }
 
+local checkedFiles = List(
+    "src/**",
+    "test/**",
+    "scripts/**",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "tsconfig*.json",
+    "tsdown.config.ts",
+    "vitest*.config.ts",
+)
+
 local build = new Step {
-    glob = List("*.ts", "*.json")
+    glob = checkedFiles
     check = "pnpm build"
 }
 
 // Vitest's type tests run `tsc --build` too; running after typecheck avoids two
 // concurrent builds writing the same tsbuildinfo (TS6305 on Windows).
 local test = new Step {
-    glob = List("*.ts", "*.json")
+    glob = checkedFiles
     check = "pnpm test"
     depends = List("typecheck")
 }
 
 local e2e = new Step {
-    glob = List("*.ts", "*.json")
+    glob = checkedFiles
     check = "pnpm test:e2e"
     depends = List("build")
 }
@@ -90,6 +102,8 @@ hooks {
             ["knip"] = knip
             ["mutation"] {
                 glob = List("src/**/*.ts")
+                // URL remotes make hk's default-branch ref unresolvable.
+                step_condition = "exec('git diff --name-only origin/main...HEAD -- src/') != ''"
                 check = "pnpm mutation"
                 profiles = List("agent")
             }
