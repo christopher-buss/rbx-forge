@@ -46,7 +46,15 @@ export function createStudioRecorder(
 		studio: (studioStatus, place, process, origin = status.services.studio.origin) => {
 			const { owner } = status.services.studio;
 			const from = origin === undefined ? {} : { origin };
-			status.services.studio = { ...process, ...from, owner, place, status: studioStatus };
+			const desktop = process?.desktop ?? "user";
+			status.services.studio = {
+				...process,
+				...from,
+				desktop,
+				owner,
+				place,
+				status: studioStatus,
+			};
 			changed();
 		},
 		studioLeft: () => {

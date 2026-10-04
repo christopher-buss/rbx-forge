@@ -18,6 +18,7 @@ export interface FakeProcess {
 	blocked?: "throw" | boolean;
 	/** How many times `requestClose` reached it while it ran. */
 	closeRequests?: number;
+	desktop?: "hidden" | "user";
 	executablePath: string;
 	/** It exits right after it is pinned, before any query on the pin. */
 	exitsAfterPin?: boolean;
@@ -234,6 +235,7 @@ function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 	}
 
 	return {
+		desktop: () => entry.desktop ?? "user",
 		executablePath: () => (entry.alive ? entry.executablePath : null),
 		isAlive: () => entry.alive,
 		isBlocked: () => blockedNow(pid, entry),

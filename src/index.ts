@@ -14,6 +14,7 @@ export type {
 	RbxtsOptions,
 	SessionOptions,
 	StudioOptions,
+	StudioDesktop,
 	SyncbackOptions,
 	TypegenOptions,
 } from "./config/schema.ts";

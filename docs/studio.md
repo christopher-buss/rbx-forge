@@ -61,6 +61,22 @@ Rojo and let it go, open, and touch none of its auto-recovery files; `restart`
 keeps it, and starts the compiler and Rojo again on the same port; `stop` fails
 with `studio_found`.
 
+## Hidden desktop
+
+On Windows, `forge up --studio` opens a new Studio on a hidden desktop, apart
+from the user's desktop. It loads plugins and serves the Studio MCP without
+changing the user's screen. All projects share one named desktop in the Windows
+user session. Forge opens it or makes it and keeps it for later launches.
+
+`forge start` opens Studio on the user's desktop by default. Set
+`studio.desktop` in the config or pass `--desktop user` / `--desktop hidden` to
+`start` or `up --studio`; the flag wins. On macOS and Linux the effective desktop
+is always `user`. A found Studio stays on its existing desktop.
+
+`forge status --json` records the actual desktop as
+`services.studio.desktop`. `stop` and `down` close windows on that desktop and
+end a Studio blocked by a modal dialog there at once.
+
 ## Managed Rojo plugin
 
 After a successful place build, immediately before attempting a new direct

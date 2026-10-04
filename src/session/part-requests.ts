@@ -1,5 +1,6 @@
 import { type } from "arktype";
 
+import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import type { StudioSave } from "../studio/save-studio.ts";
 import type { OwnerHandlers } from "./ownership.ts";
@@ -15,6 +16,8 @@ export type AddablePart = "compiler" | "studio";
 
 /** What one `addParts` request asks for. */
 export interface PartRequest {
+	readonly defaultDesktop?: StudioDesktop | undefined;
+	readonly desktop?: StudioDesktop | undefined;
 	readonly parts: ReadonlyArray<AddablePart>;
 	/** The Studio executable to start (`up --studio-path`), absolute. */
 	readonly studioPath?: string | undefined;
@@ -101,6 +104,8 @@ interface Link {
 }
 
 const partRequest = type({
+	"defaultDesktop?": "'user' | 'hidden'",
+	"desktop?": "'user' | 'hidden'",
 	"parts": "('compiler' | 'studio')[]",
 	"studioPath?": "string",
 });

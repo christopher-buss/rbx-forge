@@ -3,6 +3,7 @@ import path from "node:path";
 import { buildAsync } from "../commands/build.ts";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
+import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import type { StudioReadyListener } from "../seams/network.ts";
@@ -57,6 +58,8 @@ export interface PreparedStudio {
 interface OpenOptions {
 	/** Build the session's place first, unless Studio has it open. */
 	build: boolean;
+	defaultDesktop?: StudioDesktop | undefined;
+	desktop?: StudioDesktop | undefined;
 	/** The session's end signal. */
 	signal: AbortSignal;
 	/** The Studio executable to start, absolute. */
@@ -195,10 +198,7 @@ export function createStudioAdder(
 		let opening = followPreparedStudio(setup, scope, attach, prepared);
 		const isRojoStarted = await serveRojoAsync(setup, scope, attach.parts, rojo);
 		if (prepared !== undefined && opening === undefined && !hasEnded(scope)) {
-			opening = await attachAsync(setup, scope, attach, {
-				prepared,
-				studioPath: request.studioPath,
-			});
+			opening = await attachAsync(setup, scope, attach, { ...request, prepared });
 		}
 
 		if (opening !== undefined && !hasEnded(scope)) {
@@ -323,7 +323,9 @@ async function attachAsync(
 	setup: StudioSetup,
 	scope: SessionScope,
 	attach: AttachParts,
-	options: Pick<OpenOptions, "studioPath"> & { prepared: PreparedStudio },
+	options: Pick<OpenOptions, "defaultDesktop" | "desktop" | "studioPath"> & {
+		prepared: PreparedStudio;
+	},
 ): Promise<{ open: Promise<void>; place: string }> {
 	try {
 		const opened = await openStudioAsync(

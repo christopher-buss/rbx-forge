@@ -147,6 +147,36 @@ pub struct PinnedProcess {
 
 #[napi]
 impl PinnedProcess {
+    /// The desktop inherited by this process. Always user on POSIX.
+    #[napi]
+    pub fn desktop(&self) -> Result<String> {
+        #[cfg(windows)]
+        {
+            if !self
+                .inner
+                .is_alive()
+                .map_err(|err| to_napi("process desktop", &err))?
+            {
+                return Ok("user".to_owned());
+            }
+            let desktop = os::win::desktop::for_process(self.pid())
+                .map_err(|err| to_napi("process desktop", &err))?;
+            let name = desktop
+                .name()
+                .map_err(|err| to_napi("desktop name", &err))?;
+            Ok(if name == os::win::desktop::HIDDEN_NAME {
+                "hidden"
+            } else {
+                "user"
+            }
+            .to_owned())
+        }
+        #[cfg(not(windows))]
+        {
+            Ok("user".to_owned())
+        }
+    }
+
     /// The PID the process had when it was pinned.
     #[napi(getter)]
     #[must_use]

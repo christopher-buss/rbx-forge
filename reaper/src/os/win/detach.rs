@@ -31,6 +31,7 @@ pub struct Detached<'a> {
     pub env: &'a [(String, String)],
     /// A file its stdout and stderr append to; `NUL` when `None`.
     pub output: Option<&'a str>,
+    pub desktop: Option<&'a str>,
 }
 
 fn inheritable(file: File) -> io::Result<File> {
@@ -76,6 +77,16 @@ pub fn spawn_detached(detached: &Detached<'_>) -> io::Result<Option<u32>> {
     startup.StartupInfo.hStdOutput = raw(&output);
     startup.StartupInfo.hStdError = raw(&output);
     startup.lpAttributeList = attributes.as_ptr();
+
+    let mut desktop_name = if detached.desktop == Some("hidden") {
+        super::desktop::open_hidden()?;
+        Some(wide(super::desktop::HIDDEN_NAME))
+    } else {
+        None
+    };
+    if let Some(name) = &mut desktop_name {
+        startup.StartupInfo.lpDesktop = name.as_mut_ptr();
+    }
 
     let flags = EXTENDED_STARTUPINFO_PRESENT
         | DETACHED_PROCESS

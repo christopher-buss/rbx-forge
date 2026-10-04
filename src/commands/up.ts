@@ -23,6 +23,13 @@ import { isStudioReady, studioCancelled } from "./up-studio.ts";
 
 export const UP_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
+		name: "desktop",
+		config: "studio.desktop",
+		kind: "string",
+		text: "Studio desktop (default: hidden on Windows).",
+		value: "user|hidden",
+	},
+	{
 		name: "compiler",
 		kind: "boolean",
 		text: "Run the compiler in watch mode (the default); --no-compiler starts no part.",
@@ -136,7 +143,7 @@ export async function runUpAsync(
 	input: CommandInput,
 ): Promise<CommandResult> {
 	const { clock } = context.seams;
-	const wanted = wantedParts(context, input.flags);
+	const wanted = wantedParts(context, input);
 	const request: SessionRequest = {
 		compiler: input.flags["compiler"] !== false,
 		config: input.config,
@@ -177,7 +184,7 @@ function describeStudio({ place, status }: SessionStatus["services"]["studio"]):
  * @returns The parts, and the Studio executable to start.
  * @throws {ForgeError} `usage` for `--studio-path` without `--studio`.
  */
-function wantedParts(context: CommandContext, flags: CommandInput["flags"]): PartRequest {
+function wantedParts(context: CommandContext, { config, flags }: CommandInput): PartRequest {
 	const studioPath = flags[STUDIO_PATH_FLAG.name];
 	const hasStudio = flags["studio"] === true;
 	if (typeof studioPath === "string" && !hasStudio) {
@@ -186,6 +193,8 @@ function wantedParts(context: CommandContext, flags: CommandInput["flags"]): Par
 
 	const parts: Array<AddablePart> = flags["compiler"] === false ? [] : ["compiler"];
 	return {
+		defaultDesktop: "hidden",
+		...(config.studio?.desktop === undefined ? {} : { desktop: config.studio.desktop }),
 		parts: hasStudio ? [...parts, "studio"] : parts,
 		...(typeof studioPath === "string"
 			? { studioPath: path.resolve(context.cwd, studioPath) }

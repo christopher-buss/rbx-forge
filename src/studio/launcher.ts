@@ -1,7 +1,8 @@
 import type { ChildProcess } from "node:child_process";
 
+import type { StudioDesktop } from "../config/schema.ts";
 import { toForgeError } from "../errors.ts";
-import type { NativeLoader } from "../native/addon.ts";
+import type { NativeLoader, PinnedProcess } from "../native/addon.ts";
 import type { Invocation } from "../process/command-line.ts";
 import { readVariable, withVariables } from "../process/environment.ts";
 import type { ChildProcessBackend } from "../process/process-runner.ts";
@@ -24,6 +25,7 @@ export interface StudioLaunch {
 	 */
 	beforeLaunch?: (() => Promise<void>) | undefined;
 	cwd: string;
+	desktop?: StudioDesktop | undefined;
 	env: Environment;
 	/** The absolute path of the place file. */
 	place: string;
@@ -35,6 +37,7 @@ export interface StudioLaunch {
 
 /** A Studio forge started itself, pinned at the start. */
 export interface StudioProcess {
+	desktop?: StudioDesktop;
 	pid: number;
 	/** Its OS start time (see `processStartTime`). */
 	startTime: string;
@@ -69,6 +72,16 @@ type LauncherEnd =
 	| { error: NodeJS.ErrnoException; type: "error" }
 	| { exitCode: null | number; signal: NodeJS.Signals | null; type: "exit" }
 	| { type: "waiting" };
+
+/**
+ * Read a verified Studio's identity and desktop from its pin.
+ *
+ * @param pinned - A process verified as Studio.
+ * @returns Its process identity and desktop.
+ */
+export function studioProcess(pinned: PinnedProcess): StudioProcess {
+	return { desktop: pinned.desktop(), pid: pinned.pid, startTime: pinned.startTime };
+}
 
 /**
  * The Windows shell reads the place from this variable: cmd.exe expands
@@ -238,6 +251,7 @@ function startBreakingAway(
 			cwd,
 			env: definedOnly(env),
 			program: executable,
+			...(launch.desktop === undefined ? {} : { desktop: launch.desktop }),
 		}) ?? undefined
 	);
 }
@@ -311,5 +325,13 @@ async function launchDirectAsync(
 		return { message: `${executable} (PID ${pid}) exited at once.`, type: "failed" };
 	}
 
-	return { studio: { pid, startTime: pinned.startTime }, type: "launched" };
+	const desktop = backend.host.platform === "win32" ? (launch.desktop ?? "user") : "user";
+	return {
+		studio: {
+			pid,
+			startTime: pinned.startTime,
+			...(launch.desktop === undefined ? {} : { desktop }),
+		},
+		type: "launched",
+	};
 }

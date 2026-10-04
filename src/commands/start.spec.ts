@@ -19,6 +19,7 @@ import { ForgeError } from "../errors.ts";
 import type { IpcHandler } from "../ipc/server.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { SupervisorLaunch, SupervisorLauncher } from "../supervisor/launcher.ts";
+import type { CommandInput } from "./context.ts";
 import { runStartAsync, START_FLAGS } from "./start.ts";
 
 /**
@@ -146,6 +147,7 @@ interface JoinRun {
  *
  * @param flags - The parsed flags.
  * @param setup - Serves the session first, or from the supervisor.
+ * @param config - The flags' config values.
  * @returns The run.
  */
 async function joinWithAsync(
@@ -154,6 +156,7 @@ async function joinWithAsync(
 		serve?: (memory: MemoryFileSystem, ipc: MemoryTransport) => Promise<unknown>;
 		supervisor?: SupervisorLauncher;
 	},
+	config: CommandInput["config"] = {},
 ): Promise<JoinRun> {
 	const memory = createMemoryFileSystem();
 	const ipc = createMemoryTransport();
@@ -179,7 +182,7 @@ async function joinWithAsync(
 				supervisor,
 			}),
 		}),
-		{ config: {}, flags },
+		{ config, flags },
 	);
 	return { ipc, memory, reporter, running, signals, sleeps: () => now / 1000, supervisor };
 }
@@ -209,39 +212,48 @@ async function joinedAsync(run: JoinRun): Promise<void> {
 }
 
 describe("runStartAsync next to a running session", () => {
-	it("should join it as its owner, and let go on a stop signal", async () => {
-		expect.assertions(4);
+	it.for([
+		{ config: {}, desktop: {} },
+		{ config: { studio: { desktop: "hidden" } }, desktop: { desktop: "hidden" } },
+	] as const)(
+		"should join as its owner with $desktop and let go on a stop signal",
+		async ({ config, desktop }) => {
+			expect.assertions(4);
 
-		let session: FakeSession | undefined;
-		const run = await joinWithAsync(
-			{ "studio-path": "Studio.exe" },
-			{
-				serve: serving((served) => {
-					session = served;
-				}),
-			},
-		);
-		await joinedAsync(run);
-		run.signals.fire("SIGINT");
+			let session: FakeSession | undefined;
+			const run = await joinWithAsync(
+				{ "studio-path": "Studio.exe" },
+				{
+					serve: serving((served) => {
+						session = served;
+					}),
+				},
+				config,
+			);
+			await joinedAsync(run);
+			run.signals.fire("SIGINT");
 
-		await expect(run.running).resolves.toStrictEqual({
-			data: RELEASED,
-			summary:
-				"Let go of session s1: stopped Rojo; left Studio open; the compiler runs on with no owner.",
-		});
-		expect(run.reporter.events).toStrictEqual([
-			{
-				message:
-					"Joined session s1: took the compiler; started Studio and Rojo. Press Ctrl+C to stop.",
-				type: "info",
-			},
-		]);
-		expect(session!.join).toHaveBeenCalledExactlyOnceWith({
-			parts: ["compiler", "studio"],
-			studioPath: path.resolve(PROJECT, "Studio.exe"),
-		});
-		expect([run.supervisor.mock.calls, run.signals.listeners()]).toStrictEqual([[], 0]);
-	});
+			await expect(run.running).resolves.toStrictEqual({
+				data: RELEASED,
+				summary:
+					"Let go of session s1: stopped Rojo; left Studio open; the compiler runs on with no owner.",
+			});
+			expect(run.reporter.events).toStrictEqual([
+				{
+					message:
+						"Joined session s1: took the compiler; started Studio and Rojo. Press Ctrl+C to stop.",
+					type: "info",
+				},
+			]);
+			expect(session!.join).toHaveBeenCalledExactlyOnceWith({
+				...desktop,
+				defaultDesktop: "user",
+				parts: ["compiler", "studio"],
+				studioPath: path.resolve(PROJECT, "Studio.exe"),
+			});
+			expect([run.supervisor.mock.calls, run.signals.listeners()]).toStrictEqual([[], 0]);
+		},
+	);
 
 	it("should ask for no part with --no-compiler and --no-open", async () => {
 		expect.assertions(2);
@@ -264,7 +276,10 @@ describe("runStartAsync next to a running session", () => {
 		run.signals.fire("SIGINT");
 		await run.running;
 
-		expect(session!.join).toHaveBeenCalledExactlyOnceWith({ parts: [] });
+		expect(session!.join).toHaveBeenCalledExactlyOnceWith({
+			defaultDesktop: "user",
+			parts: [],
+		});
 		expect(run.reporter.events).toStrictEqual([
 			{ message: "Joined session s1: it has no part. Press Ctrl+C to stop.", type: "info" },
 		]);

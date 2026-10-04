@@ -27,6 +27,8 @@ export interface FileLock {
  * that reused the PID.
  */
 export interface PinnedProcess {
+	/** The pinned process desktop. Always user on POSIX. */
+	desktop: () => "hidden" | "user";
 	/** Full path of the executable, or `null` once the process has exited. */
 	executablePath: () => null | string;
 	/** Whether the pinned process still runs. */
@@ -131,6 +133,11 @@ export interface NativePipeServer {
 export interface DetachedSpawn {
 	args: Array<string>;
 	cwd: string;
+	/**
+	 * Hidden selects the shared Windows desktop; absent or user keeps this
+	 * desktop.
+	 */
+	desktop?: "hidden" | "user";
 	/** The whole environment of the new process. */
 	env: Record<string, string>;
 	/** A file its stdout and stderr append to; `NUL` when missing. */
