@@ -21,6 +21,22 @@ import { saveStudioAsync } from "../studio/save-studio.ts";
 import { runSaveAsync } from "./save.ts";
 
 describe(runSaveAsync, () => {
+	it("rejects a malformed session save result", async () => {
+		expect.assertions(1);
+
+		const memory = createMemoryFileSystem();
+		const ipc = createMemoryTransport();
+		const session = await serveFakeSessionAsync(memory, ipc);
+		session.save = () => ({ place: "example.rbxl" });
+		const context = createCommandContext({
+			seams: createTestSeams({ fileSystem: memory.fileSystem, ipc }),
+		});
+
+		await expect(runSaveAsync(context, { config: {}, flags: {} })).rejects.toMatchObject({
+			code: "internal_error",
+		});
+	});
+
 	it.for<"missing" | "wrong_pid" | "wrong_process">(["missing", "wrong_pid", "wrong_process"])(
 		"refuses the %s place lock even when the session records Studio",
 		async (kind) => {
@@ -88,7 +104,7 @@ describe(runSaveAsync, () => {
 	});
 
 	it("saves a found session Studio one request at a time and resets its idle timeout", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const memory = createMemoryFileSystem({
 			"game.rbxl": "place",
@@ -100,6 +116,7 @@ describe(runSaveAsync, () => {
 		const native = createFakeNative({
 			42: {
 				alive: true,
+				desktop: "hidden",
 				executablePath: "RobloxStudioBeta.exe",
 				onSave: () => {
 					mtime += 1000;
@@ -155,6 +172,7 @@ describe(runSaveAsync, () => {
 			"1970-01-01T00:00:03.000Z",
 		]);
 		expect(idle.idleAt()).toBeGreaterThan(60_000);
+		expect(results[0].data["desktop"]).toBe("hidden");
 	});
 
 	it("waits for an opening Studio before saving", async () => {
