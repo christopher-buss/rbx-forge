@@ -78,7 +78,7 @@ function savedResult(
 ): StudioSave {
 	return {
 		bytes: stat.size,
-		desktop: target.desktop ?? "user",
+		desktop: pinned.desktop(),
 		durationMs,
 		mtime: stat.mtime.toISOString(),
 		pid: pinned.pid,

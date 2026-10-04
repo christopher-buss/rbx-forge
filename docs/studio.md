@@ -226,3 +226,10 @@ A Studio that is not open fails with `studio_not_open`; a modal before the
 request fails with `studio_busy`. `save_failed` carries `details.reason`:
 `timeout`, `studio_error`, `no_menu_item`, or `permission_denied`. The writable
 check stops a read-only place before Studio can show a save error.
+
+`forge save --place <snapshot>` saves the Studio that has that snapshot open,
+without using a session. The snapshot's lock must identify a verified Studio
+on this computer; a missing or stale lock returns `studio_not_open`. Paths are
+relative to the project directory unless absolute. The result reports Studio's
+actual desktop. Run `forge syncback --input <snapshot>` after the save to read
+its edits back into the project.

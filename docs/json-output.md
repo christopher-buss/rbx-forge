@@ -224,6 +224,8 @@ no part stopped or started; an add failure, such as `compiler_missing` or
 ## The save result
 
 `forge save --json` saves the session's Studio before syncback reads its place.
+`forge save --place <snapshot> --json` saves a snapshot Studio directly and
+returns the same data, including its actual desktop, without a running session.
 After editing in Studio, run `forge save --json`, then `forge syncback --json`.
 
 ```json
