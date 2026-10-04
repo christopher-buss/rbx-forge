@@ -6,6 +6,9 @@ const setupFiles = ["./test/setup/jest-extended.ts"];
 /** Swaps the global managed plugin; no Studio, real or stand-in, may run. */
 const REAL_STUDIO_SPEC = "test/integration/real-studio-sync.spec.ts";
 
+/** Kills every new `RobloxStudioBeta.exe`, stand-ins included. */
+const REAL_STUDIO_E2E_SPEC = "test/e2e/real-studio.spec.ts";
+
 /**
  * The coverage-measured suite. Never spawns a process: every I/O goes through
  * injected seams. `vitest.stryker.config.ts` runs the same project.
@@ -86,10 +89,26 @@ export default defineConfig({
 				test: {
 					name: "e2e",
 					clearMocks: true,
+					exclude: [...defaultExclude, REAL_STUDIO_E2E_SPEC],
 					// Removing temp projects outruns the default on Windows.
 					hookTimeout: 30_000,
 					include: ["test/e2e/**/*.spec.ts"],
 					restoreMocks: true,
+					setupFiles: [...setupFiles, "./test/setup/studio-isolation.ts"],
+					testTimeout: 60_000,
+					unstubEnvs: true,
+				},
+			},
+			{
+				extends: true,
+				test: {
+					// Runs after `e2e`: its specs spawn Studio stand-ins.
+					name: "e2e-real-studio",
+					clearMocks: true,
+					hookTimeout: 30_000,
+					include: [REAL_STUDIO_E2E_SPEC],
+					restoreMocks: true,
+					sequence: { groupOrder: 1 },
 					setupFiles: [...setupFiles, "./test/setup/studio-isolation.ts"],
 					testTimeout: 60_000,
 					unstubEnvs: true,
