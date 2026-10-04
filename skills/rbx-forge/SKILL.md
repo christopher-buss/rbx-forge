@@ -47,6 +47,8 @@ and `hint`. Branch on `error.code` and the exit code.
   `forge up --json` joins it (`data.started: false`), so it is not yours.
 - `compile_timeout`: no fresh build came within 300 s. Read
   `forge logs compiler`.
+- `edit_not_compiled`: the compiler started no compile for the edited file in
+  `error.details.path`. Save it again, or read `forge logs compiler`.
 - A deleted output folder or a reinstalled `node_modules`:
   `forge restart --json` restarts the parts with no owner.
 - `session_stopping` (exit 6): the session is still ending. Run the command

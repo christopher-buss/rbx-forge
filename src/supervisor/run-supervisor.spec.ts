@@ -3352,6 +3352,38 @@ describe("forge up control channel", () => {
 		await expect(waiting).rejects.toMatchObject({ code: "compile_timeout" });
 	});
 
+	it("should wait in freshStatus for a compile of a source edit after the last build", async () => {
+		expect.assertions(1);
+
+		const run = startCommand({
+			files: {
+				...TOOL_FILES,
+				"src/main.ts": "",
+				"tsconfig.json": '{"compilerOptions":{"rootDir":"src"}}',
+			},
+			flags: { open: false },
+			projectType: "rbxts",
+		});
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(
+			path.join(SESSION, "output", "compiler.log"),
+			"[10:00:00] Starting compilation in watch mode...\nFound 0 errors. Watching for file changes.\n",
+		);
+		await passAsync(run, 2 * OUTPUT_POLL_MS);
+		run.memory.setModifiedTime("src/main.ts", run.clock.clock.now());
+		const waiting = callSessionAsync(run.ipc, CONTROL_TARGET, "freshStatus", {
+			params: { timeoutMs: 2000 },
+		});
+		// The test awaits it; this only keeps the early rejection handled.
+		waiting.catch(() => {});
+		await flushAsync();
+		await passAsync(run, 2000);
+
+		await expect(waiting).rejects.toThrow(
+			`no compile started for the edit to ${path.join("src", "main.ts")}`,
+		);
+	});
+
 	it("should fail a freshStatus wait with service_failed when the compiler exits", async () => {
 		expect.assertions(1);
 

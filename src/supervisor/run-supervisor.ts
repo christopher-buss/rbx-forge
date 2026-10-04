@@ -341,19 +341,20 @@ async function runOpenSessionAsync(
  * What the control channel knows of the session's services, and its idle
  * timeout.
  *
+ * @param cwd - The project root.
  * @param services - The config, plan, resolved compiler, and owner.
- * @returns What the session runs, whether it reads builds, and the timeout.
+ * @returns What the session runs, whether it reads builds, where the
+ *   compiler's sources are, and the timeout.
  */
-function controlPlan({
-	compiler,
-	config,
-	owner,
-	plan,
-}: SessionServices): Pick<ControlSetup, "idleTimeout" | "plan" | "readsBuilds"> {
+function controlPlan(
+	cwd: string,
+	{ compiler, config, owner, plan }: SessionServices,
+): Pick<ControlSetup, "idleTimeout" | "plan" | "readsBuilds" | "sources"> {
 	return {
 		idleTimeout: config.session.idleTimeout,
 		plan: { ...plan, compiler: compiler !== undefined, owner },
 		readsBuilds: compiler?.parsesDiagnostics === true,
+		sources: { args: config.rbxts.args, cwd },
 	};
 }
 
@@ -389,7 +390,7 @@ async function runLockedAsync(
 
 	const links = { parts, sync: createSessionSync() };
 	const { closeAsync, files, ...state } = await openSessionAsync(context.seams, {
-		...controlPlan(services),
+		...controlPlan(context.cwd, services),
 		...links,
 		forge,
 		identity: identityOf(context, config, options.version),

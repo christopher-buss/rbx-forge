@@ -67,6 +67,11 @@ The time (750 ms) in which no compile may start before the last build counts as
 fresh. A compile that starts in it restarts the wait.\
 _Avoid_: debounce, settle time
 
+**Pickup window**:\
+The time an idle compiler gets to start a compile for the newest source edit
+before `status --wait` fails with `edit_not_compiled`.\
+_Avoid_: grace period
+
 ## Ownership and cleanup
 
 **Lease**:\

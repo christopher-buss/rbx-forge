@@ -8,6 +8,8 @@ import { createBuildWatch } from "../session/build-watch.ts";
 import type { IdleTracker } from "../session/idle.ts";
 import { createIdleTracker } from "../session/idle.ts";
 import type { SessionSync } from "../session/session-sync.ts";
+import type { SourceRoots } from "../session/source-edits.ts";
+import { newestSourceEdit } from "../session/source-edits.ts";
 import type { PartOwner, SessionStatus, StatusStore } from "../session/status.ts";
 import { createStatusStore, isReady } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
@@ -45,6 +47,8 @@ export interface ControlSetup {
 	port: number | undefined;
 	/** The session reads its compiler's builds (roblox-ts). */
 	readsBuilds: boolean;
+	/** Where the compiler's sources are, for the edits a wait waits for. */
+	sources: SourceRoots;
 	/** The supervisor's stop requests: `shutdown` feeds them. */
 	stop: StopSource;
 	/** Runs `forge sync` through the session body. */
@@ -222,6 +226,7 @@ function createSessionState(
 	const store = createSessionStatus(seams, setup, stateFile);
 	const builds = createBuildWatch({
 		clock: seams.clock,
+		edits: (before) => newestSourceEdit(seams.fileSystem, setup.sources, before),
 		recorder: {
 			building: (isBuilding) => {
 				if (isBuilding) {

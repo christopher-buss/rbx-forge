@@ -31,6 +31,7 @@ export type ForgeErrorCode =
 	| "config_not_found"
 	| "declined"
 	| "detach_unsupported"
+	| "edit_not_compiled"
 	| "endpoint_in_use"
 	| "hook_depth_exceeded"
 	| "hook_failed"
@@ -111,6 +112,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	detach_unsupported: {
 		exitCode: EXIT_FAILURE,
 		text: "The host does not let a session outlive the terminal.",
+	},
+	edit_not_compiled: {
+		exitCode: EXIT_FAILURE,
+		text: "`status --wait` found a source edit, but the compiler started no compile for it within the pickup window.",
 	},
 	endpoint_in_use: {
 		exitCode: EXIT_FAILURE,

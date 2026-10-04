@@ -32,8 +32,8 @@ interface Watched {
 }
 
 /**
- * Start a session whose compiler watches `src/main.ts`, and reach its
- * control channel.
+ * Start a session whose compiler watches `src/main.ts`, the source root of
+ * its tsconfig, and reach its control channel.
  *
  * @param variables - `FIXTURE_COMPILE_*` and other fixture variables.
  * @returns How to edit the file and ask the session.
@@ -43,6 +43,10 @@ async function startWatchedAsync(variables: Record<string, string>): Promise<Wat
 	const watched = path.join(project.project, "src", "main.ts");
 	mkdirSync(path.dirname(watched), { recursive: true });
 	writeFileSync(watched, "export {};\n");
+	writeFileSync(
+		path.join(project.project, "tsconfig.json"),
+		JSON.stringify({ compilerOptions: { outDir: "out", rootDir: "src" } }),
+	);
 	launch(project, COMPILER_ONLY, { FIXTURE_COMPILER_WATCH: watched, ...variables });
 	const session = await waitForSessionAsync(project);
 	const target: IpcTarget = { endpoint: session.identity.endpoint, token: session.token };
@@ -85,6 +89,22 @@ describe("freshStatus", () => {
 
 		expect(first).toMatchObject({ building: false, lastBuild: { errors: 0 } });
 		expect(second).toMatchObject({ building: false, lastBuild: { errors: 1 } });
+	});
+
+	it("should wait for the build of an edit that the watcher sees after the quiet window", async () => {
+		expect.assertions(1);
+
+		const session = await startWatchedAsync({
+			FIXTURE_COMPILE_DELAY_MS: "3000",
+			FIXTURE_COMPILER_NDJSON: "1",
+		});
+		await session.askAsync(20_000);
+		session.edit("export const error = 1;\n");
+
+		await expect(session.askAsync(20_000)).resolves.toMatchObject({
+			building: false,
+			lastBuild: { errors: 1 },
+		});
 	});
 
 	it("should fail with compile_timeout while a compile runs past the bound", async () => {

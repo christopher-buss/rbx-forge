@@ -3,10 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import { ForgeError } from "../errors.ts";
-import type { BuildWatch } from "./build-watch.ts";
+import type { BuildWatch, BuildWatchOptions } from "./build-watch.ts";
 import { createBuildWatch } from "./build-watch.ts";
-import { QUIET_WINDOW_MS } from "./freshness.ts";
+import { EDIT_PICKUP_MS, QUIET_WINDOW_MS } from "./freshness.ts";
 import type { StatusRecorder } from "./status.ts";
+import { isoTime } from "./status.ts";
 
 const START = "[10:00:00] Starting compilation in watch mode...";
 const CHANGE = "[10:00:01] File change detected. Starting incremental compilation...";
@@ -33,13 +34,16 @@ async function flushAsync(): Promise<void> {
 	});
 }
 
-function makeWatch(tracks = true): Harness {
+/** A source edit at 4.9 s, before a wait that a built watch starts at 5 s. */
+const EDIT = { at: 4900, path: "src/a.ts" };
+
+function makeWatch(tracks = true, edits: BuildWatchOptions["edits"] = () => {}): Harness {
 	const manual = createManualClock(0);
 	const recorder = {
 		building: vi.fn<StatusRecorder["building"]>(),
 		compiled: vi.fn<StatusRecorder["compiled"]>(),
 	};
-	const watch = createBuildWatch({ clock: manual.clock, recorder, tracks });
+	const watch = createBuildWatch({ clock: manual.clock, edits, recorder, tracks });
 	return {
 		advanceAsync: async (ms) => {
 			manual.advance(ms);
@@ -66,10 +70,11 @@ function makeWatch(tracks = true): Harness {
 /**
  * A watch whose compiler finished its first compile at 400 ms, now at 5 s.
  *
+ * @param edits - Finds the newest source edit.
  * @returns The harness.
  */
-async function builtAsync(): Promise<Harness> {
-	const harness = makeWatch();
+async function builtAsync(edits?: BuildWatchOptions["edits"]): Promise<Harness> {
+	const harness = makeWatch(true, edits);
 	await harness.lineAsync(START);
 	await harness.advanceAsync(400);
 	await harness.lineAsync(FOUND);
@@ -382,5 +387,89 @@ describe(createBuildWatch, () => {
 		await lineAsync("compiling as game..");
 
 		expect(recorder.building.mock.lastCall).toStrictEqual([false]);
+	});
+
+	it("should wait for a compile that starts after an edit the watcher sees late", async () => {
+		expect.assertions(3);
+
+		const edits = vi.fn<BuildWatchOptions["edits"]>(() => EDIT);
+		const { advanceAsync, lineAsync, wait } = await builtAsync(edits);
+		const waiting = wait();
+		await advanceAsync(30_000);
+		const isEarly = waiting.settled();
+		await lineAsync(CHANGE);
+		await advanceAsync(400);
+		await lineAsync(FOUND);
+		await advanceAsync(QUIET_WINDOW_MS);
+
+		expect(isEarly).toBeFalse();
+		expect(edits).toHaveBeenCalledExactlyOnceWith(5000);
+		await expect(waiting.wait).resolves.toBeUndefined();
+	});
+
+	it("should not wait longer for an edit that a compile started after", async () => {
+		expect.assertions(1);
+
+		const { advanceAsync, wait } = await builtAsync(() => ({ at: 0, path: "src/a.ts" }));
+		const waiting = wait();
+		await advanceAsync(QUIET_WINDOW_MS);
+
+		await expect(waiting.wait).resolves.toBeUndefined();
+	});
+
+	it("should fail with edit_not_compiled when no compile starts for an edit within the pickup window", async () => {
+		expect.assertions(2);
+
+		const { advanceAsync, wait } = await builtAsync(() => EDIT);
+		const waiting = wait(10 * EDIT_PICKUP_MS);
+		await advanceAsync(EDIT_PICKUP_MS - 1);
+		const isEarly = waiting.settled();
+		await advanceAsync(1);
+
+		expect(isEarly).toBeFalse();
+		await expect(waiting.wait).rejects.toMatchObject({
+			code: "edit_not_compiled",
+			details: {
+				editedAt: isoTime(EDIT.at),
+				path: EDIT.path,
+				pickupSeconds: EDIT_PICKUP_MS / 1000,
+			},
+			hint: 'The compiler may ignore this file. Read its output with "forge logs compiler", or save the file again.',
+			message: `No compile started for the edit to ${EDIT.path} within ${EDIT_PICKUP_MS / 1000} s.`,
+		});
+	});
+
+	it("should start the pickup window when a compile that started before the edit ends", async () => {
+		expect.assertions(2);
+
+		const { advanceAsync, lineAsync, wait } = await builtAsync(() => {
+			return {
+				at: 5050,
+				path: "src/a.ts",
+			};
+		});
+		await lineAsync(CHANGE);
+		await advanceAsync(100);
+		const waiting = wait(10 * EDIT_PICKUP_MS);
+		await advanceAsync(10_000);
+		await lineAsync(FOUND);
+		await advanceAsync(EDIT_PICKUP_MS - 1);
+		const isEarly = waiting.settled();
+		await advanceAsync(1);
+
+		expect(isEarly).toBeFalse();
+		await expect(waiting.wait).rejects.toMatchObject({ code: "edit_not_compiled" });
+	});
+
+	it("should tell why a wait timed out before a compile started for an edit", async () => {
+		expect.assertions(1);
+
+		const { advanceAsync, wait } = await builtAsync(() => EDIT);
+		const waiting = wait(2000);
+		await advanceAsync(2000);
+
+		await expect(waiting.wait).rejects.toThrow(
+			"No fresh build within 2 s: no compile started for the edit to src/a.ts.",
+		);
 	});
 });
