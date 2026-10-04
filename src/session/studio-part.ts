@@ -3,9 +3,11 @@ import path from "node:path";
 import { buildAsync } from "../commands/build.ts";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
+import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import type { StudioReadyListener } from "../seams/network.ts";
+import { watchHiddenLightingAsync } from "../studio/lighting-dialog.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
 import type { OpenedStudio } from "./attach.ts";
 import { attachStudio } from "./attach.ts";
@@ -30,6 +32,8 @@ export { STUDIO_OPEN_BOUND_MS } from "./studio-readiness.ts";
 export interface StudioState {
 	/** Ends a pending sync wait without ending the Studio follow. */
 	cancelReady?: (() => void) | undefined;
+	/** The current follow, settled before a desktop move closes Studio. */
+	followed?: Promise<void>;
 	isAttached: boolean;
 	/** Stops following the attached Studio, which stays open. */
 	letGo?: (() => void) | undefined;
@@ -57,6 +61,8 @@ export interface PreparedStudio {
 interface OpenOptions {
 	/** Build the session's place first, unless Studio has it open. */
 	build: boolean;
+	defaultDesktop?: StudioDesktop | undefined;
+	desktop?: StudioDesktop | undefined;
 	/** The session's end signal. */
 	signal: AbortSignal;
 	/** The Studio executable to start, absolute. */
@@ -135,7 +141,8 @@ export function followSessionStudio(
 		...opened,
 		onOpen: readiness.onLock,
 	});
-	scope.track(followed.finally(readiness.end));
+	follow.state.followed = followed.finally(readiness.end);
+	scope.track(follow.state.followed);
 	return { open: readiness.open };
 }
 
@@ -195,10 +202,7 @@ export function createStudioAdder(
 		let opening = followPreparedStudio(setup, scope, attach, prepared);
 		const isRojoStarted = await serveRojoAsync(setup, scope, attach.parts, rojo);
 		if (prepared !== undefined && opening === undefined && !hasEnded(scope)) {
-			opening = await attachAsync(setup, scope, attach, {
-				prepared,
-				studioPath: request.studioPath,
-			});
+			opening = await attachAsync(setup, scope, attach, { ...request, prepared });
 		}
 
 		if (opening !== undefined && !hasEnded(scope)) {
@@ -221,6 +225,23 @@ async function buildPlaceAsync(steps: CommandContext, config: ResolvedConfig): P
 		project: config.rojoProjectPath,
 		target: { output: config.buildOutputPath, type: "output" },
 	});
+}
+
+async function watchStartupLightingAsync(
+	context: CommandContext,
+	opened: OpenedStudio,
+	signal: AbortSignal,
+): Promise<void> {
+	return context.seams.host.platform === "win32"
+		? watchHiddenLightingAsync(
+				context.seams,
+				{ place: opened.place, process: opened.studio ?? undefined },
+				{
+					openingTimeoutMs: STUDIO_OPEN_BOUND_MS,
+					signal,
+				},
+			)
+		: undefined;
 }
 
 /**
@@ -248,6 +269,11 @@ async function watchStudioAsync(
 			idle.activity(context.seams.clock.now());
 		},
 	);
+	const lighting = watchStartupLightingAsync(
+		context,
+		opened,
+		AbortSignal.any([options.signal, followed.signal]),
+	);
 	const lock = { path: studioLockPath(place), pid: studio?.pid };
 	try {
 		return await waitForStudioCloseAsync(options, lock, () => {
@@ -255,7 +281,7 @@ async function watchStudioAsync(
 		});
 	} finally {
 		followed.abort();
-		await saves.done;
+		await Promise.all([saves.done, lighting]);
 	}
 }
 
@@ -276,7 +302,7 @@ async function followAsync(
 	const { status } = setup;
 	const { place, studio } = opened;
 	const isClosed = await watchStudioAsync(setup, scope, opened);
-	if (!isClosed) {
+	if (!isClosed || scope.signal.aborted) {
 		return;
 	}
 
@@ -323,7 +349,9 @@ async function attachAsync(
 	setup: StudioSetup,
 	scope: SessionScope,
 	attach: AttachParts,
-	options: Pick<OpenOptions, "studioPath"> & { prepared: PreparedStudio },
+	options: Pick<OpenOptions, "defaultDesktop" | "desktop" | "studioPath"> & {
+		prepared: PreparedStudio;
+	},
 ): Promise<{ open: Promise<void>; place: string }> {
 	try {
 		const opened = await openStudioAsync(

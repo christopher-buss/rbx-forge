@@ -56,10 +56,33 @@ the session and stays open.
 A Studio that the session attached this way is a found Studio:
 `data.services.studio.origin` is `found` (`forge` for a Studio the session
 opened), also after a `start` took it and gave it back. Only `stop --force` and
-`restart --force` close a found Studio. `down` and the idle timeout stop its
+`restart --force` close a found Studio during cleanup. An explicit Windows
+`show` or `hide` also closes it when changing its desktop, after saving it.
+`down` and the idle timeout stop its
 Rojo and let it go, open, and touch none of its auto-recovery files; `restart`
 keeps it, and starts the compiler and Rojo again on the same port; `stop` fails
 with `studio_found`.
+
+## Hidden desktop
+
+On Windows, `forge up --studio` and `forge open` open a new Studio on a
+hidden desktop, apart from the user's desktop. It loads plugins and serves the Studio MCP without
+changing the user's screen. All projects share one named desktop in the Windows
+user session. Forge opens it or makes it and keeps it for later launches.
+
+`forge start` opens Studio on the user's desktop by default. Set
+`studio.desktop` in the config or pass `--desktop user` / `--desktop hidden` to
+`start`, `up --studio`, or `open`; the flag wins. On macOS and Linux the effective
+desktop is always `user`. A found Studio stays on its existing desktop.
+
+`restart` reopens Studio on its previous desktop. When Windows cannot launch
+a hidden Studio directly, forge uses the platform launcher on the user desktop
+and emits a warning. Snapshot results and session status report this actual
+desktop.
+
+`forge status` displays the desktop; `forge status --json` records it as
+`services.studio.desktop`. `stop` and `down` close windows on that desktop and
+end a Studio blocked by a modal dialog there at once.
 
 ## Managed Rojo plugin
 
@@ -129,7 +152,8 @@ windows; `SIGTERM` on macOS and Linux), then looks at Studio every 50 ms:
 
 - When the place's lock file goes, Studio has closed the place: forge ends the
   process at once, instead of waiting for Studio's slow exit.
-- When a modal dialog blocks Studio (Windows), forge ends it at once, without a
+- When a modal dialog blocks Studio (Windows, or macOS with Accessibility
+  access), forge ends it at once, without a
   save. A place fresh from `rojo build` always counts as changed in Studio, so
   "Save changes?" is the common case. Studio also shows a modal dialog while it
   opens a place.
@@ -191,3 +215,96 @@ warning in `recovery.warnings`; it never fails `stop` or `down`.
 
 Limit: two projects with the same place file name, open at the same time, can
 match each other's file. `move` keeps the file, so nothing is lost.
+
+## Saving
+
+`forge save` saves the session's Studio, whether forge opened it or found it
+already open. It waits while Studio opens, checks that the place is writable,
+presses the English File > Save to File menu, and waits for the changed mtime
+to settle. `--timeout <s>` controls the wait (30 seconds by default). Session
+saves run one at a time and count as activity for the idle timeout.
+
+On Windows, saving Studio on the user's desktop takes focus. The result names
+the desktop so an agent can tell whether the user saw the save.
+
+On macOS, forge presses the menu through Accessibility (AX) without activating
+Studio. It saves in the background, while minimized, and while the app is hidden;
+Studio keeps its focus and visibility. Studio restores a window minimized to
+the Dock when it saves, so forge minimizes that window again for up to two
+seconds after the press; the window can show briefly. Saves fail with `timeout`
+while the screen is locked. Grant Accessibility access to the terminal
+running forge in System Settings > Privacy & Security > Accessibility, then
+restart that terminal if needed. forge never prompts for this permission. Menu
+names must be English. The writable check runs before any AX action, because a
+read-only save can activate Studio and switch Space.
+
+An agent edits through Studio, then runs `forge save --json`, then
+`forge syncback --json`. Syncback reads the saved place on disk.
+
+A Studio that is not open fails with `studio_not_open`; a modal before the
+request fails with `studio_busy`. `save_failed` carries `details.reason`:
+`timeout`, `studio_error`, `no_menu_item`, or `permission_denied`. The writable
+check stops a read-only place before Studio can show a save error.
+
+`forge save --place <snapshot>` saves the Studio that has that snapshot open,
+without using a session. The snapshot's lock must identify a verified Studio
+on this computer; a missing or stale lock returns `studio_not_open`. Paths are
+relative to the project directory unless absolute. The result reports Studio's
+actual desktop. Run `forge syncback --input <snapshot>` after the save to read
+its edits back into the project.
+
+
+A place with Compatibility lighting can show **Lighting Technology Migration**
+after its lock file appears. On the hidden Windows desktop, forge watches for
+that prompt during startup and presses its exact **Continue** button there.
+Hidden snapshots use a bounded detached watcher, so `forge open` returns
+without waiting for the delayed prompt and the watcher ends after Studio
+exits, the prompt is dismissed, or its startup deadline expires;
+save also checks for it before reporting `studio_busy`. Other dialogs still
+require attention. Hidden saves and this dismissal leave the user's focus
+unchanged.
+
+Set `Lighting.Technology` explicitly in the Rojo project (for example,
+`Voxel`, `ShadowMap`, or `Future`) to avoid the migration prompt. forge keeps
+the place as the project builds it and never changes that property.
+
+## Showing and hiding Studio on Windows
+
+`forge show` saves the session Studio and reopens that saved place on the user's
+desktop. `forge hide` saves it and reopens it on forge's hidden desktop. Both
+wait until the replacement has the place open, keep Rojo running, and preserve
+the Studio's owner. They use the saved file without rebuilding it, so edits
+made in Studio survive. Undo history and open script tabs are lost when Studio
+reopens. These commands also move an owned or found Studio: the replacement
+keeps the owner and its origin becomes forge. Snapshot Studios are outside
+these commands.
+
+`--timeout <s>` controls the save wait (30 seconds by default).
+`--studio-path <exe>` selects the executable used to reopen Studio. A failed
+save leaves the original Studio open. Requests run in order with other session
+saves and lifecycle changes. If Studio already uses the requested desktop,
+forge saves it and retains its PID.
+
+If Windows cannot launch on the hidden desktop, forge warns and opens Studio
+on the user's desktop. The result's `to` and `forge status` report the actual
+desktop. `save.pid` identifies the saved Studio; `pid` identifies the Studio
+that now has the place open.
+
+## Showing and hiding Studio on macOS
+
+`forge hide` saves the session Studio and hides that app. `forge show` saves it
+and unhides it. Both retain the same PID, undo history, script tabs, owner, and
+Rojo. They preserve focus, Space, and window order; show does not raise Studio
+above other apps. Snapshot Studios are outside these commands. Each place has
+its own Studio process, so other open places stay as they are.
+
+The commands read the app's current hidden state, including a manual Cmd+H.
+Their result uses `from` and `to` as app visibility: `hidden` means app-hidden,
+`user` means shown. `services.studio.desktop` records the last successful forge
+visibility command. Manual Cmd+H or Dock changes do not update this status marker;
+the next show or hide reads their actual effect. `save.desktop` remains `user`
+because macOS uses no hidden desktop. A restart can open a visible Studio again;
+keeping the desktop across a restart refers to Windows placement.
+
+As on Windows, `--timeout <s>` controls saving first. A save failure leaves app
+visibility and PID unchanged. `--studio-path` applies only to Windows reopening.

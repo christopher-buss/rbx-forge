@@ -11,11 +11,13 @@
 mod model;
 #[allow(dead_code, reason = "the worker layer serves only the reaper binary")]
 mod os;
+mod studio_dialog;
+mod studio_save;
 #[cfg(windows)]
 mod windows_exports;
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use napi::bindgen_prelude::AsyncTask;
 use napi::{Env, Error, Result, Task};
@@ -146,6 +148,59 @@ pub struct PinnedProcess {
 
 #[napi]
 impl PinnedProcess {
+    /// The macOS app-hidden state, or none for a nongraphical or exited process.
+    ///
+    /// # Errors
+    ///
+    /// When macOS refuses the process identity query.
+    #[napi]
+    pub fn app_hidden(&self) -> Result<Option<bool>> {
+        self.inner
+            .app_hidden()
+            .map_err(|err| to_napi("read app visibility", &err))
+    }
+
+    /// Hide or unhide the macOS app without activation or a restart.
+    ///
+    /// # Errors
+    ///
+    /// When macOS refuses the process identity query.
+    #[napi]
+    pub fn set_app_hidden(&self, hidden: bool) -> Result<bool> {
+        self.inner
+            .set_app_hidden(hidden)
+            .map_err(|err| to_napi("change app visibility", &err))
+    }
+    /// The desktop inherited by this process. Always user on POSIX.
+    #[napi]
+    pub fn desktop(&self) -> Result<String> {
+        #[cfg(windows)]
+        {
+            if !self
+                .inner
+                .is_alive()
+                .map_err(|err| to_napi("process desktop", &err))?
+            {
+                return Ok("user".to_owned());
+            }
+            let desktop = os::win::desktop::for_process(self.pid())
+                .map_err(|err| to_napi("process desktop", &err))?;
+            let name = desktop
+                .name()
+                .map_err(|err| to_napi("desktop name", &err))?;
+            Ok(if name == os::win::desktop::HIDDEN_NAME {
+                "hidden"
+            } else {
+                "user"
+            }
+            .to_owned())
+        }
+        #[cfg(not(windows))]
+        {
+            Ok("user".to_owned())
+        }
+    }
+
     /// The PID the process had when it was pinned.
     #[napi(getter)]
     #[must_use]
@@ -213,11 +268,50 @@ impl PinnedProcess {
             .map_err(|err| to_napi(&format!("kill group of process {}", self.pid()), &err))
     }
 
-    /// Ask the pinned process to close, as a user would: `WM_CLOSE` to its
-    /// main windows on Windows (hidden ones only when Studio titles them),
-    /// `SIGTERM` elsewhere. It does not wait, and
-    /// the process may refuse. `false` when it had already exited, or on
-    /// Windows has no main window.
+    /// Press Studio's English File > Save to File accessibility menu off Node's event loop.
+    ///
+    /// # Errors
+    ///
+    /// When Studio exited or the native accessibility action fails.
+    #[napi]
+    pub fn request_save(&self, timeout_ms: Option<u32>) -> Result<AsyncTask<StudioSaveTask>> {
+        let deadline =
+            Instant::now() + Duration::from_millis(u64::from(timeout_ms.unwrap_or(30_000)));
+        if !self.is_alive()? {
+            return Err(Error::from_reason("Studio exited"));
+        }
+        Ok(AsyncTask::new(StudioSaveTask {
+            pid: self.pid(),
+            start_time: self.inner.start_time(),
+            deadline,
+        }))
+    }
+
+    /// Invoke an exact button in a dialog on the pinned process desktop.
+    ///
+    /// # Errors
+    ///
+    /// When the identity changed or Windows refuses accessibility access.
+    #[napi]
+    pub fn dismiss_dialog(
+        &self,
+        title: String,
+        button: String,
+        desktop: String,
+        timeout_ms: Option<u32>,
+    ) -> Result<AsyncTask<StudioDialogTask>> {
+        Ok(AsyncTask::new(StudioDialogTask {
+            pid: self.pid(),
+            start_time: self.inner.start_time(),
+            title,
+            button,
+            desktop,
+            deadline: std::time::Instant::now()
+                + Duration::from_millis(u64::from(timeout_ms.unwrap_or(1000))),
+        }))
+    }
+
+    /// Ask the pinned process to close its main windows.
     ///
     /// # Errors
     ///
@@ -230,8 +324,8 @@ impl PinnedProcess {
     }
 
     /// Whether a modal dialog blocks the process's main windows: on Windows
-    /// one of them is disabled, and ignores a close request. Always
-    /// `false` on POSIX, and once the process has exited.
+    /// one of them is disabled; on macOS AX reports a modal window or sheet.
+    /// `false` on Linux, without macOS Accessibility access, and after exit.
     ///
     /// # Errors
     ///
@@ -386,4 +480,70 @@ pub fn force_cleanup(target: SessionTarget, bound_ms: u32) -> AsyncTask<CleanupT
         target: OwnedTarget::new(target),
         bound: Duration::from_millis(u64::from(bound_ms)),
     })
+}
+
+pub struct StudioSaveTask {
+    pid: u32,
+    start_time: u64,
+    deadline: Instant,
+}
+impl Task for StudioSaveTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<Self::Output> {
+        if Instant::now() >= self.deadline {
+            return Ok("timeout".to_owned());
+        }
+        let pinned = os::process::PinnedProcess::open(self.pid)
+            .map_err(|err| to_napi("pin Studio for save", &err))?;
+        let Some(pinned) = pinned else {
+            return Err(Error::from_reason("Studio exited"));
+        };
+        if pinned.start_time() != self.start_time {
+            return Err(Error::from_reason("Studio identity changed"));
+        }
+        match studio_save::request(self.pid, self.deadline) {
+            _ if Instant::now() >= self.deadline => Ok("timeout".to_owned()),
+            result => result.map_err(|err| to_napi("save Studio", &err)),
+        }
+    }
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+pub struct StudioDialogTask {
+    pid: u32,
+    start_time: u64,
+    title: String,
+    button: String,
+    desktop: String,
+    deadline: std::time::Instant,
+}
+impl Task for StudioDialogTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<Self::Output> {
+        let pinned = os::process::PinnedProcess::open(self.pid)
+            .map_err(|err| to_napi("pin Studio for dialog", &err))?;
+        let Some(pinned) = pinned else {
+            return Ok(false);
+        };
+        if pinned.start_time() != self.start_time {
+            return Ok(false);
+        }
+        match studio_dialog::dismiss(
+            self.pid,
+            &self.title,
+            &self.button,
+            &self.desktop,
+            self.deadline,
+        ) {
+            _ if Instant::now() >= self.deadline => Ok(false),
+            result => result.map_err(|err| to_napi("dismiss Studio dialog", &err)),
+        }
+    }
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
 }

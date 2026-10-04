@@ -2,6 +2,7 @@
 //! A marker's ReadyUrl receives one GET after the place lock exists.
 //! FIXTURE_STUDIO_ACK=none omits the GET; wrong sends an invalid token.
 //! FIXTURE_STUDIO_ACK_DELAY_MS delays the GET from the lock's creation.
+//! FIXTURE_STUDIO_PLATFORM_LAUNCHER=1 reads the place from RBX_FORGE_PLACE.
 
 #[allow(
     dead_code,
@@ -22,11 +23,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
-    let place = args
-        .windows(2)
-        .find(|pair| pair[0] == "--localPlaceFile")
-        .map(|pair| pair[1].as_str())
-        .or_else(|| args.first().map(String::as_str))
+    let platform_place = (env::var("FIXTURE_STUDIO_PLATFORM_LAUNCHER").as_deref() == Ok("1"))
+        .then(|| env::var("RBX_FORGE_PLACE"))
+        .transpose()
+        .map_err(io::Error::other)?;
+    let place = platform_place
+        .as_deref()
+        .or_else(|| {
+            args.windows(2)
+                .find(|pair| pair[0] == "--localPlaceFile")
+                .map(|pair| pair[1].as_str())
+                .or_else(|| args.first().map(String::as_str))
+        })
         .ok_or_else(|| io::Error::other("missing place"))?;
     let mut ready_url = args
         .windows(2)
@@ -59,6 +67,10 @@ fn main() -> io::Result<()> {
     if lock_pending && env::var("FIXTURE_STUDIO_AUTOSAVE").as_deref() == Ok("1") {
         write_autosave(Path::new(place))?;
     }
+    let dialog_delay = env::var("FIXTURE_STUDIO_DIALOG_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok());
+    let mut dialog_opened = false;
     let mut handled_close = 0;
     loop {
         if lock_pending && started.elapsed() >= Duration::from_millis(lock_delay) {
@@ -72,6 +84,12 @@ fn main() -> io::Result<()> {
             )?;
             lock_pending = false;
             locked_at = Some(Instant::now());
+        }
+        if !dialog_opened
+            && dialog_delay.is_some_and(|ms| started.elapsed() >= Duration::from_millis(ms))
+        {
+            open_dialog(window)?;
+            dialog_opened = true;
         }
         let requests = close_requests();
         if requests > handled_close {
@@ -258,3 +276,18 @@ fn disable_window(window: isize) {
 
 #[cfg(unix)]
 fn disable_window(_: isize) {}
+
+#[cfg(windows)]
+fn open_dialog(owner: isize) -> io::Result<()> {
+    os::win::testing::open_test_dialog(
+        owner,
+        &env::var("FIXTURE_STUDIO_DIALOG_TITLE")
+            .unwrap_or_else(|_| "Lighting Technology Migration".to_owned()),
+        &env::var("FIXTURE_STUDIO_DIALOG_BUTTON").unwrap_or_else(|_| "Continue".to_owned()),
+    )?;
+    Ok(())
+}
+#[cfg(not(windows))]
+fn open_dialog(_owner: isize) -> io::Result<()> {
+    Ok(())
+}

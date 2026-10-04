@@ -90,17 +90,20 @@ export function spawnSyncRojo({
 export function directSyncLauncher({
 	seams,
 }: CommandContext): ReturnType<typeof createStudioLauncher> {
-	return createStudioLauncher({
-		...seams,
-		childProcess: {
-			...seams.childProcess,
-			spawn: () => {
-				throw new Error(
-					"Sync tests require direct launch; platform fallback has no owned Studio PID",
-				);
+	return createStudioLauncher(
+		{
+			...seams,
+			childProcess: {
+				...seams.childProcess,
+				spawn: () => {
+					throw new Error(
+						"Sync tests require direct launch; platform fallback has no owned Studio PID",
+					);
+				},
 			},
 		},
-	});
+		path.join(import.meta.dirname, "..", "..", "src", "supervisor.ts"),
+	);
 }
 
 /**

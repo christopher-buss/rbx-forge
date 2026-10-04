@@ -119,7 +119,13 @@ export function createPartRestarter(
 		const parts = isHeld ? [] : restartedParts(services, stops.stopped, force);
 		// The adder starts Rojo again for a Studio that stays.
 		const hasWork = parts.length > 0 || stops.stopped.includes("rojo");
-		const added = hasWork ? await restart.add({ parts, studioPath }) : [];
+		const added = hasWork
+			? await restart.add({
+					desktop: services.studio.desktop,
+					parts,
+					studioPath,
+				})
+			: [];
 		return {
 			added,
 			...(stops.foundStudio === undefined ? {} : { foundStudio: stops.foundStudio }),

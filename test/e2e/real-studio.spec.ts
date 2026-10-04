@@ -20,15 +20,26 @@
  * Timings go to `RBX_FORGE_TEST_REAL_STUDIO_LOG` (NDJSON), when set.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync, copyFileSync, existsSync, readFileSync } from "node:fs";
+import {
+	appendFileSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, expect, it, onTestFinished } from "vitest";
 
+import type { PinnedProcess } from "../../src/native/addon.ts";
+import { parseOpened } from "../helpers/output.ts";
 import { pinNow, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
 import { makeFixtureAsync } from "./session-fixture.ts";
+import type { UpRun } from "./up-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
 const { env } = process;
@@ -73,6 +84,34 @@ function killNewStudiosAtEnd(): void {
 
 		await waitForDeathAsync(added, 10_000);
 	});
+}
+
+function snapshotCleanup(project: string): (pid: number) => PinnedProcess {
+	let studio: PinnedProcess | undefined;
+	onTestFinished(() => {
+		studio?.kill();
+		studio?.waitForExit(10_000);
+		const query = `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like '*--watch-hidden-lighting*' -and $_.CommandLine -like '*${path.basename(project).replaceAll("'", "''")}*' } | ForEach-Object ProcessId`;
+		const { status, stdout } = spawnSync(
+			"powershell.exe",
+			["-NoProfile", "-NonInteractive", "-Command", query],
+			{ encoding: "utf8", windowsHide: true },
+		);
+		assert(status === 0);
+		const pids = stdout.trim().split(/\s+/).filter(Boolean);
+		for (const text of pids) {
+			const watcher = pinNow(Number(text));
+			if (watcher !== undefined && !watcher.waitForExit(5000)) {
+				watcher.kill();
+				watcher.waitForExit(5000);
+			}
+		}
+	});
+	return (pid) => {
+		studio = pinNow(pid);
+		assert(studio !== undefined);
+		return studio;
+	};
 }
 
 /**
@@ -120,15 +159,46 @@ async function makeRealProjectAsync(fixturePlace: string): Promise<Fixture> {
 	return { ...fixture, place: path.join(fixture.project, PLACE) };
 }
 
+async function compatibilitySnapshotAsync(): Promise<Fixture> {
+	const fixture = await makeFixtureAsync({ projectType: "luau" });
+	const directory = path.join(fixture.project, "node_modules", "snapshot-rojo");
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(
+		path.join(fixture.project, "package.json"),
+		JSON.stringify({ devDependencies: { "snapshot-rojo": "1.0.0" } }),
+	);
+	writeFileSync(
+		path.join(directory, "package.json"),
+		JSON.stringify({ name: "snapshot-rojo", bin: { rojo: "cli.mjs" } }),
+	);
+	writeFileSync(
+		path.join(directory, "cli.mjs"),
+		`import { copyFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
+const output = process.argv[process.argv.indexOf('--output') + 1];
+mkdirSync(path.dirname(output), { recursive: true });
+copyFileSync(${JSON.stringify(path.join(PLACES, "compatibility.rbxl"))}, output);`,
+	);
+	return fixture;
+}
+
 /**
  * Start a session with `up --studio`, which opens the place in the
  * installed Studio.
  *
  * @param fixture - The project.
+ * @param desktop - Where Studio opens.
  * @returns The session's id.
  */
-async function upStudioAsync(fixture: Fixture): Promise<string> {
-	const up = await runForgeAsync(fixture, ["up", "--studio", "--json"], realVariables(fixture));
+async function upStudioAsync(
+	fixture: Fixture,
+	desktop: "hidden" | "user" = "user",
+): Promise<string> {
+	const up = await runForgeAsync(
+		fixture,
+		["up", "--studio", "--desktop", desktop, "--json"],
+		realVariables(fixture),
+	);
 	return String(up.result.data!["sessionId"]);
 }
 
@@ -174,7 +244,191 @@ async function waitForLoadedAsync(fixture: Fixture, sessionId: string): Promise<
 	return [status.services.studio.pid, lockPid];
 }
 
+/**
+ * Read focus without activating or switching any desktop.
+ * @returns The foreground window handle.
+ */
+function foregroundWindow(): string {
+	const { status, stdout } = spawnSync(
+		"powershell.exe",
+		[
+			"-NoProfile",
+			"-NonInteractive",
+			"-Command",
+			"Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class ForgeForeground { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); }'; [ForgeForeground]::GetForegroundWindow().ToInt64().ToString()",
+		],
+		{ encoding: "utf8", windowsHide: true },
+	);
+	assert(status === 0);
+	return stdout.trim();
+}
+
+function saveOutcome(run: UpRun): string {
+	return run.status === 0 ? "saved" : JSON.stringify(run.result);
+}
+
 describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
+	it(
+		"dismisses hidden snapshot Compatibility lighting after the open CLI exits",
+		{ timeout: 150_000 },
+		async () => {
+			expect.assertions(6);
+
+			killNewStudiosAtEnd();
+			const fixture = await compatibilitySnapshotAsync();
+			const pinSnapshot = snapshotCleanup(fixture.project);
+			const focus = foregroundWindow();
+			const opened = await runForgeAsync(fixture, ["open", "--json"], realVariables(fixture));
+
+			expect(opened.status).toBe(0);
+
+			const { place, studio } = parseOpened(opened.result.data);
+			assert(studio !== null);
+			const pinned = pinSnapshot(studio.pid);
+			note({
+				bytes: statSync(place).size,
+				command: "snapshot-open",
+				executable: pinned.executablePath(),
+				result: opened.result,
+			});
+
+			await expect
+				.poll(() => existsSync(`${place}.lock`), { interval: 100, timeout: OPEN_MS })
+				.toBeTrue();
+			expect(Number(readFileSync(`${place}.lock`, "utf8").split(/\r?\n/, 1)[0])).toBe(
+				studio.pid,
+			);
+
+			await sleep(10_000);
+
+			await expect
+				.poll(() => pinned.isBlocked(), { interval: 500, timeout: 30_000 })
+				.toBeFalse();
+			expect(pinned.isAlive()).toBeTrue();
+			expect(foregroundWindow()).toBe(focus);
+		},
+	);
+
+	it(
+		"moves the saved session Studio between desktops without restarting Rojo",
+		{ timeout: 600_000 },
+		async () => {
+			expect.assertions(5);
+
+			killNewStudiosAtEnd();
+			const fixture = await makeRealProjectAsync("saved.rbxl");
+			const sessionId = await upStudioAsync(fixture, "hidden");
+			const [, original] = await waitForLoadedAsync(fixture, sessionId);
+			const before = await runForgeAsync(
+				fixture,
+				["status", "--json"],
+				realVariables(fixture),
+			);
+			assert(before.result.data !== undefined, "status returns data");
+			const { services } = before.result.data;
+			assert(
+				typeof services === "object" && services !== null && "rojo" in services,
+				"Rojo status recorded",
+			);
+			const shown = await runForgeAsync(fixture, ["show", "--json"], realVariables(fixture));
+			const [, visible] = await waitForLoadedAsync(fixture, sessionId);
+
+			expect(shown.status).toBe(0);
+			expect(shown.result.data).toMatchObject({
+				from: "hidden",
+				pid: visible,
+				save: { pid: original, place: fixture.place },
+				to: "user",
+			});
+
+			assert(visible !== original, "show replaces Studio");
+
+			const hidden = await runForgeAsync(fixture, ["hide", "--json"], realVariables(fixture));
+			const [, replacement] = await waitForLoadedAsync(fixture, sessionId);
+
+			expect(hidden.status).toBe(0);
+			expect(hidden.result.data).toMatchObject({
+				from: "user",
+				pid: replacement,
+				save: { pid: visible, place: fixture.place },
+				to: "hidden",
+			});
+
+			assert(replacement !== visible, "hide replaces Studio");
+
+			const after = await runForgeAsync(
+				fixture,
+				["status", "--json"],
+				realVariables(fixture),
+			);
+
+			expect(after.result.data).toMatchObject({
+				services: { rojo: services.rojo },
+				sessionId,
+			});
+		},
+	);
+
+	it.for([
+		{
+			desktop: "user",
+			expectedFocus: (_focus: string): unknown => expect.any(String),
+		},
+		{ desktop: "hidden", expectedFocus: (focus: string) => focus },
+	] as const)(
+		"saves Studio on the $desktop desktop",
+		{ timeout: 240_000 },
+		async ({ desktop, expectedFocus }) => {
+			expect.assertions(5);
+
+			killNewStudiosAtEnd();
+			const fixture = await makeRealProjectAsync("unsaved.rbxl");
+			const sessionId = await upStudioAsync(fixture, desktop);
+			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
+			const before = statSync(fixture.place).mtimeMs;
+			const focus = foregroundWindow();
+			const save = await runForgeAsync(
+				fixture,
+				["save", "--timeout", "30", "--json"],
+				realVariables(fixture),
+			);
+			const after = foregroundWindow();
+
+			expect(saveOutcome(save)).toBe("saved");
+			expect(save.result.data).toMatchObject({ desktop, pid: lockPid, place: fixture.place });
+			expect(statSync(fixture.place).mtimeMs).toBeGreaterThan(before);
+			expect(after).toStrictEqual(expectedFocus(focus));
+
+			const firstSavedAt = statSync(fixture.place).mtimeMs;
+			const again = await runForgeAsync(fixture, ["save", "--json"], realVariables(fixture));
+
+			expect({
+				changed: statSync(fixture.place).mtimeMs > firstSavedAt,
+				result: again.result,
+			}).toMatchObject({ changed: true, result: { ok: true } });
+		},
+	);
+
+	it(
+		"dismisses delayed Compatibility lighting migration on the hidden desktop",
+		{ timeout: 240_000 },
+		async () => {
+			expect.assertions(3);
+
+			killNewStudiosAtEnd();
+			const fixture = await makeRealProjectAsync("compatibility.rbxl");
+			const sessionId = await upStudioAsync(fixture, "hidden");
+			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
+			await sleep(10_000);
+			const focus = foregroundWindow();
+			const save = await runForgeAsync(fixture, ["save", "--json"], realVariables(fixture));
+
+			expect(saveOutcome(save)).toBe("saved");
+			expect(save.result.data).toMatchObject({ desktop: "hidden", pid: lockPid });
+			expect(foregroundWindow()).toBe(focus);
+		},
+	);
+
 	it(
 		"should open Studio directly with up --studio, and close it with down",
 		{ timeout: 240_000 },

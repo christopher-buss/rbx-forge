@@ -16,9 +16,7 @@ attached Studio.\
 _Avoid_: component, piece
 
 **Owner**:\
-The `start` terminal that owns a part. Only its owner stops an owned part; any
-client, and the idle timeout, can stop a part with no owner, except a found
-Studio.\
+The `start` terminal responsible for a part's lifetime.\
 _Avoid_: holder, creator
 
 **Idle timeout**:\
@@ -124,8 +122,8 @@ already has the place open is attached as it is, never opened a second time.\
 _Avoid_: connect, join
 
 **Found Studio**:\
-A Studio that already had the place open when the session attached it. Only
-`--force` closes it; otherwise the session lets it go, open.\
+A Studio that already had the place open when the session attached it. Its
+origin remains found until forge replaces it.\
 _Avoid_: user Studio, external Studio
 
 **Hidden desktop**:\

@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 import { compileAsync } from "../commands/compile.ts";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
@@ -15,10 +17,12 @@ import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./
 import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
 import { createServiceParts } from "./service-parts.ts";
+import { saveSessionStudioAsync } from "./session-save.ts";
 import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
 import { checkSyncbackOnce, startSyncback, watchSavesForSyncback } from "./session-syncback.ts";
 import type { PartOwner, StatusRecorder, StatusStore } from "./status.ts";
+import { createStudioMover } from "./studio-move.ts";
 import type { PreparedStudio, StudioSetup, StudioState } from "./studio-part.ts";
 import {
 	createStudioAdder,
@@ -321,7 +325,13 @@ function watchIdle({ config, context, idle, parts }: SessionSetup, scope: Sessio
 		idle,
 		minutes: config.session.idleTimeout,
 		reporter: context.reporter,
-		stopAsync: parts.stopAsync,
+		stopAsync: async (request: Parameters<PartRequests["stopAsync"]>[0]) => {
+			return parts.stopAsync(request, () => {
+				const at = idle.idleAt();
+				assert(at !== undefined);
+				return context.seams.clock.now() >= at;
+			});
+		},
 	};
 	scope.track(stopWhenIdleAsync(setup, scope.signal));
 }
@@ -354,7 +364,11 @@ function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: B
 				state.studio.cancelReady?.();
 			}
 		},
+		move: createStudioMover(session, scope, { ...state, state: state.studio }),
 		restart: createPartRestarter(session, { add, parts, stop }),
+		save: async (timeoutMs, signal) => {
+			return saveSessionStudioAsync(session, scope, timeoutMs, signal);
+		},
 		stop,
 		...createOwnerHandlers(session, scope, { add, ownership, parts, studio: state.studio }),
 	});

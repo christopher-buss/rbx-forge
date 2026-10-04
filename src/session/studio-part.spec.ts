@@ -11,6 +11,7 @@ import {
 	PROJECT,
 } from "../../test/helpers/seams.ts";
 import { resolveConfig } from "../config/resolve.ts";
+import type { StudioDesktop } from "../config/schema.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
 import { SCRIPTS, VERSION } from "../studio/rojo-plugin.ts";
 import stock from "../studio/rojo-plugin/stock.json" with { type: "json" };
@@ -20,7 +21,18 @@ function fixture(
 	sources: Array<string>,
 	fallback = false,
 	prepare = true,
-	beforePrepare?: (abort: AbortController) => void,
+	{
+		beforePrepare,
+		desktop,
+	}: {
+		beforePrepare?: (abort: AbortController) => void;
+		desktop?: {
+			default?: StudioDesktop;
+			file?: StudioDesktop;
+			flag?: StudioDesktop;
+			platform: NodeJS.Platform;
+		};
+	} = {},
 ) {
 	const directory = path.join(PROJECT, "session");
 	const memory = createMemoryFileSystem({
@@ -44,13 +56,20 @@ function fixture(
 
 		return fallback
 			? { type: "launched" }
-			: { studio: { pid: 900, startTime: "1" }, type: "launched" };
+			: {
+					studio: {
+						pid: 900,
+						startTime: "1",
+						...(launch.desktop === undefined ? {} : { desktop: launch.desktop }),
+					},
+					type: "launched",
+				};
 	});
 	const context = createCommandContext({
 		env: { HOME: PROJECT },
 		seams: createTestSeams({
 			fileSystem: memory.fileSystem,
-			host: { ...seams.host, platform: "darwin" },
+			host: { ...seams.host, platform: desktop?.platform ?? "darwin" },
 			native: () => native.addon,
 			network: {
 				...seams.network,
@@ -76,7 +95,13 @@ function fixture(
 	});
 	const abort = new AbortController();
 	const setup = {
-		config: resolveConfig({ projectType: "luau" }, {}),
+		config: resolveConfig(
+			{
+				projectType: "luau",
+				studio: desktop?.file === undefined ? {} : { desktop: desktop.file },
+			},
+			{},
+		),
 		directory,
 		status: {
 			rojoPort: () => {},
@@ -92,7 +117,12 @@ function fixture(
 		memory,
 		native,
 		open: async () => {
-			return openStudioAsync(setup, context, { signal: abort.signal }, { isBuilt: true });
+			return openStudioAsync(
+				setup,
+				context,
+				{ defaultDesktop: desktop?.default, desktop: desktop?.flag, signal: abort.signal },
+				{ isBuilt: true },
+			);
 		},
 		processRunner: seams.processRunner,
 		write,
@@ -193,14 +223,11 @@ describe("session Studio plugin capabilities", () => {
 	it("should cancel before plugin preparation without installing or writing", async () => {
 		expect.assertions(4);
 
-		const run = fixture(
-			[stock.App, stock.ServeSession, "protocolVersion = 5,"],
-			false,
-			true,
-			(abort) => {
+		const run = fixture([stock.App, stock.ServeSession, "protocolVersion = 5,"], false, true, {
+			beforePrepare: (abort) => {
 				abort.abort();
 			},
-		);
+		});
 		run.memory.fileSystem.rmSync(
 			path.join(PROJECT, "Documents/Roblox/Plugins/RojoManagedPlugin.rbxm"),
 		);
@@ -285,4 +312,33 @@ describe("session Studio plugin capabilities", () => {
 		});
 		expect(write).not.toHaveBeenCalled();
 	});
+});
+
+describe("session Studio desktop", () => {
+	it.for([
+		{ default: "hidden", expected: "hidden", platform: "win32" },
+		{ default: "user", expected: "user", platform: "win32" },
+		{ default: "hidden", expected: "user", file: "user", platform: "win32" },
+		{ default: "user", expected: "hidden", file: "hidden", platform: "win32" },
+		{ default: "hidden", expected: "user", file: "hidden", flag: "user", platform: "win32" },
+		{ default: "user", expected: "hidden", file: "user", flag: "hidden", platform: "win32" },
+		{ default: "hidden", expected: "user", platform: "darwin" },
+		{ expected: "user", flag: "hidden", platform: "linux" },
+	] as const)(
+		"should resolve $platform default=$default file=$file flag=$flag as $expected",
+		async (desktop) => {
+			expect.assertions(1);
+
+			const run = fixture(
+				[stock.App, stock.ServeSession, "protocolVersion = 5,"],
+				false,
+				true,
+				{ desktop },
+			);
+
+			await expect(run.open()).resolves.toMatchObject({
+				studio: { desktop: desktop.expected },
+			});
+		},
+	);
 });

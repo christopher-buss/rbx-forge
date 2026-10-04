@@ -25,8 +25,10 @@ export interface FakeSession {
 	join: IpcHandler;
 	/** Answers an owner's release; lets go of no part by default. */
 	leave: IpcOwner["leave"];
+	moveStudio: IpcHandler;
 	/** Answers `restartParts`; restarts no part by default. */
 	restartParts: IpcHandler;
+	save: IpcHandler;
 	/** What `status` answers; change it to move the session on. */
 	status: SessionStatus;
 	/** Stop answering, as a dead supervisor does. Its files stay. */
@@ -98,8 +100,12 @@ export async function serveFakeSessionAsync(
 			return { added: [], sessionId: status.sessionId, taken: [] };
 		},
 		leave: vi.fn<IpcOwner["leave"]>().mockResolvedValue({ ...LET_GO }),
+		moveStudio: unavailableMove,
 		restartParts: () => {
 			return { added: [], kept: [], stopped: [] };
+		},
+		save: () => {
+			throw new Error("save is not configured");
 		},
 		status,
 		stop: async () => {
@@ -131,7 +137,9 @@ function serverOptions(session: FakeSession): IpcServerOptions {
 		handlers: {
 			addParts: async (parameters) => session.addParts(parameters),
 			freshStatus: async (parameters) => session.freshStatus(parameters),
+			moveStudio: async (parameters) => session.moveStudio(parameters),
 			restartParts: async (parameters) => session.restartParts(parameters),
+			save: async (parameters) => session.save(parameters),
 			status: () => answerOf(session),
 			sync: async (parameters) => session.sync(parameters),
 		},
@@ -170,4 +178,8 @@ function writeSessionFiles(
 	fileSystem.writeFileSync(files.token, "token");
 	fileSystem.writeFileSync(forge.current, `${status.sessionId}\n`);
 	return identity;
+}
+
+function unavailableMove(): never {
+	throw new Error("moveStudio is not configured");
 }

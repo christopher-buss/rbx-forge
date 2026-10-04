@@ -58,7 +58,15 @@ function makeTarget() {
 		builds,
 		handlers: controlHandlers({
 			builds,
-			parts: { addAsync, ownAsync, releaseAsync, restartAsync, stopAsync },
+			clock: { now: () => 0, sleep: async () => new Promise(() => {}) },
+			parts: {
+				addAsync,
+				ownAsync,
+				releaseAsync,
+				restartAsync,
+				saveAsync: vi.fn<PartRequests["saveAsync"]>(),
+				stopAsync,
+			},
 			sessionId: "s1",
 			status,
 			stop: { request },
@@ -66,7 +74,14 @@ function makeTarget() {
 		}),
 		ownAsync,
 		owner: controlOwner({
-			parts: { addAsync, ownAsync, releaseAsync, restartAsync, stopAsync },
+			parts: {
+				addAsync,
+				ownAsync,
+				releaseAsync,
+				restartAsync,
+				saveAsync: vi.fn<PartRequests["saveAsync"]>(),
+				stopAsync,
+			},
 			sessionId: "s1",
 		}),
 		releaseAsync,
@@ -79,6 +94,59 @@ function makeTarget() {
 }
 
 describe(controlHandlers, () => {
+	it.for([
+		{},
+		{ desktop: "other", timeoutMs: 100 },
+		{ desktop: "user", timeoutMs: "100" },
+		{ desktop: "user", timeoutMs: NaN },
+		{ desktop: "user", timeoutMs: 0 },
+		{ desktop: "user", studioPath: 7, timeoutMs: 100 },
+	])("should reject malformed move parameters %j", async (parameters) => {
+		expect.assertions(1);
+
+		await expect(
+			makeTarget().handlers.moveStudio!({ ...parameters, sessionId: "s1" }),
+		).rejects.toMatchObject({
+			code: "usage",
+			message: "moveStudio takes a desktop and positive save timeoutMs.",
+		});
+	});
+
+	it.for([undefined, "/opt/Studio"])(
+		"should reject unavailable Studio after accepting the optional path %s",
+		async (studioPath) => {
+			expect.assertions(1);
+
+			await expect(
+				makeTarget().handlers.moveStudio!({
+					desktop: "user",
+					sessionId: "s1",
+					studioPath,
+					timeoutMs: 100,
+				}),
+			).rejects.toMatchObject({
+				code: "studio_not_open",
+				message: "No session Studio is open.",
+			});
+		},
+	);
+
+	it("should reject a move addressed to a replaced session before looking for its Studio", async () => {
+		expect.assertions(1);
+
+		await expect(
+			makeTarget().handlers.moveStudio!({
+				desktop: "user",
+				sessionId: "old",
+				timeoutMs: 100,
+			}),
+		).rejects.toMatchObject({
+			code: "session_replaced",
+			details: { sessionId: "s1" },
+			message: "Session old is gone; session s1 runs in its place.",
+		});
+	});
+
 	it("should answer status with the status now, once merged compiles settled", () => {
 		expect.assertions(2);
 

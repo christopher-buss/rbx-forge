@@ -108,6 +108,7 @@ export async function openSessionAsync(
 	const server = startIpcServer(listener, {
 		handlers: controlHandlers({
 			builds,
+			clock: seams.clock,
 			parts: setup.parts,
 			sessionId: setup.identity.sessionId,
 			status,

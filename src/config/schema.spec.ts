@@ -27,6 +27,7 @@ const FULL_CONFIG: ForgeConfig = {
 	rojoPort: 34_873,
 	rojoProjectPath: "build.project.json",
 	session: { idleTimeout: 0.5 },
+	studio: { desktop: "hidden" },
 	syncback: { inputPath: "sync.rbxl", projectPath: "sync.project.json", runOnStart: true },
 	typegen: {
 		exclude: ["**/node_modules/**"],

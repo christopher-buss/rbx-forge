@@ -329,14 +329,26 @@ impl Pin {
         self.signal_live(libc::SIGTERM)
     }
 
-    /// POSIX has no window state to read: never blocked.
-    #[allow(
-        clippy::unused_self,
-        clippy::unnecessary_wraps,
-        reason = "same shape as on Windows"
-    )]
+    pub fn app_hidden(&self) -> io::Result<Option<bool>> {
+        if !self.is_alive()? {
+            return Ok(None);
+        }
+        let hidden = crate::os::macos_application::hidden(self.pid)?;
+        Ok(if self.is_alive()? { hidden } else { None })
+    }
+
+    pub fn set_app_hidden(&self, hidden: bool) -> io::Result<bool> {
+        if !self.is_alive()? {
+            return Ok(false);
+        }
+        crate::os::macos_application::set_hidden(self.pid, hidden, || self.is_alive())
+    }
+
     pub fn is_blocked(&self) -> io::Result<bool> {
-        Ok(false)
+        if !self.is_alive()? {
+            return Ok(false);
+        }
+        Ok(crate::os::macos_accessibility::is_blocked(self.pid))
     }
 
     /// Send `signal` to the process, once its start time still names it.

@@ -27,6 +27,21 @@ export interface FileLock {
  * that reused the PID.
  */
 export interface PinnedProcess {
+	/**
+	 * The macOS app-hidden state; null for no app or an unsupported platform.
+	 */
+	appHidden: () => boolean | null;
+	/** The pinned process desktop. Always user on POSIX. */
+	desktop: () => "hidden" | "user";
+	/**
+	 * Invoke an exact button in an exact dialog on the pinned process desktop.
+	 */
+	dismissDialog: (
+		title: string,
+		button: string,
+		desktop: "hidden" | "user",
+		timeoutMs?: number,
+	) => Promise<boolean>;
 	/** Full path of the executable, or `null` once the process has exited. */
 	executablePath: () => null | string;
 	/** Whether the pinned process still runs. */
@@ -34,8 +49,9 @@ export interface PinnedProcess {
 	/**
 	 * Whether a modal dialog blocks the process's main windows: on Windows
 	 * one of them is disabled, as Windows does to the owner of a modal
-	 * dialog, and it ignores a close request. Always `false` on POSIX, and
-	 * once the process has exited.
+	 * dialog, and it ignores a close request. On macOS, AX reports modal
+	 * windows and sheets. `false` on Linux, without macOS Accessibility
+	 * access, and once the process has exited.
 	 */
 	isBlocked: () => boolean;
 	/**
@@ -65,6 +81,10 @@ export interface PinnedProcess {
 	 *   window.
 	 */
 	requestClose: () => boolean;
+	/** Press File > Save to File within the deadline (default 30 seconds). */
+	requestSave: (timeoutMs?: number) => Promise<"no_menu_item" | "requested" | "timeout">;
+	/** Hide or unhide the macOS app without activation; false for no app. */
+	setAppHidden: (hidden: boolean) => boolean;
 	/** The start time read when it was pinned (see `processStartTime`). */
 	readonly startTime: string;
 	/**
@@ -129,6 +149,11 @@ export interface NativePipeServer {
 export interface DetachedSpawn {
 	args: Array<string>;
 	cwd: string;
+	/**
+	 * Hidden selects the shared Windows desktop; absent or user keeps this
+	 * desktop.
+	 */
+	desktop?: "hidden" | "user";
 	/** The whole environment of the new process. */
 	env: Record<string, string>;
 	/** A file its stdout and stderr append to; `NUL` when missing. */
@@ -239,7 +264,8 @@ export interface NativeAddon {
 	 * Windows only: start a process outside this process's job
 	 * (`CREATE_BREAKAWAY_FROM_JOB`), with no console and stdin from `NUL`.
 	 *
-	 * @returns Its PID, or `null` when the job forbids breakaway.
+	 * @returns Its PID, or `null` when the job forbids breakaway or the requested
+	 * hidden desktop cannot be opened. No process has started in either case.
 	 */
 	spawnDetached?: (spawn: DetachedSpawn) => null | number;
 	/**

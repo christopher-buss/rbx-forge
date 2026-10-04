@@ -53,13 +53,16 @@ function makeLauncher({
 
 	return {
 		clock,
-		launch: createStudioLauncher({
-			childProcess,
-			clock: clock.clock,
-			fileSystem: memory.fileSystem,
-			host: { ...createTestSeams().host, kill: vi.fn<Host["kill"]>(), platform },
-			native: () => native.addon,
-		}),
+		launch: createStudioLauncher(
+			{
+				childProcess,
+				clock: clock.clock,
+				fileSystem: memory.fileSystem,
+				host: { ...createTestSeams().host, kill: vi.fn<Host["kill"]>(), platform },
+				native: () => native.addon,
+			},
+			"/forge/supervisor.mjs",
+		),
 	};
 }
 
@@ -155,6 +158,70 @@ describe(studioLaunchInvocation, () => {
 });
 
 describe(createStudioLauncher, () => {
+	it("should warn when a hidden Studio needs the Windows platform launcher because no executable is discovered", async () => {
+		expect.assertions(1);
+
+		const { launch } = makeLauncher({
+			childProcess: spawnerExiting(0).runner,
+			platform: "win32",
+		});
+
+		await expect(
+			launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden" }),
+		).resolves.toStrictEqual({
+			desktop: "user",
+			type: "launched",
+			warning:
+				"Studio opened on the user's desktop: the platform launcher cannot use the hidden desktop.",
+		});
+	});
+
+	it("should report the user desktop without a warning for a requested user platform launch", async () => {
+		expect.assertions(1);
+
+		const { launch } = makeLauncher({
+			childProcess: spawnerExiting(0).runner,
+			platform: "win32",
+		});
+
+		await expect(
+			launch({ ...launchOf(WINDOWS_PLACE), desktop: "user" }),
+		).resolves.toStrictEqual({ desktop: "user", type: "launched" });
+	});
+
+	it("should report the user desktop and warn when a hidden launch cannot break away", async () => {
+		expect.assertions(1);
+
+		const { native } = windowsNative(null);
+		const { launch } = makeLauncher({
+			childProcess: spawnerExiting(0).runner,
+			files: { [STUDIO_EXE]: "" },
+			native,
+			platform: "win32",
+		});
+
+		await expect(
+			launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden" }),
+		).resolves.toMatchObject({
+			desktop: "user",
+			type: "launched",
+			warning:
+				"Studio opened on the user's desktop: the platform launcher cannot use the hidden desktop.",
+		});
+	});
+
+	it("should launch and report a Studio on the hidden Windows desktop", async () => {
+		expect.assertions(2);
+
+		const { native, spawns } = windowsNative();
+		const { launch } = makeLauncher({ files: { [STUDIO_EXE]: "" }, native, platform: "win32" });
+
+		await expect(
+			launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden" }),
+		).resolves.toMatchObject({ studio: { desktop: "hidden" } });
+		expect(spawns[0]).toMatchObject({ desktop: "hidden" });
+	});
+
 	it("should pass the session RunScript arguments to Studio on Windows", async () => {
 		expect.assertions(1);
 

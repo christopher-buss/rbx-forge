@@ -1,7 +1,8 @@
 import type { ChildProcess } from "node:child_process";
 
+import type { StudioDesktop } from "../config/schema.ts";
 import { toForgeError } from "../errors.ts";
-import type { NativeLoader } from "../native/addon.ts";
+import type { NativeLoader, PinnedProcess } from "../native/addon.ts";
 import type { Invocation } from "../process/command-line.ts";
 import { readVariable, withVariables } from "../process/environment.ts";
 import type { ChildProcessBackend } from "../process/process-runner.ts";
@@ -9,6 +10,8 @@ import type { FileSystem } from "../seams/file-system.ts";
 import type { Environment } from "../seams/seams.ts";
 import type { StudioExecutable } from "./discover.ts";
 import { findStudioExecutable } from "./discover.ts";
+import { createSnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
+import type { SnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
 
 /**
  * How long forge waits for the platform launcher to report. A launcher that
@@ -24,6 +27,7 @@ export interface StudioLaunch {
 	 */
 	beforeLaunch?: (() => Promise<void>) | undefined;
 	cwd: string;
+	desktop?: StudioDesktop | undefined;
 	env: Environment;
 	/** The absolute path of the place file. */
 	place: string;
@@ -31,14 +35,20 @@ export interface StudioLaunch {
 	runScript?: string | undefined;
 	/** The `--studio-path` flag: the Studio executable to start. */
 	studioPath?: string | undefined;
+	/** Start a detached watcher for a snapshot's delayed migration prompt. */
+	watchHiddenLighting?: boolean | undefined;
 }
 
 /** A Studio forge started itself, pinned at the start. */
 export interface StudioProcess {
+	desktop?: StudioDesktop;
 	pid: number;
 	/** Its OS start time (see `processStartTime`). */
 	startTime: string;
 }
+
+/** A verified Studio process with its actual desktop. */
+export type LocatedStudio = StudioProcess & { desktop: StudioDesktop };
 
 /**
  * Whether Studio got the place. `studio`: the Studio forge started
@@ -46,8 +56,8 @@ export interface StudioProcess {
  * what the user can do, when forge knows better than the default.
  */
 export type StudioLaunchOutcome =
-	| { hint?: string | undefined; message: string; type: "failed" }
-	| { studio?: StudioProcess; type: "launched" };
+	| { desktop?: StudioDesktop; studio?: StudioProcess; type: "launched"; warning?: string }
+	| { hint?: string | undefined; message: string; studio?: never; type: "failed" };
 
 /**
  * Opens a place in Roblox Studio, so Studio is never a child of forge and
@@ -69,6 +79,16 @@ type LauncherEnd =
 	| { error: NodeJS.ErrnoException; type: "error" }
 	| { exitCode: null | number; signal: NodeJS.Signals | null; type: "exit" }
 	| { type: "waiting" };
+
+/**
+ * Read a verified Studio's identity and desktop from its pin.
+ *
+ * @param pinned - A process verified as Studio.
+ * @returns Its process identity and desktop.
+ */
+export function studioProcess(pinned: PinnedProcess): LocatedStudio {
+	return { desktop: pinned.desktop(), pid: pinned.pid, startTime: pinned.startTime };
+}
 
 /**
  * The Windows shell reads the place from this variable: cmd.exe expands
@@ -116,30 +136,26 @@ export function studioLaunchInvocation(
  * The {@link StudioLauncher} of forge.
  *
  * - Direct: Studio starts with the place, or a session's RunScript task.
- *   Windows: through the addon, out of this
- *   process's job, with no console and no inherited handles; a job that
- *   forbids breakaway falls back to the platform launcher. POSIX: detached
- *   in its own session, with no pipes. The process is pinned at once, so
- *   later checks rely on its PID and start time.
+ *   Windows: through the addon, out of this process's job, with no console and
+ *   only its streams and desktop inherited; a job that forbids breakaway falls
+ *   back to the platform launcher. POSIX: detached in its own session, with no
+ *   pipes. The process is pinned at once, so later checks rely on its PID and
+ *   start time.
  * - Platform launcher: detached, hidden, and with no pipes; forge waits at
  *   most {@link LAUNCHER_WAIT_MS} for it to exit and never keeps it alive.
  *
  * @param backend - The spawn seam, clock, host, file system, and addon.
+ * @param supervisorEntry - The entry for a detached snapshot Lighting watcher.
  * @returns A {@link StudioLauncher}.
  */
-export function createStudioLauncher(backend: StudioLaunchBackend): StudioLauncher {
+export function createStudioLauncher(
+	backend: StudioLaunchBackend,
+	supervisorEntry: string,
+): StudioLauncher {
+	const watch = createSnapshotLightingLauncher(backend, supervisorEntry);
 	return async (launch) => {
-		let executable: StudioExecutable | undefined;
-		try {
-			executable = findStudioExecutable(backend, launch);
-		} catch (err) {
-			const { hint, message } = toForgeError(err);
-			return { hint, message, type: "failed" };
-		}
-
-		return executable === undefined
-			? launchThroughPlatformAsync(backend, launch)
-			: launchDirectAsync(backend, launch, executable.path);
+		const outcome = await launchStudioAsync(backend, launch);
+		return watchSnapshotLighting(watch, launch, outcome);
 	};
 }
 
@@ -168,9 +184,32 @@ function describeFailure(file: string, end: LauncherEnd): string | undefined {
 		: `${file} exited with code ${end.exitCode}.`;
 }
 
+/**
+ * The actual desktop after the platform launcher opens Studio.
+ *
+ * @param desktop - The requested desktop, when specified.
+ * @param platform - The host platform.
+ * @returns A launch result, including any hidden-desktop fallback warning.
+ */
+function platformLaunchOutcome(
+	desktop: StudioDesktop | undefined,
+	platform: NodeJS.Platform,
+): StudioLaunchOutcome {
+	return {
+		type: "launched",
+		...(desktop === undefined ? {} : { desktop: "user" }),
+		...(desktop === "hidden" && platform === "win32"
+			? {
+					warning:
+						"Studio opened on the user's desktop: the platform launcher cannot use the hidden desktop.",
+				}
+			: {}),
+	};
+}
+
 async function launchThroughPlatformAsync(
 	{ childProcess, clock, host }: ChildProcessBackend,
-	{ cwd, env, place }: StudioLaunch,
+	{ cwd, desktop, env, place }: StudioLaunch,
 ): Promise<StudioLaunchOutcome> {
 	const invocation = studioLaunchInvocation(place, host.platform, env);
 	const { file } = invocation;
@@ -197,7 +236,7 @@ async function launchThroughPlatformAsync(
 	}
 
 	child.unref();
-	return { type: "launched" };
+	return platformLaunchOutcome(desktop, host.platform);
 }
 
 function definedOnly(environment: Environment): Record<string, string> {
@@ -223,7 +262,7 @@ function studioArguments({ place, runScript }: StudioLaunch): Array<string> {
  * @param backend - The addon.
  * @param launch - The place, directory, and environment.
  * @param executable - The Studio executable.
- * @returns Its PID; `undefined` when the job forbids breakaway.
+ * @returns Its PID; `undefined` when breakaway or hidden desktop setup is unavailable.
  */
 function startBreakingAway(
 	backend: Pick<StudioLaunchBackend, "native">,
@@ -238,6 +277,7 @@ function startBreakingAway(
 			cwd,
 			env: definedOnly(env),
 			program: executable,
+			...(launch.desktop === undefined ? {} : { desktop: launch.desktop }),
 		}) ?? undefined
 	);
 }
@@ -311,5 +351,51 @@ async function launchDirectAsync(
 		return { message: `${executable} (PID ${pid}) exited at once.`, type: "failed" };
 	}
 
-	return { studio: { pid, startTime: pinned.startTime }, type: "launched" };
+	const desktop = backend.host.platform === "win32" ? (launch.desktop ?? "user") : "user";
+	return {
+		studio: {
+			pid,
+			startTime: pinned.startTime,
+			...(launch.desktop === undefined ? {} : { desktop }),
+		},
+		type: "launched",
+	};
+}
+
+async function launchStudioAsync(
+	backend: StudioLaunchBackend,
+	launch: StudioLaunch,
+): Promise<StudioLaunchOutcome> {
+	let executable: StudioExecutable | undefined;
+	try {
+		executable = findStudioExecutable(backend, launch);
+	} catch (err) {
+		const { hint, message } = toForgeError(err);
+		return { hint, message, type: "failed" };
+	}
+
+	return executable === undefined
+		? launchThroughPlatformAsync(backend, launch)
+		: launchDirectAsync(backend, launch, executable.path);
+}
+
+function watchSnapshotLighting(
+	watch: SnapshotLightingLauncher,
+	launch: StudioLaunch,
+	outcome: StudioLaunchOutcome,
+): StudioLaunchOutcome {
+	if (launch.watchHiddenLighting !== true || outcome.studio?.desktop !== "hidden") {
+		return outcome;
+	}
+
+	try {
+		watch({ cwd: launch.cwd, env: launch.env, place: launch.place, studio: outcome.studio });
+		return outcome;
+	} catch (err) {
+		return {
+			...outcome,
+			type: "launched",
+			warning: `Studio opened, but its automatic Lighting prompt watcher could not start: ${String(err)}`,
+		};
+	}
 }

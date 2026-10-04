@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 
 import type { CommandContext } from "../commands/context.ts";
 import { openPlaceAsync } from "../commands/open.ts";
+import { resolveStudioDesktop } from "../config/resolve.ts";
+import type { StudioDesktop } from "../config/schema.ts";
 import type { StudioReadyListener } from "../seams/network.ts";
 import { prepareRojoPluginAsync } from "../studio/rojo-plugin.ts";
 import type { PluginCapabilities } from "../studio/rojo-plugin.ts";
@@ -10,6 +12,8 @@ import type { OpenedStudio } from "./attach.ts";
 import type { PreparedStudio, StudioSetup } from "./studio-part.ts";
 
 interface LaunchOptions {
+	defaultDesktop?: StudioDesktop | undefined;
+	desktop?: StudioDesktop | undefined;
 	signal: AbortSignal;
 	studioPath?: string | undefined;
 }
@@ -94,7 +98,7 @@ function reportManualStudio(context: CommandContext): void {
 async function launchMarkedAsync(
 	{ config }: LaunchSetup,
 	steps: CommandContext,
-	{ signal, studioPath }: LaunchOptions,
+	{ defaultDesktop, desktop, signal, studioPath }: LaunchOptions,
 	{
 		info,
 		isBuilt,
@@ -108,6 +112,7 @@ async function launchMarkedAsync(
 			plugin = await prepareRojoPluginAsync(steps, config, info.protocolVersion, signal);
 			signal.throwIfAborted();
 		},
+		desktop: resolveStudioDesktop(config, steps.seams.host.platform, defaultDesktop, desktop),
 		isBuilt,
 		runScript,
 		signal,

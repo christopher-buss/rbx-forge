@@ -2,6 +2,7 @@ import type { Type } from "arktype";
 import { type } from "arktype";
 
 import type { Diagnostic } from "../compiler/diagnostics.ts";
+import type { StudioDesktop } from "../config/schema.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
 import { createPartRecorder, createStudioRecorder } from "./status-recorders.ts";
@@ -95,6 +96,11 @@ export type StudioOrigin = "forge" | "found";
 
 /** The Studio of a session. */
 export interface SessionStudio {
+	/**
+	 * The actual launch desktop, or on macOS the last forge app visibility.
+	 * Absent before launch and in older sessions.
+	 */
+	desktop?: StudioDesktop;
 	origin?: StudioOrigin;
 	owner: null | PartOwner;
 	pid?: number;
@@ -378,6 +384,7 @@ const statusSchema: Type<SessionStatus> = type({
 		}),
 		rojo: servicePart.and({ "port?": INTEGER }),
 		studio: {
+			"desktop?": "'user' | 'hidden'",
 			"origin?": "'forge' | 'found'",
 			"owner": OWNER,
 			"pid?": INTEGER,

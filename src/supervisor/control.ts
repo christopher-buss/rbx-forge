@@ -1,5 +1,6 @@
 import { ForgeError } from "../errors.ts";
 import type { IpcOwner, IpcServerOptions } from "../ipc/server.ts";
+import type { Clock } from "../seams/clock.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { PartRequests } from "../session/part-requests.ts";
@@ -12,10 +13,12 @@ import type { StopSource } from "../session/stop-source.ts";
 /** What the control channel of one session reaches. */
 export interface ControlTarget {
 	builds: Pick<BuildWatch, "tick" | "waitAsync">;
-	parts: Pick<
-		PartRequests,
-		"addAsync" | "ownAsync" | "releaseAsync" | "restartAsync" | "stopAsync"
-	>;
+	clock: Clock;
+	parts: Partial<Pick<PartRequests, "moveAsync">> &
+		Pick<
+			PartRequests,
+			"addAsync" | "ownAsync" | "releaseAsync" | "restartAsync" | "saveAsync" | "stopAsync"
+		>;
 	sessionId: string;
 	status: Pick<StatusStore, "snapshot">;
 	stop: Pick<StopSource, "request">;
@@ -75,7 +78,9 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 			);
 			return snapshot(target);
 		},
+		moveStudio: async (parameters) => moveStudioAsync(target, parameters),
 		restartParts: async (parameters) => restartPartsAsync(target, parameters),
+		save: async (parameters) => saveAsync(target, parameters),
 		shutdown: (parameters) => {
 			requireSession(target, parameters);
 			const isForced = parameters["force"] === true;
@@ -154,4 +159,54 @@ function snapshot({ builds, status }: ControlTarget): Record<string, unknown> {
 	// Start lines that one summary line ended may have settled meanwhile.
 	builds.tick();
 	return { ...status.snapshot() };
+}
+
+async function saveAsync(
+	target: ControlTarget,
+	parameters: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+	requireSession(target, parameters);
+	const { timeoutMs } = parameters;
+	if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+		throw new ForgeError("usage", "save takes a positive timeoutMs.");
+	}
+
+	const timer = new AbortController();
+	const request = new AbortController();
+	try {
+		return await Promise.race([
+			target.parts.saveAsync(timeoutMs, request.signal).then((result) => ({ ...result })),
+			target.clock.sleep(timeoutMs, timer.signal).then(() => {
+				request.abort();
+				throw new ForgeError("save_failed", "Studio did not save before the timeout.", {
+					details: { reason: "timeout" },
+				});
+			}),
+		]);
+	} finally {
+		timer.abort();
+	}
+}
+
+async function moveStudioAsync(
+	target: ControlTarget,
+	parameters: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+	requireSession(target, parameters);
+	const { desktop, studioPath, timeoutMs } = parameters;
+	if (
+		typeof timeoutMs !== "number" ||
+		!Number.isFinite(timeoutMs) ||
+		timeoutMs <= 0 ||
+		(desktop !== "hidden" && desktop !== "user") ||
+		(studioPath !== undefined && typeof studioPath !== "string")
+	) {
+		throw new ForgeError("usage", "moveStudio takes a desktop and positive save timeoutMs.");
+	}
+
+	if (target.parts.moveAsync === undefined) {
+		throw new ForgeError("studio_not_open", "No session Studio is open.");
+	}
+
+	return { ...(await target.parts.moveAsync({ desktop, studioPath, timeoutMs })) };
 }

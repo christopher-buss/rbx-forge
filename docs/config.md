@@ -306,6 +306,24 @@ defineConfig({
 
 Options for the Roblox Studio that `stop`, `down`, and the idle timeout close.
 
+#### `studio.desktop`
+
+- Type: `"user" | "hidden"`
+- Default: `"user"` for `start`; `"hidden"` for `up --studio` and `open` on
+  Windows.
+- Flag: `--desktop <user|hidden>` on `start`, `up`, and `open`.
+
+Choose where a new Studio opens. The flag overrides the config file; without
+either, the command selects its default. On macOS and Linux Studio always runs
+on the user's desktop. An already open Studio keeps its desktop. See
+[Hidden desktop](./studio.md#hidden-desktop).
+
+```ts
+defineConfig({
+	studio: { desktop: "user" },
+});
+```
+
 #### `studio.autoRecovery`
 
 - Type: `"move" | "delete" | "keep"`

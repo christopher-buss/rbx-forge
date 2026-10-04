@@ -8,7 +8,8 @@ import type { Host } from "../seams/host.ts";
 import type { Environment, Seams } from "../seams/seams.ts";
 import type { RecoveryReport } from "./auto-recovery.ts";
 import { autoSaveDirectories, handleAutoRecoveryAsync } from "./auto-recovery.ts";
-import type { StudioProcess } from "./launcher.ts";
+import type { LocatedStudio, StudioProcess } from "./launcher.ts";
+import { studioProcess } from "./launcher.ts";
 import type { StudioLock } from "./lock-file.ts";
 import {
 	isLockHost,
@@ -152,9 +153,8 @@ export async function closeStudioAsync(
 	recovery: RecoveryOptions,
 ): Promise<StudioStop> {
 	const lockPath = studioLockPath(target.place);
-	const own =
+	let pinned =
 		target.process === undefined ? undefined : checkOwn(seams, target.process, lockPath);
-	let pinned = own;
 	if (pinned === undefined) {
 		const text = readLockFile(seams.fileSystem, lockPath);
 		if (text === undefined) {
@@ -198,7 +198,7 @@ export async function closeStudioAsync(
  *   that names no verified Studio.
  * @throws {ForgeError} `native_missing`.
  */
-export function findPlaceStudio(seams: StudioSeams, place: string): StudioProcess | undefined {
+export function findPlaceStudio(seams: StudioSeams, place: string): LocatedStudio | undefined {
 	const lockPath = studioLockPath(place);
 	const text = readLockFile(seams.fileSystem, lockPath);
 	if (text === undefined) {
@@ -208,7 +208,7 @@ export function findPlaceStudio(seams: StudioSeams, place: string): StudioProces
 	try {
 		const { pid } = readStudioLock(seams, text, lockPath);
 		const check = checkStudio(seams, pid, lockPath);
-		return check.status === "studio" ? { pid, startTime: check.pinned.startTime } : undefined;
+		return check.status === "studio" ? studioProcess(check.pinned) : undefined;
 	} catch (err) {
 		if (err instanceof ForgeError && err.code === "identity_mismatch") {
 			return undefined;

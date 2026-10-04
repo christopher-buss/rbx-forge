@@ -32,8 +32,10 @@ export const MAX_LINE_BYTES = 1_048_576;
 export type IpcMethod =
 	| "addParts"
 	| "freshStatus"
+	| "moveStudio"
 	| "own"
 	| "restartParts"
+	| "save"
 	| "shutdown"
 	| "status"
 	| "stopParts"
@@ -79,7 +81,7 @@ const helloLine = jsonLine.pipe(type({ protocol: "number", token: "string", type
 const requestLine = jsonLine.pipe(
 	type({
 		"method":
-			"'addParts' | 'freshStatus' | 'own' | 'restartParts' | 'shutdown' | 'status' | 'stopParts' | 'sync'",
+			"'addParts' | 'freshStatus' | 'moveStudio' | 'own' | 'restartParts' | 'save' | 'shutdown' | 'status' | 'stopParts' | 'sync'",
 		"params?": RECORD,
 		"type": "'request'",
 	}),

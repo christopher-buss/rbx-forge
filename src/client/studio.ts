@@ -26,7 +26,7 @@ export const RECOVERY_FLAG: FlagDefinition = {
 export function recoveryOptions(
 	environment: Environment,
 	forge: ForgeFiles,
-	config: Pick<ResolvedConfig, "studio">,
+	config: { studio: Pick<ResolvedConfig["studio"], "autoRecovery"> },
 ): RecoveryOptions {
 	return {
 		env: environment,

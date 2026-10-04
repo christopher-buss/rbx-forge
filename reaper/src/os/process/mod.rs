@@ -147,6 +147,39 @@ impl PinnedProcess {
         self.pin.is_alive()
     }
 
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "shared macOS app visibility surface"
+    )]
+    pub fn app_hidden(&self) -> io::Result<Option<bool>> {
+        #[cfg(target_os = "macos")]
+        {
+            self.pin.app_hidden()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(None)
+        }
+    }
+
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "shared macOS app visibility surface"
+    )]
+    pub fn set_app_hidden(&self, hidden: bool) -> io::Result<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            self.pin.set_app_hidden(hidden)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = hidden;
+            Ok(false)
+        }
+    }
+
     /// Force-kill the pinned process (`TerminateProcess`, `SIGKILL`). Only
     /// this process: not its children, and never a process that reused its
     /// PID.
@@ -177,8 +210,8 @@ impl PinnedProcess {
 
     /// Whether a modal dialog blocks the process's main windows: on Windows
     /// one of them is disabled, as Windows does to the owner of a modal
-    /// dialog; such a window ignores a close request. Always `false` on
-    /// POSIX, and once the process has exited.
+    /// dialog; such a window ignores a close request. macOS reports AX modal
+    /// windows or sheets. `false` on Linux, without AX access, and after exit.
     ///
     /// # Errors
     ///

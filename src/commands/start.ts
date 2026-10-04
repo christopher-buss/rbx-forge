@@ -16,6 +16,13 @@ import type { CommandContext, CommandInput } from "./context.ts";
 
 export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
 	{
+		name: "desktop",
+		config: "studio.desktop",
+		kind: "string",
+		text: "Studio desktop (default: user; hidden is Windows only).",
+		value: "user|hidden",
+	},
+	{
 		name: "compiler",
 		kind: "boolean",
 		text: "Compile, build, and run the compiler in watch mode (the default); --no-compiler runs none of them.",
@@ -88,7 +95,7 @@ export async function runStartAsync(
 	}
 
 	const session = found?.session ?? (await waitForSessionAsync(context));
-	return joinAsync(context, session, wantedParts(context, input.flags));
+	return joinAsync(context, session, wantedParts(context, input));
 }
 
 /**
@@ -133,7 +140,7 @@ async function superviseAsync(
  * @param flags - The parsed flags.
  * @returns The parts, and the Studio executable to start.
  */
-function wantedParts(context: CommandContext, flags: CommandInput["flags"]): PartRequest {
+function wantedParts(context: CommandContext, { config, flags }: CommandInput): PartRequest {
 	const parts: Array<AddablePart> = [];
 	if (flags["compiler"] !== false) {
 		parts.push("compiler");
@@ -145,6 +152,8 @@ function wantedParts(context: CommandContext, flags: CommandInput["flags"]): Par
 
 	const studioPath = flags[STUDIO_PATH_FLAG.name];
 	return {
+		defaultDesktop: "user",
+		...(config.studio?.desktop === undefined ? {} : { desktop: config.studio.desktop }),
 		parts,
 		...(typeof studioPath === "string"
 			? { studioPath: path.resolve(context.cwd, studioPath) }

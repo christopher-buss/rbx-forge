@@ -220,3 +220,58 @@ opens once the compiler's first build is done; Rojo keeps its port. Failures:
 nothing started again; Studio's close failure, such as `identity_mismatch`, with
 no part stopped or started; an add failure, such as `compiler_missing` or
 `port_in_use`.
+
+## The save result
+
+`forge save --json` saves the session's Studio before syncback reads its place.
+`forge save --place <snapshot> --json` saves a snapshot Studio directly and
+returns the same data, including its actual desktop, without a running session.
+After editing in Studio, run `forge save --json`, then `forge syncback --json`.
+
+```json
+{
+	"type": "result",
+	"command": "save",
+	"ok": true,
+	"data": {
+		"place": "C:/project/game.rbxl",
+		"pid": 5678,
+		"desktop": "user",
+		"bytes": 1048576,
+		"mtime": "2026-01-01T12:00:00.000Z",
+		"durationMs": 412
+	}
+}
+```
+
+`place` is absolute; `bytes` and the ISO `mtime` describe the saved file after
+its changed timestamp settles. `desktop` is `user` or `hidden`. On Windows,
+`user` means saving can take focus. `durationMs` includes waiting for an opening
+Studio. `--timeout <s>` defaults to 30 seconds.
+
+| Code              | Exit | Meaning                                                                                      |
+| ----------------- | ---- | -------------------------------------------------------------------------------------------- |
+| `studio_not_open` | 3    | No Studio has the target place open.                                                         |
+| `studio_busy`     | 1    | A modal blocks Studio before the save.                                                       |
+| `save_failed`     | 1    | `error.details.reason` is `timeout`, `studio_error`, `no_menu_item`, or `permission_denied`. |
+
+The writable check runs before the save request; a read-only place returns
+`save_failed` with `permission_denied` without triggering a Studio save dialog.
+
+## The `show` and `hide` result
+
+`forge show --json` and `forge hide --json` return `data.from` and `data.to` as
+`user` or `hidden`, `data.pid` for the resulting Studio, and `data.durationMs`
+for the whole operation. `data.save` is the preceding save result (`place`,
+`pid`, `desktop`, `bytes`, `mtime`, `durationMs`). Its PID is the original
+Studio's; the outer PID changes when Windows reopens it.
+
+On Windows, `to` reports the actual desktop, including a warned fallback to
+`user` when hidden launch is unavailable. A save failure returns the save error
+and leaves the original Studio open.
+
+On macOS, both PIDs stay the same. `from` and `to` report app visibility:
+`hidden` for app-hidden, `user` for shown. `save.desktop` remains `user` because
+macOS has no hidden desktop. `services.studio.desktop` records the last
+successful forge visibility command; manual Cmd+H changes are read by the next
+show or hide.

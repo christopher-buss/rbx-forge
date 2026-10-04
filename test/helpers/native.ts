@@ -7,10 +7,12 @@ import type {
 	SessionProcess,
 	SessionTarget,
 } from "../../src/native/addon.ts";
+import { dismissDialogAsync } from "./native-dialog.ts";
 
 /** One process in the fake process table. */
 export interface FakeProcess {
 	alive: boolean;
+	appHidden?: boolean | null;
 	/**
 	 * A modal dialog blocks its windows (`isBlocked`); `throw` makes the
 	 * query fail.
@@ -18,6 +20,8 @@ export interface FakeProcess {
 	blocked?: "throw" | boolean;
 	/** How many times `requestClose` reached it while it ran. */
 	closeRequests?: number;
+	desktop?: "hidden" | "user";
+	dialog?: { button: string; title: string };
 	executablePath: string;
 	/** It exits right after it is pinned, before any query on the pin. */
 	exitsAfterPin?: boolean;
@@ -39,8 +43,11 @@ export interface FakeProcess {
 	 * or `throw` (the OS refuses the request).
 	 */
 	onCloseRequest?: "dialog" | "exit" | "exit_first" | "linger" | "no_window" | "refuse" | "throw";
+	onSave?: () => void;
+	onSaveRequest?: "dialog" | "ignore" | "no_menu_item" | "save" | "throw" | "timeout";
 	/** `pinProcess` throws this message (for example, access denied). */
 	pinError?: string;
+	refusesAppVisibility?: boolean;
 	/** Its start time as the addon reports it; the PID when not set. */
 	startTime?: string;
 	/** The timeout of every `waitForExit` call on its pins. */
@@ -197,28 +204,83 @@ function blockedNow(pid: number, entry: FakeProcess): boolean {
 	return entry.alive && entry.blocked === true;
 }
 
+function requestSave(entry: FakeProcess): "no_menu_item" | "requested" | "timeout" {
+	if (!entry.alive || entry.onSaveRequest === "throw") {
+		throw new Error("Studio save failed");
+	}
+
+	if (entry.onSaveRequest === "no_menu_item") {
+		return "no_menu_item";
+	}
+
+	if (entry.onSaveRequest === "timeout") {
+		entry.onSave?.();
+		return "timeout";
+	}
+
+	if (entry.onSaveRequest === "dialog") {
+		entry.blocked = true;
+	} else if (entry.onSaveRequest !== "ignore") {
+		entry.onSave?.();
+	}
+
+	return "requested";
+}
+
+async function requestSaveAsync(
+	entry: FakeProcess,
+	timeoutMs = 30_000,
+): Promise<"no_menu_item" | "requested" | "timeout"> {
+	await Promise.resolve();
+	return timeoutMs <= 0 ? "timeout" : requestSave(entry);
+}
+
+function killEntry(entry: FakeProcess): boolean {
+	const wasAlive = entry.alive;
+	entry.alive = entry.ignoresKill === true && wasAlive;
+	return wasAlive;
+}
+
+function appHidden(entry: FakeProcess): boolean | null {
+	if (!entry.alive) {
+		return null;
+	}
+
+	return entry.appHidden === undefined ? false : entry.appHidden;
+}
+
+function setAppHidden(entry: FakeProcess, hidden: boolean): boolean {
+	if (!entry.alive || entry.refusesAppVisibility === true || entry.appHidden === null) {
+		return false;
+	}
+
+	entry.appHidden = hidden;
+	return true;
+}
+
 function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 	if (entry.exitsAfterPin === true) {
 		entry.alive = false;
 	}
 
-	function kill(): boolean {
-		const wasAlive = entry.alive;
-		entry.alive = entry.ignoresKill === true && wasAlive;
-		return wasAlive;
-	}
-
 	return {
+		appHidden: () => appHidden(entry),
+		desktop: () => entry.desktop ?? "user",
+		dismissDialog: async (title, button, desktop) => {
+			return dismissDialogAsync(entry, title, button, desktop);
+		},
 		executablePath: () => (entry.alive ? entry.executablePath : null),
 		isAlive: () => entry.alive,
 		isBlocked: () => blockedNow(pid, entry),
-		kill,
+		kill: () => killEntry(entry),
 		killGroup: () => {
 			entry.groupKilled = true;
-			return kill();
+			return killEntry(entry);
 		},
 		pid,
 		requestClose: () => requestClose(entry),
+		requestSave: async (timeoutMs) => requestSaveAsync(entry, timeoutMs),
+		setAppHidden: (hidden) => setAppHidden(entry, hidden),
 		startTime: startTimeOf(pid, entry),
 		waitForExit: (timeoutMs) => {
 			entry.waits?.push(timeoutMs);

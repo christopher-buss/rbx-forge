@@ -73,15 +73,17 @@ The bins `forge` and `rbx-forge` are the same. Run forge from the project root.
 
 Session commands:
 
-| Command             | What it does                                                                                                                                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `forge start`       | Run the session in this terminal, or join the running one, as the owner of its parts. Ctrl+C, a closed terminal, or a killed `start` stops the parts it started and gives back the rest. Studio stays open.                    |
-| `forge up`          | Start a session in the background with the watch-mode compiler. Returns when its first compile is done, or it failed. `--studio` also attaches Studio and Rojo. On a running session, starts only the missing or failed parts. |
-| `forge status`      | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                                                              |
-| `forge sync`        | Run syncback and its hooks through the running session, and report the result.                                                                                                                                                 |
-| `forge logs <name>` | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                                                               |
-| `forge restart`     | Restart the session's parts that have no owner: the compiler, then a fresh Studio with Rojo on the same port. See below.                                                                                                       |
-| `forge down`        | Stop the session's parts that have no owner (Studio first), and end the session when none is left. Reports `stopped` only when its supervisor and every process of it are gone.                                                |
+| Command                     | What it does                                                                                                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `forge start`               | Run the session in this terminal, or join the running one, as the owner of its parts. Ctrl+C, a closed terminal, or a killed `start` stops the parts it started and gives back the rest. Studio stays open.                    |
+| `forge up`                  | Start a session in the background with the watch-mode compiler. Returns when its first compile is done, or it failed. `--studio` also attaches Studio and Rojo. On a running session, starts only the missing or failed parts. |
+| `forge status`              | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                                                              |
+| `forge save`                | Save the session Studio to disk before syncback. `--place <snapshot>` saves a snapshot Studio. `--timeout <s>` controls the wait.                                                                                              |
+| `forge show` / `forge hide` | Save and show or hide the session Studio. Windows reopens it on the user or hidden desktop; macOS unhides or hides the same app. Keeps Rojo running and preserves ownership.                                                   |
+| `forge sync`                | Run syncback and its hooks through the running session, and report the result.                                                                                                                                                 |
+| `forge logs <name>`         | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                                                               |
+| `forge restart`             | Restart the session's parts that have no owner: the compiler, then a fresh Studio with Rojo on the same port. See below.                                                                                                       |
+| `forge down`                | Stop the session's parts that have no owner (Studio first), and end the session when none is left. Reports `stopped` only when its supervisor and every process of it are gone.                                                |
 
 `start` runs the compiler, Rojo, and Studio, and owns them: `down`, `stop`,
 `restart`, and the idle timeout leave them alone. When a session runs (such as
@@ -101,6 +103,8 @@ flags:
   (config `syncback.runOnStart`).
 - `--force`: when a crashed earlier session still has processes after the wait,
   kill them, each verified as that session's own.
+- `--desktop <user|hidden>`: where Studio opens on Windows. `start` defaults to
+  `user`; `up --studio` and `open` default to `hidden`.
 - `--studio-path <path>`: the Roblox Studio executable to start (see
   [Opening Studio](./docs/studio.md#opening-studio)).
 
@@ -132,7 +136,9 @@ the project's `rojo plugin install`. See
 
 A Studio that already had the place open when the session attached it is a found
 Studio (`origin: "found"` in `status`; a Studio the session opened is `forge`).
-Only `stop --force` and `restart --force` close it: `down` and the idle timeout
+Only `stop --force` and `restart --force` close it during cleanup. Explicit
+Windows `show` and `hide` also save and reopen it when changing its desktop; the
+replacement keeps its owner and has origin `forge`. `down` and the idle timeout
 stop its Rojo and leave it open, `restart` keeps it, and `stop` fails with
 `studio_found` (exit 1).
 
@@ -174,16 +180,16 @@ leaves a found Studio open; set it with `session.idleTimeout`.
 
 One-shot commands:
 
-| Command          | What it does                                                                                              |
-| ---------------- | --------------------------------------------------------------------------------------------------------- |
-| `forge init`     | Create `rbx-forge.config.ts`. `--type <rbxts\|luau>`, `--force` to replace.                               |
-| `forge config`   | Print the resolved config.                                                                                |
-| `forge build`    | Build the Rojo project. `-o, --output <path>`, or `--plugin <name>` for Studio's plugins folder.          |
-| `forge compile`  | Compile roblox-ts once and report errors (rbxts only). While a session runs: see below.                   |
-| `forge open`     | Build a snapshot of the place and open it in Studio, outside every session. `--studio-path <path>`.       |
-| `forge stop`     | Close the session's Studio (and stop its Rojo) or the Studio of a place, after it verifies it. See below. |
-| `forge syncback` | Sync the place back into the project once. `--input <path>`, `--project <path>`.                          |
-| `forge typegen`  | Write service types from the Rojo sourcemap. `-o`, `--include`, `--exclude`, `--max-depth` (rbxts only).  |
+| Command          | What it does                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `forge init`     | Create `rbx-forge.config.ts`. `--type <rbxts\|luau>`, `--force` to replace.                                                     |
+| `forge config`   | Print the resolved config.                                                                                                      |
+| `forge build`    | Build the Rojo project. `-o, --output <path>`, or `--plugin <name>` for Studio's plugins folder.                                |
+| `forge compile`  | Compile roblox-ts once and report errors (rbxts only). While a session runs: see below.                                         |
+| `forge open`     | Build a snapshot of the place and open it in Studio, outside every session. `--studio-path <path>`, `--desktop <user\|hidden>`. |
+| `forge stop`     | Close the session's Studio (and stop its Rojo) or the Studio of a place, after it verifies it. See below.                       |
+| `forge syncback` | Sync the place back into the project once. `--input <path>`, `--project <path>`.                                                |
+| `forge typegen`  | Write service types from the Rojo sourcemap. `-o`, `--include`, `--exclude`, `--max-depth` (rbxts only).                        |
 
 `stop` closes the session's Studio and stops its Rojo; the compiler keeps
 running, and an `up` session with no part left ends. A Studio that a

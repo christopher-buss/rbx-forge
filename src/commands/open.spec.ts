@@ -38,6 +38,7 @@ interface OpenSetup {
 	launch?: StudioLaunchOutcome;
 	/** What each spawn returns, by its label (`rojo` or a hook). */
 	outcomes?: Record<string, ProcessOutcome>;
+	platform?: NodeJS.Platform;
 }
 
 interface OpenRun {
@@ -65,6 +66,7 @@ function makeOpen({
 	files = { "tools/rojo": "" },
 	launch = { type: "launched" },
 	outcomes = {},
+	platform = "linux",
 }: OpenSetup = {}): OpenRun {
 	const memory = createMemoryFileSystem(files);
 	const order: Array<string> = [];
@@ -101,6 +103,7 @@ function makeOpen({
 			seams: createTestSeams({
 				configLoader,
 				fileSystem: memory.fileSystem,
+				host: { ...createTestSeams().host, platform },
 				processRunner,
 				prompter: { choose: vi.fn<Prompter["choose"]>(), confirm },
 				studioLauncher: launcher,
@@ -153,6 +156,75 @@ function oldSnapshots(count: number): Record<string, string> {
 }
 
 describe(runOpenAsync, () => {
+	it("should let the desktop flag override the snapshot's configured hidden desktop", async () => {
+		expect.assertions(1);
+
+		const run = makeOpen({
+			file: { studio: { desktop: "hidden" } },
+			files: { "tools/rojo.exe": "" },
+			platform: "win32",
+		});
+		await runOpenAsync(run.context, input({ studio: { desktop: "user" } }));
+
+		expect(run.launcher).toHaveBeenCalledWith(expect.objectContaining({ desktop: "user" }));
+	});
+
+	it("should use the snapshot's configured desktop", async () => {
+		expect.assertions(1);
+
+		const run = makeOpen({
+			file: { studio: { desktop: "user" } },
+			files: { "tools/rojo.exe": "" },
+			platform: "win32",
+		});
+		await runOpenAsync(run.context, input());
+
+		expect(run.launcher).toHaveBeenCalledWith(expect.objectContaining({ desktop: "user" }));
+	});
+
+	it("should report the actual desktop of a directly launched snapshot", async () => {
+		expect.assertions(1);
+
+		const run = makeOpen({
+			files: { "tools/rojo.exe": "" },
+			launch: {
+				studio: { desktop: "hidden", pid: 900, startTime: "9000" },
+				type: "launched",
+			},
+			platform: "win32",
+		});
+
+		await expect(runOpenAsync(run.context, input())).resolves.toMatchObject({
+			data: { desktop: "hidden", studio: { desktop: "hidden", pid: 900 } },
+		});
+	});
+
+	it("should return the actual desktop and report a hidden launch fallback warning", async () => {
+		expect.assertions(2);
+
+		const warning =
+			"Studio opened on the user's desktop: the platform launcher cannot use the hidden desktop.";
+		const run = makeOpen({
+			files: { "tools/rojo.exe": "" },
+			launch: { desktop: "user", type: "launched", warning },
+			platform: "win32",
+		});
+
+		await expect(runOpenAsync(run.context, input())).resolves.toMatchObject({
+			data: { desktop: "user", studio: null },
+		});
+		expect(run.reporter.events).toContainEqual({ message: warning, type: "warning" });
+	});
+
+	it("should launch a snapshot on the hidden desktop by default on Windows", async () => {
+		expect.assertions(1);
+
+		const run = makeOpen({ files: { "tools/rojo.exe": "" }, platform: "win32" });
+		await runOpenAsync(run.context, input());
+
+		expect(run.launcher).toHaveBeenCalledWith(expect.objectContaining({ desktop: "hidden" }));
+	});
+
 	it("should build a snapshot into .forge/snapshots, then open it", async () => {
 		expect.assertions(3);
 
@@ -161,6 +233,7 @@ describe(runOpenAsync, () => {
 		await expect(runOpenAsync(context, input())).resolves.toStrictEqual({
 			data: {
 				build: { durationMs: 900, hooks: [], output: SNAPSHOT },
+				desktop: "user",
 				hooks: [],
 				place: SNAPSHOT,
 				pruned: [],
@@ -176,7 +249,16 @@ describe(runOpenAsync, () => {
 		]);
 		expect({ launches: launcher.mock.calls, order }).toStrictEqual({
 			launches: [
-				[{ cwd: PROJECT, env: { PATH: TOOLS }, place: SNAPSHOT, studioPath: undefined }],
+				[
+					{
+						cwd: PROJECT,
+						desktop: "user",
+						env: { PATH: TOOLS },
+						place: SNAPSHOT,
+						studioPath: undefined,
+						watchHiddenLighting: true,
+					},
+				],
 			],
 			order: ["rojo", "studio"],
 		});
@@ -386,6 +468,7 @@ describe(openPlaceAsync, () => {
 
 		await expect(openStepAsync(context)).resolves.toStrictEqual({
 			build: { durationMs: 900, hooks: [], output: GAME },
+			desktop: "user",
 			hooks: [],
 			place: GAME,
 			studio: null,
@@ -420,6 +503,7 @@ describe(openPlaceAsync, () => {
 
 		await expect(openStepAsync(context, NO_BUILD)).resolves.toStrictEqual({
 			build: null,
+			desktop: "user",
 			hooks: [],
 			place: GAME,
 			studio: null,

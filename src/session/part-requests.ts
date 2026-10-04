@@ -1,10 +1,13 @@
 import { type } from "arktype";
 
+import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
+import type { StudioSave } from "../studio/save-studio.ts";
 import type { OwnerHandlers } from "./ownership.ts";
 import type { PartRestarter } from "./part-restarts.ts";
 import type { PartStopper } from "./part-stops.ts";
 import type { PartId } from "./status.ts";
+import type { StudioMover } from "./studio-move.ts";
 
 /**
  * A part a client can ask a running session to add: `studio` attaches
@@ -14,6 +17,8 @@ export type AddablePart = "compiler" | "studio";
 
 /** What one `addParts` request asks for. */
 export interface PartRequest {
+	readonly defaultDesktop?: StudioDesktop | undefined;
+	readonly desktop?: StudioDesktop | undefined;
 	readonly parts: ReadonlyArray<AddablePart>;
 	/** The Studio executable to start (`up --studio-path`), absolute. */
 	readonly studioPath?: string | undefined;
@@ -25,9 +30,11 @@ export type PartAdder = (request: PartRequest) => Promise<Array<PartId>>;
 /** What the session body adds, stops, and hands over parts with. */
 export interface PartHandlers extends OwnerHandlers {
 	add: PartAdder;
-	/** Interrupt a readiness wait before a stop enters the serialized queue. */
+	/** Interrupt a readiness wait before a stop runs. */
 	beforeStop?: (request: Parameters<PartStopper>[0]) => void;
+	move?: StudioMover;
 	restart: PartRestarter;
+	save?: (timeoutMs: number, signal?: AbortSignal) => Promise<StudioSave>;
 	stop: PartStopper;
 }
 
@@ -56,6 +63,8 @@ export interface PartRequests {
 	 * fails.
 	 */
 	close: () => void;
+	/** Save and reopen Studio on the requested desktop in the session queue. */
+	moveAsync: StudioMover;
 	/**
 	 * A `start` joins as the owner.
 	 *
@@ -78,13 +87,17 @@ export interface PartRequests {
 	 *   restart's failure, such as `cleanup_in_progress`.
 	 */
 	restartAsync: PartRestarter;
+	saveAsync: (timeoutMs: number, signal?: AbortSignal) => Promise<StudioSave>;
 	/**
 	 * Stop the parts a request may stop.
 	 *
 	 * @returns What it stopped and kept.
 	 * @rejects {ForgeError} `not_running` once the session is stopping.
 	 */
-	stopAsync: PartStopper;
+	stopAsync: (
+		request: Parameters<PartStopper>[0],
+		shouldStop?: () => boolean,
+	) => ReturnType<PartStopper>;
 }
 
 /** The link between the control channel and the body. */
@@ -98,6 +111,8 @@ interface Link {
 }
 
 const partRequest = type({
+	"defaultDesktop?": "'user' | 'hidden'",
+	"desktop?": "'user' | 'hidden'",
 	"parts": "('compiler' | 'studio')[]",
 	"studioPath?": "string",
 });
@@ -137,20 +152,20 @@ export function createPartRequests(): PartRequests {
 			link.isClosed = true;
 			attached.resolve(undefined);
 		},
+		moveAsync: async (request) => {
+			return whenAttachedAsync(link, async (handlers) => moveAsync(handlers, request));
+		},
 		ownAsync: async (request) => whenAttachedAsync(link, async ({ own }) => own(request)),
 		releaseAsync: async (reason) => nowAsync(link, async ({ release }) => release(reason)),
 		restartAsync: async (request) => {
 			return whenAttachedAsync(link, async ({ restart }) => restart(request));
 		},
-		stopAsync: async (request) => {
-			if (link.isClosed) {
-				throw stopping();
-			}
-
-			const handlers = link.handlers ?? (await waitForHandlersAsync(link.attached, link));
-			handlers.beforeStop?.(request);
-			return whenAttachedAsync(link, async ({ stop }) => stop(request));
+		saveAsync: async (timeoutMs, signal) => {
+			return whenAttachedAsync(link, async (handlers) => {
+				return saveAsync(handlers, timeoutMs, signal);
+			});
 		},
+		stopAsync: async (request, shouldStop) => stopAsync(link, request, shouldStop),
 	};
 }
 
@@ -243,4 +258,60 @@ async function nowAsync<T>(link: Link, run: (handlers: PartHandlers) => Promise<
 	}
 
 	return link.enqueueAsync(async () => run(handlers));
+}
+
+async function saveAsync(
+	{ save }: PartHandlers,
+	timeoutMs: number,
+	signal?: AbortSignal,
+): Promise<StudioSave> {
+	if (save === undefined) {
+		throw new ForgeError("studio_not_open", "No session Studio is open.");
+	}
+
+	signal?.throwIfAborted();
+	return save(timeoutMs, signal);
+}
+
+function preflightStop(
+	handlers: PartHandlers,
+	request: Parameters<PartStopper>[0],
+	shouldStop?: () => boolean,
+): void {
+	if (shouldStop === undefined) {
+		handlers.beforeStop?.(request);
+	}
+}
+
+async function stopAsync(
+	link: Link,
+	request: Parameters<PartStopper>[0],
+	shouldStop?: () => boolean,
+): Promise<Awaited<ReturnType<PartStopper>>> {
+	if (link.isClosed) {
+		throw stopping();
+	}
+
+	const handlers = link.handlers ?? (await waitForHandlersAsync(link.attached, link));
+	preflightStop(handlers, request, shouldStop);
+
+	return whenAttachedAsync(link, async ({ stop }) => {
+		// Queued idle stops must still be needed after an active save finishes.
+		if (shouldStop?.() === false) {
+			return { ending: false, kept: [], stopped: [] };
+		}
+
+		return stop(request);
+	});
+}
+
+async function moveAsync(
+	{ move }: PartHandlers,
+	request: Parameters<StudioMover>[0],
+): Promise<Awaited<ReturnType<StudioMover>>> {
+	if (move === undefined) {
+		throw new ForgeError("studio_not_open", "No session Studio is open.");
+	}
+
+	return move(request);
 }

@@ -32,6 +32,33 @@ function makeStore(start: StatusStart = START) {
 const NO_PARTS: StatusStart = { ...START, compiler: false, open: false };
 
 describe(createStatusStore, () => {
+	it("should report the user desktop for a platform launch", () => {
+		expect.assertions(1);
+
+		const { store } = makeStore();
+		store.studio("opening", "/game.rbxl", null, "forge");
+
+		expect(store.snapshot().services.studio.desktop).toBe("user");
+	});
+
+	it("should retain Studio's hidden desktop while opening and closing", () => {
+		expect.assertions(3);
+
+		const { store } = makeStore();
+		const studio = { desktop: "hidden" as const, pid: 900, startTime: "1" };
+		store.studio("opening", "/game.rbxl", studio, "forge");
+
+		expect(store.snapshot().services.studio.desktop).toBe("hidden");
+
+		store.studio("open", "/game.rbxl", studio);
+
+		expect(parseStatus(store.snapshot())!.services.studio.desktop).toBe("hidden");
+
+		store.studio("closed", "/game.rbxl", studio);
+
+		expect(store.snapshot().services.studio.desktop).toBe("hidden");
+	});
+
 	it("should start with every planned service starting and the rest off", () => {
 		expect.assertions(2);
 
@@ -285,6 +312,7 @@ describe(createStatusStore, () => {
 			status: "idle",
 		});
 		expect(store.snapshot().services.studio).toStrictEqual({
+			desktop: "user",
 			owner: null,
 			place: "/project/game.rbxl",
 			status: "open",
@@ -298,6 +326,7 @@ describe(createStatusStore, () => {
 		store.studio("opening", "/project/game.rbxl", { pid: 7, startTime: "70" });
 
 		expect(parseStatus(store.snapshot())!.services.studio).toStrictEqual({
+			desktop: "user",
 			owner: null,
 			pid: 7,
 			place: "/project/game.rbxl",
