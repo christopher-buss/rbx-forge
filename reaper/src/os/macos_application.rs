@@ -3,6 +3,10 @@
 use std::ffi::{CStr, c_char, c_void};
 use std::io;
 use std::mem::transmute;
+use std::time::{Duration, Instant};
+
+/// How long AppKit may take to apply a hide or unhide request.
+const SETTLE: Duration = Duration::from_secs(1);
 
 type Object = *mut c_void;
 type Selector = *mut c_void;
@@ -84,6 +88,8 @@ pub fn hidden(pid: u32) -> io::Result<Option<bool>> {
     Ok(Application::open(pid)?.map(|application| application.boolean(c"isHidden")))
 }
 
+/// Request the visibility, then wait for `isHidden` to match. `hide` and
+/// `unhide` return NO for another process's app even when they apply.
 pub fn set_hidden(
     pid: u32,
     hidden: bool,
@@ -95,5 +101,16 @@ pub fn set_hidden(
     if !is_alive()? {
         return Ok(false);
     }
-    Ok(application.boolean(if hidden { c"hide" } else { c"unhide" }))
+    application.boolean(if hidden { c"hide" } else { c"unhide" });
+    let deadline = Instant::now() + SETTLE;
+    loop {
+        if application.boolean(c"isHidden") == hidden {
+            return Ok(true);
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        // SAFETY: a bounded default-mode turn refreshes AppKit's varying properties.
+        unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true) };
+    }
 }
