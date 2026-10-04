@@ -220,3 +220,38 @@ opens once the compiler's first build is done; Rojo keeps its port. Failures:
 nothing started again; Studio's close failure, such as `identity_mismatch`, with
 no part stopped or started; an add failure, such as `compiler_missing` or
 `port_in_use`.
+
+## The save result
+
+`forge save --json` saves the session's Studio before syncback reads its place.
+After editing in Studio, run `forge save --json`, then `forge syncback --json`.
+
+```json
+{
+	"type": "result",
+	"command": "save",
+	"ok": true,
+	"data": {
+		"place": "C:/project/game.rbxl",
+		"pid": 5678,
+		"desktop": "user",
+		"bytes": 1048576,
+		"mtime": "2026-01-01T12:00:00.000Z",
+		"durationMs": 412
+	}
+}
+```
+
+`place` is absolute; `bytes` and the ISO `mtime` describe the saved file after
+its changed timestamp settles. `desktop` is `user` or `hidden`. On Windows,
+`user` means saving can take focus. `durationMs` includes waiting for an opening
+Studio. `--timeout <s>` defaults to 30 seconds.
+
+| Code              | Exit | Meaning                                                                                      |
+| ----------------- | ---- | -------------------------------------------------------------------------------------------- |
+| `studio_not_open` | 3    | No Studio has the target place open.                                                         |
+| `studio_busy`     | 1    | A modal blocks Studio before the save.                                                       |
+| `save_failed`     | 1    | `error.details.reason` is `timeout`, `studio_error`, `no_menu_item`, or `permission_denied`. |
+
+The writable check runs before the save request; a read-only place returns
+`save_failed` with `permission_denied` without triggering a Studio save dialog.

@@ -48,13 +48,16 @@ export type ForgeErrorCode =
 	| "process_failed"
 	| "reaper_unavailable"
 	| "rojo_missing"
+	| "save_failed"
 	| "service_failed"
 	| "session_replaced"
 	| "session_running"
 	| "session_stopping"
 	| "sourcemap_invalid"
+	| "studio_busy"
 	| "studio_found"
 	| "studio_launch_failed"
+	| "studio_not_open"
 	| "studio_owned"
 	| "supervisor_unresponsive"
 	| "syncback_unsupported"
@@ -156,6 +159,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		text: "The native reaper is missing or the OS is not supported.",
 	},
 	rojo_missing: { exitCode: EXIT_FAILURE, text: "Rojo is not installed." },
+	save_failed: {
+		exitCode: EXIT_FAILURE,
+		text: "Studio could not save the place; details.reason describes the failure.",
+	},
 	service_failed: {
 		exitCode: EXIT_FAILURE,
 		text: "A session service exited, so the session stopped.",
@@ -176,6 +183,7 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		exitCode: EXIT_FAILURE,
 		text: "Rojo's sourcemap is missing, or is not the sourcemap of a place.",
 	},
+	studio_busy: { exitCode: EXIT_FAILURE, text: "A modal dialog blocks Studio before saving." },
 	studio_found: {
 		exitCode: EXIT_FAILURE,
 		text: "The Studio already had the place open when the session attached it; only --force closes it.",
@@ -184,6 +192,7 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		exitCode: EXIT_FAILURE,
 		text: "The platform launcher could not open the place in Roblox Studio.",
 	},
+	studio_not_open: { exitCode: EXIT_NOT_RUNNING, text: "No Studio has the target place open." },
 	studio_owned: {
 		exitCode: EXIT_FAILURE,
 		text: "A forge start terminal owns the Studio; only --force closes it.",

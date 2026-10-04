@@ -11,6 +11,7 @@
 mod model;
 #[allow(dead_code, reason = "the worker layer serves only the reaper binary")]
 mod os;
+mod studio_save;
 #[cfg(windows)]
 mod windows_exports;
 
@@ -213,11 +214,23 @@ impl PinnedProcess {
             .map_err(|err| to_napi(&format!("kill group of process {}", self.pid()), &err))
     }
 
-    /// Ask the pinned process to close, as a user would: `WM_CLOSE` to its
-    /// main windows on Windows (hidden ones only when Studio titles them),
-    /// `SIGTERM` elsewhere. It does not wait, and
-    /// the process may refuse. `false` when it had already exited, or on
-    /// Windows has no main window.
+    /// Press Studio's English File > Save to File accessibility menu off Node's event loop.
+    ///
+    /// # Errors
+    ///
+    /// When Studio exited or the native accessibility action fails.
+    #[napi]
+    pub fn request_save(&self) -> Result<AsyncTask<StudioSaveTask>> {
+        if !self.is_alive()? {
+            return Err(Error::from_reason("Studio exited"));
+        }
+        Ok(AsyncTask::new(StudioSaveTask {
+            pid: self.pid(),
+            start_time: self.inner.start_time(),
+        }))
+    }
+
+    /// Ask the pinned process to close its main windows.
     ///
     /// # Errors
     ///
@@ -386,4 +399,27 @@ pub fn force_cleanup(target: SessionTarget, bound_ms: u32) -> AsyncTask<CleanupT
         target: OwnedTarget::new(target),
         bound: Duration::from_millis(u64::from(bound_ms)),
     })
+}
+
+pub struct StudioSaveTask {
+    pid: u32,
+    start_time: u64,
+}
+impl Task for StudioSaveTask {
+    type Output = String;
+    type JsValue = String;
+    fn compute(&mut self) -> Result<Self::Output> {
+        let pinned = os::process::PinnedProcess::open(self.pid)
+            .map_err(|err| to_napi("pin Studio for save", &err))?;
+        let Some(pinned) = pinned else {
+            return Err(Error::from_reason("Studio exited"));
+        };
+        if pinned.start_time() != self.start_time {
+            return Err(Error::from_reason("Studio identity changed"));
+        }
+        studio_save::request(self.pid).map_err(|err| to_napi("save Studio", &err))
+    }
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
 }

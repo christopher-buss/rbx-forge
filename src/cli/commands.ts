@@ -7,6 +7,7 @@ import { CONFIG_FILE_NAME, INIT_FLAGS, runInitAsync } from "../commands/init.ts"
 import { LOG_NAMES, LOGS_FLAGS, runLogsAsync } from "../commands/logs.ts";
 import { OPEN_FLAGS, runOpenAsync } from "../commands/open.ts";
 import { RESTART_FLAGS, runRestartAsync } from "../commands/restart.ts";
+import { runSaveAsync, SAVE_FLAGS } from "../commands/save.ts";
 import { runStartAsync, START_FLAGS } from "../commands/start.ts";
 import { runStatusAsync, STATUS_FLAGS } from "../commands/status.ts";
 import { runStopAsync, STOP_FLAGS } from "../commands/stop.ts";
@@ -84,6 +85,12 @@ export const COMMANDS: ReadonlyArray<CommandDefinition> = [
 		run: runStatusAsync,
 		summary:
 			"Show the running session: each service, the Rojo port, the last compile with its diagnostics, and the last syncback with its hooks. --wait first waits for a build that reflects your last edit.",
+	},
+	{
+		name: "save",
+		flags: SAVE_FLAGS,
+		run: runSaveAsync,
+		summary: "Save the session Studio place to disk before syncback.",
 	},
 	{
 		name: "sync",
