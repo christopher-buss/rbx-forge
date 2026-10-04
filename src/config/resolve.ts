@@ -23,7 +23,7 @@ export interface ConfigDefaults {
 		buildOutputPath: string | undefined;
 		projectPath: string | undefined;
 	};
-	rbxts: { args: Array<string>; command: string };
+	rbxts: { args: Array<string>; command: string; project: string | undefined };
 	rojoAlias: string;
 	rojoPort: number | undefined;
 	rojoProjectPath: string;
@@ -55,7 +55,7 @@ export const DEFAULT_CONFIG: Readonly<ConfigDefaults> = {
 	hookTimeoutMs: 300_000,
 	luau: { watch: { args: [], command: undefined } },
 	open: { buildFirst: true, buildOutputPath: undefined, projectPath: undefined },
-	rbxts: { args: [], command: "rbxtsc" },
+	rbxts: { args: [], command: "rbxtsc", project: undefined },
 	rojoAlias: "rojo",
 	rojoPort: undefined,
 	rojoProjectPath: "default.project.json",

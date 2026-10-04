@@ -354,7 +354,7 @@ function controlPlan(
 		idleTimeout: config.session.idleTimeout,
 		plan: { ...plan, compiler: compiler !== undefined, owner },
 		readsBuilds: compiler?.parsesDiagnostics === true,
-		sources: { args: config.rbxts.args, cwd },
+		sources: { args: config.rbxts.args, cwd, project: config.rbxts.project },
 	};
 }
 

@@ -210,6 +210,27 @@ defineConfig({
 });
 ```
 
+#### `rbxts.project`
+
+- Type: `string`
+- Default: none
+
+The tsconfig the build compiles, relative to the project. `status --wait` waits
+for a compile that starts after the newest edit under its root directories and
+those of the projects it references. Set it when `rbxts.args` do not name the
+tsconfig with `-p` or `--project`, such as when a task runner runs the compiler.
+With neither, forge reads `tsconfig.json`.
+
+```ts
+defineConfig({
+	rbxts: {
+		args: ["exec", "nx", "run", "game:build"],
+		command: "pnpm",
+		project: "tsconfig.lib.json",
+	},
+});
+```
+
 ### `luau`
 
 Options for Luau projects (`projectType: "luau"`).

@@ -6,6 +6,9 @@ import { MTIME_SLACK_MS, newestSourceEdit } from "./source-edits.ts";
 
 const TSCONFIG = JSON.stringify({ compilerOptions: { outDir: "out", rootDir: "src" } });
 const NOW = 10_000;
+/** The tsconfig variable for the directory of the tsconfig that extends. */
+// oxlint-disable-next-line no-template-curly-in-string -- tsconfig syntax
+const CONFIG_DIR = "${configDir}";
 /** A time past the clock slack after {@link NOW}; memfs keeps whole seconds. */
 const FUTURE = NOW + MTIME_SLACK_MS + 1000;
 
@@ -129,6 +132,224 @@ describe(newestSourceEdit, () => {
 
 		expect(newestSourceEdit(fileSystem, { args: [], cwd: PROJECT }, NOW)).toMatchObject({
 			at: NOW + MTIME_SLACK_MS,
+		});
+	});
+
+	it("should read the tsconfig that rbxts.project names over the arguments", () => {
+		expect.assertions(1);
+
+		const fileSystem = project({
+			"game/src/a.ts": ["", 2000],
+			"game/tsconfig.json": [TSCONFIG, 0],
+			"lib/src/b.ts": ["", 3000],
+			"tsconfig.lib.json": [JSON.stringify({ compilerOptions: { rootDir: "lib/src" } }), 0],
+		});
+
+		expect(
+			newestSourceEdit(
+				fileSystem,
+				{ args: ["-p", "game"], cwd: PROJECT, project: "tsconfig.lib.json" },
+				NOW,
+			),
+		).toStrictEqual({ at: 3000, path: path.join("lib", "src", "b.ts") });
+	});
+
+	it("should take the root and output directories a tsconfig extends, relative to the base", () => {
+		expect.assertions(1);
+
+		const fileSystem = project({
+			"config/src/a.ts": ["", 1000],
+			"config/src/out/b.lua": ["", 5000],
+			"config/tsconfig.base.json": [
+				JSON.stringify({ compilerOptions: { outDir: "src/out", rootDir: "src" } }),
+				0,
+			],
+			"tsconfig.json": ['{"extends":"./config/tsconfig.base"}', 0],
+		});
+
+		expect(newestSourceEdit(fileSystem, { args: [], cwd: PROJECT }, NOW)).toStrictEqual({
+			at: 1000,
+			path: path.join("config", "src", "a.ts"),
+		});
+	});
+
+	it("should let a tsconfig override what it extends, from each of several bases", () => {
+		expect.assertions(1);
+
+		const fileSystem = project({
+			"a.json": [JSON.stringify({ compilerOptions: { rootDir: "one" } }), 0],
+			"b.json": [JSON.stringify({ compilerOptions: { outDir: "two/out" } }), 0],
+			"one/a.ts": ["", 3000],
+			"tsconfig.json": [
+				JSON.stringify({
+					compilerOptions: { rootDir: "two" },
+					extends: ["./a.json", "./b.json"],
+				}),
+				0,
+			],
+			"two/b.ts": ["", 2000],
+			"two/out/c.lua": ["", 5000],
+		});
+
+		expect(newestSourceEdit(fileSystem, { args: [], cwd: PROJECT }, NOW)).toMatchObject({
+			at: 2000,
+		});
+	});
+
+	it("should skip a base that is a package, and one that is missing", () => {
+		expect.assertions(1);
+
+		const fileSystem = project({
+			"@tsconfig/node.json": [
+				JSON.stringify({ compilerOptions: { rootDirs: ["../pkg"] } }),
+				0,
+			],
+			"pkg/a.ts": ["", 3000],
+			"src/a.ts": ["", 2000],
+			"tsconfig.json": [
+				JSON.stringify({
+					compilerOptions: { rootDir: "src" },
+					extends: ["@tsconfig/node", "./missing.json"],
+				}),
+				0,
+			],
+		});
+
+		expect(newestSourceEdit(fileSystem, { args: [], cwd: PROJECT }, NOW)).toMatchObject({
+			at: 2000,
+		});
+	});
+
+	it("should expand configDir to the directory of the tsconfig that extends", () => {
+		expect.assertions(1);
+
+		const fileSystem = project({
+			"game/src/a.ts": ["", 1000],
+			"game/src/out/b.lua": ["", 5000],
+			"game/tsconfig.json": ['{"extends":"../tsconfig.base.json"}', 0],
+			"tsconfig.base.json": [
+				JSON.stringify({
+					compilerOptions: {
+						outDir: `${CONFIG_DIR}/src/out`,
+						rootDir: `${CONFIG_DIR}/src`,
+					},
+				}),
+				0,
+			],
+		});
+
+		expect(
+			newestSourceEdit(fileSystem, { args: ["-p", "game"], cwd: PROJECT }, NOW),
+		).toStrictEqual({ at: 1000, path: path.join("game", "src", "a.ts") });
+	});
+
+	it("should keep the root directories of a base that the tsconfig does not set", () => {
+		expect.assertions(1);
+
+		const fileSystem = project({
+			"base.json": [JSON.stringify({ compilerOptions: { rootDirs: ["one", "two"] } }), 0],
+			"one/a.ts": ["", 1000],
+			"tsconfig.json": ['{"compilerOptions":{"outDir":"out"},"extends":"./base.json"}', 0],
+			"two/b.ts": ["", 2000],
+		});
+
+		expect(newestSourceEdit(fileSystem, { args: [], cwd: PROJECT }, NOW)).toMatchObject({
+			at: 2000,
+		});
+	});
+
+	it("should end a cycle of tsconfigs that extend each other", () => {
+		expect.assertions(1);
+
+		const fileSystem = project({
+			"base.json": ['{"extends":"./tsconfig.json"}', 0],
+			"src/a.ts": ["", 2000],
+			"tsconfig.json": ['{"compilerOptions":{"rootDir":"src"},"extends":"./base.json"}', 0],
+		});
+
+		expect(newestSourceEdit(fileSystem, { args: [], cwd: PROJECT }, NOW)).toMatchObject({
+			at: 2000,
+		});
+	});
+
+	it("should let null clear an option a tsconfig extends", () => {
+		expect.assertions(1);
+
+		const fileSystem = project({
+			"base.json": [
+				JSON.stringify({
+					compilerOptions: { outDir: "src/out", rootDir: "src", rootDirs: ["src"] },
+				}),
+				0,
+			],
+			"lib.json": [JSON.stringify({ compilerOptions: { rootDir: "lib" } }), 0],
+			"lib/a.ts": ["", 1000],
+			"src/b.ts": ["", 2000],
+			"src/out/c.lua": ["", 3000],
+			"tsconfig.json": [
+				JSON.stringify({
+					compilerOptions: { outDir: null, rootDir: null, rootDirs: null },
+					extends: "./base.json",
+					references: [{ path: "./lib.json" }],
+				}),
+				0,
+			],
+		});
+
+		expect(newestSourceEdit(fileSystem, { args: [], cwd: PROJECT }, NOW)).toMatchObject({
+			at: 1000,
+		});
+	});
+
+	it("should follow the references of a tsconfig, as a build of the solution does", () => {
+		expect.assertions(1);
+
+		const fileSystem = project({
+			"packages/a/src/a.ts": ["", 2000],
+			"packages/a/tsconfig.json": [
+				JSON.stringify({
+					compilerOptions: { outDir: "out", rootDir: "src" },
+					references: [
+						{ path: "../b/tsconfig.lib.json" },
+						{ path: "../../tsconfig.lib.json" },
+					],
+				}),
+				0,
+			],
+			"packages/b/out/b.lua": ["", 5000],
+			"packages/b/src/b.ts": ["", 3000],
+			"packages/b/tsconfig.lib.json": [TSCONFIG, 0],
+			"src/main.ts": ["", 1000],
+			"tools/x.ts": ["", 4000],
+			"tsconfig.lib.json": [
+				JSON.stringify({
+					compilerOptions: { rootDir: "src" },
+					references: [{ path: "./packages/a" }],
+				}),
+				0,
+			],
+		});
+
+		expect(
+			newestSourceEdit(
+				fileSystem,
+				{ args: [], cwd: PROJECT, project: "tsconfig.lib.json" },
+				NOW,
+			),
+		).toStrictEqual({ at: 3000, path: path.join("packages", "b", "src", "b.ts") });
+	});
+
+	it("should read a solution tsconfig with no root directory of its own through its references", () => {
+		expect.assertions(1);
+
+		const fileSystem = project({
+			"src/a.ts": ["", 2000],
+			"tsconfig.json": ['{"files":[],"references":[{"path":"./tsconfig.lib.json"}]}', 0],
+			"tsconfig.lib.json": [TSCONFIG, 0],
+		});
+
+		expect(newestSourceEdit(fileSystem, { args: [], cwd: PROJECT }, NOW)).toMatchObject({
+			at: 2000,
 		});
 	});
 

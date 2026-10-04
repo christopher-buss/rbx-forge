@@ -395,7 +395,7 @@ describe(createBuildWatch, () => {
 		const edits = vi.fn<BuildWatchOptions["edits"]>(() => EDIT);
 		const { advanceAsync, lineAsync, wait } = await builtAsync(edits);
 		const waiting = wait();
-		await advanceAsync(30_000);
+		await advanceAsync(EDIT_PICKUP_MS - 1000);
 		const isEarly = waiting.settled();
 		await lineAsync(CHANGE);
 		await advanceAsync(400);

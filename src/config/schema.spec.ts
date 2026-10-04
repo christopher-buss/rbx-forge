@@ -22,7 +22,7 @@ const FULL_CONFIG: ForgeConfig = {
 	luau: { watch: { args: ["process", "--watch"], command: "darklua" } },
 	open: { buildFirst: false, buildOutputPath: "open.rbxl", projectPath: "open.project.json" },
 	projectType: "luau",
-	rbxts: { args: ["--verbose"], command: "rbxtsc" },
+	rbxts: { args: ["--verbose"], command: "rbxtsc", project: "tsconfig.lib.json" },
 	rojoAlias: "rojo-custom",
 	rojoPort: 34_873,
 	rojoProjectPath: "build.project.json",
@@ -104,6 +104,7 @@ describe(validateConfigFile, () => {
 		[{ projectType: "rbxts", typegen: { maxDepth: 0 } }, "typegen.maxDepth"],
 		[{ buildOutputPath: "", projectType: "rbxts" }, "buildOutputPath"],
 		[{ projectType: "rbxts", rbxts: { args: "--verbose" } }, "rbxts.args"],
+		[{ projectType: "rbxts", rbxts: { project: "" } }, "rbxts.project"],
 		[{ open: { buildFirst: "yes" }, projectType: "rbxts" }, "open.buildFirst"],
 	] as const)("should reject the bad value in %o", ([value, key]) => {
 		expect.assertions(2);

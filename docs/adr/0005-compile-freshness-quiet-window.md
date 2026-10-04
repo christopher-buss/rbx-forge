@@ -37,19 +37,22 @@ times once, and a compile must start after the newest edit.
   longer than that can show as done too soon; `--timeout` bounds every other
   case.
 - **Source edits.** At the start of each wait, forge finds the newest
-  modification time under the root directories of the compiler's tsconfig
-  (`rootDirs`, else `rootDir`; `-p` or `--project` in `rbxts.args` names it),
-  outside `outDir`, `node_modules`, and hidden entries. A time well after the
-  wait began (a clock ahead) does not count; one a little after does, because a
-  file written just now can read ahead of the clock. When that edit is newer
-  than the last compile start, the wait also needs a compile that starts at or
-  after it. A tsconfig forge cannot read, or one with no root directory, gives
-  no edit: the quiet window alone answers.
+  modification time under the root directories (`rootDirs`, else `rootDir`,
+  through `extends`) of the tsconfig the build compiles and of each project it
+  references, as a build of a solution does, outside their `outDir`s,
+  `node_modules`, and hidden entries. `rbxts.project` names that tsconfig when a
+  task runner hides it, else `-p` or `--project` in `rbxts.args`, else
+  `tsconfig.json`. A time well after the wait began (a clock ahead) does not
+  count; one a little after does, because a file written just now can read ahead
+  of the clock. When that edit is newer than the last compile start, the wait
+  also needs a compile that starts at or after it. A tsconfig forge cannot read,
+  or one with no root directory, gives no edit: the quiet window alone answers.
 - **Edits with no compile.** The compiler can ignore an edited file. A pickup
   window, from the call or the end of the last compile, bounds the wait for a
   compile of the edit; after it the wait fails with `edit_not_compiled`, which
-  names the file. Later waits do not wait for that edit again. It is long,
-  because a watcher can take tens of seconds.
+  names the file. Later waits do not wait for that edit again. It is a few times
+  the longest delay from a save to a start line of a watcher with no rebuild
+  loop.
 - **No compiler to read.** A session with no roblox-ts compiler (Luau, or
   `--no-compiler`) answers at once. A session that is still starting waits for
   its first build.
@@ -84,6 +87,8 @@ times once, and a compile must start after the newest edit.
   `edit_not_compiled` for an edit it would still compile.
 - A deleted file changes no file's modification time, so the wait does not wait
   for its compile.
-- A root directory that only an `extends` base names gives no edit.
+- A solution `tsconfig.json` that references more projects than the build
+  compiles widens the scan to their sources. `rbxts.project` narrows it.
+- Files that the tsconfig's `include` or `exclude` leaves out count as edits.
 - The start time is when the session read the start line, up to one output read
   late, so an edit in that gap counts as compiled.

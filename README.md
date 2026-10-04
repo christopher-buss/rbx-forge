@@ -165,12 +165,13 @@ Rojo keeps its port. It returns when no part is starting. It takes
 `--recovery <mode>` and `--studio-path <path>`.
 
 `status --wait` returns the status once the compiler's last build is fresh: a
-compile started after the newest edit under the tsconfig's `rootDir`, no compile
-runs, and none started for a short quiet window. Run it after an edit. When the
-compiler starts no compile for that edit within 90 s, it fails with
-`edit_not_compiled`. `--timeout <seconds>` bounds the wait (default 300), else
-it fails with `compile_timeout`. `--timeout 0` does not wait: it returns the
-status now. With no roblox-ts compiler in the session, it returns at once.
+compile started after the newest edit under the tsconfig's `rootDir` (see
+`rbxts.project`), no compile runs, and none started for a short quiet window.
+Run it after an edit. When the compiler starts no compile for that edit within
+10 s, it fails with `edit_not_compiled`. `--timeout <seconds>` bounds the wait
+(default 300), else it fails with `compile_timeout`. `--timeout 0` does not
+wait: it returns the status now. With no roblox-ts compiler in the session, it
+returns at once.
 
 One session runs per project (per worktree and build output). A second `up`
 joins the running session and adds its missing parts; a `start` joins it as its

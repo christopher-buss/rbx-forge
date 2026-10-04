@@ -14,7 +14,7 @@ export const QUIET_WINDOW_MS = 750;
  * The pickup window: how long an idle compiler may take to start a compile
  * for a source edit before a wait gives up on it.
  */
-export const EDIT_PICKUP_MS = 90_000;
+export const EDIT_PICKUP_MS = 10_000;
 
 /**
  * What the watch-mode compiler is doing, from its build events and the time.

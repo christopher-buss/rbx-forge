@@ -122,17 +122,19 @@ started a compile shows `false` too.
 `forge status --wait` asks the session to answer once the last build is fresh:
 
 1. It finds the newest edit: the newest modification time of a file under the
-   root directories of the compiler's tsconfig (`rootDirs`, else `rootDir`; `-p`
-   or `--project` in `rbxts.args` names the tsconfig), outside `outDir`,
-   `node_modules`, and hidden files and folders. When no compile started after
-   it, it waits for one: a watcher can see a save seconds late.
+   root directories (`rootDirs`, else `rootDir`, through `extends`) of the
+   tsconfig the build compiles and of each project it references, outside their
+   `outDir`s, `node_modules`, and hidden files and folders. `rbxts.project`
+   names that tsconfig, else `-p` or `--project` in `rbxts.args`, else
+   `tsconfig.json`. When no compile started after the edit, it waits for one: a
+   watcher can see a save seconds late.
 2. It waits for the compile that runs, if any.
 3. Then it waits for a quiet window (750 ms) with no new compile. A compile that
    starts in the window restarts the wait.
 4. It returns the normal status.
 
 An edit that starts no compile (a file the compiler does not watch) fails with
-`edit_not_compiled` (exit 1) once the compiler is idle for 90 s with no compile
+`edit_not_compiled` (exit 1) once the compiler is idle for 10 s with no compile
 for it; `error.details` has `path` (relative to the project), `editedAt`, and
 `pickupSeconds`. Later waits do not wait for that edit again. Save the file
 again, or read `forge logs compiler`. With no tsconfig, or one with no root
