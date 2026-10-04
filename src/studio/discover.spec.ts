@@ -150,7 +150,7 @@ describe(findStudioExecutable, () => {
 		expect(error.code).toBe("native_missing");
 	});
 
-	it("should find nothing without the registry read", () => {
+	it("should find nothing when the addon has no registry read", () => {
 		expect.assertions(1);
 
 		expect(find({ files: [LINK_EXE] })).toBeUndefined();

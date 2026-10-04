@@ -114,8 +114,8 @@ export function openPlacePath(config: Pick<ResolvedConfig, "buildOutputPath" | "
  * @param options - Whether it is built, and the Studio executable flag.
  * @returns The place, the build (or `null`), the Studio forge started, and
  *   the `open` hook results.
- * @rejects {ForgeError} `place_not_found`, `declined`, `studio_launch_failed`, a build
- *   failure from `buildAsync`, or a hook failure.
+ * @rejects {ForgeError} `place_not_found`, `declined`, `studio_launch_failed`,
+ *   `native_missing`, a build failure from `buildAsync`, or a hook failure.
  */
 export async function openPlaceAsync(
 	context: CommandContext,
@@ -149,8 +149,8 @@ export async function openPlaceAsync(
  * @param input - `--studio-path` and the config values flags set.
  * @returns The snapshot, its build, the snapshots it deleted, the Studio
  *   forge started, and the `open` hook results.
- * @rejects {ForgeError} `studio_launch_failed`, a build failure from
- *   `buildAsync`, a hook failure, or a config error.
+ * @rejects {ForgeError} `studio_launch_failed`, `native_missing`, a build
+ *   failure from `buildAsync`, a hook failure, or a config error.
  */
 export async function runOpenAsync(
 	context: CommandContext,
