@@ -57,6 +57,8 @@ catalogs:
     "@stryker-mutator/vitest-runner": 10.0.0
   native:
     "@napi-rs/cli": 3.10.5
+  release:
+    bumpp: 12.3.0
   runtime:
     "@msgpack/msgpack": 3.1.3
     arktype: 2.2.3

@@ -6,6 +6,8 @@ export default {
 		"test/fixtures/bin/*.ts",
 		// Claude Code worktree hooks (`.claude/settings.json`).
 		"scripts/worktree/{create,remove}.ts",
+		// Release steps (`package.json` scripts).
+		"scripts/release/{bootstrap,check,publish}.ts",
 	],
 	ignore: [".agents/**"],
 	// External tools exercised by integration and opt-in Studio tests.

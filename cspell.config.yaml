@@ -15,7 +15,9 @@ words:
   - NETBIOS
   - arktype
   - autorecovery
+  - bumpp
   - catchable
+  - changelogithub
   - codegen
   - darklua
   - defu
@@ -26,6 +28,7 @@ words:
   - pathext
   - pidfd
   - pids
+  - preversion
   - quenty
   - rbxl
   - rbxlx
