@@ -22,8 +22,9 @@ background with no change of focus, so macOS needs no hidden desktop.
   never destroys it.
 - **Defaults.** `up --studio` and `open` launch Studio on the hidden desktop;
   `start`, for people, launches it on the user's desktop. `studio.desktop` in
-  the config and `--desktop <user|hidden>` override this. `restart` keeps
-  Studio's desktop. The state contract reports it (`services.studio.desktop`).
+  the config and `--desktop <user|hidden>` override this. On Windows, `restart`
+  keeps Studio's desktop and the state contract reports it
+  (`services.studio.desktop`). macOS launches use the user's desktop.
 - **Fallback.** When forge cannot launch on the hidden desktop (no executable,
   so it uses the platform launcher, or breakaway is denied), it opens Studio on
   the user's desktop with a warning.
@@ -32,7 +33,9 @@ background with no change of focus, so macOS needs no hidden desktop.
   the desktop.
 - **`show` and `hide`.** On Windows, `forge show` and `forge hide` save Studio,
   close it, and open it again on the other desktop. Undo history and open script
-  tabs are lost. On macOS, they hide and unhide the app.
+  tabs are lost. On macOS, they save, then hide or unhide the app in place;
+  state records the last successful forge visibility change. Native desktop and
+  save results still report the user's desktop.
 - **Close and block checks see the hidden desktop.** Closing Studio and finding
   a modal dialog enumerate the windows of Studio's desktop, so `stop` and `down`
   end a blocked Studio at once, as on the user's desktop.

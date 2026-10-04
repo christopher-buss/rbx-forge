@@ -97,7 +97,8 @@ export type StudioOrigin = "forge" | "found";
 /** The Studio of a session. */
 export interface SessionStudio {
 	/**
-	 * The actual launch desktop; absent before launch and in older sessions.
+	 * The actual launch desktop, or on macOS the last forge app visibility.
+	 * Absent before launch and in older sessions.
 	 */
 	desktop?: StudioDesktop;
 	origin?: StudioOrigin;

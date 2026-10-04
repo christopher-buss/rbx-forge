@@ -148,6 +148,29 @@ pub struct PinnedProcess {
 
 #[napi]
 impl PinnedProcess {
+    /// The macOS app-hidden state, or none for a nongraphical or exited process.
+    ///
+    /// # Errors
+    ///
+    /// When macOS refuses the process identity query.
+    #[napi]
+    pub fn app_hidden(&self) -> Result<Option<bool>> {
+        self.inner
+            .app_hidden()
+            .map_err(|err| to_napi("read app visibility", &err))
+    }
+
+    /// Hide or unhide the macOS app without activation or a restart.
+    ///
+    /// # Errors
+    ///
+    /// When macOS refuses the process identity query.
+    #[napi]
+    pub fn set_app_hidden(&self, hidden: bool) -> Result<bool> {
+        self.inner
+            .set_app_hidden(hidden)
+            .map_err(|err| to_napi("change app visibility", &err))
+    }
     /// The desktop inherited by this process. Always user on POSIX.
     #[napi]
     pub fn desktop(&self) -> Result<String> {

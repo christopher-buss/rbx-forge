@@ -7,6 +7,7 @@ import { serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
 import {
 	createCommandContext,
 	createMemoryFileSystem,
+	createRecordingReporter,
 	createTestSeams,
 } from "../../test/helpers/seams.ts";
 import { ForgeError } from "../errors.ts";
@@ -31,17 +32,57 @@ async function commandSessionAsync(platform: NodeJS.Platform = "win32") {
 		.fn<IpcHandler>()
 		.mockResolvedValue({ durationMs: 1000, from: "hidden", pid: 43, save: SAVE, to: "user" });
 	handlers.moveStudio = move;
+	const reporter = createRecordingReporter();
 	const context = createCommandContext({
+		reporter,
 		seams: createTestSeams({
 			fileSystem: memory.fileSystem,
 			host: { ...createTestSeams().host, platform },
 			ipc,
 		}),
 	});
-	return { context, move };
+	return { context, move, reporter };
 }
 
 describe("session Studio moves", () => {
+	it("should report a hidden macOS app while saving on its user desktop", async () => {
+		expect.assertions(2);
+
+		const { context, move, reporter } = await commandSessionAsync("darwin");
+		move.mockResolvedValue({
+			durationMs: 300,
+			from: "user",
+			pid: 42,
+			save: { ...SAVE, desktop: "user" },
+			to: "hidden",
+		});
+
+		await expect(runHideAsync(context, { config: {}, flags: {} })).resolves.toMatchObject({
+			data: { from: "user", pid: 42, save: { desktop: "user", pid: 42 }, to: "hidden" },
+			summary: "Studio is hidden (PID 42).",
+		});
+		expect(reporter.events).toStrictEqual([]);
+	});
+
+	it("should show a macOS app without warning about lost undo history", async () => {
+		expect.assertions(2);
+
+		const { context, move, reporter } = await commandSessionAsync("darwin");
+		move.mockResolvedValue({
+			durationMs: 300,
+			from: "hidden",
+			pid: 42,
+			save: { ...SAVE, desktop: "user" },
+			to: "user",
+		});
+
+		await expect(runShowAsync(context, { config: {}, flags: {} })).resolves.toMatchObject({
+			data: { from: "hidden", pid: 42, save: { desktop: "user", pid: 42 }, to: "user" },
+			summary: "Studio is shown (PID 42).",
+		});
+		expect(reporter.events).toStrictEqual([]);
+	});
+
 	it.for([runShowAsync, runHideAsync])(
 		"should report studio_not_open when no session runs",
 		async (run) => {

@@ -329,6 +329,21 @@ impl Pin {
         self.signal_live(libc::SIGTERM)
     }
 
+    pub fn app_hidden(&self) -> io::Result<Option<bool>> {
+        if !self.is_alive()? {
+            return Ok(None);
+        }
+        let hidden = crate::os::macos_application::hidden(self.pid)?;
+        Ok(if self.is_alive()? { hidden } else { None })
+    }
+
+    pub fn set_app_hidden(&self, hidden: bool) -> io::Result<bool> {
+        if !self.is_alive()? {
+            return Ok(false);
+        }
+        crate::os::macos_application::set_hidden(self.pid, hidden, || self.is_alive())
+    }
+
     pub fn is_blocked(&self) -> io::Result<bool> {
         if !self.is_alive()? {
             return Ok(false);

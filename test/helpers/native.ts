@@ -12,6 +12,7 @@ import { dismissDialogAsync } from "./native-dialog.ts";
 /** One process in the fake process table. */
 export interface FakeProcess {
 	alive: boolean;
+	appHidden?: boolean | null;
 	/**
 	 * A modal dialog blocks its windows (`isBlocked`); `throw` makes the
 	 * query fail.
@@ -46,6 +47,7 @@ export interface FakeProcess {
 	onSaveRequest?: "dialog" | "ignore" | "no_menu_item" | "save" | "throw" | "timeout";
 	/** `pinProcess` throws this message (for example, access denied). */
 	pinError?: string;
+	refusesAppVisibility?: boolean;
 	/** Its start time as the addon reports it; the PID when not set. */
 	startTime?: string;
 	/** The timeout of every `waitForExit` call on its pins. */
@@ -239,12 +241,30 @@ function killEntry(entry: FakeProcess): boolean {
 	return wasAlive;
 }
 
+function appHidden(entry: FakeProcess): boolean | null {
+	if (!entry.alive) {
+		return null;
+	}
+
+	return entry.appHidden === undefined ? false : entry.appHidden;
+}
+
+function setAppHidden(entry: FakeProcess, hidden: boolean): boolean {
+	if (!entry.alive || entry.refusesAppVisibility === true || entry.appHidden === null) {
+		return false;
+	}
+
+	entry.appHidden = hidden;
+	return true;
+}
+
 function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 	if (entry.exitsAfterPin === true) {
 		entry.alive = false;
 	}
 
 	return {
+		appHidden: () => appHidden(entry),
 		desktop: () => entry.desktop ?? "user",
 		dismissDialog: async (title, button, desktop) => {
 			return dismissDialogAsync(entry, title, button, desktop);
@@ -260,6 +280,7 @@ function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 		pid,
 		requestClose: () => requestClose(entry),
 		requestSave: async (timeoutMs) => requestSaveAsync(entry, timeoutMs),
+		setAppHidden: (hidden) => setAppHidden(entry, hidden),
 		startTime: startTimeOf(pid, entry),
 		waitForExit: (timeoutMs) => {
 			entry.waits?.push(timeoutMs);
