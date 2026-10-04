@@ -201,6 +201,27 @@ export function releaseVersion(manifest: string, reference: string | undefined):
 }
 
 /**
+ * The README of one platform package, which npm shows on its page.
+ * @param root - The root `package.json`.
+ * @param target - The native target.
+ * @returns The Markdown text.
+ */
+export function platformReadme(
+	root: Readonly<Record<string, unknown>>,
+	target: NativeTarget,
+): string {
+	const name = String(root["name"]);
+	return [
+		`# \`${NATIVE_PREFIX}${target.target}\``,
+		"",
+		`The \`${target.rust}\` build of the ${name} native addon and \`forge-reaper\`.`,
+		`npm installs it as an optional dependency of [\`${name}\`](https://www.npmjs.com/package/${name})`,
+		`on a matching system. Install \`${name}\`, not this package.`,
+		"",
+	].join("\n");
+}
+
+/**
  * Publish the platform packages, then the root package with them as optional
  * dependencies. A package already on npm at this version is skipped, so a
  * failed run can run again. The root `package.json` is restored after.
@@ -223,12 +244,9 @@ export function publishRelease(dependencies: PublishDependencies, options: Publi
 		NATIVE_TARGETS.map((target) => [`${NATIVE_PREFIX}${target.target}`, options.version]),
 	);
 	const published = { ...root, optionalDependencies, version: options.version };
-	files.write(manifestPath, `${JSON.stringify(published, undefined, "\t")}\n`);
-	try {
-		publishOnce(dependencies, options, String(root["name"]), () => options.root);
-	} finally {
-		files.write(manifestPath, original);
-	}
+	publishOnce(dependencies, options, String(root["name"]), () => {
+		return packRoot(dependencies, options, original, published);
+	});
 }
 
 /**
@@ -338,6 +356,43 @@ function readManifest(text: string): Manifest {
 	return { ...manifest, version: manifest["version"] };
 }
 
+/**
+ * The file `pnpm pack` writes: `@scope/name` becomes `scope-name`.
+ * @param name - The package name.
+ * @param version - The package version.
+ * @returns The tarball file name.
+ */
+function tarballName(name: string, version: string): string {
+	const unscoped = name.startsWith("@") ? name.slice(1) : name;
+	return `${unscoped.replace("/", "-")}-${version}.tgz`;
+}
+
+/**
+ * Pack the root package with the publish-time manifest, then restore it.
+ * @param dependencies - Files and processes.
+ * @param options - Paths and version.
+ * @param original - The root `package.json` text to restore.
+ * @param published - The manifest to pack.
+ * @returns The tarball to publish.
+ */
+function packRoot(
+	{ files, run }: PublishDependencies,
+	options: PublishOptions,
+	original: string,
+	published: Manifest,
+): string {
+	const manifestPath = path.join(options.root, MANIFEST);
+	files.write(manifestPath, `${JSON.stringify(published, undefined, "\t")}\n`);
+	try {
+		const destination = path.relative(options.root, options.staging);
+		runOrThrow(run, "pnpm", ["--dir", options.root, "pack", "--pack-destination", destination]);
+	} finally {
+		files.write(manifestPath, original);
+	}
+
+	return path.join(options.staging, tarballName(String(published["name"]), options.version));
+}
+
 function publishOnce(
 	{ log, read, run }: PublishDependencies,
 	{ tag, version }: PublishOptions,
@@ -350,15 +405,8 @@ function publishOnce(
 		return;
 	}
 
-	runOrThrow(run, "pnpm", [
-		"publish",
-		prepare(),
-		"--access",
-		"public",
-		"--no-git-checks",
-		"--tag",
-		tag,
-	]);
+	// npm, not pnpm: pnpm publish sends no README, so npm shows none.
+	runOrThrow(run, "npm", ["publish", prepare(), "--access", "public", "--tag", tag]);
 }
 
 /**
@@ -376,10 +424,7 @@ function packPlatform(
 	version: string,
 ): string {
 	runOrThrow(run, "pnpm", ["--dir", directory, "pack", "--pack-destination", ".."]);
-	const tarball = path.join(
-		path.dirname(directory),
-		`${name.slice(1).replace("/", "-")}-${version}.tgz`,
-	);
+	const tarball = path.join(path.dirname(directory), tarballName(name, version));
 	const entry = `package/${reaperName(target)}`;
 	files.writeBytes(tarball, setEntryMode(files.readBytes(tarball), entry, 0o755));
 	return tarball;
@@ -397,6 +442,7 @@ function stagePackage(
 	files.copy(addon, path.join(directory, path.basename(addon)));
 	files.copy(reaper, path.join(directory, reaperName(target)));
 	files.copy(path.join(rootDirectory, "LICENSE"), path.join(directory, "LICENSE"));
+	files.write(path.join(directory, "README.md"), platformReadme(root, target));
 	files.write(path.join(directory, MANIFEST), `${JSON.stringify(manifest, undefined, "\t")}\n`);
 	return { name: String(manifest["name"]), directory, target };
 }

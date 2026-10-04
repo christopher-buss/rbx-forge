@@ -8,6 +8,7 @@ import {
 	bootstrapRelease,
 	NATIVE_TARGETS,
 	platformManifest,
+	platformReadme,
 	publishRelease,
 	releaseVersion,
 	runReleaseCheck,
@@ -28,7 +29,7 @@ const PACKED = gzippedTarball([
 	{ name: "package/forge-reaper", size: 1 },
 	{ name: "package/forge-reaper.exe", size: 1 },
 ]);
-const FLAGS = "--access public --no-git-checks";
+const ROOT_PACK = ["pnpm --dir repo pack --pack-destination", path.join("..", "staging")].join(" ");
 const RUN_LIST =
 	"gh run list --repo owner/forge --workflow ci.yaml --commit abc --status success --limit 1 --json databaseId --jq .[0].databaseId";
 const BOOTSTRAP_READS = {
@@ -142,6 +143,26 @@ describe("native targets", () => {
 			rust: "aarch64-unknown-linux-gnu",
 			target: "linux-arm64-gnu",
 		});
+	});
+});
+
+describe(platformReadme, () => {
+	it("should name the package and point to the package to install", () => {
+		expect.assertions(1);
+
+		const target = NATIVE_TARGETS.find(({ target: name }) => name === "linux-arm64-musl");
+		assert(target);
+
+		expect(platformReadme({ name: "rbx-forge" }, target)).toBe(
+			[
+				"# `@rbx-forge/native-linux-arm64-musl`",
+				"",
+				"The `aarch64-unknown-linux-musl` build of the rbx-forge native addon and `forge-reaper`.",
+				"npm installs it as an optional dependency of [`rbx-forge`](https://www.npmjs.com/package/rbx-forge)",
+				"on a matching system. Install `rbx-forge`, not this package.",
+				"",
+			].join("\n"),
+		);
 	});
 });
 
@@ -319,21 +340,22 @@ describe(publishRelease, () => {
 		const { dependencies, processes } = publishSetup();
 		publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
 
-		expect(processes.runs).toHaveLength(NATIVE_TARGETS.length * 2 + 1);
+		expect(processes.runs).toHaveLength(NATIVE_TARGETS.length * 2 + 2);
 		expect(processes.runs).toStrictEqual([
 			...NATIVE_TARGETS.flatMap(({ target }) => {
 				const tarball = path.join("staging", `rbx-forge-native-${target}-1.0.0.tgz`);
 				return [
 					`pnpm --dir ${path.join("staging", target)} pack --pack-destination ..`,
-					`pnpm publish ${tarball} ${FLAGS} --tag latest`,
+					`npm publish ${tarball} --access public --tag latest`,
 				];
 			}),
-			`pnpm publish repo ${FLAGS} --tag latest`,
+			ROOT_PACK,
+			`npm publish ${path.join("staging", "rbx-forge-1.0.0.tgz")} --access public --tag latest`,
 		]);
 	});
 
-	it("should stage the addon, the reaper, the license, and a manifest", () => {
-		expect.assertions(4);
+	it("should stage the addon, the reaper, the license, a README, and a manifest", () => {
+		expect.assertions(5);
 
 		const { contents, dependencies } = publishSetup();
 		publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
@@ -343,6 +365,9 @@ describe(publishRelease, () => {
 		expect(contents.get(path.join(directory, "forge-native.darwin-arm64.node"))).toBe("addon");
 		expect(contents.get(path.join(directory, "forge-reaper"))).toBe("reaper");
 		expect(contents.get(path.join(directory, "LICENSE"))).toBe("MIT");
+		expect(contents.get(path.join(directory, "README.md"))).toStartWith(
+			"# `@rbx-forge/native-darwin-arm64`",
+		);
 		expect(JSON.parse(contents.get(path.join(directory, "package.json"))!)).toMatchObject({
 			name: "@rbx-forge/native-darwin-arm64",
 			version: "1.0.0",
@@ -380,9 +405,9 @@ describe(publishRelease, () => {
 			{ ...OPTIONS, tag: "next", version: "1.1.0-rc.0" },
 		);
 
-		const published: unknown = JSON.parse(manifests.at(-1)!);
+		const packed: unknown = JSON.parse(manifests.at(-2)!);
 
-		expect(published).toMatchObject({
+		expect(packed).toMatchObject({
 			optionalDependencies: { "@rbx-forge/native-win32-x64-msvc": "1.1.0-rc.0" },
 			version: "1.1.0-rc.0",
 		});
@@ -398,7 +423,7 @@ describe(publishRelease, () => {
 		});
 		publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
 
-		expect(processes.runs).toHaveLength((NATIVE_TARGETS.length - 1) * 2 + 1);
+		expect(processes.runs).toHaveLength((NATIVE_TARGETS.length - 1) * 2 + 2);
 		expect(processes.logs).toStrictEqual([
 			"release: @rbx-forge/native-win32-x64-msvc@1.0.0 is on npm; skipped",
 		]);
@@ -422,16 +447,14 @@ describe(publishRelease, () => {
 		expect(processes.runs).toBeEmpty();
 	});
 
-	it("should restore the root manifest when its publish fails", () => {
+	it("should restore the root manifest when its pack fails", () => {
 		expect.assertions(2);
 
-		const { contents, dependencies } = publishSetup({}, [
-			"pnpm publish repo --access public --no-git-checks --tag latest",
-		]);
+		const { contents, dependencies } = publishSetup({}, [ROOT_PACK]);
 
 		expect(() => {
 			publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
-		}).toThrow("pnpm publish repo --access public --no-git-checks --tag latest exited with 1");
+		}).toThrow(`${ROOT_PACK} exited with 1`);
 		expect(contents.get(path.join("repo", "package.json"))).toBe(ROOT_MANIFEST);
 	});
 });
