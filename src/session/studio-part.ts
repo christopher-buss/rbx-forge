@@ -22,6 +22,7 @@ import type { ServiceParts } from "./service-parts.ts";
 import type { PartId, StatusRecorder, StatusStore } from "./status.ts";
 import { openStudioAsync } from "./studio-launch.ts";
 import { createStudioReadiness, STUDIO_OPEN_BOUND_MS } from "./studio-readiness.ts";
+import type { StudioLockWatch } from "./watch.ts";
 import { waitForStudioCloseAsync, watchSaves } from "./watch.ts";
 import { watchOptions } from "./worker-context.ts";
 
@@ -245,6 +246,27 @@ async function watchStartupLightingAsync(
 }
 
 /**
+ * The lock file of the place, and the Studio it must name while that
+ * Studio runs.
+ *
+ * @param context - Reads process start times.
+ * @param opened - The place and its Studio.
+ * @returns The lock watch.
+ */
+function studioLock(context: CommandContext, { place, studio }: OpenedStudio): StudioLockWatch {
+	return {
+		isAlive: () => {
+			return (
+				studio === null ||
+				context.seams.native().processStartTime(studio.pid) === studio.startTime
+			);
+		},
+		path: studioLockPath(place),
+		pid: studio?.pid,
+	};
+}
+
+/**
  * Wait until Studio closes the place, and count each save of it as
  * activity meanwhile.
  *
@@ -259,7 +281,7 @@ async function watchStudioAsync(
 	scope: Pick<SessionScope, "signal">,
 	opened: OpenedStudio & { onOpen: () => void },
 ): Promise<boolean> {
-	const { place, studio } = opened;
+	const { place } = opened;
 	const options = watchOptions(context, scope);
 	const followed = new AbortController();
 	const saves = watchSaves(
@@ -274,9 +296,8 @@ async function watchStudioAsync(
 		opened,
 		AbortSignal.any([options.signal, followed.signal]),
 	);
-	const lock = { path: studioLockPath(place), pid: studio?.pid };
 	try {
-		return await waitForStudioCloseAsync(options, lock, () => {
+		return await waitForStudioCloseAsync(options, studioLock(context, opened), () => {
 			opened.onOpen();
 		});
 	} finally {

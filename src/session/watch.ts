@@ -22,6 +22,11 @@ export interface SaveWatch {
 
 /** The lock file of a place a session's Studio has open. */
 export interface StudioLockWatch {
+	/**
+	 * Whether the recorded Studio still runs: a Studio that exits leaves its
+	 * lock file, so its end closes the place too.
+	 */
+	isAlive: () => boolean;
 	/** The place's lock file. */
 	path: string;
 	/**
@@ -33,7 +38,8 @@ export interface StudioLockWatch {
 
 /**
  * Wait until Studio closes a place: its lock file appears, naming the
- * recorded Studio, then goes away or names another process.
+ * recorded Studio, then goes away or names another process. The exit of
+ * the recorded Studio closes it at any point.
  *
  * @param options - The clock, file system, interval, and end signal.
  * @param lock - The place's lock file, and the Studio it must name.
@@ -47,12 +53,16 @@ export async function waitForStudioCloseAsync(
 	onOpen: () => void,
 ): Promise<boolean> {
 	const { fileSystem } = options;
-	if (!(await pollAsync(options, () => holdsLock(fileSystem, lock)))) {
+	if (!(await pollAsync(options, () => !lock.isAlive() || holdsLock(fileSystem, lock)))) {
 		return false;
 	}
 
+	if (!lock.isAlive()) {
+		return true;
+	}
+
 	onOpen();
-	return pollAsync(options, () => !holdsLock(fileSystem, lock));
+	return pollAsync(options, () => !lock.isAlive() || !holdsLock(fileSystem, lock));
 }
 
 /**

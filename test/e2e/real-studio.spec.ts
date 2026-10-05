@@ -1,8 +1,8 @@
 /**
  * Opt-in, local only: `up`, `down`, and `stop` against the real Roblox Studio
  * of this computer. It runs only with `RBX_FORGE_TEST_REAL_STUDIO=1` on
- * Windows with Studio installed and logged in; CI never runs it. It opens
- * Studio windows on the desktop.
+ * Windows with Studio installed and logged in, and genuine Rojo 7.7.1 (see
+ * `genuineRojo`); CI never runs it. It opens Studio windows on the desktop.
  *
  * Each test notes the Studio PIDs that run before it, and at its end kills
  * only Studios that were not there: a Studio the user has open is never
@@ -36,6 +36,7 @@ import { assert, describe, expect, it, onTestFinished } from "vitest";
 
 import type { PinnedProcess } from "../../src/native/addon.ts";
 import { parseOpened } from "../helpers/output.ts";
+import { genuineRojo } from "../helpers/real-studio-sync-fixture.ts";
 import { pinNow, waitForDeathAsync } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
 import { makeFixtureAsync } from "./session-fixture.ts";
@@ -128,17 +129,18 @@ function note(entry: Record<string, unknown>): void {
 
 /**
  * The real environment for forge and Studio: the installed Studio, the
- * user's own folders (the e2e setup replaces them), and the whole `PATH`
- * after the fixture binaries.
+ * user's own folders (the e2e setup replaces them), and the user's `PATH`
+ * with genuine Rojo first. No fixture binary: the managed plugin acknowledges
+ * readiness only after a real initial sync, and a Rojo shim (rokit) runs the
+ * next `rojo` on `PATH`.
  *
- * @param fixture - The project, for its fixture binaries.
  * @returns The variables for forge's run.
  */
-function realVariables(fixture: Fixture): Record<string, string> {
+function realVariables(): Record<string, string> {
 	return {
 		HOME: env["RBX_FORGE_TEST_REAL_HOME"] ?? "",
 		LOCALAPPDATA: env["RBX_FORGE_TEST_REAL_LOCALAPPDATA"] ?? "",
-		PATH: `${fixture.environment()["PATH"] ?? ""}${path.delimiter}${env["PATH"] ?? ""}`,
+		PATH: [path.dirname(genuineRojo()), env["PATH"] ?? ""].join(path.delimiter),
 		RBX_FORGE_STUDIO_PATH: "",
 		USERPROFILE: env["RBX_FORGE_TEST_REAL_USERPROFILE"] ?? "",
 	};
@@ -197,7 +199,7 @@ async function upStudioAsync(
 	const up = await runForgeAsync(
 		fixture,
 		["up", "--studio", "--desktop", desktop, "--json"],
-		realVariables(fixture),
+		realVariables(),
 	);
 	return String(up.result.data!["sessionId"]);
 }
@@ -286,7 +288,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			killNewStudiosAtEnd();
 			const fixture = await compatibilitySnapshotAsync();
 			const pinSnapshot = snapshotCleanup(fixture.project);
-			const opened = await runForgeAsync(fixture, ["open", "--json"], realVariables(fixture));
+			const opened = await runForgeAsync(fixture, ["open", "--json"], realVariables());
 
 			expect(opened.status).toBe(0);
 
@@ -327,18 +329,14 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const fixture = await makeRealProjectAsync("saved.rbxl");
 			const sessionId = await upStudioAsync(fixture, "hidden");
 			const [, original] = await waitForLoadedAsync(fixture, sessionId);
-			const before = await runForgeAsync(
-				fixture,
-				["status", "--json"],
-				realVariables(fixture),
-			);
+			const before = await runForgeAsync(fixture, ["status", "--json"], realVariables());
 			assert(before.result.data !== undefined, "status returns data");
 			const { services } = before.result.data;
 			assert(
 				typeof services === "object" && services !== null && "rojo" in services,
 				"Rojo status recorded",
 			);
-			const shown = await runForgeAsync(fixture, ["show", "--json"], realVariables(fixture));
+			const shown = await runForgeAsync(fixture, ["show", "--json"], realVariables());
 			const [, visible] = await waitForLoadedAsync(fixture, sessionId);
 
 			expect(shown.status).toBe(0);
@@ -351,7 +349,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 			assert(visible !== original, "show replaces Studio");
 
-			const hidden = await runForgeAsync(fixture, ["hide", "--json"], realVariables(fixture));
+			const hidden = await runForgeAsync(fixture, ["hide", "--json"], realVariables());
 			const [, replacement] = await waitForLoadedAsync(fixture, sessionId);
 
 			expect(hidden.status).toBe(0);
@@ -364,11 +362,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 			assert(replacement !== visible, "hide replaces Studio");
 
-			const after = await runForgeAsync(
-				fixture,
-				["status", "--json"],
-				realVariables(fixture),
-			);
+			const after = await runForgeAsync(fixture, ["status", "--json"], realVariables());
 
 			expect(after.result.data).toMatchObject({
 				services: { rojo: services.rojo },
@@ -397,7 +391,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const save = await runForgeAsync(
 				fixture,
 				["save", "--timeout", "30", "--json"],
-				realVariables(fixture),
+				realVariables(),
 			);
 			const after = foregroundOwner();
 
@@ -407,7 +401,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			expect(after).toStrictEqual(expectedFocus(lockPid));
 
 			const firstSavedAt = statSync(fixture.place).mtimeMs;
-			const again = await runForgeAsync(fixture, ["save", "--json"], realVariables(fixture));
+			const again = await runForgeAsync(fixture, ["save", "--json"], realVariables());
 
 			expect({
 				changed: statSync(fixture.place).mtimeMs > firstSavedAt,
@@ -427,7 +421,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const sessionId = await upStudioAsync(fixture, "hidden");
 			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			await sleep(10_000);
-			const save = await runForgeAsync(fixture, ["save", "--json"], realVariables(fixture));
+			const save = await runForgeAsync(fixture, ["save", "--json"], realVariables());
 
 			expect(saveOutcome(save)).toBe("saved");
 			expect(save.result.data).toMatchObject({ desktop: "hidden", pid: lockPid });
@@ -447,7 +441,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const sessionId = await upStudioAsync(fixture);
 			const [recorded, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			const opened = Date.now();
-			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables(fixture));
+			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables());
 			note({ closeMs: Date.now() - opened, openMs: opened - started, test: "down" });
 
 			expect(recorded).toBe(lockPid);
@@ -467,7 +461,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 		const sessionId = await upStudioAsync(fixture);
 		const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 		const loaded = Date.now();
-		const stop = await runForgeAsync(fixture, ["stop", "--json"], realVariables(fixture));
+		const stop = await runForgeAsync(fixture, ["stop", "--json"], realVariables());
 		note({ closeMs: Date.now() - loaded, test: "stop" });
 
 		expect(stop.result.data).toMatchObject({
@@ -490,7 +484,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const sessionId = await upStudioAsync(fixture);
 			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			const loaded = Date.now();
-			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables(fixture));
+			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables());
 			note({ closeMs: Date.now() - loaded, test: "dialog" });
 
 			expect(down.result.data).toMatchObject({
