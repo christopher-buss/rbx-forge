@@ -78,6 +78,12 @@ const STUDIO_PID = 777;
 const OPEN_STUDIO: Record<number, FakeProcess> = {
 	[STUDIO_PID]: { alive: true, executablePath: "/opt/RobloxStudio", startTime: "0" },
 };
+/** The Studios the fake launchers start: they run until a test ends them. */
+const LAUNCHED_STUDIOS: Record<number, FakeProcess> = {
+	1: { alive: true, executablePath: "/opt/RobloxStudio", startTime: "0" },
+	900: { alive: true, executablePath: "/opt/RobloxStudio", startTime: "900" },
+	901: { alive: true, executablePath: "/opt/RobloxStudio", startTime: "901" },
+};
 const STUDIO_LOCK = `${STUDIO_PID}\nRobloxStudio\n${TEST_HOSTNAME}\n`;
 /** Studio has the place open: the session attaches it, no build, no launch. */
 const ATTACHED = {
@@ -941,6 +947,7 @@ function startCommand({
 	const seams = createTestSeams();
 	const native = createFakeNative({
 		4242: { alive: true, executablePath: "/node" },
+		...LAUNCHED_STUDIOS,
 		...processes,
 	});
 	const reporter = createRecordingReporter();
@@ -3916,6 +3923,33 @@ describe("forge up --studio", () => {
 		expect(launchesBeforeListening).toBe(0);
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
+	});
+
+	it("should fail the attach at once, and close Studio, when the launched Studio exits while opening", async () => {
+		expect.assertions(2);
+
+		const run = startCommand({ flags: UP });
+		await flushAsync();
+		run.studioLauncher.mockResolvedValue({
+			studio: { pid: LAUNCHED_PID, startTime: "900" },
+			type: "launched",
+		});
+		const answer = askAddAsync(run, STUDIO);
+		await vi.waitFor(async () => {
+			await passAsync(run, FILE_POLL_MS);
+			assert(run.studioLauncher.mock.calls.length > 0, "Studio is launched");
+		});
+		run.native.processes.set(LAUNCHED_PID, {
+			alive: false,
+			executablePath: "/opt/RobloxStudio",
+		});
+		await passAsync(run, FILE_POLL_MS);
+		const closed = stateOf(run);
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		await expect(answer).resolves.toMatchObject({ code: "studio_launch_failed" });
+		expect(closed).toMatchObject({ services: { studio: { status: "closed" } } });
 	});
 
 	it("should serve Rojo before building and opening Studio, then answer once both are ready", async () => {

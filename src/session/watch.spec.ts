@@ -10,8 +10,12 @@ import { waitForStudioCloseAsync, watchSaves } from "./watch.ts";
 
 const PLACE = path.join(PROJECT, "game.rbxl");
 const LOCK = `${PLACE}.lock`;
-const ANY_STUDIO = { path: LOCK, pid: undefined };
-const STUDIO_7 = { path: LOCK, pid: 7 };
+function isAlive(): boolean {
+	return true;
+}
+
+const ANY_STUDIO = { isAlive, path: LOCK, pid: undefined };
+const STUDIO_7 = { isAlive, path: LOCK, pid: 7 };
 
 interface Watching {
 	abort: AbortController;
@@ -138,6 +142,38 @@ describe(waitForStudioCloseAsync, () => {
 		await watch.tickAsync();
 
 		await expect(closed).resolves.toBeTrue();
+	});
+
+	it("should resolve true once the recorded Studio exits while its lock file names it", async () => {
+		expect.assertions(2);
+
+		let isRunning = true;
+		const watch = watching({ "game.rbxl.lock": "7\nRobloxStudioBeta\nhost\n" });
+		const onOpen = vi.fn<() => void>();
+		const lock = { ...STUDIO_7, isAlive: () => isRunning };
+		const closed = waitForStudioCloseAsync(watch.options, lock, onOpen);
+		await watch.tickAsync();
+		isRunning = false;
+		await watch.tickAsync();
+
+		await expect(closed).resolves.toBeTrue();
+		expect(onOpen).toHaveBeenCalledOnce();
+	});
+
+	it("should resolve true, never open, when the recorded Studio exits before its lock file", async () => {
+		expect.assertions(2);
+
+		let isRunning = true;
+		const watch = watching();
+		const onOpen = vi.fn<() => void>();
+		const lock = { ...STUDIO_7, isAlive: () => isRunning };
+		const closed = waitForStudioCloseAsync(watch.options, lock, onOpen);
+		await watch.tickAsync();
+		isRunning = false;
+		await watch.tickAsync();
+
+		await expect(closed).resolves.toBeTrue();
+		expect(onOpen).not.toHaveBeenCalled();
 	});
 });
 
