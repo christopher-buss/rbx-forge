@@ -24,7 +24,7 @@ export const OPEN_FLAGS: ReadonlyArray<FlagDefinition> = [
 		name: "desktop",
 		config: "studio.desktop",
 		kind: "string",
-		text: "Studio desktop (default: hidden on Windows).",
+		text: "Studio desktop (default: hidden on Windows and macOS).",
 		value: "user|hidden",
 	},
 ];
