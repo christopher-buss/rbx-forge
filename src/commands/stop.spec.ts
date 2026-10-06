@@ -34,7 +34,7 @@ import {
 	STUDIO_EXIT_TIMEOUT_MS,
 	STUDIO_START_SLACK_MS,
 } from "../studio/close-studio.ts";
-import { MAC_STUDIO_CLOSE_MS, STUDIO_CLOSE_MS } from "../studio/close-window.ts";
+import { MAC_STUDIO_CLOSE_MS, STUDIO_CLOSE_MS } from "../studio/close-timeout.ts";
 import type { CommandContext } from "./context.ts";
 import { runStopAsync } from "./stop.ts";
 
@@ -401,7 +401,7 @@ describe(runStopAsync, () => {
 	});
 
 	it("should give Studio a short time to close on macOS, where it ignores the close request", async () => {
-		expect.assertions(3);
+		expect.assertions(2);
 
 		const project = makeProject({
 			env: { HOME: path.join(PROJECT, "home") },
@@ -419,10 +419,9 @@ describe(runStopAsync, () => {
 
 		await expect(stopAsync(project)).resolves.toMatchObject({
 			data: { end: "timeout", forced: true },
-			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}: it did not close within 1 s, so forge ended it without saving.`,
+			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}: it did not close within ${MAC_STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving.`,
 		});
 		expect(project.elapsed()).toBe(MAC_STUDIO_CLOSE_MS);
-		expect(MAC_STUDIO_CLOSE_MS).toBe(1000);
 	});
 
 	it.for([

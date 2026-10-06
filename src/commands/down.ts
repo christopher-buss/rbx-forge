@@ -13,8 +13,7 @@ import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { listParts } from "../session/part-names.ts";
 import type { KeptPart } from "../session/part-stops.ts";
-import type { StudioEnd } from "../studio/close-studio.ts";
-import { studioCloseMs } from "../studio/close-window.ts";
+import { forcedEndClause } from "../studio/close-timeout.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
@@ -37,30 +36,6 @@ export const DOWN_FLAGS: ReadonlyArray<FlagDefinition> = [
 		value: "<seconds>",
 	},
 ];
-
-/**
- * How the summary tells how Studio went, by how it was ended.
- *
- * @param end - How forge ended it.
- * @param platform - The OS, for its close window.
- * @returns The clause.
- */
-function ended(
-	end: Exclude<StudioEnd, "exited" | "lock_released">,
-	platform: NodeJS.Platform,
-): string {
-	switch (end) {
-		case "dialog": {
-			return "a dialog blocked it";
-		}
-		case "no_window": {
-			return "it had no window to close";
-		}
-		case "timeout": {
-			return `it did not close within ${studioCloseMs(platform) / 1000} s`;
-		}
-	}
-}
 
 /** The summary's first words when the session stopped as asked. */
 const STOPPED = "Stopped session";
@@ -150,7 +125,7 @@ function studioSentence(studio: DownStudio, platform: NodeJS.Platform): string {
 		case "closed": {
 			return studio.end === "exited" || studio.end === "lock_released"
 				? ` Closed Roblox Studio (PID ${studio.pid}).`
-				: ` Roblox Studio (PID ${studio.pid}): ${ended(studio.end, platform)}, so forge ended it without saving.`;
+				: ` Roblox Studio (PID ${studio.pid}): ${forcedEndClause(studio.end, platform)}, so forge ended it without saving.`;
 		}
 		case "failed": {
 			return ` Roblox Studio may still have ${studio.place} open: ${studio.message}`;

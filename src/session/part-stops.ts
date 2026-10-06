@@ -7,7 +7,7 @@ import type { IpcFailure } from "../ipc/protocol.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import type { StudioStop, StudioTarget } from "../studio/close-studio.ts";
 import { closeStudioAsync } from "../studio/close-studio.ts";
-import { STUDIO_CLOSE_MS } from "../studio/close-window.ts";
+import { STUDIO_CLOSE_MS } from "../studio/close-timeout.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
 import { hasStudioLock } from "../studio/lock-file.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";

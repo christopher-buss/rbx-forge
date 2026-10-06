@@ -213,10 +213,10 @@ Window states after `WM_CLOSE` to the main window:
   **Detach** (a job that forbids breakaway falls back to the platform launcher);
   on POSIX it detaches in a new session. It pins the process at once. A close is
   a close request, then a poll every 50 ms: the kill comes at once when the lock
-  file goes or a main window is disabled (a modal dialog), else after 15 s. A
-  main window is a visible, unowned, non-tool, non-console window; with none, a
-  hidden unowned window titled `… - Roblox Studio` counts, so a Studio started
-  hidden (the e2e stand-in) still gets the request.
+  file goes or a main window is disabled (a modal dialog), else after a per-OS
+  time limit. A main window is a visible, unowned, non-tool, non-console window;
+  with none, a hidden unowned window titled `… - Roblox Studio` counts, so a
+  Studio started hidden (the e2e stand-in) still gets the request.
 - **Remote-client test.** An integration test on Windows creates the real forge
   pipe, then connects through `\\127.0.0.1\pipe\<name>` and
   `\\localhost\pipe\<name>` and expects `ERROR_ACCESS_DENIED`. The same test
@@ -272,6 +272,8 @@ Window states after `WM_CLOSE` to the main window:
   that change this get a clear error, not a leaked or killed supervisor.
 - The release workflow owns a step that the napi CLI does not have (adding the
   reaper binary). We must keep it when we update `@napi-rs/cli`.
+- The close time limit is a tuning surface: 15 s, and 1 s on macOS, where Studio
+  often ignores `SIGTERM`.
 - The remote-client test needs the SMB server service on the Windows machine. It
   is running on `windows-latest` and by default on Windows 10 and 11.
 

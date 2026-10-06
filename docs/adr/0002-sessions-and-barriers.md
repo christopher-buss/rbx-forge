@@ -70,13 +70,13 @@ in-process session cannot do.
   the Studio executable, started before the lock file). It sends a close request
   (`WM_CLOSE` to its main windows on Windows, `SIGTERM` elsewhere), and ends
   Studio without a save at once when a modal dialog blocks it (such as a save
-  prompt, which an agent cannot answer), or after 15 s. It ends Studio at once
-  too when the lock file goes: the place is closed, and Studio's own exit is
-  slow. After a kill it deletes the lock file and handles Studio's auto-recovery
-  files. Then the session ends once syncback of a last save is done (at most 30
-  s). `--keep-studio` leaves Studio open. A Studio that `down` cannot verify or
-  end is reported in `studio` and does not fail `down`. `--force` does not
-  change how Studio closes.
+  prompt, which an agent cannot answer), or after a per-OS time limit. It ends
+  Studio at once too when the lock file goes: the place is closed, and Studio's
+  own exit is slow. After a kill it deletes the lock file and handles Studio's
+  auto-recovery files. Then the session ends once syncback of a last save is
+  done (at most 30 s). `--keep-studio` leaves Studio open. A Studio that `down`
+  cannot verify or end is reported in `studio` and does not fail `down`.
+  `--force` does not change how Studio closes.
 - **Evidence, not PIDs.** A process belongs to a session only by its marker, its
   lease descriptor (POSIX), its recorded job (Windows), or a recorded pin. Every
   kill goes through a pin and re-checks that evidence. An unverifiable process

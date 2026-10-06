@@ -8,7 +8,7 @@ import type { Host } from "../seams/host.ts";
 import type { Environment, Seams } from "../seams/seams.ts";
 import type { RecoveryReport } from "./auto-recovery.ts";
 import { autoSaveDirectories, handleAutoRecoveryAsync } from "./auto-recovery.ts";
-import { studioCloseMs } from "./close-window.ts";
+import { studioCloseMs } from "./close-timeout.ts";
 import type { LocatedStudio, StudioProcess } from "./launcher.ts";
 import { studioProcess } from "./launcher.ts";
 import type { StudioLock } from "./lock-file.ts";

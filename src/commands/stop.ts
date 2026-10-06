@@ -14,7 +14,7 @@ import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
 import type { SessionStudio } from "../session/status.ts";
 import type { RecoveryOptions, StudioEnd, StudioStop } from "../studio/close-studio.ts";
 import { closeStudioAsync } from "../studio/close-studio.ts";
-import { studioCloseMs } from "../studio/close-window.ts";
+import { forcedEndClause } from "../studio/close-timeout.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
 import { listSnapshots } from "../studio/snapshots.ts";
 import { failureError } from "../supervisor/channel.ts";
@@ -60,7 +60,7 @@ interface SessionAnswer {
  * (or another place in `--place`), it closes the Studio the place's lock
  * file names. Studio
  * gets a close request; forge ends it once it closed the place, at once
- * when a dialog blocks it, and else after {@link studioCloseMs}, without
+ * when a dialog blocks it, and else after its OS's close time limit, without
  * a save (`closeStudioAsync`). It acts only on a Studio its identity check
  * verifies. With no `--place`, it first closes every snapshot Studio: each
  * snapshot in `.forge/snapshots/` with a lock file (`forge open`). The
@@ -137,25 +137,13 @@ function partsOf(answer: SessionAnswer | undefined): null | Pick<PartStops, "kep
  * How the summary tells how Studio went.
  *
  * @param end - How Studio went.
- * @param platform - The OS, for its close window.
+ * @param platform - The OS, for its close time limit.
  * @returns The end of the summary's sentence.
  */
 function how(end: StudioEnd, platform: NodeJS.Platform): string {
-	switch (end) {
-		case "dialog": {
-			return ": a dialog blocked it, so forge ended it without saving";
-		}
-		case "exited":
-		case "lock_released": {
-			return "";
-		}
-		case "no_window": {
-			return ": it had no window to close, so forge ended it without saving";
-		}
-		case "timeout": {
-			return `: it did not close within ${studioCloseMs(platform) / 1000} s, so forge ended it without saving`;
-		}
-	}
+	return end === "exited" || end === "lock_released"
+		? ""
+		: `: ${forcedEndClause(end, platform)}, so forge ended it without saving`;
 }
 
 /**
@@ -223,15 +211,12 @@ async function closeSnapshotsAsync(
 	{ cwd, seams }: CommandContext,
 	recovery: RecoveryOptions,
 ): Promise<Array<CommandResult>> {
+	const { platform } = seams.host;
 	const results: Array<CommandResult> = [];
 	for (const place of listSnapshots(seams.fileSystem, forgeFiles(cwd).snapshots)) {
 		if (seams.fileSystem.existsSync(studioLockPath(place))) {
 			results.push(
-				stopResult(
-					await closeStudioAsync(seams, { place }, recovery),
-					place,
-					seams.host.platform,
-				),
+				stopResult(await closeStudioAsync(seams, { place }, recovery), place, platform),
 			);
 		}
 	}
