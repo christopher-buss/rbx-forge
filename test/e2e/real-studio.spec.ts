@@ -142,6 +142,7 @@ function realVariables(): Record<string, string> {
 		LOCALAPPDATA: env["RBX_FORGE_TEST_REAL_LOCALAPPDATA"] ?? "",
 		PATH: [path.dirname(genuineRojo()), env["PATH"] ?? ""].join(path.delimiter),
 		RBX_FORGE_STUDIO_PATH: "",
+		RBX_FORGE_TEST_NO_INSTALLED_STUDIO: "",
 		USERPROFILE: env["RBX_FORGE_TEST_REAL_USERPROFILE"] ?? "",
 	};
 }

@@ -367,7 +367,7 @@ describe("forge open", () => {
 		});
 	});
 
-	// Windows would find the installed Studio in the registry; the fixture
+	// Windows' \`start\` is a shell builtin with no stand-in; the fixture
 	// \`open\` and \`xdg-open\` on PATH stand in for the platform launcher.
 	it.skipIf(IS_WINDOWS)(
 		"should open the snapshot through the platform launcher when it finds no Studio",

@@ -12,6 +12,7 @@ import {
 	commandExecutable,
 	findStudioExecutable,
 	MACOS_STUDIO_PATH,
+	NO_INSTALLED_STUDIO_VARIABLE,
 	STUDIO_PATH_VARIABLE,
 	STUDIO_REGISTRY_KEYS,
 	withStudioPath,
@@ -164,6 +165,20 @@ describe(findStudioExecutable, () => {
 			source: "application",
 		});
 		expect(find({ platform: "darwin" })).toBeUndefined();
+	});
+
+	it("should skip the installed Studio when the e2e isolation says so", () => {
+		expect.assertions(3);
+
+		const skip = { [NO_INSTALLED_STUDIO_VARIABLE]: "1" };
+
+		expect(find({ files: [MACOS_STUDIO_PATH], platform: "darwin" }, skip)).toBeUndefined();
+		expect(
+			find({ files: [LINK_EXE], registry: { [LINK_KEY]: `"${LINK_EXE}" %1` } }, skip),
+		).toBeUndefined();
+		expect(
+			find({ files: [ENV_EXE] }, { ...skip, [STUDIO_PATH_VARIABLE]: ENV_EXE }),
+		).toStrictEqual({ path: ENV_EXE, source: "environment" });
 	});
 
 	it("should find nothing on Linux", () => {
