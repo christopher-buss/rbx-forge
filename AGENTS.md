@@ -41,6 +41,11 @@ Default label strings, one per triage role. See `docs/agents/triage-labels.md`.
 Single-context: GLOSSARY.md + docs/adr/ at the repo root (created lazily). See
 docs/agents/domain.md.
 
+### Code review
+
+`/implement` runs `/code-review` with inputs from `docs/agents/code-review.md`;
+`builder` and `reviewer` agents live in `.claude/agents/` and `.codex/agents/`.
+
 ### Git and PRs
 
 ## Commits
