@@ -9,7 +9,7 @@ import type { FakeNative } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import { createMemoryFileSystem, createTestSeams } from "../../test/helpers/seams.ts";
 import { ForgeError } from "../errors.ts";
-import type { DetachedSpawn, NativeAddon, NativeLoader } from "../native/addon.ts";
+import type { AppLaunch, DetachedSpawn, NativeLoader } from "../native/addon.ts";
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Host } from "../seams/host.ts";
 import { findInstalledStudio, MACOS_STUDIO_PATH, STUDIO_REGISTRY_KEYS } from "./discover.ts";
@@ -577,8 +577,6 @@ describe(createStudioLauncher, () => {
 
 const MACOS_BUNDLE = "/Applications/RobloxStudio.app";
 
-type LaunchRequest = Parameters<NonNullable<NativeAddon["launchApplication"]>>[0];
-
 /**
  * A macOS addon whose LaunchServices launch starts a Studio with PID 1000.
  *
@@ -586,15 +584,15 @@ type LaunchRequest = Parameters<NonNullable<NativeAddon["launchApplication"]>>[0
  * @returns The addon and every launch.
  */
 function macosNative(result: Error | number = 1000): {
-	launches: Array<LaunchRequest>;
+	launches: Array<AppLaunch>;
 	native: FakeNative;
 } {
 	const native = createFakeNative({
 		1000: { alive: true, executablePath: MACOS_STUDIO_PATH },
 	});
-	const launches: Array<LaunchRequest> = [];
+	const launches: Array<AppLaunch> = [];
 	Object.assign(native.addon, {
-		launchApplication: async (launch: LaunchRequest) => {
+		launchApplication: async (launch: AppLaunch) => {
 			launches.push(launch);
 			if (result instanceof Error) {
 				throw result;

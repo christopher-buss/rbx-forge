@@ -163,8 +163,7 @@ export interface DetachedSpawn {
 }
 
 /** What {@link NativeAddon.launchApplication} starts. */
-// eslint-disable-next-line unicorn/name-replacements -- The Rust struct's name.
-export interface ApplicationLaunch {
+export interface AppLaunch {
 	/** Bring the app to the front; otherwise it never takes focus. */
 	activates: boolean;
 	args: Array<string>;
@@ -252,7 +251,7 @@ export interface NativeAddon {
 	 * @returns Its PID.
 	 * @rejects When LaunchServices cannot launch it.
 	 */
-	launchApplication?: (launch: ApplicationLaunch) => Promise<number>;
+	launchApplication?: (launch: AppLaunch) => Promise<number>;
 	/** Version of the native crate. */
 	nativeVersion: () => string;
 	/** Pin the live process with this PID, or `null` when there is none. */
