@@ -400,14 +400,14 @@ async function launchDirectAsync(
 		return { message: `${executable} (PID ${pid}) exited at once.`, type: "failed" };
 	}
 
+	const { platform } = backend.host;
 	const studio: StudioProcess = {
 		pid,
 		startTime: pinned.startTime,
-		...(launch.desktop === undefined ? {} : { desktop }),
+		...(platform !== "darwin" && launch.desktop === undefined ? {} : { desktop }),
 	};
 	const message =
-		warning ??
-		keepHiddenWarning(keepHidden, launch, backend.host.platform, { ...studio, desktop });
+		warning ?? keepHiddenWarning(keepHidden, launch, platform, { ...studio, desktop });
 	return { studio, type: "launched", ...(message === undefined ? {} : { warning: message }) };
 }
 

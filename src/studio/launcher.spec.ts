@@ -398,7 +398,7 @@ describe(createStudioLauncher, () => {
 		});
 
 		await expect(launch(launchOf())).resolves.toStrictEqual({
-			studio: { pid: 1000, startTime: "1000" },
+			studio: { desktop: "user", pid: 1000, startTime: "1000" },
 			type: "launched",
 		});
 		expect(spawner.calls[0]).toMatchObject({
@@ -686,7 +686,7 @@ describe("macOS Studio launch", () => {
 		});
 
 		await expect(launch(launchOf())).resolves.toStrictEqual({
-			studio: { pid: 1000, startTime: "1000" },
+			studio: { desktop: "user", pid: 1000, startTime: "1000" },
 			type: "launched",
 		});
 		expect(launches[0]).toMatchObject({ activates: true, hides: false });
