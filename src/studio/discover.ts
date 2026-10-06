@@ -120,6 +120,7 @@ export function findInstalledStudio(seams: InstalledStudioSeams): StudioExecutab
 		: undefined;
 }
 
+// Stryker disable BlockStatement: equivalent, both return undefined
 /**
  * No installed Studio, so discovery ends at the platform launcher.
  *
@@ -128,6 +129,7 @@ export function findInstalledStudio(seams: InstalledStudioSeams): StudioExecutab
 export function noInstalledStudio(): undefined {
 	return undefined;
 }
+// Stryker restore BlockStatement
 
 /**
  * The environment of a session whose `start` or `up` got `--studio-path`:
