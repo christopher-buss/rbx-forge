@@ -118,6 +118,8 @@ interface StartSetup {
 	/** The host OS; Linux by default. */
 	platform?: NodeJS.Platform;
 	pluginSources?: Array<string>;
+	/** The managed plugin's `Rojo.Version` value; missing by default. */
+	pluginVersion?: string | undefined;
 	/** More processes in the fake process table, such as a Studio. */
 	processes?: Record<number, FakeProcess>;
 	projectType?: "luau" | "rbxts";
@@ -601,10 +603,6 @@ describe("managed Rojo plugin lifecycle", () => {
 	it.for([
 		{ reason: "unknown sources", source: "return 'manually changed'" },
 		{
-			reason: "newer forge sources",
-			source: `-- rbx-forge patch 9 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`,
-		},
-		{
 			reason: "unknown forge stock hash",
 			source: `-- rbx-forge patch 1 stock ${"a".repeat(64)}\n${stockPlugin.App}`,
 		},
@@ -626,16 +624,86 @@ describe("managed Rojo plugin lifecycle", () => {
 		const sources = stockPluginSources();
 		sources[0] = source;
 		const previous = [...sources];
-		const run = startPluginSession(sources);
+		const run = startPluginSession(sources, { pluginVersion: "7.7.1" });
+		await endPluginSessionAsync(run);
+
+		expect(sources).toStrictEqual(previous);
+		expect(run.reporter.events).toContainEqual({
+			message: `The managed Rojo plugin sources were changed by hand. ${RESTORE_PLUGIN}`,
+			type: "warning",
+		});
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+	});
+
+	it("should preserve newer forge sources and ask to update forge", async () => {
+		expect.assertions(3);
+
+		const sources = stockPluginSources();
+		sources[1] = `-- rbx-forge patch 9 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a\n${stockPlugin.ServeSession}`;
+		const previous = [...sources];
+		const run = startPluginSession(sources, { pluginVersion: "7.7.1" });
 		await endPluginSessionAsync(run);
 
 		expect(sources).toStrictEqual(previous);
 		expect(run.reporter.events).toContainEqual({
 			message:
-				"The managed Rojo plugin has unsupported or manually changed sources. Auto-connect is off; connect to Rojo manually in Studio.",
+				"The managed Rojo plugin has a newer rbx-forge patch (9). Update rbx-forge in this project. Auto-connect is off; connect to Rojo manually in Studio.",
 			type: "warning",
 		});
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
+	});
+
+	it.for([
+		{
+			message: `The managed Rojo plugin sources were changed by hand. ${RESTORE_PLUGIN}`,
+			reason: "a matching version with whitespace",
+			version: " 7.7.1\n",
+		},
+		{
+			message: `The managed Rojo plugin is from Rojo 7.6.0 and does not match Rojo 7.7.1. ${RESTORE_PLUGIN}`,
+			reason: "an older stock plugin",
+			version: "7.6.0",
+		},
+		{
+			message: `The managed Rojo plugin is from Rojo 7.8.0 and does not match Rojo 7.7.1. ${RESTORE_PLUGIN}`,
+			reason: "a newer stock plugin",
+			version: "7.8.0",
+		},
+		{
+			message: `The managed Rojo plugin does not match Rojo 7.7.1. ${RESTORE_PLUGIN}`,
+			reason: "an unreadable version",
+			version: undefined,
+		},
+		{
+			message: `The managed Rojo plugin does not match Rojo 7.7.1. ${RESTORE_PLUGIN}`,
+			reason: "a blank version",
+			version: " \n",
+		},
+	])(
+		"should explain $reason on unrecognized sources without writing",
+		async ({ message, version }) => {
+			expect.assertions(3);
+
+			const sources = stockPluginSources();
+			sources[1] = "return 'other release'";
+			const run = startPluginSession(sources, { pluginVersion: version });
+			const write = vi.spyOn(run.native.addon, "writeModelScriptSources");
+			await endPluginSessionAsync(run);
+
+			expect(write).not.toHaveBeenCalled();
+			expect(run.reporter.events).toContainEqual({ message, type: "warning" });
+			expect(run.studioLauncher).toHaveBeenCalledOnce();
+		},
+	);
+
+	it("should read the plugin version only for unrecognized sources", async () => {
+		expect.assertions(1);
+
+		const run = startPluginSession(stockPluginSources(), { pluginVersion: "7.6.0" });
+		const read = vi.spyOn(run.native.addon, "readModelStringValues");
+		await endPluginSessionAsync(run);
+
+		expect(read).not.toHaveBeenCalled();
 	});
 
 	it("should preserve upstream launch-marker support", async () => {
@@ -747,12 +815,13 @@ describe("managed Rojo plugin lifecycle", () => {
 		async ({ app, session }) => {
 			expect.assertions(1);
 
-			const run = startPluginSession([app, session, "protocolVersion = 5,"]);
+			const run = startPluginSession([app, session, "protocolVersion = 5,"], {
+				pluginVersion: "7.7.1",
+			});
 			await endPluginSessionAsync(run);
 
 			expect(run.reporter.events).toContainEqual({
-				message:
-					"The managed Rojo plugin has unsupported or manually changed sources. Auto-connect is off; connect to Rojo manually in Studio.",
+				message: `The managed Rojo plugin sources were changed by hand. ${RESTORE_PLUGIN}`,
 				type: "warning",
 			});
 		},
@@ -873,6 +942,9 @@ describe("managed Rojo plugin lifecycle", () => {
 	});
 });
 
+const RESTORE_PLUGIN =
+	"Restore it with the project's rojo plugin install, then restart Studio. Auto-connect is off; connect to Rojo manually in Studio.";
+
 function stockPluginSources(): Array<string> {
 	return [stockPlugin.App, stockPlugin.ServeSession, "return { protocolVersion = 5 }"];
 }
@@ -926,6 +998,7 @@ function startCommand({
 	pause = () => neverPauseAsync,
 	platform = "linux",
 	pluginSources,
+	pluginVersion,
 	processes = {},
 	projectType = "luau",
 	reaper = {},
@@ -972,6 +1045,7 @@ function startCommand({
 				"Plugins",
 				"RojoManagedPlugin.rbxm",
 			),
+			pluginVersion,
 		);
 	}
 

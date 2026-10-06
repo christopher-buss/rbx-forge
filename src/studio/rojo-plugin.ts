@@ -7,6 +7,7 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
 import { readVariable } from "../process/environment.ts";
 import { runRojoAsync } from "../rojo/rojo.ts";
+import type { RojoServerInfo } from "../seams/network.ts";
 import patched from "./rojo-plugin/patched.json" with { type: "json" };
 
 /**
@@ -59,7 +60,7 @@ const PROTOCOL = /\bprotocolVersion\s*=\s*(\d+)\s*[,}]/u;
  *
  * @param context - The original project, addon, file system, and reporter.
  * @param config - The project's Rojo command.
- * @param protocolVersion - The validated session server's protocol.
+ * @param server - The validated session server's protocol and Rojo version.
  * @param signal - The session's end signal.
  * @returns Capabilities of the prepared plugin.
  * @rejects Installation failure, protocol mismatch, atomic write failure, or cancellation.
@@ -67,7 +68,7 @@ const PROTOCOL = /\bprotocolVersion\s*=\s*(\d+)\s*[,}]/u;
 export async function prepareRojoPluginAsync(
 	context: CommandContext,
 	config: Pick<ResolvedConfig, "rojoAlias">,
-	protocolVersion: number,
+	server: Pick<RojoServerInfo, "protocolVersion" | "serverVersion">,
 	signal: AbortSignal,
 ): Promise<PluginCapabilities> {
 	const model = pluginPath(context);
@@ -85,7 +86,7 @@ export async function prepareRojoPluginAsync(
 		return MANUAL;
 	}
 
-	const decision = decide(context, sources, protocolVersion);
+	const decision = decide(context, model, sources, server);
 	if (decision !== "patch") {
 		return decision;
 	}
@@ -166,10 +167,6 @@ function recognizes(
 
 	const body = source.slice(mark[0].length);
 	const version = Number(mark[1]);
-	if (version > VERSION) {
-		return false;
-	}
-
 	const legacyHash = version === VERSION - 1 ? previousHash : hash;
 	const isKnownBody =
 		version === VERSION
@@ -187,10 +184,43 @@ function upstream(context: CommandContext): PluginCapabilities {
 	return { autoConnect: false, source: "upstream", syncAcknowledgement: false };
 }
 
+function unrecognizedReason(context: CommandContext, model: string, serverVersion: string): string {
+	let version: string;
+	try {
+		const [value] = context.seams.native().readModelStringValues(model, [["Rojo", "Version"]]);
+		assert(value !== undefined);
+		version = value.trim();
+		assert(version !== "");
+	} catch {
+		return `The managed Rojo plugin does not match Rojo ${serverVersion}.`;
+	}
+
+	return version === serverVersion
+		? "The managed Rojo plugin sources were changed by hand."
+		: `The managed Rojo plugin is from Rojo ${version} and does not match Rojo ${serverVersion}.`;
+}
+
+function hasNewerPatch(context: CommandContext, sources: Array<string>): boolean {
+	const newer = Math.max(...sources.map((source) => Number(MARK.exec(source)?.[1] ?? 0)));
+	if (newer <= VERSION) {
+		return false;
+	}
+
+	manual(
+		context,
+		`The managed Rojo plugin has a newer rbx-forge patch (${newer}). Update rbx-forge in this project.`,
+	);
+	return true;
+}
+
 function decide(
 	context: CommandContext,
+	model: string,
 	sources: Array<string>,
-	serverProtocol: number,
+	{
+		protocolVersion: serverProtocol,
+		serverVersion,
+	}: Pick<RojoServerInfo, "protocolVersion" | "serverVersion">,
 ): "patch" | PluginCapabilities {
 	const [app, session, configSource] = sources;
 	assert(app !== undefined);
@@ -204,6 +234,10 @@ function decide(
 		return upstream(context);
 	}
 
+	if (hasNewerPatch(context, [app, session])) {
+		return MANUAL;
+	}
+
 	const isRecognized = SCRIPTS.every((script, index) => {
 		const source = sources[index];
 		assert(source !== undefined);
@@ -212,7 +246,7 @@ function decide(
 	if (!isRecognized) {
 		return manual(
 			context,
-			"The managed Rojo plugin has unsupported or manually changed sources.",
+			`${unrecognizedReason(context, model, serverVersion)} Restore it with the project's rojo plugin install, then restart Studio.`,
 		);
 	}
 
