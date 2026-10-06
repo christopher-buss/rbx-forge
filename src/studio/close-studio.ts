@@ -8,6 +8,7 @@ import type { Host } from "../seams/host.ts";
 import type { Environment, Seams } from "../seams/seams.ts";
 import type { RecoveryReport } from "./auto-recovery.ts";
 import { autoSaveDirectories, handleAutoRecoveryAsync } from "./auto-recovery.ts";
+import { studioCloseMs } from "./close-window.ts";
 import type { LocatedStudio, StudioProcess } from "./launcher.ts";
 import { studioProcess } from "./launcher.ts";
 import type { StudioLock } from "./lock-file.ts";
@@ -19,12 +20,6 @@ import {
 	readLockFile,
 	studioLockPath,
 } from "./lock-file.ts";
-
-/**
- * How long Studio gets to close its place on the close request when it
- * shows no dialog; forge then ends it, without a save.
- */
-export const STUDIO_CLOSE_MS = 15_000;
 
 /** How often forge looks at a closing Studio. */
 export const STUDIO_CLOSE_POLL_MS = 50;
@@ -48,7 +43,7 @@ export const STUDIO_START_SLACK_MS = 2000;
  *   ended the process at once instead of waiting for its slow exit.
  * - `dialog`: a modal dialog (such as "Save changes?") blocked it, so forge
  *   ended it at once, without a save.
- * - `timeout`: it did not close within {@link STUDIO_CLOSE_MS}, so forge
+ * - `timeout`: it did not close within {@link studioCloseMs}, so forge
  *   ended it, without a save.
  * - `no_window`: it had no window to ask, so forge ended it.
  */
@@ -133,7 +128,7 @@ interface Ended {
  * forge looks every {@link STUDIO_CLOSE_POLL_MS} and ends it at once when
  * its lock file goes (the place is closed; this skips Studio's slow exit),
  * or when a modal dialog blocks it (a place fresh from Rojo always asks to
- * save), or after {@link STUDIO_CLOSE_MS}. A Studio forge ended cannot
+ * save), or after {@link studioCloseMs}. A Studio forge ended cannot
  * remove its lock file, so forge does; and it handles the auto-recovery
  * files the Studio left (`recovery`).
  *
@@ -320,10 +315,10 @@ function isBlocked(pinned: PinnedProcess): boolean {
 
 /**
  * End a verified Studio: a close request, then a kill once its lock file
- * goes, a modal dialog blocks it, or {@link STUDIO_CLOSE_MS} pass; at once
+ * goes, a modal dialog blocks it, or {@link studioCloseMs} pass; at once
  * when no request went out.
  *
- * @param seams - The clock and file system.
+ * @param seams - The clock, file system, and OS.
  * @param pinned - The pinned Studio process.
  * @param lock - Its place's lock file, and whether it was there before the
  *   close request.
@@ -333,7 +328,7 @@ function isBlocked(pinned: PinnedProcess): boolean {
  * @rejects {ForgeError} `process_failed` when it does not exit in time.
  */
 async function endStudioAsync(
-	{ clock, fileSystem }: StudioSeams,
+	{ clock, fileSystem, host }: StudioSeams,
 	pinned: PinnedProcess,
 	{ lockPath, wasLocked }: { lockPath: string; wasLocked: boolean },
 ): Promise<Ended> {
@@ -343,7 +338,7 @@ async function endStudioAsync(
 			: { end: "exited", forced: false, killed: false };
 	}
 
-	const deadline = clock.now() + STUDIO_CLOSE_MS;
+	const deadline = clock.now() + studioCloseMs(host.platform);
 	for (;;) {
 		if (!pinned.isAlive()) {
 			return { end: "exited", forced: false, killed: false };

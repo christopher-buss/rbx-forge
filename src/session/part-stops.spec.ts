@@ -15,7 +15,7 @@ import {
 import { DEFAULT_CONFIG } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
-import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
+import { STUDIO_CLOSE_MS } from "../studio/close-window.ts";
 import { IDLE_STOP } from "./idle.ts";
 import type {
 	PartStops,

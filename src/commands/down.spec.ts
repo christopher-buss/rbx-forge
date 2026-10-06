@@ -45,6 +45,8 @@ interface Setup {
 	isNamed?: boolean;
 	/** Its supervisor still runs, holding the singleton lock. */
 	isSupervisorAlive?: boolean;
+	/** The OS forge runs on (default the test host's). */
+	platform?: NodeJS.Platform;
 }
 
 /**
@@ -57,6 +59,7 @@ function makeContext({
 	isLeaseHeld = false,
 	isNamed = true,
 	isSupervisorAlive = false,
+	platform,
 }: Setup = {}): { context: CommandContext; elapsed: () => number; native: FakeNative } {
 	const memory = createMemoryFileSystem(isNamed ? SESSION_FILES : {});
 	const native = createFakeNative({ 500: { alive: isSupervisorAlive, executablePath: "/node" } });
@@ -75,13 +78,14 @@ function makeContext({
 			now += ms;
 		},
 	};
+	const seams = createTestSeams({
+		clock,
+		fileSystem: memory.fileSystem,
+		ipc: createMemoryTransport(),
+		native: () => native.addon,
+	});
 	const context = createCommandContext({
-		seams: createTestSeams({
-			clock,
-			fileSystem: memory.fileSystem,
-			ipc: createMemoryTransport(),
-			native: () => native.addon,
-		}),
+		seams: { ...seams, host: { ...seams.host, platform: platform ?? seams.host.platform } },
 	});
 	return { context, elapsed: () => now, native };
 }
@@ -202,6 +206,18 @@ describe(runDownAsync, () => {
 			});
 		},
 	);
+
+	it("should name macOS's close time when the session's Studio did not close", async () => {
+		expect.assertions(1);
+
+		const project = makeContext({ isSupervisorAlive: true, platform: "darwin" });
+		await serveStopsAsync(project, closedStudio(ended("timeout")));
+
+		await expect(downAsync(project.context)).resolves.toMatchObject({
+			summary:
+				"Stopped session s1; every process of it is gone. Roblox Studio (PID 4242): it did not close within 1 s, so forge ended it without saving.",
+		});
+	});
 
 	it("should say in the summary when the session cannot verify its Studio", async () => {
 		expect.assertions(1);

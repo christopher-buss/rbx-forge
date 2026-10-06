@@ -14,7 +14,7 @@ import type { CommandResult } from "../seams/reporter.ts";
 import { listParts } from "../session/part-names.ts";
 import type { KeptPart } from "../session/part-stops.ts";
 import type { StudioEnd } from "../studio/close-studio.ts";
-import { STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
+import { studioCloseMs } from "../studio/close-window.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
@@ -38,12 +38,29 @@ export const DOWN_FLAGS: ReadonlyArray<FlagDefinition> = [
 	},
 ];
 
-/** How the summary tells how Studio went, by how it was ended. */
-const ENDED: Readonly<Record<Exclude<StudioEnd, "exited" | "lock_released">, string>> = {
-	dialog: "a dialog blocked it",
-	no_window: "it had no window to close",
-	timeout: `it did not close within ${STUDIO_CLOSE_MS / 1000} s`,
-};
+/**
+ * How the summary tells how Studio went, by how it was ended.
+ *
+ * @param end - How forge ended it.
+ * @param platform - The OS, for its close window.
+ * @returns The clause.
+ */
+function ended(
+	end: Exclude<StudioEnd, "exited" | "lock_released">,
+	platform: NodeJS.Platform,
+): string {
+	switch (end) {
+		case "dialog": {
+			return "a dialog blocked it";
+		}
+		case "no_window": {
+			return "it had no window to close";
+		}
+		case "timeout": {
+			return `it did not close within ${studioCloseMs(platform) / 1000} s`;
+		}
+	}
+}
 
 /** The summary's first words when the session stopped as asked. */
 const STOPPED = "Stopped session";
@@ -101,7 +118,7 @@ export async function runDownAsync(
 		recovery: studio.autoRecovery,
 		timeoutMs,
 	});
-	return { data: { ...report }, summary: downSummary(report) };
+	return { data: { ...report }, summary: downSummary(report, context.seams.host.platform) };
 }
 
 /**
@@ -124,15 +141,16 @@ function keptSentence(kept: ReadonlyArray<KeptPart>): string {
  * The sentence the summary gives Studio.
  *
  * @param studio - What `down` did with the session's Studio.
+ * @param platform - The OS.
  * @returns The sentence, with a leading space; empty when there is nothing
  *   to say.
  */
-function studioSentence(studio: DownStudio): string {
+function studioSentence(studio: DownStudio, platform: NodeJS.Platform): string {
 	switch (studio.status) {
 		case "closed": {
 			return studio.end === "exited" || studio.end === "lock_released"
 				? ` Closed Roblox Studio (PID ${studio.pid}).`
-				: ` Roblox Studio (PID ${studio.pid}): ${ENDED[studio.end]}, so forge ended it without saving.`;
+				: ` Roblox Studio (PID ${studio.pid}): ${ended(studio.end, platform)}, so forge ended it without saving.`;
 		}
 		case "failed": {
 			return ` Roblox Studio may still have ${studio.place} open: ${studio.message}`;
@@ -151,18 +169,19 @@ function studioSentence(studio: DownStudio): string {
  * The summary line of a `down` result.
  *
  * @param report - The session, its parts, and how it stopped.
+ * @param platform - The OS.
  * @returns How the session went, then its Studio.
  */
-function downSummary(report: DownReport): string {
+function downSummary(report: DownReport, platform: NodeJS.Platform): string {
 	const { sessionId } = report;
 	if (report.status === "stopped") {
 		const empty = report.parts?.stopped.length === 0 ? " It had no part to stop." : "";
-		return `${HOW[report.stoppedBy]} ${sessionId}; every process of it is gone.${empty}${studioSentence(report.studio)}`;
+		return `${HOW[report.stoppedBy]} ${sessionId}; every process of it is gone.${empty}${studioSentence(report.studio, platform)}`;
 	}
 
 	const { parts } = report;
 	const stopped = parts.stopped.length === 0 ? "no part" : listParts(parts.stopped);
-	return `Stopped ${stopped} of session ${sessionId}. It goes on${keptSentence(parts.kept)}${studioSentence(report.studio)}`;
+	return `Stopped ${stopped} of session ${sessionId}. It goes on${keptSentence(parts.kept)}${studioSentence(report.studio, platform)}`;
 }
 
 /**
