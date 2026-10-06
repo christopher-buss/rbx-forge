@@ -603,10 +603,6 @@ describe("managed Rojo plugin lifecycle", () => {
 	it.for([
 		{ reason: "unknown sources", source: "return 'manually changed'" },
 		{
-			reason: "newer forge sources",
-			source: `-- rbx-forge patch 9 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`,
-		},
-		{
 			reason: "unknown forge stock hash",
 			source: `-- rbx-forge patch 1 stock ${"a".repeat(64)}\n${stockPlugin.App}`,
 		},
@@ -639,6 +635,24 @@ describe("managed Rojo plugin lifecycle", () => {
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
 
+	it("should preserve newer forge sources and ask to update forge", async () => {
+		expect.assertions(3);
+
+		const sources = stockPluginSources();
+		sources[1] = `-- rbx-forge patch 9 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a\n${stockPlugin.ServeSession}`;
+		const previous = [...sources];
+		const run = startPluginSession(sources, { pluginVersion: "7.7.1" });
+		await endPluginSessionAsync(run);
+
+		expect(sources).toStrictEqual(previous);
+		expect(run.reporter.events).toContainEqual({
+			message:
+				"The managed Rojo plugin has a newer rbx-forge patch (9). Update rbx-forge in this project. Auto-connect is off; connect to Rojo manually in Studio.",
+			type: "warning",
+		});
+		expect(run.studioLauncher).toHaveBeenCalledOnce();
+	});
+
 	it.for([
 		{
 			message: `The managed Rojo plugin sources were changed by hand. ${RESTORE_PLUGIN}`,
@@ -659,6 +673,11 @@ describe("managed Rojo plugin lifecycle", () => {
 			message: `The managed Rojo plugin does not match Rojo 7.7.1. ${RESTORE_PLUGIN}`,
 			reason: "an unreadable version",
 			version: undefined,
+		},
+		{
+			message: `The managed Rojo plugin does not match Rojo 7.7.1. ${RESTORE_PLUGIN}`,
+			reason: "a blank version",
+			version: " \n",
 		},
 	])(
 		"should explain $reason on unrecognized sources without writing",

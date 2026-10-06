@@ -7,6 +7,7 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
 import { readVariable } from "../process/environment.ts";
 import { runRojoAsync } from "../rojo/rojo.ts";
+import type { RojoServerInfo } from "../seams/network.ts";
 import patched from "./rojo-plugin/patched.json" with { type: "json" };
 
 /**
@@ -67,7 +68,7 @@ const PROTOCOL = /\bprotocolVersion\s*=\s*(\d+)\s*[,}]/u;
 export async function prepareRojoPluginAsync(
 	context: CommandContext,
 	config: Pick<ResolvedConfig, "rojoAlias">,
-	server: { protocolVersion: number; serverVersion: string },
+	server: Pick<RojoServerInfo, "protocolVersion" | "serverVersion">,
 	signal: AbortSignal,
 ): Promise<PluginCapabilities> {
 	const model = pluginPath(context);
@@ -166,10 +167,6 @@ function recognizes(
 
 	const body = source.slice(mark[0].length);
 	const version = Number(mark[1]);
-	if (version > VERSION) {
-		return false;
-	}
-
 	const legacyHash = version === VERSION - 1 ? previousHash : hash;
 	const isKnownBody =
 		version === VERSION
@@ -187,12 +184,13 @@ function upstream(context: CommandContext): PluginCapabilities {
 	return { autoConnect: false, source: "upstream", syncAcknowledgement: false };
 }
 
-function mismatch(context: CommandContext, model: string, serverVersion: string): string {
+function unrecognizedReason(context: CommandContext, model: string, serverVersion: string): string {
 	let version: string;
 	try {
 		const [value] = context.seams.native().readModelStringValues(model, [["Rojo", "Version"]]);
 		assert(value !== undefined);
 		version = value.trim();
+		assert(version !== "");
 	} catch {
 		return `The managed Rojo plugin does not match Rojo ${serverVersion}.`;
 	}
@@ -202,6 +200,19 @@ function mismatch(context: CommandContext, model: string, serverVersion: string)
 		: `The managed Rojo plugin is from Rojo ${version} and does not match Rojo ${serverVersion}.`;
 }
 
+function hasNewerPatch(context: CommandContext, sources: Array<string>): boolean {
+	const newer = Math.max(...sources.map((source) => Number(MARK.exec(source)?.[1] ?? 0)));
+	if (newer <= VERSION) {
+		return false;
+	}
+
+	manual(
+		context,
+		`The managed Rojo plugin has a newer rbx-forge patch (${newer}). Update rbx-forge in this project.`,
+	);
+	return true;
+}
+
 function decide(
 	context: CommandContext,
 	model: string,
@@ -209,7 +220,7 @@ function decide(
 	{
 		protocolVersion: serverProtocol,
 		serverVersion,
-	}: { protocolVersion: number; serverVersion: string },
+	}: Pick<RojoServerInfo, "protocolVersion" | "serverVersion">,
 ): "patch" | PluginCapabilities {
 	const [app, session, configSource] = sources;
 	assert(app !== undefined);
@@ -223,6 +234,10 @@ function decide(
 		return upstream(context);
 	}
 
+	if (hasNewerPatch(context, [app, session])) {
+		return MANUAL;
+	}
+
 	const isRecognized = SCRIPTS.every((script, index) => {
 		const source = sources[index];
 		assert(source !== undefined);
@@ -231,7 +246,7 @@ function decide(
 	if (!isRecognized) {
 		return manual(
 			context,
-			`${mismatch(context, model, serverVersion)} Restore it with the project's rojo plugin install, then restart Studio.`,
+			`${unrecognizedReason(context, model, serverVersion)} Restore it with the project's rojo plugin install, then restart Studio.`,
 		);
 	}
 

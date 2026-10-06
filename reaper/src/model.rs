@@ -49,51 +49,43 @@ fn instance_at(dom: &WeakDom, path: &[String], kind: &str, classes: &[&str]) -> 
     Ok(current)
 }
 
+const SCRIPT_CLASSES: &[&str] = &["Script", "LocalScript", "ModuleScript"];
+
 fn script_at(dom: &WeakDom, path: &[String]) -> io::Result<Ref> {
-    instance_at(
-        dom,
-        path,
-        "script",
-        &["Script", "LocalScript", "ModuleScript"],
-    )
+    instance_at(dom, path, "script", SCRIPT_CLASSES)
 }
 
-pub fn read_string_values(path: &Path, value_paths: &[Vec<String>]) -> io::Result<Vec<String>> {
+fn read_strings(
+    path: &Path,
+    instance_paths: &[Vec<String>],
+    kind: &str,
+    classes: &[&str],
+    property: &str,
+) -> io::Result<Vec<String>> {
     let dom = read_model(path)?;
-    value_paths
+    instance_paths
         .iter()
         .map(|path| {
-            let value = dom
-                .get_by_ref(instance_at(&dom, path, "StringValue", &["StringValue"])?)
-                .expect("the resolved value exists");
-            match value.properties.get(&"Value".into()) {
+            let instance = dom
+                .get_by_ref(instance_at(&dom, path, kind, classes)?)
+                .expect("the resolved instance exists");
+            match instance.properties.get(&property.into()) {
                 Some(Variant::String(value)) => Ok(value.clone()),
                 _ => Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("StringValue path {path:?}: Value is not a string"),
+                    format!("{kind} path {path:?}: {property} is not a string"),
                 )),
             }
         })
         .collect()
 }
 
+pub fn read_string_values(path: &Path, value_paths: &[Vec<String>]) -> io::Result<Vec<String>> {
+    read_strings(path, value_paths, "StringValue", &["StringValue"], "Value")
+}
+
 pub fn read_sources(path: &Path, script_paths: &[Vec<String>]) -> io::Result<Vec<String>> {
-    let dom = read_model(path)?;
-    script_paths
-        .iter()
-        .map(|path| {
-            let script = dom
-                .get_by_ref(script_at(&dom, path)?)
-                .expect("the resolved script exists");
-            match script.properties.get(&"Source".into()) {
-                Some(Variant::String(source)) => Ok(source.clone()),
-                _ => Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("script path {path:?}: Source is not a string"),
-                )),
-            }
-        })
-        .collect()
+    read_strings(path, script_paths, "script", SCRIPT_CLASSES, "Source")
 }
 
 pub fn write_sources(path: &Path, scripts: &[(Vec<String>, String)]) -> io::Result<()> {
