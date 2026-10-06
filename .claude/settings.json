@@ -23,5 +23,16 @@
 				]
 			}
 		]
+	},
+	"enabledPlugins": {
+		"commitlint-preflight@isentinel": true
+	},
+	"extraKnownMarketplaces": {
+		"isentinel": {
+			"source": {
+				"source": "github",
+				"repo": "christopher-buss/skills"
+			}
+		}
 	}
 }
