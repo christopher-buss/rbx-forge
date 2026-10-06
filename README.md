@@ -55,6 +55,9 @@ Requirements:
   needs Rojo 7.7 or later.
 - For roblox-ts projects: `roblox-ts` as a project dependency (see
   [`rbxts.command`](./docs/config.md#rbxtscommand)).
+- On Windows, to run `forge up` through pnpm (`pnpm exec`, `pnpm run`): pnpm 11
+  or earlier, or 12.10 or later. pnpm 12.0 to 12.9 runs scripts in a job that
+  `up` cannot leave, so `up` fails with `detach_unsupported`.
 
 ```bash
 npm install --save-dev rbx-forge
