@@ -112,13 +112,10 @@ export function createFakeNative(
 			...processMembers(table),
 			isLockFree: (path) => !locks.has(path),
 			nativeVersion: () => "0.0.0",
-			readModelScriptSources: () => {
-				throw new Error("model script sources are not configured");
-			},
+			readModelScriptSources: modelNotConfigured,
+			readModelStringValues: modelNotConfigured,
 			tryLockFile: (path, mode) => lockIn(locks, path, mode),
-			writeModelScriptSources: () => {
-				throw new Error("model script sources are not configured");
-			},
+			writeModelScriptSources: modelNotConfigured,
 			...(registry === undefined
 				? {}
 				: { readUserRegistryDefault: (key) => readFrom(values, key) }),
@@ -128,6 +125,10 @@ export function createFakeNative(
 		processes: table,
 		sessions,
 	};
+}
+
+function modelNotConfigured(): never {
+	throw new Error("the model is not configured");
 }
 
 function startTimeOf(pid: number, entry: FakeProcess): string {

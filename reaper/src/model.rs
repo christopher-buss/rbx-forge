@@ -1,4 +1,4 @@
-//! Script sources in binary Roblox models, addressed by instance names.
+//! Script sources and string values in binary Roblox models, addressed by instance names.
 
 use std::fs::File;
 use std::io::{self, BufReader};
@@ -14,11 +14,11 @@ fn read_model(path: &Path) -> io::Result<WeakDom> {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
-fn script_at(dom: &WeakDom, path: &[String]) -> io::Result<Ref> {
-    let invalid = |reason| {
+fn instance_at(dom: &WeakDom, path: &[String], kind: &str, classes: &[&str]) -> io::Result<Ref> {
+    let invalid = |reason: &str| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("script path {path:?}: {reason}"),
+            format!("{kind} path {path:?}: {reason}"),
         )
     };
     if path.is_empty() {
@@ -40,16 +40,41 @@ fn script_at(dom: &WeakDom, path: &[String]) -> io::Result<Ref> {
             return Err(invalid("ambiguous instance name"));
         }
     }
-    let script = dom
+    let instance = dom
         .get_by_ref(current)
         .expect("the resolved instance exists");
-    if !matches!(
-        script.class.as_str(),
-        "Script" | "LocalScript" | "ModuleScript"
-    ) {
-        return Err(invalid("instance is not a script"));
+    if !classes.contains(&instance.class.as_str()) {
+        return Err(invalid(&format!("instance is not a {kind}")));
     }
     Ok(current)
+}
+
+fn script_at(dom: &WeakDom, path: &[String]) -> io::Result<Ref> {
+    instance_at(
+        dom,
+        path,
+        "script",
+        &["Script", "LocalScript", "ModuleScript"],
+    )
+}
+
+pub fn read_string_values(path: &Path, value_paths: &[Vec<String>]) -> io::Result<Vec<String>> {
+    let dom = read_model(path)?;
+    value_paths
+        .iter()
+        .map(|path| {
+            let value = dom
+                .get_by_ref(instance_at(&dom, path, "StringValue", &["StringValue"])?)
+                .expect("the resolved value exists");
+            match value.properties.get(&"Value".into()) {
+                Some(Variant::String(value)) => Ok(value.clone()),
+                _ => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("StringValue path {path:?}: Value is not a string"),
+                )),
+            }
+        })
+        .collect()
 }
 
 pub fn read_sources(path: &Path, script_paths: &[Vec<String>]) -> io::Result<Vec<String>> {
@@ -141,6 +166,35 @@ mod tests {
             read_sources(&path, &[vec!["Plugin".into(), "App".into()]]).unwrap(),
             vec!["return 42"]
         );
+    }
+
+    #[test]
+    fn reads_requested_string_values() {
+        let (_directory, path) = fixture();
+        assert_eq!(
+            read_string_values(&path, &[vec!["Plugin".into(), "Settings".into()]]).unwrap(),
+            vec!["keep me"]
+        );
+    }
+
+    #[test]
+    fn refuses_string_values_at_invalid_paths() {
+        let (_directory, path) = fixture();
+        for (invalid, reason) in [
+            (vec![], "empty path"),
+            (vec!["Plugin".into(), "Missing".into()], "missing instance"),
+            (
+                vec!["Plugin".into(), "App".into()],
+                "instance is not a StringValue",
+            ),
+        ] {
+            assert!(
+                read_string_values(&path, &[invalid])
+                    .unwrap_err()
+                    .to_string()
+                    .contains(reason)
+            );
+        }
     }
 
     #[test]

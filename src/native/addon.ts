@@ -248,6 +248,11 @@ export interface NativeAddon {
 	 */
 	readModelScriptSources: (path: string, scriptPaths: Array<Array<string>>) => Array<string>;
 	/**
+	 * Read `StringValue` values in request order, using instance names from
+	 * the model root. Missing, ambiguous, and non-`StringValue` paths throw.
+	 */
+	readModelStringValues: (path: string, valuePaths: Array<Array<string>>) => Array<string>;
+	/**
 	 * Windows only: the default value of `HKEY_CURRENT_USER\<key>`, or
 	 * `null` when the key or value is missing.
 	 *

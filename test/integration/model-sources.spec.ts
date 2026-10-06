@@ -1,5 +1,6 @@
-import { copyFileSync, readFileSync } from "node:fs";
+import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 
 import { loadRealNative } from "../helpers/real-native.ts";
@@ -63,5 +64,22 @@ describe("native model script sources", () => {
 			]);
 		}).toThrow(/missing instance/u);
 		expect(readFileSync(model)).toStrictEqual(original);
+	});
+});
+
+describe("native model string values", () => {
+	it("should read the stock Rojo plugin version and refuse a script path", () => {
+		expect.assertions(2);
+
+		const model = path.join(makeTemporaryDirectory(), "rojo.rbxm");
+		writeFileSync(
+			model,
+			gunzipSync(readFileSync(path.join(FIXTURE, "..", "rojo-7.7.1.rbxm.gz"))),
+		);
+
+		expect(native.readModelStringValues(model, [["Rojo", "Version"]])).toStrictEqual(["7.7.1"]);
+		expect(() => native.readModelStringValues(model, [["Rojo", "Plugin", "Config"]])).toThrow(
+			/not a StringValue/u,
+		);
 	});
 });

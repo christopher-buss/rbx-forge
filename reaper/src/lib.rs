@@ -49,6 +49,20 @@ pub fn read_model_script_sources(
         .map_err(|err| to_napi(&format!("read script sources in {path}"), &err))
 }
 
+/// Read `StringValue` values in request order, using instance-name paths from the model root.
+///
+/// # Errors
+///
+/// When the model cannot be read or a path does not identify one `StringValue`.
+#[napi]
+pub fn read_model_string_values(
+    path: String,
+    value_paths: Vec<Vec<String>>,
+) -> Result<Vec<String>> {
+    model::read_string_values(Path::new(&path), &value_paths)
+        .map_err(|err| to_napi(&format!("read string values in {path}"), &err))
+}
+
 /// One script's replacement source, addressed from the model root.
 #[napi(object)]
 pub struct ModelScriptSource {
