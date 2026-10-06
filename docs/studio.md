@@ -95,7 +95,11 @@ folder. Windows uses `%USERPROFILE%\AppData\Local\Roblox\Plugins`; macOS uses
 project's Rojo command. Forge supports Rojo 7.7 and later; the recognized stock
 sources of 7.7.0 and 7.7.1 share one patch. Unknown or manually edited sources,
 unreadable sources, and newer forge patches are preserved with manual connection
-guidance. Upstream launch-marker support is preserved too; its confirmation
+guidance. For unrecognized sources, forge compares the plugin's `Rojo.Version`
+with the server's Rojo version: the warning names both versions when they
+differ, reports hand-edited sources when they match, and reports a plain
+mismatch when the plugin version is unreadable. Each warning tells you to run the
+project's `rojo plugin install` and restart Studio. Upstream launch-marker support is preserved too; its confirmation
 dialog may still need accepting in Studio.
 
 Both script sources are replaced atomically. A current coherent pair is left

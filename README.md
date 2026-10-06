@@ -131,8 +131,9 @@ only its Rojo stops; the compiler runs on.
 
 Before a new direct session launch, forge prepares the managed Rojo plugin by
 default. Rojo 7.7.0 and 7.7.1 share the supported stock sources; other versions
-are preserved when their sources are unrecognized. Restore the stock plugin with
-the project's `rojo plugin install`. See
+are preserved when their sources are unrecognized, with a warning that names the
+plugin and server Rojo versions or reports hand edits. Restore the stock plugin
+with the project's `rojo plugin install`, then restart Studio. See
 [Managed Rojo plugin](./docs/studio.md#managed-rojo-plugin).
 
 A Studio that already had the place open when the session attached it is a found
