@@ -1,0 +1,212 @@
+import path from "node:path";
+import { assert, describe, expect, it } from "vitest";
+
+import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
+import { createFakeNative } from "../../test/helpers/native.ts";
+import { createMemoryFileSystem, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
+import { STUDIO_OPEN_BOUND_MS } from "../session/studio-readiness.ts";
+import {
+	createKeepHiddenLauncher,
+	KEEP_HIDDEN_FLAG,
+	KEEP_HIDDEN_POLL_MS,
+	KEEP_HIDDEN_QUIET_MS,
+	keepStudioHiddenAsync,
+} from "./keep-hidden.ts";
+
+const PLACE = path.join(PROJECT, "game.rbxl");
+const TARGET = { pid: 42, place: PLACE, startTime: "42" };
+
+interface Script {
+	/** Studio exits at this time. */
+	exitsAt?: number;
+	/** Its place lock appears at this time. */
+	opensAt?: number;
+	/** Studio shows itself at these times. */
+	showsAt?: Array<number>;
+}
+
+function watching({ exitsAt, opensAt, showsAt = [] }: Script = {}) {
+	let now = 0;
+	const memory = createMemoryFileSystem({ "game.rbxl": "place" });
+	const native = createFakeNative({
+		42: { alive: true, appHidden: true, executablePath: "RobloxStudio", startTime: "42" },
+	});
+	const studio = native.processes.get(42);
+	assert(studio !== undefined);
+	const shows: Array<number> = [];
+	const hides: Array<number> = [];
+	const pending = [...showsAt];
+	const seams = createTestSeams({
+		clock: {
+			now: () => now,
+			sleep: async (ms) => {
+				now += ms;
+				if (pending[0] !== undefined && now >= pending[0]) {
+					pending.shift();
+					studio.appHidden = false;
+					shows.push(now);
+				}
+
+				if (opensAt !== undefined && now >= opensAt) {
+					memory.fileSystem.writeFileSync(`${PLACE}.lock`, "42\nRobloxStudio\nhost\n");
+				}
+
+				if (exitsAt !== undefined && now >= exitsAt) {
+					studio.alive = false;
+				}
+			},
+		},
+		fileSystem: memory.fileSystem,
+		native: () => native.addon,
+	});
+	return {
+		hides,
+		now: () => now,
+		run: async (target: Record<string, number | string> = TARGET) => {
+			const pinProcess = native.addon.pinProcess.bind(native.addon);
+			native.addon.pinProcess = (pid) => {
+				const pinned = pinProcess(pid);
+				return pinned === null
+					? null
+					: {
+							...pinned,
+							setAppHidden: (hidden) => {
+								hides.push(now);
+								return pinned.setAppHidden(hidden);
+							},
+						};
+			};
+
+			await keepStudioHiddenAsync(seams, JSON.stringify(target));
+		},
+		shows,
+		studio,
+	};
+}
+
+describe(keepStudioHiddenAsync, () => {
+	it("should hide Studio again within one poll every time it shows itself", async () => {
+		expect.assertions(3);
+
+		const run = watching({ opensAt: 5000, showsAt: [1700, 3100, 3900, 4200] });
+		await run.run();
+
+		expect(run.hides).toStrictEqual(run.shows);
+		expect(run.hides).toHaveLength(4);
+		expect(run.studio.appHidden).toBeTrue();
+	});
+
+	it("should stop once the place is open and Studio stayed hidden for the quiet window", async () => {
+		expect.assertions(1);
+
+		const run = watching({ opensAt: 5000, showsAt: [4200] });
+		await run.run();
+
+		expect(run.now()).toBe(5000 + KEEP_HIDDEN_QUIET_MS);
+	});
+
+	it("should restart the quiet window when Studio shows itself after its place opens", async () => {
+		expect.assertions(1);
+
+		const run = watching({ opensAt: 1000, showsAt: [2000] });
+		await run.run();
+
+		expect(run.now()).toBe(2000 + KEEP_HIDDEN_QUIET_MS);
+	});
+
+	it("should stop when Studio exits", async () => {
+		expect.assertions(1);
+
+		const run = watching({ exitsAt: 500 });
+		await run.run();
+
+		expect(run.now()).toBe(500);
+	});
+
+	it("should stop at the open bound when the place never opens", async () => {
+		expect.assertions(1);
+
+		const run = watching();
+		await run.run();
+
+		expect(run.now()).toBe(STUDIO_OPEN_BOUND_MS);
+	});
+
+	it("should leave a process alone whose start time differs", async () => {
+		expect.assertions(1);
+
+		const run = watching({ showsAt: [KEEP_HIDDEN_POLL_MS] });
+		await run.run({ pid: 42, place: PLACE, startTime: "41" });
+
+		expect(run.now()).toBe(0);
+	});
+
+	it("should leave a missing process alone", async () => {
+		expect.assertions(1);
+
+		const run = watching();
+		await run.run({ pid: 43, place: PLACE, startTime: "43" });
+
+		expect(run.now()).toBe(0);
+	});
+
+	it("should reject a malformed target", async () => {
+		expect.assertions(1);
+
+		const run = watching();
+
+		await expect(run.run({ pid: 0, place: PLACE, startTime: "42" })).rejects.toThrow("pid");
+	});
+});
+
+describe(createKeepHiddenLauncher, () => {
+	it("should ignore a watcher that fails to start after the spawn returns", async () => {
+		expect.assertions(1);
+
+		const spawner = createFakeSpawner((child) => {
+			child.error(new Error("spawn /node ENOENT"));
+		});
+		const launch = createKeepHiddenLauncher(
+			{ childProcess: spawner.runner, host: createTestSeams().host },
+			"/forge/supervisor.mjs",
+		);
+		launch({ cwd: "/project", env: {}, target: TARGET });
+		await new Promise((resolve) => {
+			setImmediate(resolve);
+		});
+
+		expect(spawner.children[0]!.referenced).toBeFalse();
+	});
+
+	it("should start the watcher detached through the supervisor entry, with no pipes", () => {
+		expect.assertions(2);
+
+		const spawner = createFakeSpawner();
+		const launch = createKeepHiddenLauncher(
+			{ childProcess: spawner.runner, host: createTestSeams().host },
+			"/forge/supervisor.mjs",
+		);
+		launch({
+			cwd: "/project",
+			env: { PATH: "/bin" },
+			target: { pid: 42, place: PLACE, startTime: "42" },
+		});
+
+		expect(spawner.calls[0]).toMatchObject({
+			args: [
+				"/forge/supervisor.mjs",
+				KEEP_HIDDEN_FLAG,
+				JSON.stringify({ pid: 42, place: PLACE, startTime: "42" }),
+			],
+			file: "/node",
+			options: {
+				cwd: "/project",
+				detached: true,
+				env: { PATH: "/bin" },
+				stdio: "ignore",
+				windowsHide: true,
+			},
+		});
+		expect(spawner.children[0]!.referenced).toBeFalse();
+	});
+});

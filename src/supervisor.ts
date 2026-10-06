@@ -31,6 +31,7 @@ import {
 	PAUSE_POLL_MS,
 } from "./session/pause.ts";
 import { createStopSource } from "./session/stop-source.ts";
+import { KEEP_HIDDEN_FLAG, keepStudioHiddenAsync } from "./studio/keep-hidden.ts";
 import { runSnapshotLightingAsync } from "./studio/snapshot-lighting.ts";
 import type { SessionRequest } from "./supervisor/channel.ts";
 import { createChannelReporter, encodeMessage, parseSessionRequest } from "./supervisor/channel.ts";
@@ -64,6 +65,11 @@ function createSupervisorSeams(): Seams {
 		output: process.stderr,
 		supervisorEntry: import.meta.filename,
 	});
+}
+
+if (process.argv[2] === KEEP_HIDDEN_FLAG) {
+	await keepStudioHiddenAsync(createSupervisorSeams(), process.argv[3] ?? "");
+	process.exit();
 }
 
 if (process.argv[2] === "--watch-hidden-lighting") {

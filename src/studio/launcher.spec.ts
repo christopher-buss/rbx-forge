@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 
 import { createFailingSpawner, createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import type { FakeSpawner, SpawnBehavior } from "../../test/helpers/fake-process.ts";
@@ -9,10 +9,11 @@ import type { FakeNative } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import { createMemoryFileSystem, createTestSeams } from "../../test/helpers/seams.ts";
 import { ForgeError } from "../errors.ts";
-import type { DetachedSpawn, NativeLoader } from "../native/addon.ts";
+import type { AppLaunch, DetachedSpawn, NativeLoader } from "../native/addon.ts";
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Host } from "../seams/host.ts";
 import { findInstalledStudio, MACOS_STUDIO_PATH, STUDIO_REGISTRY_KEYS } from "./discover.ts";
+import { KEEP_HIDDEN_FLAG } from "./keep-hidden.ts";
 import type { StudioLaunch, StudioLauncher } from "./launcher.ts";
 import {
 	createStudioLauncher,
@@ -147,6 +148,16 @@ describe(studioLaunchInvocation, () => {
 		expect(studioLaunchInvocation(POSIX_PLACE, "darwin", { HOME: "/home/me" })).toStrictEqual({
 			args: [POSIX_PLACE],
 			env: { HOME: "/home/me" },
+			file: "open",
+		});
+	});
+
+	it("should open a hidden macOS place in the background and hidden", () => {
+		expect.assertions(1);
+
+		expect(studioLaunchInvocation(POSIX_PLACE, "darwin", {}, "hidden")).toStrictEqual({
+			args: ["-g", "-j", POSIX_PLACE],
+			env: {},
 			file: "open",
 		});
 	});
@@ -561,5 +572,199 @@ describe(createStudioLauncher, () => {
 		await launch(launchOf());
 
 		expect(clock.pending()).toBe(0);
+	});
+});
+
+const MACOS_BUNDLE = "/Applications/RobloxStudio.app";
+
+/**
+ * A macOS addon whose LaunchServices launch starts a Studio with PID 1000.
+ *
+ * @param result - What `launchApplication` does: a PID, or an error to reject with.
+ * @returns The addon and every launch.
+ */
+function macosNative(result: Error | number = 1000): {
+	launches: Array<AppLaunch>;
+	native: FakeNative;
+} {
+	const native = createFakeNative({
+		1000: { alive: true, executablePath: MACOS_STUDIO_PATH },
+	});
+	const launches: Array<AppLaunch> = [];
+	Object.assign(native.addon, {
+		launchApplication: async (launch: AppLaunch) => {
+			launches.push(launch);
+			if (result instanceof Error) {
+				throw result;
+			}
+
+			return result;
+		},
+	});
+	return { launches, native };
+}
+
+describe("macOS Studio launch", () => {
+	it("should launch a hidden Studio through LaunchServices, never activated, and keep it hidden", async () => {
+		expect.assertions(3);
+
+		const spawner = createFakeSpawner();
+		const { launches, native } = macosNative();
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			files: { [MACOS_STUDIO_PATH]: "" },
+			native,
+			platform: "darwin",
+		});
+
+		await expect(launch({ ...launchOf(), desktop: "hidden" })).resolves.toStrictEqual({
+			studio: { desktop: "hidden", pid: 1000, startTime: "1000" },
+			type: "launched",
+		});
+		expect(launches).toStrictEqual([
+			{
+				activates: false,
+				args: [POSIX_PLACE],
+				bundle: MACOS_BUNDLE,
+				env: { PATH: "/bin" },
+				hides: true,
+			},
+		]);
+		expect(spawner.calls).toMatchObject([
+			{
+				args: [
+					"/forge/supervisor.mjs",
+					KEEP_HIDDEN_FLAG,
+					JSON.stringify({ pid: 1000, place: POSIX_PLACE, startTime: "1000" }),
+				],
+				options: { detached: true },
+			},
+		]);
+	});
+
+	it("should launch a user Studio through LaunchServices, activated, with the RunScript task", async () => {
+		expect.assertions(3);
+
+		const spawner = createFakeSpawner();
+		const { launches, native } = macosNative();
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			files: { [MACOS_STUDIO_PATH]: "" },
+			native,
+			platform: "darwin",
+		});
+
+		await expect(
+			launch({ ...launchOf(), desktop: "user", runScript: "/project/run.lua" }),
+		).resolves.toStrictEqual({
+			studio: { desktop: "user", pid: 1000, startTime: "1000" },
+			type: "launched",
+		});
+		expect(launches[0]).toMatchObject({
+			activates: true,
+			args: [
+				"--task",
+				"RunScript",
+				"--localPlaceFile",
+				POSIX_PLACE,
+				"--runScriptFile",
+				"/project/run.lua",
+			],
+			hides: false,
+		});
+		expect(spawner.calls).toHaveLength(0);
+	});
+
+	it("should launch Studio activated through LaunchServices when no desktop is requested", async () => {
+		expect.assertions(2);
+
+		const { launches, native } = macosNative();
+		const { launch } = makeLauncher({
+			files: { [MACOS_STUDIO_PATH]: "" },
+			native,
+			platform: "darwin",
+		});
+
+		await expect(launch(launchOf())).resolves.toStrictEqual({
+			studio: { pid: 1000, startTime: "1000" },
+			type: "launched",
+		});
+		expect(launches[0]).toMatchObject({ activates: true, hides: false });
+	});
+
+	it("should fail when LaunchServices cannot launch Studio", async () => {
+		expect.assertions(1);
+
+		const { native } = macosNative(new Error("launch denied"));
+		const { launch } = makeLauncher({
+			files: { [MACOS_STUDIO_PATH]: "" },
+			native,
+			platform: "darwin",
+		});
+
+		await expect(launch({ ...launchOf(), desktop: "hidden" })).resolves.toStrictEqual({
+			message: `Could not launch ${MACOS_BUNDLE}: launch denied`,
+			type: "failed",
+		});
+	});
+
+	it("should warn when the watcher that keeps Studio hidden cannot start", async () => {
+		expect.assertions(1);
+
+		const { native } = macosNative();
+		const { launch } = makeLauncher({
+			childProcess: {
+				spawn: () => {
+					throw new Error("spawn EINVAL");
+				},
+			},
+			files: { [MACOS_STUDIO_PATH]: "" },
+			native,
+			platform: "darwin",
+		});
+
+		const outcome = await launch({ ...launchOf(), desktop: "hidden" });
+		assert(outcome.type === "launched");
+
+		expect(outcome.warning).toContain("the watcher that keeps it hidden could not start");
+	});
+
+	it("should start an executable outside an app bundle directly and report the user desktop with a warning", async () => {
+		expect.assertions(2);
+
+		const executable = "/opt/studio/RobloxStudio";
+		const spawner = createFakeSpawner();
+		const { launches, native } = macosNative();
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			files: { [executable]: "" },
+			native,
+			platform: "darwin",
+		});
+
+		await expect(
+			launch({ ...launchOf(), desktop: "hidden", studioPath: executable }),
+		).resolves.toStrictEqual({
+			studio: { desktop: "user", pid: 1000, startTime: "1000" },
+			type: "launched",
+			warning:
+				"Studio opened on the user's desktop: its executable is not in an app bundle LaunchServices can open hidden.",
+		});
+		expect(launches).toHaveLength(0);
+	});
+
+	it("should open a hidden place in the background with the platform launcher and warn that it may not stay hidden", async () => {
+		expect.assertions(2);
+
+		const spawner = spawnerExiting(0);
+		const { launch } = makeLauncher({ childProcess: spawner.runner, platform: "darwin" });
+
+		await expect(launch({ ...launchOf(), desktop: "hidden" })).resolves.toStrictEqual({
+			desktop: "user",
+			type: "launched",
+			warning:
+				"Studio opened in the background, but the platform launcher cannot keep it hidden.",
+		});
+		expect(spawner.calls[0]).toMatchObject({ args: ["-g", "-j", POSIX_PLACE], file: "open" });
 	});
 });

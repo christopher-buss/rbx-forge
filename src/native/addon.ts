@@ -163,8 +163,8 @@ export interface DetachedSpawn {
 }
 
 /** What {@link NativeAddon.launchApplication} starts. */
-export interface ApplicationLaunch {
-	/** Bring the app to the front; otherwise it never becomes frontmost. */
+export interface AppLaunch {
+	/** Bring the app to the front; otherwise it never takes focus. */
 	activates: boolean;
 	args: Array<string>;
 	/** The app bundle's full path. */
@@ -245,13 +245,13 @@ export interface NativeAddon {
 	 */
 	isLockFree: (path: string) => boolean;
 	/**
-	 * macOS only: launch a new instance of an app bundle through
+	 * On macOS only, launch a new instance of an app bundle through
 	 * LaunchServices.
 	 *
 	 * @returns Its PID.
 	 * @rejects When LaunchServices cannot launch it.
 	 */
-	launchApplication?: (launch: ApplicationLaunch) => Promise<number>;
+	launchApplication?: (launch: AppLaunch) => Promise<number>;
 	/** Version of the native crate. */
 	nativeVersion: () => string;
 	/** Pin the live process with this PID, or `null` when there is none. */
