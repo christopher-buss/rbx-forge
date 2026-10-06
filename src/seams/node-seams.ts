@@ -16,6 +16,8 @@ import {
 import { createChildProcessRunner } from "../process/process-runner.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
 import { createReaperLauncher } from "../reaper/reaper-client.ts";
+import type { InstalledStudio } from "../studio/discover.ts";
+import { findInstalledStudio, noInstalledStudio as none } from "../studio/discover.ts";
 import { createStudioLauncher } from "../studio/launcher.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
 import { createDetachedLauncher } from "../supervisor/detached-launcher.ts";
@@ -39,6 +41,11 @@ export interface NodeSeamsOptions {
 	 * the platform package (`RBX_FORGE_NATIVE_DIR`).
 	 */
 	nativeDirectory: string | undefined;
+	/**
+	 * Find no installed Studio (`RBX_FORGE_TEST_NO_INSTALLED_STUDIO=1`), so
+	 * e2e runs never start the real one.
+	 */
+	noInstalledStudio: boolean;
 	/** Prompt output: the process stdout. */
 	output: NodeJS.WritableStream;
 	/** The supervisor entry script: `supervisor.mjs` next to the CLI. */
@@ -58,6 +65,7 @@ const PROCESS_BACKEND = { childProcess: nodeChildProcessRunner, clock: nodeClock
 export function createNodeSeams({
 	input,
 	nativeDirectory,
+	noInstalledStudio,
 	output,
 	supervisorEntry,
 }: NodeSeamsOptions): Seams {
@@ -77,6 +85,7 @@ export function createNodeSeams({
 		),
 		fileSystem: nodeFileSystem,
 		host: nodeHost,
+		installedStudio: installedStudioLookup(noInstalledStudio),
 		ipc: createNodeIpcTransport(native),
 		native,
 		network: nodeNetwork,
@@ -85,7 +94,7 @@ export function createNodeSeams({
 		randomId: randomUUID,
 		reaper: createNodeReaperLauncher(nativeDirectory, native, requireModule),
 		signals: createSignals(process),
-		studioLauncher: createNodeStudioLauncher(native, supervisorEntry),
+		studioLauncher: createNodeStudioLauncher(native, noInstalledStudio, supervisorEntry),
 		supervisor: createSupervisorLauncher(PROCESS_BACKEND, supervisorEntry),
 	};
 }
@@ -116,6 +125,22 @@ function createNodeReaperLauncher(
 	);
 }
 
-function createNodeStudioLauncher(native: NativeLoader, entry: string): StudioLauncher {
-	return createStudioLauncher({ ...PROCESS_BACKEND, fileSystem: nodeFileSystem, native }, entry);
+function installedStudioLookup(skip: boolean): InstalledStudio {
+	return skip ? none : findInstalledStudio;
+}
+
+function createNodeStudioLauncher(
+	native: NativeLoader,
+	noInstalledStudio: boolean,
+	entry: string,
+): StudioLauncher {
+	return createStudioLauncher(
+		{
+			...PROCESS_BACKEND,
+			fileSystem: nodeFileSystem,
+			installedStudio: installedStudioLookup(noInstalledStudio),
+			native,
+		},
+		entry,
+	);
 }

@@ -367,8 +367,8 @@ describe("forge open", () => {
 		});
 	});
 
-	// Windows would find the installed Studio in the registry; the fixture
-	// \`open\` and \`xdg-open\` on PATH stand in for the platform launcher.
+	// Windows' \`start\` opens the installed Studio through the \`.rbxl\` file
+	// association; the fixture \`open\` and \`xdg-open\` on PATH stand in.
 	it.skipIf(IS_WINDOWS)(
 		"should open the snapshot through the platform launcher when it finds no Studio",
 		async () => {

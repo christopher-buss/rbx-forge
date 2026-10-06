@@ -221,6 +221,7 @@ export function createSyncContext(directory: string): CommandContext {
 	const seams = createNodeSeams({
 		input: process.stdin,
 		nativeDirectory: NATIVE_DIRECTORY,
+		noInstalledStudio: false,
 		output: process.stdout,
 		supervisorEntry: path.join(directory, "unused-supervisor.mjs"),
 	});

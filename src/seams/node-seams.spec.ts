@@ -7,16 +7,21 @@ import { describe, expect, it } from "vitest";
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import { REAPER_PATH } from "../../test/helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../../test/helpers/temporary-directory.ts";
+import { findInstalledStudio, noInstalledStudio } from "../studio/discover.ts";
 import { nodeNetwork } from "./network.ts";
 import { createNodeSeams } from "./node-seams.ts";
 
 /** POSIX: this process's user id; Windows has none. */
 const USER_ID = process.getuid?.();
 
-function makeSeams(nativeDirectory?: string): ReturnType<typeof createNodeSeams> {
+function makeSeams(
+	nativeDirectory?: string,
+	skipInstalledStudio = false,
+): ReturnType<typeof createNodeSeams> {
 	return createNodeSeams({
 		input: new PassThrough(),
 		nativeDirectory,
+		noInstalledStudio: skipInstalledStudio,
 		output: new PassThrough(),
 		supervisorEntry: "/forge/supervisor.mjs",
 	});
@@ -130,6 +135,13 @@ describe(createNodeSeams, () => {
 		await expect(launch).rejects.toThrow(/^Could not find @rbx-forge\/native-/);
 	});
 
+	it("should find the installed Studio unless told there is none", () => {
+		expect.assertions(2);
+
+		expect(makeSeams().installedStudio).toBe(findInstalledStudio);
+		expect(makeSeams(undefined, true).installedStudio).toBe(noInstalledStudio);
+	});
+
 	it("should make random session ids", () => {
 		expect.assertions(2);
 
@@ -167,6 +179,7 @@ describe(createNodeSeams, () => {
 		const { prompter } = createNodeSeams({
 			input,
 			nativeDirectory: undefined,
+			noInstalledStudio: false,
 			output: new PassThrough(),
 			supervisorEntry: "/forge/supervisor.mjs",
 		});

@@ -2,9 +2,12 @@
  * E2E runs never reach the user's Roblox Studio or its files. Every forge
  * process a test starts inherits this environment:
  *
- * - `RBX_FORGE_STUDIO_PATH` names a file that does not exist, so forge never
- *   finds real Studio (a launch fails with `studio_launch_failed`). A test
- *   that opens a place sets it to a stand-in.
+ * - `RBX_FORGE_STUDIO_PATH` names a file that does not exist (a launch fails
+ *   with `studio_launch_failed`). A test that opens a place sets it to a
+ *   stand-in.
+ * - `RBX_FORGE_TEST_NO_INSTALLED_STUDIO=1`: forge skips the installed-Studio
+ *   lookup, so a test that empties `RBX_FORGE_STUDIO_PATH` reaches the
+ *   platform launcher (the fixture `open` or `xdg-open` on its `PATH`).
  * - `LOCALAPPDATA`, `USERPROFILE`, and `HOME` point at a scratch home, so
  *   auto-recovery handling never touches the real AutoSaves folders. The
  *   real values stay in `RBX_FORGE_TEST_REAL_<name>` for the opt-in real
@@ -27,6 +30,7 @@ process.env["LOCALAPPDATA"] = path.join(HOME, "AppData", "Local");
 process.env["USERPROFILE"] = HOME;
 process.env["HOME"] = HOME;
 process.env["RBX_FORGE_STUDIO_PATH"] = path.join(HOME, "no-studio", "RobloxStudioBeta.exe");
+process.env["RBX_FORGE_TEST_NO_INSTALLED_STUDIO"] = "1";
 // With an `--import` (pnpm adds one), Node loads the main module as ESM, and
 // the Studio stand-in's `.rbxl` place no longer runs.
 delete process.env["NODE_OPTIONS"];

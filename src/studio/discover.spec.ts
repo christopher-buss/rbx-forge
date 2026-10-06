@@ -7,11 +7,13 @@ import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
 import { ForgeError } from "../errors.ts";
 import type { NativeAddon } from "../native/addon.ts";
 import type { Environment } from "../seams/seams.ts";
-import type { DiscoverySeams } from "./discover.ts";
+import type { DiscoverySeams, InstalledStudio } from "./discover.ts";
 import {
 	commandExecutable,
+	findInstalledStudio,
 	findStudioExecutable,
 	MACOS_STUDIO_PATH,
+	noInstalledStudio,
 	STUDIO_PATH_VARIABLE,
 	STUDIO_REGISTRY_KEYS,
 	withStudioPath,
@@ -27,6 +29,8 @@ const PLACE_KEY = String.raw`Software\Classes\Roblox.Place\shell\open\command`;
 interface Setup {
 	/** Files that exist, by absolute path. */
 	files?: ReadonlyArray<string>;
+	/** The installed Studio lookup; the real one by default. */
+	installedStudio?: InstalledStudio;
 	/** Replaces the whole addon. */
 	native?: () => NativeAddon;
 	platform?: NodeJS.Platform;
@@ -36,6 +40,7 @@ interface Setup {
 
 function seamsOf({
 	files = [],
+	installedStudio = findInstalledStudio,
 	native,
 	platform = "win32",
 	registry = {},
@@ -47,7 +52,12 @@ function seamsOf({
 	}
 
 	const { addon } = createFakeNative({}, registry);
-	return { fileSystem: memory.fileSystem, host: { platform }, native: native ?? (() => addon) };
+	return {
+		fileSystem: memory.fileSystem,
+		host: { platform },
+		installedStudio,
+		native: native ?? (() => addon),
+	};
 }
 
 function find(setup: Setup, environment: Environment = {}, studioPath?: string): unknown {
@@ -164,6 +174,20 @@ describe(findStudioExecutable, () => {
 			source: "application",
 		});
 		expect(find({ platform: "darwin" })).toBeUndefined();
+	});
+
+	it("should find nothing with the no-installed-Studio lookup", () => {
+		expect.assertions(3);
+
+		const none = { installedStudio: noInstalledStudio };
+
+		expect(find({ ...none, files: [MACOS_STUDIO_PATH], platform: "darwin" })).toBeUndefined();
+		expect(
+			find({ ...none, files: [LINK_EXE], registry: { [LINK_KEY]: `"${LINK_EXE}" %1` } }),
+		).toBeUndefined();
+		expect(
+			find({ ...none, files: [ENV_EXE] }, { [STUDIO_PATH_VARIABLE]: ENV_EXE }),
+		).toStrictEqual({ path: ENV_EXE, source: "environment" });
 	});
 
 	it("should find nothing on Linux", () => {

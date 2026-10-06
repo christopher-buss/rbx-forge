@@ -22,6 +22,7 @@ import type {
 } from "../../src/seams/reporter.ts";
 import type { Seams } from "../../src/seams/seams.ts";
 import type { Signals } from "../../src/seams/signals.ts";
+import { noInstalledStudio } from "../../src/studio/discover.ts";
 import type { StudioLauncher } from "../../src/studio/launcher.ts";
 import type { DetachedLauncher } from "../../src/supervisor/detached-launcher.ts";
 import type { SupervisorLauncher } from "../../src/supervisor/launcher.ts";
@@ -98,10 +99,8 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 		detachedSupervisor: vi.fn<DetachedLauncher>(unreachable("detached supervisor")),
 		fileSystem: createMemoryFileSystem().fileSystem,
 		host: createTestHost(),
-		ipc: {
-			connectAsync: vi.fn<IpcTransport["connectAsync"]>(unreachable("ipc")),
-			listenAsync: vi.fn<IpcTransport["listenAsync"]>(unreachable("ipc")),
-		},
+		installedStudio: noInstalledStudio,
+		ipc: unreachableIpc(),
 		native: unreachable("native addon"),
 		network: unreachableNetwork(),
 		processRunner: vi.fn<ProcessRunner>(unreachable("process runner")),
@@ -164,6 +163,13 @@ export function createCommandContext(overrides: Partial<CommandContext> = {}): C
 function unreachable(seam: string): () => never {
 	return () => {
 		throw new Error(`the test reached the ${seam} seam without providing it`);
+	};
+}
+
+function unreachableIpc(): IpcTransport {
+	return {
+		connectAsync: vi.fn<IpcTransport["connectAsync"]>(unreachable("ipc")),
+		listenAsync: vi.fn<IpcTransport["listenAsync"]>(unreachable("ipc")),
 	};
 }
 

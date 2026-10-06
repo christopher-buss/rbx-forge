@@ -8,7 +8,7 @@ import { readVariable, withVariables } from "../process/environment.ts";
 import type { ChildProcessBackend } from "../process/process-runner.ts";
 import type { FileSystem } from "../seams/file-system.ts";
 import type { Environment } from "../seams/seams.ts";
-import type { StudioExecutable } from "./discover.ts";
+import type { InstalledStudio, StudioExecutable } from "./discover.ts";
 import { findStudioExecutable } from "./discover.ts";
 import { createSnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
 import type { SnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
@@ -71,6 +71,7 @@ export type StudioLauncher = (launch: StudioLaunch) => Promise<StudioLaunchOutco
 /** What the launcher starts processes with. */
 export interface StudioLaunchBackend extends ChildProcessBackend {
 	fileSystem: Pick<FileSystem, "statSync">;
+	installedStudio: InstalledStudio;
 	native: NativeLoader;
 }
 
