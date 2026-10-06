@@ -323,13 +323,14 @@ Options for the Roblox Studio that `stop`, `down`, and the idle timeout close.
 
 - Type: `"user" | "hidden"`
 - Default: `"user"` for `start`; `"hidden"` for `up --studio` and `open` on
-  Windows.
+  Windows and macOS.
 - Flag: `--desktop <user|hidden>` on `start`, `up`, and `open`.
 
 Choose where a new Studio opens. The flag overrides the config file; without
-either, the command selects its default. On macOS and Linux Studio always runs
-on the user's desktop. An already open Studio keeps its desktop. See
-[Hidden desktop](./studio.md#hidden-desktop).
+either, the command selects its default. On Windows, hidden is a separate
+desktop; on macOS, Studio opens in the background, kept hidden and never
+activated. On Linux Studio always runs on the user's desktop. An already open
+Studio keeps its desktop. See [Hidden desktop](./studio.md#hidden-desktop).
 
 ```ts
 defineConfig({

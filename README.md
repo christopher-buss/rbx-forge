@@ -104,8 +104,8 @@ flags:
   (config `syncback.runOnStart`).
 - `--force`: when a crashed earlier session still has processes after the wait,
   kill them, each verified as that session's own.
-- `--desktop <user|hidden>`: where Studio opens on Windows. `start` defaults to
-  `user`; `up --studio` and `open` default to `hidden`.
+- `--desktop <user|hidden>`: where Studio opens on Windows and macOS. `start`
+  defaults to `user`; `up --studio` and `open` default to `hidden`.
 - `--studio-path <path>`: the Roblox Studio executable to start (see
   [Opening Studio](./docs/studio.md#opening-studio)).
 

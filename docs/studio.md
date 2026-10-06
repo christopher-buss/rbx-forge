@@ -74,8 +74,16 @@ user session. Forge opens it or makes it and keeps it for later launches.
 
 `forge start` opens Studio on the user's desktop by default. Set
 `studio.desktop` in the config or pass `--desktop user` / `--desktop hidden` to
-`start`, `up --studio`, or `open`; the flag wins. On macOS and Linux the effective
-desktop is always `user`. A found Studio stays on its existing desktop.
+`start`, `up --studio`, or `open`; the flag wins. On Linux the effective desktop
+is always `user`. A found Studio stays on its existing desktop.
+
+On macOS, `hidden` has no separate desktop: forge launches Studio through
+LaunchServices without activating it, so it never takes focus, and hides it.
+Studio shows itself a few times while it loads; a watcher hides it again each
+time, until the place is open, so its windows can appear behind the front app
+for a moment. `start` and `--desktop user` bring Studio to the front. When forge
+finds no Studio app bundle, `open -g -j` opens the place in the background, and
+forge warns that it cannot keep Studio hidden.
 
 `restart` reopens Studio on its previous desktop. When Windows cannot launch
 a hidden Studio directly, forge uses the platform launcher on the user desktop
