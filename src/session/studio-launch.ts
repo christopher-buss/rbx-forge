@@ -109,7 +109,7 @@ async function launchMarkedAsync(
 	const opened = await openPlaceAsync(steps, config, {
 		beforeLaunch: async () => {
 			signal.throwIfAborted();
-			plugin = await prepareRojoPluginAsync(steps, config, info.protocolVersion, signal);
+			plugin = await prepareRojoPluginAsync(steps, config, info, signal);
 			signal.throwIfAborted();
 		},
 		desktop: resolveStudioDesktop(config, steps.seams.host.platform, defaultDesktop, desktop),

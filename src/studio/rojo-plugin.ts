@@ -59,7 +59,7 @@ const PROTOCOL = /\bprotocolVersion\s*=\s*(\d+)\s*[,}]/u;
  *
  * @param context - The original project, addon, file system, and reporter.
  * @param config - The project's Rojo command.
- * @param protocolVersion - The validated session server's protocol.
+ * @param server - The validated session server's protocol and Rojo version.
  * @param signal - The session's end signal.
  * @returns Capabilities of the prepared plugin.
  * @rejects Installation failure, protocol mismatch, atomic write failure, or cancellation.
@@ -67,7 +67,7 @@ const PROTOCOL = /\bprotocolVersion\s*=\s*(\d+)\s*[,}]/u;
 export async function prepareRojoPluginAsync(
 	context: CommandContext,
 	config: Pick<ResolvedConfig, "rojoAlias">,
-	protocolVersion: number,
+	server: { protocolVersion: number; serverVersion: string },
 	signal: AbortSignal,
 ): Promise<PluginCapabilities> {
 	const model = pluginPath(context);
@@ -85,7 +85,7 @@ export async function prepareRojoPluginAsync(
 		return MANUAL;
 	}
 
-	const decision = decide(context, sources, protocolVersion);
+	const decision = decide(context, model, sources, server);
 	if (decision !== "patch") {
 		return decision;
 	}
@@ -187,10 +187,29 @@ function upstream(context: CommandContext): PluginCapabilities {
 	return { autoConnect: false, source: "upstream", syncAcknowledgement: false };
 }
 
+function mismatch(context: CommandContext, model: string, serverVersion: string): string {
+	let version: string;
+	try {
+		const [value] = context.seams.native().readModelStringValues(model, [["Rojo", "Version"]]);
+		assert(value !== undefined);
+		version = value.trim();
+	} catch {
+		return `The managed Rojo plugin does not match Rojo ${serverVersion}.`;
+	}
+
+	return version === serverVersion
+		? "The managed Rojo plugin sources were changed by hand."
+		: `The managed Rojo plugin is from Rojo ${version} and does not match Rojo ${serverVersion}.`;
+}
+
 function decide(
 	context: CommandContext,
+	model: string,
 	sources: Array<string>,
-	serverProtocol: number,
+	{
+		protocolVersion: serverProtocol,
+		serverVersion,
+	}: { protocolVersion: number; serverVersion: string },
 ): "patch" | PluginCapabilities {
 	const [app, session, configSource] = sources;
 	assert(app !== undefined);
@@ -212,7 +231,7 @@ function decide(
 	if (!isRecognized) {
 		return manual(
 			context,
-			"The managed Rojo plugin has unsupported or manually changed sources.",
+			`${mismatch(context, model, serverVersion)} Restore it with the project's rojo plugin install, then restart Studio.`,
 		);
 	}
 
