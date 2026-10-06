@@ -1,5 +1,4 @@
 import path from "node:path";
-import process from "node:process";
 
 /** How Stryker ended: its exit code, or `null` when a signal killed it. */
 export interface StrykerExit {
@@ -11,17 +10,17 @@ export type Outcome = "complete" | "failed" | "partial";
 export interface MutationFiles {
 	readonly copy: (from: string, to: string) => void;
 	readonly mkdir: (directory: string) => void;
+	/** Replaces the file atomically: readers see the old or new contents. */
+	readonly publish: (file: string, contents: string) => void;
 	/** The file's contents, or `undefined` when it does not exist. */
 	readonly read: (file: string) => string | undefined;
-	readonly rename: (from: string, to: string) => void;
-	readonly write: (file: string, contents: string) => void;
 }
 
 export interface MutationDependencies {
 	readonly files: MutationFiles;
 	/** The `incrementalFile` of `stryker.config.ts`. */
 	readonly localFile: string;
-	run: () => StrykerExit;
+	readonly run: () => StrykerExit;
 	/** The report every worktree of the clone shares. */
 	readonly sharedFile: string;
 }
@@ -75,7 +74,8 @@ export function shouldPublish(
 }
 
 /**
- * Seed the local report from the shared one, run Stryker, then publish.
+ * Seed the local report from the shared one, run Stryker, then publish what it
+ * wrote; Stryker exits 1 on a crash too, so an unchanged file is not a report.
  * @param dependencies - Files, paths, and the Stryker run.
  * @returns Stryker's exit code.
  */
@@ -87,14 +87,14 @@ export function runMutation(dependencies: MutationDependencies): number {
 		files.copy(sharedFile, localFile);
 	}
 
+	const before = files.read(localFile);
 	const exit = dependencies.run();
 	const outcome = classifyExit(exit);
-	const report = parseReport(files.read(localFile));
+	const after = files.read(localFile);
+	const report = after === before ? undefined : parseReport(after);
 	if (report !== undefined && shouldPublish(outcome, report, files.read(sharedFile))) {
-		const temporary = `${sharedFile}.${process.pid}.tmp`;
 		files.mkdir(path.dirname(sharedFile));
-		files.write(temporary, JSON.stringify({ ...report, complete: outcome === "complete" }));
-		files.rename(temporary, sharedFile);
+		files.publish(sharedFile, JSON.stringify({ ...report, complete: outcome === "complete" }));
 	}
 
 	return exit.code ?? 1;

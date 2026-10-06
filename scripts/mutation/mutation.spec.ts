@@ -6,12 +6,18 @@ import { classifyExit, countMutants, runMutation, shouldPublish } from "./mutati
 const SHARED = "/repo/.git/stryker/incremental.json";
 const LOCAL = "reports/stryker-incremental.json";
 
-function report(mutants: number, complete: "absent" | boolean = "absent"): string {
-	const files = { "src/a.ts": { mutants: Array.from({ length: mutants }, (_, id) => ({ id })) } };
+function reportOf(mutants: number): Report {
+	return {
+		files: { "src/a.ts": { mutants: Array.from({ length: mutants }, (_, id) => ({ id })) } },
+	};
+}
+
+function reportJson(mutants: number, complete: "absent" | boolean = "absent"): string {
+	const { files } = reportOf(mutants);
 	return JSON.stringify(complete === "absent" ? { files } : { complete, files });
 }
 
-function fake(exit: StrykerExit, initial: Record<string, string> = {}) {
+function fake(exit: StrykerExit, initial: Record<string, string> = {}, written?: string) {
 	const files = new Map(Object.entries(initial));
 	const order: Array<string> = [];
 	const dependencies: MutationDependencies = {
@@ -23,18 +29,18 @@ function fake(exit: StrykerExit, initial: Record<string, string> = {}) {
 			mkdir: (directory) => {
 				order.push(`mkdir ${directory}`);
 			},
-			read: (file) => files.get(file),
-			rename: (from, to) => {
-				files.set(to, files.get(from) ?? "");
-				files.delete(from);
-			},
-			write: (file, contents) => {
+			publish: (file, contents) => {
 				files.set(file, contents);
 			},
+			read: (file) => files.get(file),
 		},
 		localFile: LOCAL,
 		run: () => {
 			order.push("run");
+			if (written !== undefined) {
+				files.set(LOCAL, written);
+			}
+
 			return exit;
 		},
 		sharedFile: SHARED,
@@ -45,10 +51,6 @@ function fake(exit: StrykerExit, initial: Record<string, string> = {}) {
 		order,
 		shared: (): unknown => JSON.parse(files.get(SHARED) ?? "null"),
 	};
-}
-
-function parsed(mutants: number): Report {
-	return { files: { "src/a.ts": { mutants: Array.from({ length: mutants }) } } };
 }
 
 describe(classifyExit, () => {
@@ -88,40 +90,40 @@ describe(shouldPublish, () => {
 	it("should always publish a complete run", () => {
 		expect.assertions(1);
 
-		expect(shouldPublish("complete", parsed(1), report(5, true))).toBeTrue();
+		expect(shouldPublish("complete", reportOf(1), reportJson(5, true))).toBeTrue();
 	});
 
 	it("should never publish a failed run", () => {
 		expect.assertions(1);
 
-		expect(shouldPublish("failed", parsed(1), undefined)).toBeFalse();
+		expect(shouldPublish("failed", reportOf(1), undefined)).toBeFalse();
 	});
 
 	it("should publish a partial run when no shared report exists", () => {
 		expect.assertions(1);
 
-		expect(shouldPublish("partial", parsed(1), undefined)).toBeTrue();
+		expect(shouldPublish("partial", reportOf(1), undefined)).toBeTrue();
 	});
 
 	it("should publish a partial run over a malformed shared report", () => {
 		expect.assertions(2);
 
-		expect(shouldPublish("partial", parsed(1), "{")).toBeTrue();
-		expect(shouldPublish("partial", parsed(1), "{}")).toBeTrue();
+		expect(shouldPublish("partial", reportOf(1), "{")).toBeTrue();
+		expect(shouldPublish("partial", reportOf(1), "{}")).toBeTrue();
 	});
 
 	it("should keep a complete shared report over a partial run", () => {
 		expect.assertions(1);
 
-		expect(shouldPublish("partial", parsed(9), report(1, true))).toBeFalse();
+		expect(shouldPublish("partial", reportOf(9), reportJson(1, true))).toBeFalse();
 	});
 
 	it("should replace a smaller partial shared report with a partial run", () => {
 		expect.assertions(3);
 
-		expect(shouldPublish("partial", parsed(3), report(2, false))).toBeTrue();
-		expect(shouldPublish("partial", parsed(3), report(2))).toBeTrue();
-		expect(shouldPublish("partial", parsed(2), report(2, false))).toBeFalse();
+		expect(shouldPublish("partial", reportOf(3), reportJson(2, false))).toBeTrue();
+		expect(shouldPublish("partial", reportOf(3), reportJson(2))).toBeTrue();
+		expect(shouldPublish("partial", reportOf(2), reportJson(2, false))).toBeFalse();
 	});
 });
 
@@ -129,7 +131,7 @@ describe(runMutation, () => {
 	it("should seed the local report from the shared one before Stryker runs", () => {
 		expect.assertions(2);
 
-		const { dependencies, files, order } = fake({ code: 0 }, { [SHARED]: report(4, true) });
+		const { dependencies, files, order } = fake({ code: 0 }, { [SHARED]: reportJson(4, true) });
 		runMutation(dependencies);
 
 		expect(order.slice(0, 3)).toStrictEqual([
@@ -137,17 +139,13 @@ describe(runMutation, () => {
 			`copy ${SHARED} ${LOCAL}`,
 			"run",
 		]);
-		expect(files.get(LOCAL)).toBe(report(4, true));
+		expect(files.get(LOCAL)).toBe(reportJson(4, true));
 	});
 
 	it("should publish a complete run marked complete and return Stryker's code", () => {
 		expect.assertions(3);
 
-		const { dependencies, files, order, shared } = fake({ code: 1 });
-		dependencies.run = () => {
-			files.set(LOCAL, report(2));
-			return { code: 1 };
-		};
+		const { dependencies, order, shared } = fake({ code: 1 }, {}, reportJson(2));
 
 		expect(runMutation(dependencies)).toBe(1);
 		expect(shared()).toStrictEqual({
@@ -160,11 +158,7 @@ describe(runMutation, () => {
 	it("should publish a partial run marked partial", () => {
 		expect.assertions(2);
 
-		const { dependencies, files, shared } = fake({ code: 130 });
-		dependencies.run = () => {
-			files.set(LOCAL, report(2));
-			return { code: 130 };
-		};
+		const { dependencies, shared } = fake({ code: 130 }, {}, reportJson(2));
 
 		expect(runMutation(dependencies)).toBe(130);
 		expect(shared()).toMatchObject({ complete: false });
@@ -173,17 +167,20 @@ describe(runMutation, () => {
 	it("should leave the shared report alone when Stryker fails", () => {
 		expect.assertions(2);
 
-		const { dependencies, files } = fake({ code: 2 }, { [SHARED]: report(1, true) });
-		files.set(LOCAL, report(5));
+		const { dependencies, files } = fake(
+			{ code: 2 },
+			{ [SHARED]: reportJson(1, true) },
+			reportJson(5),
+		);
 
 		expect(runMutation(dependencies)).toBe(2);
-		expect(files.get(SHARED)).toBe(report(1, true));
+		expect(files.get(SHARED)).toBe(reportJson(1, true));
 	});
 
 	it("should publish nothing when the local report is malformed", () => {
 		expect.assertions(1);
 
-		const { dependencies, files } = fake({ code: 0 }, { [LOCAL]: "{" });
+		const { dependencies, files } = fake({ code: 0 }, {}, "{");
 		runMutation(dependencies);
 
 		expect(files.has(SHARED)).toBeFalse();
@@ -195,6 +192,24 @@ describe(runMutation, () => {
 		const { dependencies, files } = fake({ code: null });
 
 		expect(runMutation(dependencies)).toBe(1);
+		expect(files.has(SHARED)).toBeFalse();
+	});
+
+	it("should leave the shared report alone when a crash leaves the seed in place", () => {
+		expect.assertions(2);
+
+		const { dependencies, files } = fake({ code: 1 }, { [SHARED]: reportJson(3, false) });
+
+		expect(runMutation(dependencies)).toBe(1);
+		expect(files.get(SHARED)).toBe(reportJson(3, false));
+	});
+
+	it("should publish nothing when an interrupted run leaves a stale local report", () => {
+		expect.assertions(2);
+
+		const { dependencies, files } = fake({ code: 130 }, { [LOCAL]: reportJson(2) });
+
+		expect(runMutation(dependencies)).toBe(130);
 		expect(files.has(SHARED)).toBeFalse();
 	});
 });
