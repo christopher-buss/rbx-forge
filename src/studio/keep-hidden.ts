@@ -2,7 +2,9 @@ import { type } from "arktype";
 
 import type { ChildProcessBackend } from "../process/process-runner.ts";
 import type { Environment, Seams } from "../seams/seams.ts";
+import { parseStatus } from "../session/status.ts";
 import { STUDIO_OPEN_BOUND_MS } from "../session/studio-readiness.ts";
+import { forgeFiles, listSessions, sessionFiles } from "../supervisor/session-files.ts";
 import { hasStudioLock } from "./lock-file.ts";
 
 /** How often the watcher reads Studio's app visibility. */
@@ -60,14 +62,17 @@ export function createKeepHiddenLauncher(
 /**
  * Hide one exact macOS Studio every time it shows itself while loading,
  * until its place lock exists and it has stayed hidden for
- * {@link KEEP_HIDDEN_QUIET_MS}, it exits, or the open bound passes.
+ * {@link KEEP_HIDDEN_QUIET_MS}, it exits, a session records another desktop
+ * for it, or the open bound passes.
  *
- * @param seams - The place lock, native process identity, and polling clock.
+ * @param seams - The place lock, session states, native process identity, and polling clock.
  * @param payload - The {@link KeepHiddenTarget} as JSON.
+ * @param root - The project directory, whose sessions may show Studio.
  */
 export async function keepStudioHiddenAsync(
 	seams: Pick<Seams, "clock" | "fileSystem" | "native">,
 	payload: string,
+	root: string,
 ): Promise<void> {
 	const { pid, place, startTime } = keepHiddenTarget.assert(JSON.parse(payload));
 	const pinned = seams.native().pinProcess(pid);
@@ -81,6 +86,10 @@ export async function keepStudioHiddenAsync(
 	let isOpen = false;
 	while (pinned.isAlive() && clock.now() < deadline) {
 		if (pinned.appHidden() === false) {
+			if (isShownBySession(seams.fileSystem, root, { pid, startTime })) {
+				return;
+			}
+
 			pinned.setAppHidden(true);
 			quietSince = clock.now();
 		}
@@ -100,4 +109,19 @@ export async function keepStudioHiddenAsync(
 
 function ignoreError(): void {
 	// The launch already succeeded; the watcher is best effort.
+}
+
+function isShownBySession(
+	fileSystem: Seams["fileSystem"],
+	root: string,
+	{ pid, startTime }: Pick<KeepHiddenTarget, "pid" | "startTime">,
+): boolean {
+	const forge = forgeFiles(root);
+	return listSessions(fileSystem, forge).some((id) => {
+		const { state } = sessionFiles(forge, id);
+		const studio = fileSystem.existsSync(state)
+			? parseStatus(JSON.parse(fileSystem.readFileSync(state, "utf8")))?.services.studio
+			: undefined;
+		return studio?.pid === pid && studio.startTime === startTime && studio.desktop === "user";
+	});
 }

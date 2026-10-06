@@ -15,6 +15,7 @@ import {
 
 const PLACE = path.join(PROJECT, "game.rbxl");
 const TARGET = { pid: 42, place: PLACE, startTime: "42" };
+const STATE = path.join(PROJECT, ".forge", "sessions", "s1", "state.json");
 
 interface Script {
 	/** Studio exits at this time. */
@@ -23,9 +24,36 @@ interface Script {
 	opensAt?: number;
 	/** Studio shows itself at these times. */
 	showsAt?: Array<number>;
+	/**
+	 * `forge show` records the `user` desktop and shows Studio at this time.
+	 */
+	userShowsAt?: number;
 }
 
-function watching({ exitsAt, opensAt, showsAt = [] }: Script = {}) {
+function sessionState(desktop: "hidden" | "user") {
+	return {
+		phase: "ready",
+		pid: 7,
+		running: true,
+		services: {
+			compiler: { building: false, owner: null, status: "off" },
+			rojo: { owner: null, status: "off" },
+			studio: {
+				desktop,
+				owner: "start",
+				pid: 42,
+				place: PLACE,
+				startTime: "42",
+				status: "open",
+			},
+			syncback: { status: "off" },
+		},
+		sessionId: "s1",
+		startedAt: "2026-01-01T00:00:00.000Z",
+	};
+}
+
+function watching({ exitsAt, opensAt, showsAt = [], userShowsAt }: Script = {}) {
 	let now = 0;
 	const memory = createMemoryFileSystem({ "game.rbxl": "place" });
 	const native = createFakeNative({
@@ -45,6 +73,14 @@ function watching({ exitsAt, opensAt, showsAt = [] }: Script = {}) {
 					pending.shift();
 					studio.appHidden = false;
 					shows.push(now);
+				}
+
+				if (userShowsAt !== undefined && now >= userShowsAt && studio.appHidden === true) {
+					memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
+					// A session directory without a state yet.
+					memory.fileSystem.mkdirSync(path.join(PROJECT, ".forge", "sessions", "s0"));
+					memory.fileSystem.writeFileSync(STATE, JSON.stringify(sessionState("user")));
+					studio.appHidden = false;
 				}
 
 				if (opensAt !== undefined && now >= opensAt) {
@@ -77,7 +113,7 @@ function watching({ exitsAt, opensAt, showsAt = [] }: Script = {}) {
 						};
 			};
 
-			await keepStudioHiddenAsync(seams, JSON.stringify(target));
+			await keepStudioHiddenAsync(seams, JSON.stringify(target), PROJECT);
 		},
 		shows,
 		studio,
@@ -112,6 +148,16 @@ describe(keepStudioHiddenAsync, () => {
 		await run.run();
 
 		expect(run.now()).toBe(2000 + KEEP_HIDDEN_QUIET_MS);
+	});
+
+	it("should leave Studio shown once its session records the user desktop", async () => {
+		expect.assertions(2);
+
+		const run = watching({ opensAt: 5000, showsAt: [1000], userShowsAt: 2000 });
+		await run.run();
+
+		expect(run.hides).toStrictEqual([1000]);
+		expect(run.studio.appHidden).toBeFalse();
 	});
 
 	it("should stop when Studio exits", async () => {

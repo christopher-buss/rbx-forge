@@ -68,7 +68,7 @@ function createSupervisorSeams(): Seams {
 }
 
 if (process.argv[2] === KEEP_HIDDEN_FLAG) {
-	await keepStudioHiddenAsync(createSupervisorSeams(), process.argv[3] ?? "");
+	await keepStudioHiddenAsync(createSupervisorSeams(), process.argv[3] ?? "", process.cwd());
 	process.exit();
 }
 
