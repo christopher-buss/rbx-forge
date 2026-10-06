@@ -111,7 +111,9 @@ hooks {
     }
     ["commit-msg"] {
         steps {
-            ["conventional-commit"] = Builtins.check_conventional_commit
+            ["commitlint"] {
+                check = "pnpm exec commitlint --edit {{commit_msg_file}}"
+            }
         }
     }
     ["post-merge"] {
