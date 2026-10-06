@@ -19,7 +19,7 @@ export const START_FLAGS: ReadonlyArray<FlagDefinition> = [
 		name: "desktop",
 		config: "studio.desktop",
 		kind: "string",
-		text: "Studio desktop (default: user).",
+		text: "Studio desktop (default: user; Linux ignores hidden).",
 		value: "user|hidden",
 	},
 	{
