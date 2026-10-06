@@ -26,6 +26,7 @@ process.exitCode = await runCliAsync(process.argv.slice(2), {
 	seams: createNodeSeams({
 		input: process.stdin,
 		nativeDirectory: process.env["RBX_FORGE_NATIVE_DIR"],
+		noInstalledStudio: process.env["RBX_FORGE_TEST_NO_INSTALLED_STUDIO"] === "1",
 		output: process.stdout,
 		// Built next to this file (`dist/supervisor.mjs`).
 		supervisorEntry: fileURLToPath(new URL("supervisor.mjs", import.meta.url)),

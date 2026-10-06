@@ -11,9 +11,6 @@ import type { Environment, Seams } from "../seams/seams.ts";
 /** The variable that names the Studio executable. */
 export const STUDIO_PATH_VARIABLE = "RBX_FORGE_STUDIO_PATH";
 
-/** E2E isolation: `1` skips the installed Studio (registry and application). */
-export const NO_INSTALLED_STUDIO_VARIABLE = "RBX_FORGE_TEST_NO_INSTALLED_STUDIO";
-
 /**
  * Registry keys (under `HKEY_CURRENT_USER`) whose default value is the
  * command that opens Studio, best first: the `roblox-studio:` link handler,
@@ -44,11 +41,19 @@ export interface StudioExecutable {
 	source: StudioSource;
 }
 
-/** The seams that find Studio. */
-export interface DiscoverySeams {
+/** The seams that find the installed Studio. */
+export interface InstalledStudioSeams {
 	fileSystem: Pick<FileSystem, "statSync">;
 	host: Pick<Host, "platform">;
 	native: Seams["native"];
+}
+
+/** Finds the Studio the Roblox installer put on this computer. */
+export type InstalledStudio = (seams: InstalledStudioSeams) => StudioExecutable | undefined;
+
+/** The seams that find Studio. */
+export interface DiscoverySeams extends InstalledStudioSeams {
+	installedStudio: InstalledStudio;
 }
 
 /** The executable of a registry command: quoted, or up to `.exe`. */
@@ -67,15 +72,14 @@ export function commandExecutable(command: string): string | undefined {
 
 /**
  * Find the Roblox Studio executable, in this order: the `--studio-path`
- * flag, the {@link STUDIO_PATH_VARIABLE} variable (empty means unset), the
- * Windows registry ({@link STUDIO_REGISTRY_KEYS}), then
- * {@link MACOS_STUDIO_PATH}, unless {@link NO_INSTALLED_STUDIO_VARIABLE} is
- * `1`. A found path must be a file.
+ * flag, the {@link STUDIO_PATH_VARIABLE} variable (empty means unset), then
+ * the installed Studio (`seams.installedStudio`). A found path must be a
+ * file.
  *
- * @param seams - The file system, the OS, and the addon (registry reads).
+ * @param seams - The file system, the OS, the addon, and the installed
+ *   Studio lookup.
  * @param options - The flag's value and the environment.
- * @param options.env - Holds {@link STUDIO_PATH_VARIABLE} and
- *   {@link NO_INSTALLED_STUDIO_VARIABLE}.
+ * @param options.env - Holds {@link STUDIO_PATH_VARIABLE}.
  * @param options.studioPath - The `--studio-path` flag, if given.
  * @returns The executable, or `undefined` when none is found: forge then
  *   opens the place through the platform launcher.
@@ -95,10 +99,18 @@ export function findStudioExecutable(
 		return override(seams, variable, "environment", STUDIO_PATH_VARIABLE);
 	}
 
-	if (readVariable(env, NO_INSTALLED_STUDIO_VARIABLE, seams.host.platform) === "1") {
-		return undefined;
-	}
+	return seams.installedStudio(seams);
+}
 
+/**
+ * The installed Studio: the Windows registry ({@link STUDIO_REGISTRY_KEYS})
+ * on Windows, {@link MACOS_STUDIO_PATH} on macOS. A found path must be a file.
+ *
+ * @param seams - The file system, the OS, and the addon (registry reads).
+ * @returns The executable, or `undefined` when none is installed.
+ * @throws {ForgeError} `native_missing` when Windows has no addon.
+ */
+export function findInstalledStudio(seams: InstalledStudioSeams): StudioExecutable | undefined {
 	if (seams.host.platform === "win32") {
 		return fromRegistry(seams);
 	}
@@ -106,6 +118,15 @@ export function findStudioExecutable(
 	return seams.host.platform === "darwin" && isFile(seams, MACOS_STUDIO_PATH)
 		? { path: MACOS_STUDIO_PATH, source: "application" }
 		: undefined;
+}
+
+/**
+ * No installed Studio, so discovery ends at the platform launcher.
+ *
+ * @returns `undefined`.
+ */
+export function noInstalledStudio(): undefined {
+	return undefined;
 }
 
 /**
@@ -135,7 +156,7 @@ export function withStudioPath(
 		: environment;
 }
 
-function isFile(seams: Pick<DiscoverySeams, "fileSystem">, file: string): boolean {
+function isFile(seams: Pick<InstalledStudioSeams, "fileSystem">, file: string): boolean {
 	try {
 		return seams.fileSystem.statSync(file).isFile();
 	} catch {
@@ -180,7 +201,7 @@ function readRegistry(
 	}
 }
 
-function fromRegistry(seams: DiscoverySeams): StudioExecutable | undefined {
+function fromRegistry(seams: InstalledStudioSeams): StudioExecutable | undefined {
 	// Outside the read's catch: a missing addon is `native_missing`, never "no
 	// Studio".
 	const { readUserRegistryDefault } = seams.native();

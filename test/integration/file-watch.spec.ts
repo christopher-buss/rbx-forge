@@ -13,6 +13,7 @@ describe("real directory watch", () => {
 		const { fileSystem } = createNodeSeams({
 			input: new PassThrough(),
 			nativeDirectory: undefined,
+			noInstalledStudio: false,
 			output: new PassThrough(),
 			supervisorEntry: "/forge/supervisor.mjs",
 		});

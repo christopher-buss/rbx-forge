@@ -12,7 +12,7 @@ import { ForgeError } from "../errors.ts";
 import type { DetachedSpawn, NativeLoader } from "../native/addon.ts";
 import type { ChildProcessRunner } from "../seams/child-process.ts";
 import type { Host } from "../seams/host.ts";
-import { MACOS_STUDIO_PATH, STUDIO_REGISTRY_KEYS } from "./discover.ts";
+import { findInstalledStudio, MACOS_STUDIO_PATH, STUDIO_REGISTRY_KEYS } from "./discover.ts";
 import type { StudioLaunch, StudioLauncher } from "./launcher.ts";
 import {
 	createStudioLauncher,
@@ -63,6 +63,7 @@ function makeLauncher({
 				clock: clock.clock,
 				fileSystem: memory.fileSystem,
 				host: { ...createTestSeams().host, kill: vi.fn<Host["kill"]>(), platform },
+				installedStudio: findInstalledStudio,
 				native: nativeLoader,
 			},
 			"/forge/supervisor.mjs",

@@ -5,9 +5,9 @@
  * - `RBX_FORGE_STUDIO_PATH` names a file that does not exist (a launch fails
  *   with `studio_launch_failed`). A test that opens a place sets it to a
  *   stand-in.
- * - `RBX_FORGE_TEST_NO_INSTALLED_STUDIO=1`: forge skips the registry and
- *   `/Applications`, so a test that empties `RBX_FORGE_STUDIO_PATH` reaches
- *   the platform launcher, not the installed Studio.
+ * - `RBX_FORGE_TEST_NO_INSTALLED_STUDIO=1`: forge skips the installed-Studio
+ *   lookup, so a test that empties `RBX_FORGE_STUDIO_PATH` reaches the
+ *   platform launcher (the fixture `open` or `xdg-open` on its `PATH`).
  * - `LOCALAPPDATA`, `USERPROFILE`, and `HOME` point at a scratch home, so
  *   auto-recovery handling never touches the real AutoSaves folders. The
  *   real values stay in `RBX_FORGE_TEST_REAL_<name>` for the opt-in real

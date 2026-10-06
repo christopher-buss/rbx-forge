@@ -21,6 +21,7 @@ import { nodeClock } from "./seams/clock.ts";
 import { nodeFileSystem } from "./seams/file-system.ts";
 import { createNodeSeams } from "./seams/node-seams.ts";
 import type { Reporter } from "./seams/reporter.ts";
+import type { Seams } from "./seams/seams.ts";
 import { createSignals } from "./seams/signals.ts";
 import type { Pause } from "./session/pause.ts";
 import {
@@ -50,16 +51,23 @@ function readRequest(): ForgeError | SessionRequest {
 	}
 }
 
+/**
+ * The real seams of a supervisor process.
+ *
+ * @returns Seams that never prompt: the run is not interactive.
+ */
+function createSupervisorSeams(): Seams {
+	return createNodeSeams({
+		input: process.stdin,
+		nativeDirectory: process.env["RBX_FORGE_NATIVE_DIR"],
+		noInstalledStudio: process.env["RBX_FORGE_TEST_NO_INSTALLED_STUDIO"] === "1",
+		output: process.stderr,
+		supervisorEntry: import.meta.filename,
+	});
+}
+
 if (process.argv[2] === "--watch-hidden-lighting") {
-	await runSnapshotLightingAsync(
-		createNodeSeams({
-			input: process.stdin,
-			nativeDirectory: process.env["RBX_FORGE_NATIVE_DIR"],
-			output: process.stderr,
-			supervisorEntry: import.meta.filename,
-		}),
-		process.argv[3] ?? "",
-	);
+	await runSnapshotLightingAsync(createSupervisorSeams(), process.argv[3] ?? "");
 	process.exit();
 }
 
@@ -194,13 +202,7 @@ async function superviseAsync(): Promise<number> {
 				env,
 				interactive: false,
 				reporter,
-				seams: createNodeSeams({
-					// Never prompts: the run is not interactive.
-					input: process.stdin,
-					nativeDirectory: env["RBX_FORGE_NATIVE_DIR"],
-					output: process.stderr,
-					supervisorEntry: import.meta.filename,
-				}),
+				seams: createSupervisorSeams(),
 			},
 			REQUEST,
 			{ ...SUPERVISE, onReady },
