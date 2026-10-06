@@ -54,7 +54,7 @@
 		"knip": "knip",
 		"lint": "isentinel-lint",
 		"lint:fix": "isentinel-lint --fix",
-		"mutation": "stryker run stryker.config.ts",
+		"mutation": "node scripts/mutation/run.ts",
 		"release": "bumpp",
 		"release:bootstrap": "node scripts/release/bootstrap.ts",
 		"release:publish": "node scripts/release/publish.ts",

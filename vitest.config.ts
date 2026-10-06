@@ -45,6 +45,7 @@ export default defineConfig({
 				// Hook entries, like `src/cli.ts`, touch the process.
 				"scripts/worktree/{create,remove}.ts",
 				"scripts/release/{bootstrap,check,effects,publish}.ts",
+				"scripts/mutation/run.ts",
 			],
 			include: ["src/**/*.ts", "scripts/**/*.ts"],
 			thresholds: {
