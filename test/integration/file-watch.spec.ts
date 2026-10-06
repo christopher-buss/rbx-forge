@@ -3,6 +3,7 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { createNodeSeams } from "../../src/seams/node-seams.ts";
+import { waitUntilWatchingAsync } from "../helpers/real-file-watch.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 
 describe("real directory watch", () => {
@@ -21,6 +22,7 @@ describe("real directory watch", () => {
 		onTestFinished(() => {
 			watcher.close();
 		});
+		await waitUntilWatchingAsync(watcher, directory);
 		const filenames: Array<null | string> = [];
 		watcher.on("change", (_event: string, filename: null | string) => {
 			filenames.push(filename);

@@ -37,10 +37,15 @@ describe.skipIf(!HAS_ROJO)("real Rojo wrapper", () => {
 		const moduleUrl = pathToFileURL(
 			path.resolve(import.meta.dirname, "../../src/seams/file-system.ts"),
 		).href;
+		const helperUrl = pathToFileURL(
+			path.resolve(import.meta.dirname, "../helpers/real-file-watch.ts"),
+		).href;
 		const source = `import { nodeFileSystem as fs } from ${JSON.stringify(moduleUrl)};
+import { waitUntilWatchingAsync } from ${JSON.stringify(helperUrl)};
 const directory = ${JSON.stringify(alias)};
 const watch = fs.watch(directory);
-watch.once('change', (_event, name) => { console.log(name); watch.close(); });
+await waitUntilWatchingAsync(watch, directory);
+watch.on('change', (_event, name) => { if (name === 'watched.txt') { console.log(name); watch.close(); } });
 fs.writeFileSync(directory + '/watched.txt', 'content');`;
 		const result = spawnSync(process.execPath, ["--input-type=module", "-e", source], {
 			encoding: "utf8",
