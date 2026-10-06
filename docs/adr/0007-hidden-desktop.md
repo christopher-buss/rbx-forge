@@ -15,8 +15,9 @@ Studio there starts, loads plugins, saves, and serves the Studio MCP, and
 nothing changes on the user's screen. On macOS, an AX press saves in the
 background with no change of focus, so macOS needs no separate desktop object.
 There, Studio started as a bare process becomes the frontmost app while it
-loads; a LaunchServices launch without activation never does. So on macOS,
-`hidden` means a background LaunchServices launch, kept hidden, never activated.
+loads; a LaunchServices launch without activation never does. So on macOS, the
+hidden desktop is a background LaunchServices launch, kept hidden, never
+activated.
 
 ## Decisions
 

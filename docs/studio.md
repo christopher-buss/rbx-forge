@@ -77,7 +77,7 @@ user session. Forge opens it or makes it and keeps it for later launches.
 `start`, `up --studio`, or `open`; the flag wins. On Linux the effective desktop
 is always `user`. A found Studio stays on its existing desktop.
 
-On macOS, `hidden` has no separate desktop: forge launches Studio through
+On macOS, the hidden desktop is no separate desktop: forge launches Studio through
 LaunchServices without activating it, so it never takes focus, and hides it.
 Studio shows itself a few times while it loads; a watcher hides it again each
 time, until the place is open, so its windows can appear behind the front app
@@ -316,7 +316,7 @@ Their result uses `from` and `to` as app visibility: `hidden` means app-hidden,
 `user` means shown. `services.studio.desktop` records the last successful forge
 visibility command. Manual Cmd+H or Dock changes do not update this status marker;
 the next show or hide reads their actual effect. `save.desktop` remains `user`
-because macOS uses no hidden desktop. A restart can open a visible Studio again;
+because it records the desktop object, and macOS has only the user's. A restart can open a visible Studio again;
 keeping the desktop across a restart refers to Windows placement.
 
 As on Windows, `--timeout <s>` controls saving first. A save failure leaves app
