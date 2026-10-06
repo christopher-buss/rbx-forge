@@ -547,3 +547,56 @@ impl Task for StudioDialogTask {
         Ok(output)
     }
 }
+
+/// What `launchApplication` starts.
+#[cfg(target_os = "macos")]
+#[napi(object)]
+pub struct ApplicationLaunch {
+    /// The app bundle's full path.
+    pub bundle: String,
+    pub args: Vec<String>,
+    /// The whole environment of the new app.
+    pub env: std::collections::HashMap<String, String>,
+    pub activates: bool,
+    pub hides: bool,
+}
+
+/// A LaunchServices launch on a libuv worker thread.
+#[cfg(target_os = "macos")]
+pub struct ApplicationLaunchTask {
+    launch: ApplicationLaunch,
+}
+
+#[cfg(target_os = "macos")]
+impl Task for ApplicationLaunchTask {
+    type Output = u32;
+    type JsValue = u32;
+    fn compute(&mut self) -> Result<Self::Output> {
+        let env: Vec<(String, String)> = self
+            .launch
+            .env
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        os::macos_application::launch(&os::macos_application::Launch {
+            bundle: &self.launch.bundle,
+            args: &self.launch.args,
+            env: &env,
+            activates: self.launch.activates,
+            hides: self.launch.hides,
+        })
+        .map_err(|err| to_napi(&format!("launch {}", self.launch.bundle), &err))
+    }
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+/// Launch a new instance of an app bundle through LaunchServices; resolves
+/// with its PID. Without `activates`, the app never becomes frontmost.
+#[cfg(target_os = "macos")]
+#[napi(ts_return_type = "Promise<number>")]
+#[must_use]
+pub fn launch_application(launch: ApplicationLaunch) -> AsyncTask<ApplicationLaunchTask> {
+    AsyncTask::new(ApplicationLaunchTask { launch })
+}

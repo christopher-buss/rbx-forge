@@ -162,6 +162,19 @@ export interface DetachedSpawn {
 	program: string;
 }
 
+/** What {@link NativeAddon.launchApplication} starts. */
+export interface ApplicationLaunch {
+	/** Bring the app to the front; otherwise it never becomes frontmost. */
+	activates: boolean;
+	args: Array<string>;
+	/** The app bundle's full path. */
+	bundle: string;
+	/** The whole environment of the new app. */
+	env: Record<string, string>;
+	/** Hide the app as soon as LaunchServices reports it. */
+	hides: boolean;
+}
+
 /** One session's files: what the barrier and forced cleanup read. */
 export interface SessionTarget {
 	/** The lease file (`workers.lock`). */
@@ -231,6 +244,14 @@ export interface NativeAddon {
 	 * @throws When the file cannot be opened or locked.
 	 */
 	isLockFree: (path: string) => boolean;
+	/**
+	 * macOS only: launch a new instance of an app bundle through
+	 * LaunchServices.
+	 *
+	 * @returns Its PID.
+	 * @rejects When LaunchServices cannot launch it.
+	 */
+	launchApplication?: (launch: ApplicationLaunch) => Promise<number>;
 	/** Version of the native crate. */
 	nativeVersion: () => string;
 	/** Pin the live process with this PID, or `null` when there is none. */
