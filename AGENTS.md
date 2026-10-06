@@ -49,7 +49,9 @@ Conventional Commits
 ([.github/commit-instructions.md](.github/commit-instructions.md)). hk's
 commit-msg hook runs commitlint (`commitlint.config.ts`), the same rules CI
 applies. Merge commits too (`chore: merge ...`). A pull request is squash
-merged: its title is the commit, so commitlint checks it in CI.
+merged: its title is the commit, so commitlint checks it in CI. In Claude Code,
+the `commitlint-preflight` plugin denies a `gh pr create` or `gh pr edit` whose
+title fails commitlint, or whose title it cannot read.
 
 ## Commands
 
