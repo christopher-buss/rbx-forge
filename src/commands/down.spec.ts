@@ -15,8 +15,10 @@ import type { FlagValues } from "../cli/flags.ts";
 import { DOWN_TIMEOUT_MS } from "../client/down.ts";
 import { startIpcServer } from "../ipc/server.ts";
 import type { Clock } from "../seams/clock.ts";
+import type { Host } from "../seams/host.ts";
 import type { PartStops } from "../session/part-stops.ts";
 import type { StudioEnd, StudioStop } from "../studio/close-studio.ts";
+import { MAC_STUDIO_CLOSE_MS } from "../studio/close-timeout.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 import { runDownAsync } from "./down.ts";
@@ -39,6 +41,8 @@ const SESSION_FILES = {
 };
 
 interface Setup {
+	/** What differs from the test host, such as its OS. */
+	host?: Partial<Host>;
 	/** A worker still holds the session's lease. */
 	isLeaseHeld?: boolean;
 	/** `.forge/current` names the session. */
@@ -54,6 +58,7 @@ interface Setup {
  * @returns The context and the time the clock let pass.
  */
 function makeContext({
+	host = {},
 	isLeaseHeld = false,
 	isNamed = true,
 	isSupervisorAlive = false,
@@ -75,13 +80,14 @@ function makeContext({
 			now += ms;
 		},
 	};
+	const seams = createTestSeams({
+		clock,
+		fileSystem: memory.fileSystem,
+		ipc: createMemoryTransport(),
+		native: () => native.addon,
+	});
 	const context = createCommandContext({
-		seams: createTestSeams({
-			clock,
-			fileSystem: memory.fileSystem,
-			ipc: createMemoryTransport(),
-			native: () => native.addon,
-		}),
+		seams: { ...seams, host: { ...seams.host, ...host } },
 	});
 	return { context, elapsed: () => now, native };
 }
@@ -202,6 +208,17 @@ describe(runDownAsync, () => {
 			});
 		},
 	);
+
+	it("should name macOS's close time when the session's Studio did not close", async () => {
+		expect.assertions(1);
+
+		const project = makeContext({ host: { platform: "darwin" }, isSupervisorAlive: true });
+		await serveStopsAsync(project, closedStudio(ended("timeout")));
+
+		await expect(downAsync(project.context)).resolves.toMatchObject({
+			summary: `Stopped session s1; every process of it is gone. Roblox Studio (PID 4242): it did not close within ${MAC_STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving.`,
+		});
+	});
 
 	it("should say in the summary when the session cannot verify its Studio", async () => {
 		expect.assertions(1);

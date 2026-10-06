@@ -159,7 +159,10 @@ windows; `SIGTERM` on macOS and Linux), then looks at Studio every 50 ms:
   save. A place fresh from `rojo build` always counts as changed in Studio, so
   "Save changes?" is the common case. Studio also shows a modal dialog while it
   opens a place.
-- When Studio is still open after 15 seconds, forge ends it without a save.
+- When Studio is still open after 15 seconds (1 second on macOS), forge ends it
+  without a save. On macOS, Studio ignores `SIGTERM` after a playtest or when
+  launched in the background. A quit request would raise its "Save changes?"
+  dialog, which takes focus or unhides Studio, so forge does not send one.
 
 After it ends Studio, forge deletes the place's lock file, because an ended
 Studio cannot delete it.

@@ -30,11 +30,11 @@ import {
 import type { SessionScope } from "../session/run-session.ts";
 import type { PartOwner, SessionStatus, StatusStore } from "../session/status.ts";
 import {
-	STUDIO_CLOSE_MS,
 	STUDIO_CLOSE_POLL_MS,
 	STUDIO_EXIT_TIMEOUT_MS,
 	STUDIO_START_SLACK_MS,
 } from "../studio/close-studio.ts";
+import { MAC_STUDIO_CLOSE_MS, STUDIO_CLOSE_MS } from "../studio/close-timeout.ts";
 import type { CommandContext } from "./context.ts";
 import { runStopAsync } from "./stop.ts";
 
@@ -399,6 +399,73 @@ describe(runStopAsync, () => {
 		expect(project.elapsed()).toBe(STUDIO_CLOSE_MS);
 		expect(STUDIO_CLOSE_MS).toBe(15_000);
 	});
+
+	it("should give Studio a short time to close on macOS, where it ignores the close request", async () => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			env: { HOME: path.join(PROJECT, "home") },
+			files: { [LOCK]: studioLock(STUDIO_PID) },
+			host: { platform: "darwin" },
+			processes: {
+				[STUDIO_PID]: {
+					alive: true,
+					executablePath: STUDIO,
+					onCloseRequest: "refuse",
+					startTime: String(LOCK_WRITTEN * 1000),
+				},
+			},
+		});
+
+		await expect(stopAsync(project)).resolves.toMatchObject({
+			data: { end: "timeout", forced: true },
+			summary: `Stopped Roblox Studio (PID ${STUDIO_PID}) for ${PLACE}: it did not close within ${MAC_STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving.`,
+		});
+		expect(project.elapsed()).toBe(MAC_STUDIO_CLOSE_MS);
+	});
+
+	it.for([
+		[
+			"exited",
+			(entry: FakeProcess) => {
+				entry.alive = false;
+			},
+		],
+		[
+			"lock_released",
+			(entry: FakeProcess) => {
+				entry.onClose?.();
+			},
+		],
+	] as const)(
+		"should let Studio on macOS end %s within its short time, without forcing it",
+		async ([end, close]) => {
+			expect.assertions(1);
+
+			const project = makeProject({
+				env: { HOME: path.join(PROJECT, "home") },
+				files: { [LOCK]: studioLock(STUDIO_PID) },
+				host: { platform: "darwin" },
+				onSleep: [
+					atElapsed(MAC_STUDIO_CLOSE_MS / 2, () => {
+						close(project.processes.get(STUDIO_PID)!);
+					}),
+				],
+				processes: {
+					[STUDIO_PID]: {
+						alive: true,
+						executablePath: STUDIO,
+						onCloseRequest: "refuse",
+						startTime: String(LOCK_WRITTEN * 1000),
+					},
+				},
+			});
+
+			await expect(stopAsync(project)).resolves.toMatchObject({
+				data: { end, forced: false },
+			});
+		},
+	);
 
 	it("should end Studio at once when a dialog blocks it", async () => {
 		expect.assertions(3);

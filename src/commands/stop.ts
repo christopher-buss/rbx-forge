@@ -13,7 +13,8 @@ import type { PartStops } from "../session/part-stops.ts";
 import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
 import type { SessionStudio } from "../session/status.ts";
 import type { RecoveryOptions, StudioEnd, StudioStop } from "../studio/close-studio.ts";
-import { closeStudioAsync, STUDIO_CLOSE_MS } from "../studio/close-studio.ts";
+import { closeStudioAsync } from "../studio/close-studio.ts";
+import { forcedEndClause } from "../studio/close-timeout.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
 import { listSnapshots } from "../studio/snapshots.ts";
 import { failureError } from "../supervisor/channel.ts";
@@ -34,15 +35,6 @@ export const STOP_FLAGS: ReadonlyArray<FlagDefinition> = [
 	},
 	RECOVERY_FLAG,
 ];
-
-/** How the summary tells how Studio went. */
-const HOW: Readonly<Record<StudioEnd, string>> = {
-	dialog: ": a dialog blocked it, so forge ended it without saving",
-	exited: "",
-	lock_released: "",
-	no_window: ": it had no window to close, so forge ended it without saving",
-	timeout: `: it did not close within ${STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving`,
-};
 
 /** What `stop` asks a running session. */
 interface SessionStop {
@@ -68,7 +60,7 @@ interface SessionAnswer {
  * (or another place in `--place`), it closes the Studio the place's lock
  * file names. Studio
  * gets a close request; forge ends it once it closed the place, at once
- * when a dialog blocks it, and else after {@link STUDIO_CLOSE_MS}, without
+ * when a dialog blocks it, and else after its OS's close time limit, without
  * a save (`closeStudioAsync`). It acts only on a Studio its identity check
  * verifies. With no `--place`, it first closes every snapshot Studio: each
  * snapshot in `.forge/snapshots/` with a lock file (`forge open`). The
@@ -98,6 +90,7 @@ export async function runStopAsync(
 	input: CommandInput,
 ): Promise<CommandResult> {
 	const { cwd, env, seams } = context;
+	const { platform } = seams.host;
 	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
 	const forge = forgeFiles(cwd);
 	const request: SessionStop = {
@@ -110,15 +103,14 @@ export async function runStopAsync(
 		request.place === undefined ? await closeSnapshotsAsync(context, recovery) : [];
 
 	const answer = await askSessionAsync(context, request, config.gracefulTimeoutMs);
-	const parts =
-		answer === undefined ? null : { kept: answer.stops.kept, stopped: answer.stops.stopped };
+	const parts = partsOf(answer);
 	const outcome = answer?.stops.studio;
 	if (outcome !== undefined) {
 		if ("error" in outcome) {
 			throw failureError(outcome.error);
 		}
 
-		return combine(stopResult(outcome.stop, outcome.place), parts, snapshots);
+		return combine(stopResult(outcome.stop, outcome.place, platform), parts, snapshots);
 	}
 
 	if (answer !== undefined) {
@@ -128,7 +120,30 @@ export async function runStopAsync(
 	const place =
 		request.place ?? path.resolve(cwd, config.open.buildOutputPath ?? config.buildOutputPath);
 	const stop = await closeStudioAsync(seams, { place }, recovery);
-	return combine(stopResult(stop, place), parts, snapshots);
+	return combine(stopResult(stop, place, platform), parts, snapshots);
+}
+
+/**
+ * The session's parts that `stop` stopped and kept.
+ *
+ * @param answer - The session's answer; none with no session.
+ * @returns The parts; `null` with no session.
+ */
+function partsOf(answer: SessionAnswer | undefined): null | Pick<PartStops, "kept" | "stopped"> {
+	return answer === undefined ? null : { kept: answer.stops.kept, stopped: answer.stops.stopped };
+}
+
+/**
+ * How the summary tells how Studio went.
+ *
+ * @param end - How Studio went.
+ * @param platform - The OS, for its close time limit.
+ * @returns The end of the summary's sentence.
+ */
+function how(end: StudioEnd, platform: NodeJS.Platform): string {
+	return end === "exited" || end === "lock_released"
+		? ""
+		: `: ${forcedEndClause(end, platform)}, so forge ended it without saving`;
 }
 
 /**
@@ -136,15 +151,17 @@ export async function runStopAsync(
  *
  * @param stop - How Studio went.
  * @param place - The absolute path of the place file.
+ * @param platform - The OS.
  * @returns Its data and summary.
  */
 function stoppedResult(
 	{ end, forced: isForced, pid, recovery }: Extract<StudioStop, { status: "stopped" }>,
 	place: string,
+	platform: NodeJS.Platform,
 ): CommandResult {
 	return {
 		data: { end, forced: isForced, pid, place, recovery, stopped: true },
-		summary: `Stopped Roblox Studio (PID ${pid}) for ${place}${HOW[end]}.`,
+		summary: `Stopped Roblox Studio (PID ${pid}) for ${place}${how(end, platform)}.`,
 	};
 }
 
@@ -153,9 +170,10 @@ function stoppedResult(
  *
  * @param stop - What closing Studio did.
  * @param place - The absolute path of the place file.
+ * @param platform - The OS.
  * @returns Its data and summary.
  */
-function stopResult(stop: StudioStop, place: string): CommandResult {
+function stopResult(stop: StudioStop, place: string, platform: NodeJS.Platform): CommandResult {
 	switch (stop.status) {
 		case "closed_first": {
 			return {
@@ -176,7 +194,7 @@ function stopResult(stop: StudioStop, place: string): CommandResult {
 			};
 		}
 		case "stopped": {
-			return stoppedResult(stop, place);
+			return stoppedResult(stop, place, platform);
 		}
 	}
 }
@@ -193,10 +211,13 @@ async function closeSnapshotsAsync(
 	{ cwd, seams }: CommandContext,
 	recovery: RecoveryOptions,
 ): Promise<Array<CommandResult>> {
+	const { platform } = seams.host;
 	const results: Array<CommandResult> = [];
 	for (const place of listSnapshots(seams.fileSystem, forgeFiles(cwd).snapshots)) {
 		if (seams.fileSystem.existsSync(studioLockPath(place))) {
-			results.push(stopResult(await closeStudioAsync(seams, { place }, recovery), place));
+			results.push(
+				stopResult(await closeStudioAsync(seams, { place }, recovery), place, platform),
+			);
 		}
 	}
 
