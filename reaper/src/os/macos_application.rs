@@ -255,9 +255,13 @@ unsafe extern "C" fn complete(block: *mut Completion, application: Object, error
             Ok(send(application, sel_registerName(c"processIdentifier".as_ptr())))
         }
     };
-    let (slot, ready) = &*completion.outcome;
-    *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
+    // Once the result is stored, `launch` may free the block: own the outcome first.
+    let outcome = Arc::clone(&completion.outcome);
+    let (slot, ready) = &*outcome;
+    let mut guard = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = Some(result);
     ready.notify_all();
+    drop(guard);
 }
 
 /// Launch a new instance of an app bundle through LaunchServices and return
