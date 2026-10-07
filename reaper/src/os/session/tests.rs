@@ -116,9 +116,7 @@ fn sleeper_command() -> Command {
         command.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 60"]);
         command
     } else {
-        let mut command = Command::new("sleep");
-        command.arg("60");
-        command
+        crate::os::test_sleeper::command()
     };
     command
         .stdin(Stdio::null())
@@ -190,10 +188,9 @@ fn scan_finds_marked_processes_and_lease_holders_only() {
 #[test]
 fn force_cleanup_kills_members_leaf_first_and_leaves_the_rest() {
     let session = Session::new("leaf");
-    // A marked shell and its marked child `sleep`.
+    // A marked sleeper and its marked child sleeper.
     let mut parent = Owned(
-        Command::new("/bin/sh")
-            .args(["-c", "sleep 60 & wait"])
+        crate::os::test_sleeper::parent_command()
             .env(super::SESSION_MARKER, &session.id)
             .stdin(Stdio::null())
             .spawn()

@@ -17,6 +17,8 @@ pub mod macos_accessibility;
 pub mod macos_application;
 pub mod process;
 pub mod session;
+#[cfg(test)]
+mod test_sleeper;
 #[cfg(windows)]
 pub mod win;
 pub mod worker;
