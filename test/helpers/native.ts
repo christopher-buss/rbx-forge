@@ -8,10 +8,18 @@ import type {
 	SessionTarget,
 } from "../../src/native/addon.ts";
 import { dismissDialogAsync } from "./native-dialog.ts";
+import { appMembers, requestSaveAsync, saveMenuEnabledAsync } from "./native-studio.ts";
 
 /** One process in the fake process table. */
 export interface FakeProcess {
+	/** How many times `activateApp` reached it. */
+	activations?: number;
 	alive: boolean;
+	/**
+	 * It is the active app, which `frontmostApplication` reports. Activating
+	 * one app deactivates the others; hiding an app deactivates it.
+	 */
+	appActive?: boolean;
 	appHidden?: boolean | null;
 	/**
 	 * A modal dialog blocks its windows (`isBlocked`); `throw` makes the
@@ -48,6 +56,18 @@ export interface FakeProcess {
 	/** `pinProcess` throws this message (for example, access denied). */
 	pinError?: string;
 	refusesAppVisibility?: boolean;
+	/**
+	 * File > Save to File is disabled (macOS): `requestSave` reports
+	 * `menu_disabled` until it enables.
+	 */
+	saveMenuDisabled?: boolean;
+	/**
+	 * The item enables at this `saveMenuEnabled` poll while it is active;
+	 * never when not set.
+	 */
+	saveMenuEnablesAtPoll?: number;
+	/** How many times `saveMenuEnabled` reached it. */
+	saveMenuPolls?: number;
 	/** Its start time as the addon reports it; the PID when not set. */
 	startTime?: string;
 	/** The timeout of every `waitForExit` call on its pins. */
@@ -204,67 +224,23 @@ function blockedNow(pid: number, entry: FakeProcess): boolean {
 	return entry.alive && entry.blocked === true;
 }
 
-function requestSave(entry: FakeProcess): "no_menu_item" | "requested" | "timeout" {
-	if (!entry.alive || entry.onSaveRequest === "throw") {
-		throw new Error("Studio save failed");
-	}
-
-	if (entry.onSaveRequest === "no_menu_item") {
-		return "no_menu_item";
-	}
-
-	if (entry.onSaveRequest === "timeout") {
-		entry.onSave?.();
-		return "timeout";
-	}
-
-	if (entry.onSaveRequest === "dialog") {
-		entry.blocked = true;
-	} else if (entry.onSaveRequest !== "ignore") {
-		entry.onSave?.();
-	}
-
-	return "requested";
-}
-
-async function requestSaveAsync(
-	entry: FakeProcess,
-	timeoutMs = 30_000,
-): Promise<"no_menu_item" | "requested" | "timeout"> {
-	await Promise.resolve();
-	return timeoutMs <= 0 ? "timeout" : requestSave(entry);
-}
-
 function killEntry(entry: FakeProcess): boolean {
 	const wasAlive = entry.alive;
 	entry.alive = entry.ignoresKill === true && wasAlive;
 	return wasAlive;
 }
 
-function appHidden(entry: FakeProcess): boolean | null {
-	if (!entry.alive) {
-		return null;
-	}
-
-	return entry.appHidden === undefined ? false : entry.appHidden;
-}
-
-function setAppHidden(entry: FakeProcess, hidden: boolean): boolean {
-	if (!entry.alive || entry.refusesAppVisibility === true || entry.appHidden === null) {
-		return false;
-	}
-
-	entry.appHidden = hidden;
-	return true;
-}
-
-function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
+function pinEntry(
+	table: ReadonlyMap<number, FakeProcess>,
+	pid: number,
+	entry: FakeProcess,
+): PinnedProcess {
 	if (entry.exitsAfterPin === true) {
 		entry.alive = false;
 	}
 
 	return {
-		appHidden: () => appHidden(entry),
+		...appMembers(table, entry),
 		desktop: () => entry.desktop ?? "user",
 		dismissDialog: async (title, button, desktop) => {
 			return dismissDialogAsync(entry, title, button, desktop);
@@ -280,7 +256,7 @@ function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
 		pid,
 		requestClose: () => requestClose(entry),
 		requestSave: async (timeoutMs) => requestSaveAsync(entry, timeoutMs),
-		setAppHidden: (hidden) => setAppHidden(entry, hidden),
+		saveMenuEnabled: async (timeoutMs) => saveMenuEnabledAsync(entry, timeoutMs),
 		startTime: startTimeOf(pid, entry),
 		waitForExit: (timeoutMs) => {
 			entry.waits?.push(timeoutMs);
@@ -297,15 +273,24 @@ function pinEntry(pid: number, entry: FakeProcess): PinnedProcess {
  */
 function processMembers(
 	table: ReadonlyMap<number, FakeProcess>,
-): Pick<NativeAddon, "pinProcess" | "processStartTime"> {
+): Pick<NativeAddon, "frontmostApplication" | "pinProcess" | "processStartTime"> {
 	return {
+		frontmostApplication: () => {
+			for (const [pid, entry] of table) {
+				if (entry.alive && entry.appActive === true) {
+					return pid;
+				}
+			}
+
+			return null;
+		},
 		pinProcess: (pid) => {
 			const entry = table.get(pid);
 			if (entry?.pinError !== undefined) {
 				throw new Error(entry.pinError);
 			}
 
-			return entry?.alive === true ? pinEntry(pid, entry) : null;
+			return entry?.alive === true ? pinEntry(table, pid, entry) : null;
 		},
 		processStartTime: (pid) => {
 			const entry = table.get(pid);

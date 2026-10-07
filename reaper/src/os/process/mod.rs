@@ -180,6 +180,38 @@ impl PinnedProcess {
         }
     }
 
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "shared macOS app visibility surface"
+    )]
+    pub fn app_active(&self) -> io::Result<Option<bool>> {
+        #[cfg(target_os = "macos")]
+        {
+            self.pin.app_active()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(None)
+        }
+    }
+
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "shared macOS app visibility surface"
+    )]
+    pub fn activate_app(&self) -> io::Result<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            self.pin.activate_app()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(false)
+        }
+    }
+
     /// Force-kill the pinned process (`TerminateProcess`, `SIGKILL`). Only
     /// this process: not its children, and never a process that reused its
     /// PID.

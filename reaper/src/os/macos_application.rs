@@ -116,6 +116,57 @@ pub fn set_hidden(
     }
 }
 
+pub fn active(pid: u32) -> io::Result<Option<bool>> {
+    Ok(Application::open(pid)?.map(|application| application.boolean(c"isActive")))
+}
+
+/// Unhide the app and request activation without waiting for either.
+pub fn activate(pid: u32, is_alive: impl FnOnce() -> io::Result<bool>) -> io::Result<bool> {
+    let Some(application) = Application::open(pid)? else {
+        return Ok(false);
+    };
+    if !is_alive()? {
+        return Ok(false);
+    }
+    application.boolean(c"unhide");
+    // SAFETY: activateWithOptions: takes one NSUInteger and returns BOOL.
+    unsafe {
+        let send: unsafe extern "C" fn(Object, Selector, usize) -> ObjcBool =
+            transmute(objc_msgSend as *const ());
+        send(
+            application.object,
+            sel_registerName(c"activateWithOptions:".as_ptr()),
+            0,
+        );
+    }
+    Ok(true)
+}
+
+/// The PID of the frontmost app, or none when no app is frontmost.
+pub fn frontmost() -> io::Result<Option<u32>> {
+    // SAFETY: each call scopes autoreleased AppKit objects to this thread.
+    let _pool = Pool(unsafe { objc_autoreleasePoolPush() });
+    // SAFETY: a bounded default-mode turn refreshes AppKit's varying properties.
+    unsafe { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.001, true) };
+    // SAFETY: sharedWorkspace and frontmostApplication take no arguments and return objects.
+    let application = unsafe {
+        send0(
+            send0(class(c"NSWorkspace")?, c"sharedWorkspace"),
+            c"frontmostApplication",
+        )
+    };
+    if application.is_null() {
+        return Ok(None);
+    }
+    // SAFETY: processIdentifier is a no-argument NSRunningApplication method returning pid_t.
+    let pid = unsafe {
+        let send: unsafe extern "C" fn(Object, Selector) -> i32 =
+            transmute(objc_msgSend as *const ());
+        send(application, sel_registerName(c"processIdentifier".as_ptr()))
+    };
+    Ok(u32::try_from(pid).ok())
+}
+
 /// How long LaunchServices may take to report a launch.
 const LAUNCH_DEADLINE: Duration = Duration::from_secs(60);
 /// `BLOCK_IS_GLOBAL`: `Block_copy` returns the block itself, so the
@@ -366,6 +417,18 @@ pub fn launch(request: &Launch<'_>) -> io::Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_process_without_an_app_is_neither_active_nor_activated() {
+        let pid = u32::MAX >> 1;
+        assert_eq!(active(pid).unwrap(), None);
+        assert!(!activate(pid, || Ok(true)).unwrap());
+    }
+
+    #[test]
+    fn the_frontmost_app_is_never_this_test() {
+        assert_ne!(frontmost().unwrap(), Some(std::process::id()));
+    }
 
     #[test]
     fn launch_reports_a_missing_bundle() {

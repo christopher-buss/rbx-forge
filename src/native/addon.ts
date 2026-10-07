@@ -28,6 +28,17 @@ export interface FileLock {
  */
 export interface PinnedProcess {
 	/**
+	 * Unhide the macOS app and request its activation, without waiting.
+	 *
+	 * @returns `false` for no app or an unsupported platform.
+	 */
+	activateApp: () => boolean;
+	/**
+	 * Whether the macOS app is active; null for no app or an unsupported
+	 * platform.
+	 */
+	appActive: () => boolean | null;
+	/**
 	 * The macOS app-hidden state; null for no app or an unsupported platform.
 	 */
 	appHidden: () => boolean | null;
@@ -81,8 +92,18 @@ export interface PinnedProcess {
 	 *   window.
 	 */
 	requestClose: () => boolean;
-	/** Press File > Save to File within the deadline (default 30 seconds). */
-	requestSave: (timeoutMs?: number) => Promise<"no_menu_item" | "requested" | "timeout">;
+	/**
+	 * Press File > Save to File within the deadline (default 30 seconds).
+	 * `menu_disabled` (macOS only): the item is disabled and was not pressed.
+	 */
+	requestSave: (
+		timeoutMs?: number,
+	) => Promise<"menu_disabled" | "no_menu_item" | "requested" | "timeout">;
+	/**
+	 * Whether File > Save to File exists and is enabled; always `true` off
+	 * macOS. `false` once the deadline passes.
+	 */
+	saveMenuEnabled: (timeoutMs: number) => Promise<boolean>;
 	/** Hide or unhide the macOS app without activation; false for no app. */
 	setAppHidden: (hidden: boolean) => boolean;
 	/** The start time read when it was pinned (see `processStartTime`). */
@@ -236,6 +257,8 @@ export interface NativeAddon {
 	 * left. Unverifiable targets are reported, never killed.
 	 */
 	forceCleanup: (target: SessionTarget, boundMs: number) => Promise<CleanupReport>;
+	/** The PID of the frontmost macOS app; `null` elsewhere or without one. */
+	frontmostApplication: () => null | number;
 	/**
 	 * Whether no one holds a lock on `path` now: takes an exclusive lock and
 	 * lets go at once. Never creates the file, and a missing file is free,

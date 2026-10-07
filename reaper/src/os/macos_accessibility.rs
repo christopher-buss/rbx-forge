@@ -176,6 +176,16 @@ impl Access {
         }))
     }
 
+    /// A missing AXEnabled counts as enabled.
+    fn enabled(&self, element: &Owned) -> io::Result<bool> {
+        Ok(self.attribute(element, "AXEnabled")?.is_none_or(|value| {
+            // SAFETY: type IDs do not require a reference.
+            !value.is_type(unsafe { CFBooleanGetTypeID() })
+                // SAFETY: the type check proves value is a live CFBoolean.
+                || unsafe { CFBooleanGetValue(value.as_ref()) }
+        }))
+    }
+
     fn minimize(&self, window: &Owned) -> io::Result<()> {
         self.prepare(window)?;
         let name = Owned::text("AXMinimized")?;
@@ -223,28 +233,55 @@ pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
     let access = Access { deadline };
     // SAFETY: the constructor returns an owned AX application for this PID.
     let app = Owned::take(unsafe { AXUIElementCreateApplication(pid) })?;
-    let Some(bar) = access.attribute(&app, "AXMenuBar")? else {
+    let Some(save) = save_item(&access, &app)? else {
         return Ok("no_menu_item".to_owned());
     };
+    // Studio enables the item only once it has been the active app.
+    if !access.enabled(&save)? {
+        return Ok("menu_disabled".to_owned());
+    }
+    let action = Owned::text("AXPress")?;
+    if !pinned.is_alive()? {
+        return Err(io::Error::other("Studio identity changed"));
+    }
+    // Keeping the window minimized is best effort and never blocks the save.
+    let minimized = minimized_windows(&access, &app).unwrap_or_default();
+    access.prepare(&save)?;
+    // SAFETY: AXPress targets the live, exact File > Save to File item.
+    check(unsafe { AXUIElementPerformAction(save.as_ref(), action.as_ref()) })?;
+    keep_minimized(&pinned, minimized, deadline);
+    Ok("requested".to_owned())
+}
+
+/// Whether File > Save to File exists and is enabled, without pressing it.
+pub fn save_enabled(pid: u32, deadline: Instant) -> io::Result<bool> {
+    // SAFETY: this query neither prompts nor changes the accessibility permission.
+    if !unsafe { AXIsProcessTrusted() } {
+        return Err(accessibility_denied());
+    }
+    let pid = i32::try_from(pid).map_err(io::Error::other)?;
+    let access = Access { deadline };
+    // SAFETY: the constructor returns an owned AX application for this PID.
+    let app = Owned::take(unsafe { AXUIElementCreateApplication(pid) })?;
+    match save_item(&access, &app)? {
+        Some(save) => access.enabled(&save),
+        None => Ok(false),
+    }
+}
+
+fn save_item(access: &Access, app: &Owned) -> io::Result<Option<Owned>> {
+    let Some(bar) = access.attribute(app, "AXMenuBar")? else {
+        return Ok(None);
+    };
     let Some(file) = access.named_child(&bar, "File")? else {
-        return Ok("no_menu_item".to_owned());
+        return Ok(None);
     };
     for menu in access.elements(&file, "AXChildren")? {
         if let Some(save) = access.named_child(&menu, "Save to File")? {
-            let action = Owned::text("AXPress")?;
-            if !pinned.is_alive()? {
-                return Err(io::Error::other("Studio identity changed"));
-            }
-            // Keeping the window minimized is best effort and never blocks the save.
-            let minimized = minimized_windows(&access, &app).unwrap_or_default();
-            access.prepare(&save)?;
-            // SAFETY: AXPress targets the live, exact File > Save to File item.
-            check(unsafe { AXUIElementPerformAction(save.as_ref(), action.as_ref()) })?;
-            keep_minimized(&pinned, minimized, deadline);
-            return Ok("requested".to_owned());
+            return Ok(Some(save));
         }
     }
-    Ok("no_menu_item".to_owned())
+    Ok(None)
 }
 
 /// Studio restores only its place windows, titled `<place> - Roblox Studio`.

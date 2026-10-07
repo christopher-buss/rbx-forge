@@ -344,6 +344,21 @@ impl Pin {
         crate::os::macos_application::set_hidden(self.pid, hidden, || self.is_alive())
     }
 
+    pub fn app_active(&self) -> io::Result<Option<bool>> {
+        if !self.is_alive()? {
+            return Ok(None);
+        }
+        let active = crate::os::macos_application::active(self.pid)?;
+        Ok(if self.is_alive()? { active } else { None })
+    }
+
+    pub fn activate_app(&self) -> io::Result<bool> {
+        if !self.is_alive()? {
+            return Ok(false);
+        }
+        crate::os::macos_application::activate(self.pid, || self.is_alive())
+    }
+
     pub fn is_blocked(&self) -> io::Result<bool> {
         if !self.is_alive()? {
             return Ok(false);

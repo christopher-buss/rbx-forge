@@ -16,6 +16,18 @@ pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
     crate::os::macos_accessibility::request(pid, deadline)
 }
 
+/// Whether File > Save to File is enabled. Only macOS disables it.
+#[cfg(target_os = "macos")]
+pub fn enabled(pid: u32, deadline: Instant) -> io::Result<bool> {
+    crate::os::macos_accessibility::save_enabled(pid, deadline)
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(clippy::unnecessary_wraps, reason = "shared Studio save surface")]
+pub fn enabled(_pid: u32, _deadline: Instant) -> io::Result<bool> {
+    Ok(true)
+}
+
 #[cfg(windows)]
 pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
     use crate::os::win::{desktop, window};

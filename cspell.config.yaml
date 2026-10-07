@@ -22,6 +22,7 @@ words:
   - darklua
   - defu
   - forgerc
+  - frontmost
   - glibc
   - libc
   - napi

@@ -171,6 +171,30 @@ impl PinnedProcess {
             .set_app_hidden(hidden)
             .map_err(|err| to_napi("change app visibility", &err))
     }
+    /// Whether the macOS app is active, or none for a nongraphical or exited process.
+    ///
+    /// # Errors
+    ///
+    /// When macOS refuses the process identity query.
+    #[napi]
+    pub fn app_active(&self) -> Result<Option<bool>> {
+        self.inner
+            .app_active()
+            .map_err(|err| to_napi("read app activation", &err))
+    }
+
+    /// Unhide the macOS app and request its activation, without waiting.
+    ///
+    /// # Errors
+    ///
+    /// When macOS refuses the process identity query.
+    #[napi]
+    pub fn activate_app(&self) -> Result<bool> {
+        self.inner
+            .activate_app()
+            .map_err(|err| to_napi("activate app", &err))
+    }
+
     /// The desktop inherited by this process. Always user on POSIX.
     #[napi]
     pub fn desktop(&self) -> Result<String> {
@@ -284,6 +308,22 @@ impl PinnedProcess {
             pid: self.pid(),
             start_time: self.inner.start_time(),
             deadline,
+        }))
+    }
+
+    /// Whether Studio's File > Save to File is enabled, off Node's event loop.
+    ///
+    /// # Errors
+    ///
+    /// When Studio exited or the native accessibility query fails.
+    #[napi(ts_return_type = "Promise<boolean>")]
+    pub fn save_menu_enabled(&self, timeout_ms: u32) -> Result<AsyncTask<SaveMenuTask>> {
+        if !self.is_alive()? {
+            return Err(Error::from_reason("Studio exited"));
+        }
+        Ok(AsyncTask::new(SaveMenuTask {
+            pid: self.pid(),
+            deadline: Instant::now() + Duration::from_millis(u64::from(timeout_ms)),
         }))
     }
 
@@ -509,6 +549,42 @@ impl Task for StudioSaveTask {
     }
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output)
+    }
+}
+
+pub struct SaveMenuTask {
+    pid: u32,
+    deadline: Instant,
+}
+impl Task for SaveMenuTask {
+    type Output = bool;
+    type JsValue = bool;
+    fn compute(&mut self) -> Result<Self::Output> {
+        if Instant::now() >= self.deadline {
+            return Ok(false);
+        }
+        studio_save::enabled(self.pid, self.deadline)
+            .map_err(|err| to_napi("read Studio save menu", &err))
+    }
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        Ok(output)
+    }
+}
+
+/// The PID of the frontmost macOS app; none elsewhere or without one.
+///
+/// # Errors
+///
+/// When AppKit is missing.
+#[napi]
+pub fn frontmost_application() -> Result<Option<u32>> {
+    #[cfg(target_os = "macos")]
+    {
+        os::macos_application::frontmost().map_err(|err| to_napi("read frontmost app", &err))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(None)
     }
 }
 
