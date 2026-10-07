@@ -222,7 +222,7 @@ describe("macOS Studio visibility", () => {
 		});
 	});
 
-	it("shows an app hidden outside forge even when the status still records user", async () => {
+	it("shows and activates an app hidden outside forge even when the status still records user", async () => {
 		expect.assertions(3);
 
 		const { move, native, status } = fixture(true);
@@ -233,7 +233,12 @@ describe("macOS Studio visibility", () => {
 			save: { desktop: "user", pid: 777 },
 			to: "user",
 		});
-		expect(native.processes.get(777)).toMatchObject({ alive: true, appHidden: false });
+		expect(native.processes.get(777)).toMatchObject({
+			activations: 1,
+			alive: true,
+			appActive: true,
+			appHidden: false,
+		});
 		expect(status.snapshot().services.studio).toMatchObject({ desktop: "user", pid: 777 });
 	});
 
@@ -255,7 +260,7 @@ describe("macOS Studio visibility", () => {
 	);
 
 	it("saves and hides only the session Studio while retaining its PID and parts", async () => {
-		expect.assertions(4);
+		expect.assertions(5);
 
 		const { move, native, status } = fixture();
 
@@ -266,6 +271,7 @@ describe("macOS Studio visibility", () => {
 			to: "hidden",
 		});
 		expect(native.processes.get(777)).toMatchObject({ alive: true, appHidden: true });
+		expect(native.processes.get(777)!.activations).toBeUndefined();
 		expect(native.processes.get(888)).toMatchObject({ alive: true, appHidden: false });
 		expect(status.snapshot().services).toMatchObject({
 			compiler: { owner: "start", status: "ready" },
