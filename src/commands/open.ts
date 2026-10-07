@@ -24,7 +24,7 @@ export const OPEN_FLAGS: ReadonlyArray<FlagDefinition> = [
 		name: "desktop",
 		config: "studio.desktop",
 		kind: "string",
-		text: "Studio desktop (default: hidden on Windows).",
+		text: "Studio desktop (default: hidden on Windows and macOS).",
 		value: "user|hidden",
 	},
 ];
@@ -78,8 +78,8 @@ export interface OpenOptions {
 	/** The `--studio-path` flag, resolved. */
 	studioPath?: string | undefined;
 	/**
-	 * Watch a snapshot's delayed hidden-desktop Lighting prompt after the CLI
-	 * exits.
+	 * Watch a snapshot's delayed Lighting prompt on the hidden Windows desktop
+	 * after the CLI exits.
 	 */
 	watchHiddenLighting?: boolean | undefined;
 }
@@ -175,7 +175,7 @@ export async function runOpenAsync(
 		const launched = await launchAsync(context, place, {
 			desktop: resolveStudioDesktop(config, seams.host.platform, "hidden"),
 			studioPath: typeof studioPath === "string" ? path.resolve(cwd, studioPath) : undefined,
-			watchHiddenLighting: true,
+			watchHiddenLighting: seams.host.platform === "win32",
 		});
 
 		return { build: { ...build.value, hooks: build.hooks }, pruned, ...launched };

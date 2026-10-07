@@ -20,6 +20,9 @@ export interface FileLock {
 	release: () => void;
 }
 
+/** What pressing File > Save to File did. */
+export type SaveOutcome = "menu_disabled" | "no_menu_item" | "requested" | "timeout";
+
 /**
  * A process held by identity: a Windows handle, a Linux pidfd, or on macOS
  * the PID plus its start time, checked before every call. Every method acts
@@ -27,6 +30,17 @@ export interface FileLock {
  * that reused the PID.
  */
 export interface PinnedProcess {
+	/**
+	 * Unhide the macOS app and request its activation, without waiting.
+	 *
+	 * @returns `false` for no app or an unsupported platform.
+	 */
+	activateApp: () => boolean;
+	/**
+	 * Whether the macOS app is active; null for no app or an unsupported
+	 * platform.
+	 */
+	appActive: () => boolean | null;
 	/**
 	 * The macOS app-hidden state; null for no app or an unsupported platform.
 	 */
@@ -81,8 +95,16 @@ export interface PinnedProcess {
 	 *   window.
 	 */
 	requestClose: () => boolean;
-	/** Press File > Save to File within the deadline (default 30 seconds). */
-	requestSave: (timeoutMs?: number) => Promise<"no_menu_item" | "requested" | "timeout">;
+	/**
+	 * Press File > Save to File within the deadline (default 30 seconds).
+	 * `menu_disabled` (macOS only): the item is disabled and was not pressed.
+	 */
+	requestSave: (timeoutMs?: number) => Promise<SaveOutcome>;
+	/**
+	 * Whether File > Save to File exists and is enabled; always `true` off
+	 * macOS. `false` once the deadline passes.
+	 */
+	saveMenuEnabled: (timeoutMs: number) => Promise<boolean>;
 	/** Hide or unhide the macOS app without activation; false for no app. */
 	setAppHidden: (hidden: boolean) => boolean;
 	/** The start time read when it was pinned (see `processStartTime`). */
@@ -162,6 +184,19 @@ export interface DetachedSpawn {
 	program: string;
 }
 
+/** What {@link NativeAddon.launchApplication} starts. */
+export interface AppLaunch {
+	/** Bring the app to the front; otherwise it never takes focus. */
+	activates: boolean;
+	args: Array<string>;
+	/** The app bundle's full path. */
+	bundle: string;
+	/** The whole environment of the new app. */
+	env: Record<string, string>;
+	/** Hide the app as soon as LaunchServices reports it. */
+	hides: boolean;
+}
+
 /** One session's files: what the barrier and forced cleanup read. */
 export interface SessionTarget {
 	/** The lease file (`workers.lock`). */
@@ -223,6 +258,8 @@ export interface NativeAddon {
 	 * left. Unverifiable targets are reported, never killed.
 	 */
 	forceCleanup: (target: SessionTarget, boundMs: number) => Promise<CleanupReport>;
+	/** The PID of the frontmost macOS app; `null` elsewhere or without one. */
+	frontmostApplication: () => null | number;
 	/**
 	 * Whether no one holds a lock on `path` now: takes an exclusive lock and
 	 * lets go at once. Never creates the file, and a missing file is free,
@@ -231,6 +268,14 @@ export interface NativeAddon {
 	 * @throws When the file cannot be opened or locked.
 	 */
 	isLockFree: (path: string) => boolean;
+	/**
+	 * On macOS only, launch a new instance of an app bundle through
+	 * LaunchServices.
+	 *
+	 * @returns Its PID.
+	 * @rejects When LaunchServices cannot launch it.
+	 */
+	launchApplication?: (launch: AppLaunch) => Promise<number>;
 	/** Version of the native crate. */
 	nativeVersion: () => string;
 	/** Pin the live process with this PID, or `null` when there is none. */

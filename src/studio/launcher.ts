@@ -10,6 +10,14 @@ import type { FileSystem } from "../seams/file-system.ts";
 import type { Environment } from "../seams/seams.ts";
 import type { InstalledStudio, StudioExecutable } from "./discover.ts";
 import { findStudioExecutable } from "./discover.ts";
+import { createKeepHiddenLauncher } from "./keep-hidden.ts";
+import type { KeepHiddenLauncher } from "./keep-hidden.ts";
+import { definedOnly, studioArguments } from "./launch-arguments.ts";
+import {
+	keepHiddenWarning,
+	launchServicesStartAsync,
+	UNBUNDLED_HIDDEN_WARNING,
+} from "./macos-launch.ts";
 import { createSnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
 import type { SnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
 
@@ -105,7 +113,8 @@ export interface StudioLaunchInvocation extends Invocation {
 
 /**
  * The platform launcher that opens a place with its registered app: `start`
- * in the Windows shell, `open` on macOS, `xdg-open` elsewhere. On Windows the
+ * in the Windows shell, `open` on macOS (`-g -j` for the hidden desktop: in
+ * the background and hidden), `xdg-open` elsewhere. On Windows the
  * place goes through {@link PLACE_VARIABLE}, so a `%` in its path is never
  * expanded; it is quoted, and `start` gets an empty title first, so a path
  * with spaces is not read as the window title.
@@ -114,12 +123,14 @@ export interface StudioLaunchInvocation extends Invocation {
  * @param platform - The OS.
  * @param environment - The launcher's environment; holds `ComSpec`, the
  *   Windows shell.
+ * @param desktop - The requested desktop.
  * @returns The executable, arguments, and environment to spawn.
  */
 export function studioLaunchInvocation(
 	place: string,
 	platform: NodeJS.Platform,
 	environment: Environment,
+	desktop?: StudioDesktop,
 ): StudioLaunchInvocation {
 	if (platform === "win32") {
 		return {
@@ -130,7 +141,15 @@ export function studioLaunchInvocation(
 		};
 	}
 
-	return { args: [place], env: environment, file: platform === "darwin" ? "open" : "xdg-open" };
+	if (platform === "darwin") {
+		return {
+			args: desktop === "hidden" ? ["-g", "-j", place] : [place],
+			env: environment,
+			file: "open",
+		};
+	}
+
+	return { args: [place], env: environment, file: "xdg-open" };
 }
 
 /**
@@ -154,8 +173,9 @@ export function createStudioLauncher(
 	supervisorEntry: string,
 ): StudioLauncher {
 	const watch = createSnapshotLightingLauncher(backend, supervisorEntry);
+	const keepHidden = createKeepHiddenLauncher(backend, supervisorEntry);
 	return async (launch) => {
-		const outcome = await launchStudioAsync(backend, launch);
+		const outcome = await launchStudioAsync(backend, keepHidden, launch);
 		return watchSnapshotLighting(watch, launch, outcome);
 	};
 }
@@ -185,6 +205,23 @@ function describeFailure(file: string, end: LauncherEnd): string | undefined {
 		: `${file} exited with code ${end.exitCode}.`;
 }
 
+/** Why the platform launcher could not honor the hidden desktop, per OS. */
+const PLATFORM_HIDDEN_WARNINGS: Partial<Record<NodeJS.Platform, string>> = {
+	darwin: "Studio opened in the background, but the platform launcher cannot keep it hidden.",
+	win32: "Studio opened on the user's desktop: the platform launcher cannot use the hidden desktop.",
+};
+
+/** How Studio started, and the desktop it got. */
+interface Started {
+	desktop: StudioDesktop;
+	/**
+	 * Its PID, why it did not start, or `undefined`: use the platform
+	 * launcher.
+	 */
+	started: number | string | undefined;
+	warning?: string;
+}
+
 /**
  * The actual desktop after the platform launcher opens Studio.
  *
@@ -196,15 +233,11 @@ function platformLaunchOutcome(
 	desktop: StudioDesktop | undefined,
 	platform: NodeJS.Platform,
 ): StudioLaunchOutcome {
+	const warning = desktop === "hidden" ? PLATFORM_HIDDEN_WARNINGS[platform] : undefined;
 	return {
 		type: "launched",
 		...(desktop === undefined ? {} : { desktop: "user" }),
-		...(desktop === "hidden" && platform === "win32"
-			? {
-					warning:
-						"Studio opened on the user's desktop: the platform launcher cannot use the hidden desktop.",
-				}
-			: {}),
+		...(warning === undefined ? {} : { warning }),
 	};
 }
 
@@ -212,7 +245,7 @@ async function launchThroughPlatformAsync(
 	{ childProcess, clock, host }: ChildProcessBackend,
 	{ cwd, desktop, env, place }: StudioLaunch,
 ): Promise<StudioLaunchOutcome> {
-	const invocation = studioLaunchInvocation(place, host.platform, env);
+	const invocation = studioLaunchInvocation(place, host.platform, env, desktop);
 	const { file } = invocation;
 	const child = childProcess.spawn(file, [...invocation.args], {
 		cwd,
@@ -238,23 +271,6 @@ async function launchThroughPlatformAsync(
 
 	child.unref();
 	return platformLaunchOutcome(desktop, host.platform);
-}
-
-function definedOnly(environment: Environment): Record<string, string> {
-	const defined: Record<string, string> = {};
-	for (const [name, value] of Object.entries(environment)) {
-		if (value !== undefined) {
-			defined[name] = value;
-		}
-	}
-
-	return defined;
-}
-
-function studioArguments({ place, runScript }: StudioLaunch): Array<string> {
-	return runScript === undefined
-		? [place]
-		: ["--task", "RunScript", "--localPlaceFile", place, "--runScriptFile", runScript];
 }
 
 /**
@@ -319,10 +335,44 @@ async function startInSessionAsync(
 	return child.pid;
 }
 
+async function startDirectAsync(
+	backend: StudioLaunchBackend,
+	launch: StudioLaunch,
+	executable: string,
+): Promise<Started> {
+	const { platform } = backend.host;
+	if (platform === "win32") {
+		return {
+			desktop: launch.desktop ?? "user",
+			started: startBreakingAway(backend, launch, executable),
+		};
+	}
+
+	if (platform === "darwin") {
+		const started = await launchServicesStartAsync(backend.native, executable, {
+			args: studioArguments(launch),
+			desktop: launch.desktop,
+			env: definedOnly(launch.env),
+		});
+		if (started !== undefined) {
+			return { desktop: launch.desktop ?? "user", started };
+		}
+	}
+
+	return {
+		desktop: "user",
+		started: await startInSessionAsync(backend, launch, executable),
+		...(platform === "darwin" && launch.desktop === "hidden"
+			? { warning: UNBUNDLED_HIDDEN_WARNING }
+			: {}),
+	};
+}
+
 /**
  * Start Studio itself.
  *
  * @param backend - The spawn seam, host, and addon.
+ * @param keepHidden - Starts the watcher that keeps a hidden macOS Studio hidden.
  * @param launch - The place, directory, and environment.
  * @param executable - The Studio executable.
  * @returns The pinned Studio; the platform launcher's outcome when the
@@ -330,14 +380,12 @@ async function startInSessionAsync(
  */
 async function launchDirectAsync(
 	backend: StudioLaunchBackend,
+	keepHidden: KeepHiddenLauncher,
 	launch: StudioLaunch,
 	executable: string,
 ): Promise<StudioLaunchOutcome> {
 	await launch.beforeLaunch?.();
-	const started =
-		backend.host.platform === "win32"
-			? startBreakingAway(backend, launch, executable)
-			: await startInSessionAsync(backend, launch, executable);
+	const { desktop, started, warning } = await startDirectAsync(backend, launch, executable);
 	if (started === undefined) {
 		return launchThroughPlatformAsync(backend, launch);
 	}
@@ -352,19 +400,20 @@ async function launchDirectAsync(
 		return { message: `${executable} (PID ${pid}) exited at once.`, type: "failed" };
 	}
 
-	const desktop = backend.host.platform === "win32" ? (launch.desktop ?? "user") : "user";
-	return {
-		studio: {
-			pid,
-			startTime: pinned.startTime,
-			...(launch.desktop === undefined ? {} : { desktop }),
-		},
-		type: "launched",
+	const { platform } = backend.host;
+	const studio: StudioProcess = {
+		pid,
+		startTime: pinned.startTime,
+		...(platform !== "darwin" && launch.desktop === undefined ? {} : { desktop }),
 	};
+	const message =
+		warning ?? keepHiddenWarning(keepHidden, launch, platform, { ...studio, desktop });
+	return { studio, type: "launched", ...(message === undefined ? {} : { warning: message }) };
 }
 
 async function launchStudioAsync(
 	backend: StudioLaunchBackend,
+	keepHidden: KeepHiddenLauncher,
 	launch: StudioLaunch,
 ): Promise<StudioLaunchOutcome> {
 	let executable: StudioExecutable | undefined;
@@ -383,7 +432,7 @@ async function launchStudioAsync(
 
 	return executable === undefined
 		? launchThroughPlatformAsync(backend, launch)
-		: launchDirectAsync(backend, launch, executable.path);
+		: launchDirectAsync(backend, keepHidden, launch, executable.path);
 }
 
 function watchSnapshotLighting(

@@ -109,6 +109,11 @@ function changeMacVisibility(
 		throw new ForgeError("studio_launch_failed", "Studio could not change its app visibility.");
 	}
 
+	// An unhidden Studio launched hidden has no window on screen until active.
+	if (request.desktop === "user") {
+		pinned.activateApp();
+	}
+
 	const process = { ...previous, desktop: request.desktop };
 	setup.status.studio("open", save.place, process);
 	return { from: isHidden ? "hidden" : "user", process };

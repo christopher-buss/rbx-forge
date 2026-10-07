@@ -322,8 +322,14 @@ describe("session Studio desktop", () => {
 		{ default: "user", expected: "hidden", file: "hidden", platform: "win32" },
 		{ default: "hidden", expected: "user", file: "hidden", flag: "user", platform: "win32" },
 		{ default: "user", expected: "hidden", file: "user", flag: "hidden", platform: "win32" },
-		{ default: "hidden", expected: "user", platform: "darwin" },
+		{ default: "hidden", expected: "hidden", platform: "darwin" },
+		{ default: "user", expected: "user", platform: "darwin" },
+		{ default: "user", expected: "hidden", file: "hidden", platform: "darwin" },
+		{ default: "hidden", expected: "user", file: "hidden", flag: "user", platform: "darwin" },
+		{ default: "user", expected: "hidden", file: "user", flag: "hidden", platform: "darwin" },
+		{ default: "hidden", expected: "user", platform: "linux" },
 		{ expected: "user", flag: "hidden", platform: "linux" },
+		{ expected: "user", file: "hidden", platform: "linux" },
 	] as const)(
 		"should resolve $platform default=$default file=$file flag=$flag as $expected",
 		async (desktop) => {

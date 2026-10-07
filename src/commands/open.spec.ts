@@ -225,6 +225,17 @@ describe(runOpenAsync, () => {
 		expect(run.launcher).toHaveBeenCalledWith(expect.objectContaining({ desktop: "hidden" }));
 	});
 
+	it("should launch a hidden macOS snapshot without the Windows Lighting watcher", async () => {
+		expect.assertions(1);
+
+		const run = makeOpen({ platform: "darwin" });
+		await runOpenAsync(run.context, input());
+
+		expect(run.launcher).toHaveBeenCalledWith(
+			expect.objectContaining({ desktop: "hidden", watchHiddenLighting: false }),
+		);
+	});
+
 	it("should build a snapshot into .forge/snapshots, then open it", async () => {
 		expect.assertions(3);
 
@@ -256,7 +267,7 @@ describe(runOpenAsync, () => {
 						env: { PATH: TOOLS },
 						place: SNAPSHOT,
 						studioPath: undefined,
-						watchHiddenLighting: true,
+						watchHiddenLighting: false,
 					},
 				],
 			],

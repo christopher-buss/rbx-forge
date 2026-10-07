@@ -1,7 +1,7 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 
 import { createFakeNative } from "../../test/helpers/native.ts";
 import {
@@ -222,7 +222,7 @@ describe("macOS Studio visibility", () => {
 		});
 	});
 
-	it("shows an app hidden outside forge even when the status still records user", async () => {
+	it("shows and activates an app hidden outside forge even when the status still records user", async () => {
 		expect.assertions(3);
 
 		const { move, native, status } = fixture(true);
@@ -233,8 +233,37 @@ describe("macOS Studio visibility", () => {
 			save: { desktop: "user", pid: 777 },
 			to: "user",
 		});
-		expect(native.processes.get(777)).toMatchObject({ alive: true, appHidden: false });
+		expect(native.processes.get(777)).toMatchObject({
+			activations: 1,
+			alive: true,
+			appActive: true,
+			appHidden: false,
+		});
 		expect(status.snapshot().services.studio).toMatchObject({ desktop: "user", pid: 777 });
+	});
+
+	it("asks AppKit to unhide an app it reports hidden", async () => {
+		expect.assertions(2);
+
+		const { move, native } = fixture(true);
+		const requested: Array<boolean> = [];
+		const { pinProcess } = native.addon;
+		native.addon.pinProcess = (pid) => {
+			const pinned = pinProcess(pid);
+			assert(pinned !== null);
+			return {
+				...pinned,
+				setAppHidden: (hidden) => {
+					requested.push(hidden);
+					return pinned.setAppHidden(hidden);
+				},
+			};
+		};
+
+		await expect(move({ desktop: "user", timeoutMs: 30_000 })).resolves.toMatchObject({
+			to: "user",
+		});
+		expect(requested).toStrictEqual([false]);
 	});
 
 	it.for([false, true])(
@@ -255,7 +284,7 @@ describe("macOS Studio visibility", () => {
 	);
 
 	it("saves and hides only the session Studio while retaining its PID and parts", async () => {
-		expect.assertions(4);
+		expect.assertions(5);
 
 		const { move, native, status } = fixture();
 
@@ -266,6 +295,7 @@ describe("macOS Studio visibility", () => {
 			to: "hidden",
 		});
 		expect(native.processes.get(777)).toMatchObject({ alive: true, appHidden: true });
+		expect(native.processes.get(777)!.activations).toBeUndefined();
 		expect(native.processes.get(888)).toMatchObject({ alive: true, appHidden: false });
 		expect(status.snapshot().services).toMatchObject({
 			compiler: { owner: "start", status: "ready" },

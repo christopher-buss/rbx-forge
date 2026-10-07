@@ -74,8 +74,16 @@ user session. Forge opens it or makes it and keeps it for later launches.
 
 `forge start` opens Studio on the user's desktop by default. Set
 `studio.desktop` in the config or pass `--desktop user` / `--desktop hidden` to
-`start`, `up --studio`, or `open`; the flag wins. On macOS and Linux the effective
-desktop is always `user`. A found Studio stays on its existing desktop.
+`start`, `up --studio`, or `open`; the flag wins. On Linux the effective desktop
+is always `user`. A found Studio stays on its existing desktop.
+
+On macOS, the hidden desktop is no separate desktop: forge launches Studio through
+LaunchServices without activating it, so it never takes focus, and hides it.
+Studio shows itself a few times while it loads; a watcher hides it again each
+time, until the place is open, so its windows can appear behind the front app
+for a moment. `start` and `--desktop user` bring Studio to the front. When forge
+finds no Studio app bundle, `open -g -j` opens the place in the background, and
+forge warns that it cannot keep Studio hidden.
 
 `restart` reopens Studio on its previous desktop. When Windows cannot launch
 a hidden Studio directly, forge uses the platform launcher on the user desktop
@@ -239,7 +247,14 @@ the desktop so an agent can tell whether the user saw the save.
 
 On macOS, forge presses the menu through Accessibility (AX) without activating
 Studio. It saves in the background, while minimized, and while the app is hidden;
-Studio keeps its focus and visibility. Studio restores a window minimized to
+Studio keeps its focus and visibility. Studio keeps Save to File disabled until
+it has been the active app once, which a hidden launch never makes it. When the
+item is disabled, forge activates Studio, waits until the item enables, hides
+Studio again if it was hidden, gives focus back to the app that had it, and
+then saves. Studio shows for about a second, once per Studio process; later
+saves stay hidden. When the item stays disabled for a few seconds, for example
+during Play mode or while Studio loads, forge restores Studio's visibility and
+focus and fails the save with `menu_disabled`. Studio restores a window minimized to
 the Dock when it saves, so forge minimizes that window again for up to two
 seconds after the press; the window can show briefly. Saves fail with `timeout`
 while the screen is locked. Grant Accessibility access to the terminal
@@ -253,7 +268,8 @@ An agent edits through Studio, then runs `forge save --json`, then
 
 A Studio that is not open fails with `studio_not_open`; a modal before the
 request fails with `studio_busy`. `save_failed` carries `details.reason`:
-`timeout`, `studio_error`, `no_menu_item`, or `permission_denied`. The writable
+`timeout`, `studio_error`, `no_menu_item`, `menu_disabled` (macOS: Save to File
+stayed disabled until the deadline), or `permission_denied`. The writable
 check stops a read-only place before Studio can show a save error.
 
 `forge save --place <snapshot>` saves the Studio that has that snapshot open,
@@ -302,10 +318,12 @@ that now has the place open.
 
 ## Showing and hiding Studio on macOS
 
-`forge hide` saves the session Studio and hides that app. `forge show` saves it
-and unhides it. Both retain the same PID, undo history, script tabs, owner, and
-Rojo. They preserve focus, Space, and window order; show does not raise Studio
-above other apps. Snapshot Studios are outside these commands. Each place has
+`forge hide` saves the session Studio and hides that app. `forge show` saves it,
+unhides it, and activates it, which brings its window to the front; a Studio
+launched hidden has no window on screen until it is active. Both retain the same
+PID, undo history, script tabs, owner, and Rojo. Hide preserves focus, Space,
+and window order. The first save of a Studio that has never been active shows
+it briefly (see [Saving](#saving)). Snapshot Studios are outside these commands. Each place has
 its own Studio process, so other open places stay as they are.
 
 The commands read the app's current hidden state, including a manual Cmd+H.
@@ -313,7 +331,7 @@ Their result uses `from` and `to` as app visibility: `hidden` means app-hidden,
 `user` means shown. `services.studio.desktop` records the last successful forge
 visibility command. Manual Cmd+H or Dock changes do not update this status marker;
 the next show or hide reads their actual effect. `save.desktop` remains `user`
-because macOS uses no hidden desktop. A restart can open a visible Studio again;
+because it records the desktop object, and macOS has only the user's. A restart can open a visible Studio again;
 keeping the desktop across a restart refers to Windows placement.
 
 As on Windows, `--timeout <s>` controls saving first. A save failure leaves app

@@ -132,9 +132,11 @@ origin remains found until forge replaces it.\
 _Avoid_: user Studio, external Studio
 
 **Hidden desktop**:\
-A Windows desktop that forge makes, apart from the user's desktop, for Studios
-that agents use. A Studio there changes nothing on the user's screen.\
-_Avoid_: forge desktop, background, invisible
+Where Studios that agents use run, apart from the user's desktop, changing
+nothing on the user's screen. On Windows, a desktop that forge makes; on macOS,
+a background LaunchServices launch, kept hidden and activated only for a\
+first save (priming save).\
+_Avoid_: forge desktop, invisible
 
 **Snapshot**:\
 A copy of the place that `forge open` builds and opens, outside every session

@@ -94,7 +94,7 @@ export function resolveConfig(file: ForgeConfig, flags: ConfigLayer): ResolvedCo
  * Resolve a command's Studio desktop after flag and file precedence.
  *
  * @param config - The file and flag config layers, resolved.
- * @param platform - The host OS; hidden is Windows only.
+ * @param platform - The host OS; Linux has no hidden desktop.
  * @param defaultDesktop - The command's choice when no layer sets it.
  * @param override - A later client's desktop flag when attaching Studio.
  * @returns The effective desktop.
@@ -105,7 +105,9 @@ export function resolveStudioDesktop(
 	defaultDesktop: StudioDesktop = "user",
 	override?: StudioDesktop,
 ): StudioDesktop {
-	return platform === "win32" ? (override ?? config.studio.desktop ?? defaultDesktop) : "user";
+	return platform === "win32" || platform === "darwin"
+		? (override ?? config.studio.desktop ?? defaultDesktop)
+		: "user";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

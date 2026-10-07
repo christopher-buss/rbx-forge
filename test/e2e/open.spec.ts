@@ -34,6 +34,8 @@ const FORBID_BREAKAWAY = path.join(
 );
 const IS_WINDOWS = process.platform === "win32";
 const SNAPSHOT_DESKTOP = IS_WINDOWS ? "hidden" : "user";
+/** `open` keeps a hidden macOS launch in the background and hidden. */
+const HIDDEN_OPEN_FLAGS = process.platform === "darwin" ? ["-g", "-j"] : [];
 /** The fixture role that stands in for the POSIX platform launcher. */
 const LAUNCHER = process.platform === "darwin" ? "open" : "xdg-open";
 
@@ -383,7 +385,7 @@ describe("forge open", () => {
 
 			expect(status).toBe(EXIT_SUCCESS);
 			expect(data).toMatchObject({ studio: null });
-			expect(studio.args).toStrictEqual([parseOpened(data).place]);
+			expect(studio.args).toStrictEqual([...HIDDEN_OPEN_FLAGS, parseOpened(data).place]);
 		},
 	);
 
