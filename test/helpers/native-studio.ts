@@ -1,4 +1,4 @@
-import type { PinnedProcess } from "../../src/native/addon.ts";
+import type { PinnedProcess, SaveOutcome } from "../../src/native/addon.ts";
 import type { FakeProcess } from "./native.ts";
 
 /**
@@ -31,7 +31,7 @@ export function appMembers(
 export async function requestSaveAsync(
 	entry: FakeProcess,
 	timeoutMs = 30_000,
-): Promise<"menu_disabled" | "no_menu_item" | "requested" | "timeout"> {
+): Promise<SaveOutcome> {
 	await Promise.resolve();
 	return timeoutMs <= 0 ? "timeout" : requestSave(entry);
 }
@@ -101,9 +101,7 @@ function setAppHidden(entry: FakeProcess, hidden: boolean): boolean {
 	return true;
 }
 
-function requestSave(
-	entry: FakeProcess,
-): "menu_disabled" | "no_menu_item" | "requested" | "timeout" {
+function requestSave(entry: FakeProcess): SaveOutcome {
 	if (!entry.alive || entry.onSaveRequest === "throw") {
 		throw new Error("Studio save failed");
 	}

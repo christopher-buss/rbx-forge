@@ -9,7 +9,7 @@ import {
 	PROJECT,
 	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
-import { saveStudioAsync } from "./save-studio.ts";
+import { PRIME_LIMIT_MS, saveStudioAsync } from "./save-studio.ts";
 
 const PLACE = path.join(PROJECT, "game.rbxl");
 
@@ -18,10 +18,27 @@ const PLACE = path.join(PROJECT, "game.rbxl");
  * frontmost editor (PID 7).
  *
  * @param studio - Overrides for the Studio entry.
- * @param hidesAtSleep - Something else hides Studio at this clock sleep.
+ * @param script - What happens while it primes.
+ * @param script.abortsAtSleep - The session ends at this clock sleep.
+ * @param script.hidesAtSleep - Something else hides Studio at this clock sleep.
+ * @param script.menuReadMs - How long each Save to File read takes.
+ * @param script.timeoutMs - The save deadline.
  * @returns The save, the process table, and the clock.
  */
-function priming(studio: Partial<FakeProcess> = {}, hidesAtSleep?: number) {
+function priming(
+	studio: Partial<FakeProcess> = {},
+	{
+		abortsAtSleep,
+		hidesAtSleep,
+		menuReadMs = 0,
+		timeoutMs = 1000,
+	}: {
+		abortsAtSleep?: number;
+		hidesAtSleep?: number;
+		menuReadMs?: number;
+		timeoutMs?: number;
+	} = {},
+) {
 	const memory = createMemoryFileSystem({
 		"game.rbxl": "place",
 		"game.rbxl.lock": `42\nRobloxStudio\n${TEST_HOSTNAME}\n`,
@@ -46,6 +63,27 @@ function priming(studio: Partial<FakeProcess> = {}, hidesAtSleep?: number) {
 	assert(entry !== undefined && editor !== undefined);
 	let now = 0;
 	let sleeps = 0;
+	const abort = new AbortController();
+	const { pinProcess } = native.addon;
+	/**
+	 * Pin a process whose Save to File reads take {@link menuReadMs}.
+	 *
+	 * @param pid - The process.
+	 * @returns The pin, or null.
+	 */
+	native.addon.pinProcess = (pid) => {
+		const pinned = pinProcess(pid);
+		return pinned === null
+			? null
+			: {
+					...pinned,
+					saveMenuEnabled: async (ms) => {
+						now += menuReadMs;
+						return pinned.saveMenuEnabled(ms);
+					},
+				};
+	};
+
 	const seams = createTestSeams({
 		clock: {
 			now: () => now,
@@ -56,6 +94,10 @@ function priming(studio: Partial<FakeProcess> = {}, hidesAtSleep?: number) {
 					entry.appHidden = true;
 					entry.appActive = false;
 				}
+
+				if (sleeps === abortsAtSleep) {
+					abort.abort();
+				}
 			},
 		},
 		fileSystem: memory.fileSystem,
@@ -65,7 +107,7 @@ function priming(studio: Partial<FakeProcess> = {}, hidesAtSleep?: number) {
 		editor,
 		entry,
 		now: () => now,
-		save: async () => saveStudioAsync(seams, { place: PLACE }, 1000),
+		save: async () => saveStudioAsync(seams, { place: PLACE }, timeoutMs, abort.signal),
 	};
 }
 
@@ -95,24 +137,70 @@ describe(saveStudioAsync, () => {
 	it("should activate Studio again when something hides it while it primes", async () => {
 		expect.assertions(2);
 
-		const run = priming({}, 1);
+		const run = priming({}, { hidesAtSleep: 1 });
 
 		await expect(run.save()).resolves.toMatchObject({ pid: 42 });
 		expect(run.entry.activations).toBe(2);
 	});
 
-	it("should report menu_disabled and restore hidden state and focus when the item never enables", async () => {
+	it("should report menu_disabled and restore hidden state and focus at the priming limit", async () => {
 		expect.assertions(4);
 
-		const run = priming({ saveMenuEnablesAtPoll: Infinity });
+		const run = priming({ saveMenuEnablesAtPoll: Infinity }, { timeoutMs: 30_000 });
 
 		await expect(run.save()).rejects.toMatchObject({
 			code: "save_failed",
 			details: { place: PLACE, reason: "menu_disabled" },
 		});
-		expect(run.now()).toBe(1000);
+		expect(run.now()).toBe(PRIME_LIMIT_MS);
 		expect(run.entry.appHidden).toBeTrue();
 		expect(run.editor.appActive).toBeTrue();
+	});
+
+	it("should report a timeout when the save deadline passes before the priming limit", async () => {
+		expect.assertions(3);
+
+		const run = priming({ saveMenuEnablesAtPoll: Infinity }, { timeoutMs: PRIME_LIMIT_MS / 2 });
+
+		await expect(run.save()).rejects.toMatchObject({
+			code: "save_failed",
+			details: { place: PLACE, reason: "timeout" },
+		});
+		expect(run.entry.appHidden).toBeTrue();
+		expect(run.editor.appActive).toBeTrue();
+	});
+
+	it("should report a timeout when Save to File enables only at the save deadline", async () => {
+		expect.assertions(2);
+
+		const run = priming({ saveMenuEnablesAtPoll: 1 }, { menuReadMs: 1000 });
+
+		await expect(run.save()).rejects.toMatchObject({
+			code: "save_failed",
+			details: { place: PLACE, reason: "timeout" },
+		});
+		expect(run.entry.appHidden).toBeTrue();
+	});
+
+	it("should restore hidden state and focus when the session ends while Studio primes", async () => {
+		expect.assertions(3);
+
+		const run = priming({ saveMenuEnablesAtPoll: Infinity }, { abortsAtSleep: 2 });
+
+		await expect(run.save()).rejects.toMatchObject({ cause: { name: "AbortError" } });
+		expect(run.entry.appHidden).toBeTrue();
+		expect(run.editor.appActive).toBeTrue();
+	});
+
+	it("should not activate Studio again when it was already the front app", async () => {
+		expect.assertions(3);
+
+		const run = priming({ appActive: true, appHidden: false });
+		run.editor.appActive = false;
+
+		await expect(run.save()).resolves.toMatchObject({ pid: 42 });
+		expect(run.entry.activations).toBeUndefined();
+		expect(run.entry.appHidden).toBeFalse();
 	});
 
 	it("should hide Studio again when no app was frontmost", async () => {

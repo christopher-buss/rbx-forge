@@ -1,7 +1,7 @@
 import type { Stats } from "node:fs";
 
 import { ForgeError } from "../errors.ts";
-import type { PinnedProcess } from "../native/addon.ts";
+import type { PinnedProcess, SaveOutcome } from "../native/addon.ts";
 import type { StudioSeams, StudioTarget } from "./close-studio.ts";
 import { findPlaceStudio } from "./close-studio.ts";
 import { dismissLightingDialogAsync } from "./lighting-dialog.ts";
@@ -21,6 +21,8 @@ const POLL_MS = 100;
 const STABLE_MS = 250;
 /** How often priming reads Save to File; Studio shows until it enables. */
 const PRIME_POLL_MS = 10;
+/** The longest priming keeps Studio visible. */
+export const PRIME_LIMIT_MS = 5000;
 
 /**
  * Save a verified Studio and wait until its changed place file settles.
@@ -61,13 +63,28 @@ export async function saveStudioAsync(
 
 function saveFailure(
 	place: string,
-	reason: "menu_disabled" | "no_menu_item" | "permission_denied" | "studio_error" | "timeout",
+	reason: "permission_denied" | "studio_error" | Exclude<SaveOutcome, "requested">,
 	cause?: unknown,
 ): ForgeError {
 	return new ForgeError("save_failed", `Could not save ${place}: ${reason}.`, {
 		cause,
 		details: { place, reason },
 	});
+}
+
+function restoreFocus(
+	seams: StudioSeams,
+	pinned: PinnedProcess,
+	{ front, wasHidden }: { front: null | number; wasHidden: boolean },
+): void {
+	if (wasHidden) {
+		pinned.setAppHidden(true);
+	}
+
+	// Activating Studio itself would unhide it again.
+	if (front !== null && front !== pinned.pid) {
+		seams.native().pinProcess(front)?.activateApp();
+	}
 }
 
 /**
@@ -77,7 +94,8 @@ function saveFailure(
  * @param pinned - The Studio to activate and hide again.
  * @param place - Its place, for the error.
  * @param options - The save deadline and the session end.
- * @rejects `save_failed` (`menu_disabled`) when the item stays disabled.
+ * @rejects `save_failed`: `menu_disabled` when the item stays disabled for
+ *   {@link PRIME_LIMIT_MS}, `timeout` when the save deadline passes first.
  */
 async function primeStudioAsync(
 	seams: StudioSeams,
@@ -88,6 +106,7 @@ async function primeStudioAsync(
 	const native = seams.native();
 	const front = native.frontmostApplication();
 	const wasHidden = pinned.appHidden() === true;
+	const primeDeadline = Math.min(deadline, seams.clock.now() + PRIME_LIMIT_MS);
 	try {
 		for (;;) {
 			// The keep-hidden watcher may hide Studio before it is active.
@@ -95,26 +114,25 @@ async function primeStudioAsync(
 				pinned.activateApp();
 			}
 
-			if (await pinned.saveMenuEnabled(deadline - seams.clock.now())) {
+			const remainingMs = deadline - seams.clock.now();
+			if (remainingMs <= 0) {
+				throw saveFailure(place, "timeout");
+			}
+
+			if (await pinned.saveMenuEnabled(remainingMs)) {
 				return;
 			}
 
 			signal?.throwIfAborted();
-			const remainingMs = deadline - seams.clock.now();
-			if (remainingMs <= 0) {
+			const primeMs = primeDeadline - seams.clock.now();
+			if (primeMs <= 0) {
 				throw saveFailure(place, "menu_disabled");
 			}
 
-			await seams.clock.sleep(Math.min(PRIME_POLL_MS, remainingMs), signal);
+			await seams.clock.sleep(Math.min(PRIME_POLL_MS, primeMs), signal);
 		}
 	} finally {
-		if (wasHidden) {
-			pinned.setAppHidden(true);
-		}
-
-		if (front !== null) {
-			native.pinProcess(front)?.activateApp();
-		}
+		restoreFocus(seams, pinned, { front, wasHidden });
 	}
 }
 
@@ -143,7 +161,12 @@ async function requestStudioSaveAsync(
 	let outcome = await pinned.requestSave(remainingMs);
 	if (outcome === "menu_disabled") {
 		await primeStudioAsync(seams, pinned, place, { deadline, signal });
-		outcome = await pinned.requestSave(deadline - seams.clock.now());
+		const primedMs = deadline - seams.clock.now();
+		if (primedMs <= 0) {
+			throw saveFailure(place, "timeout");
+		}
+
+		outcome = await pinned.requestSave(primedMs);
 	}
 
 	if (outcome !== "requested") {

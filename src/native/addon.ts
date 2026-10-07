@@ -20,6 +20,9 @@ export interface FileLock {
 	release: () => void;
 }
 
+/** What pressing File > Save to File did. */
+export type SaveOutcome = "menu_disabled" | "no_menu_item" | "requested" | "timeout";
+
 /**
  * A process held by identity: a Windows handle, a Linux pidfd, or on macOS
  * the PID plus its start time, checked before every call. Every method acts
@@ -96,9 +99,7 @@ export interface PinnedProcess {
 	 * Press File > Save to File within the deadline (default 30 seconds).
 	 * `menu_disabled` (macOS only): the item is disabled and was not pressed.
 	 */
-	requestSave: (
-		timeoutMs?: number,
-	) => Promise<"menu_disabled" | "no_menu_item" | "requested" | "timeout">;
+	requestSave: (timeoutMs?: number) => Promise<SaveOutcome>;
 	/**
 	 * Whether File > Save to File exists and is enabled; always `true` off
 	 * macOS. `false` once the deadline passes.
