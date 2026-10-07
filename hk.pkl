@@ -73,7 +73,20 @@ local e2e = new Step {
 
 local native = new Step {
     glob = List("reaper/**")
-    check = "cargo build --manifest-path reaper/Cargo.toml"
+    check = "cargo test --manifest-path reaper/Cargo.toml"
+    depends = List("cargo-fmt", "cargo-clippy")
+}
+
+// hk 2.2.0 cannot load the builtin's own test cases.
+local fmt = (Builtins.cargo_fmt) {
+    tests = new {}
+}
+
+// CI runs clippy with `-D warnings`.
+local clippy = (Builtins.cargo_clippy) {
+    env {
+        ["CARGO_BUILD_WARNINGS"] = "deny"
+    }
 }
 
 local knip = new Step {
@@ -94,6 +107,8 @@ hooks {
             ["build"] = (build) { profiles = List("agent") }
             ["test"] = (test) { profiles = List("agent") }
             ["e2e"] = (e2e) { profiles = List("agent") }
+            ["cargo-fmt"] = (fmt) { profiles = List("agent") }
+            ["cargo-clippy"] = (clippy) { profiles = List("agent") }
             ["native"] = (native) { profiles = List("agent") }
         }
     }
@@ -134,6 +149,8 @@ hooks {
             ["build"] = build
             ["test"] = test
             ["e2e"] = e2e
+            ["cargo-fmt"] = fmt
+            ["cargo-clippy"] = clippy
             ["native"] = native
         }
     }
