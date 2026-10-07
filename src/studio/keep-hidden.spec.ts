@@ -22,6 +22,8 @@ interface Script {
 	exitsAt?: number;
 	/** Its place lock appears at this time. */
 	opensAt?: number;
+	/** What the session that `forge show` writes records for Studio. */
+	recorded?: Parameters<typeof sessionState>;
 	/** Studio shows itself at these times. */
 	showsAt?: Array<number>;
 	/**
@@ -30,7 +32,10 @@ interface Script {
 	userShowsAt?: number;
 }
 
-function sessionState(desktop: "hidden" | "user") {
+function sessionState(
+	desktop: "hidden" | "user",
+	studio: { pid?: number; startTime?: string } = {},
+) {
 	return {
 		phase: "ready",
 		pid: 7,
@@ -45,6 +50,7 @@ function sessionState(desktop: "hidden" | "user") {
 				place: PLACE,
 				startTime: "42",
 				status: "open",
+				...studio,
 			},
 			syncback: { status: "off" },
 		},
@@ -53,7 +59,13 @@ function sessionState(desktop: "hidden" | "user") {
 	};
 }
 
-function watching({ exitsAt, opensAt, showsAt = [], userShowsAt }: Script = {}) {
+function watching({
+	exitsAt,
+	opensAt,
+	recorded = ["user"],
+	showsAt = [],
+	userShowsAt,
+}: Script = {}) {
 	let now = 0;
 	const memory = createMemoryFileSystem({ "game.rbxl": "place" });
 	const native = createFakeNative({
@@ -64,6 +76,7 @@ function watching({ exitsAt, opensAt, showsAt = [], userShowsAt }: Script = {}) 
 	const shows: Array<number> = [];
 	const hides: Array<number> = [];
 	const pending = [...showsAt];
+	let didUserShow = false;
 	const seams = createTestSeams({
 		clock: {
 			now: () => now,
@@ -75,11 +88,17 @@ function watching({ exitsAt, opensAt, showsAt = [], userShowsAt }: Script = {}) 
 					shows.push(now);
 				}
 
-				if (userShowsAt !== undefined && now >= userShowsAt && studio.appHidden === true) {
+				if (!didUserShow && userShowsAt !== undefined && now >= userShowsAt) {
+					didUserShow = true;
 					memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
 					// A session directory without a state yet.
-					memory.fileSystem.mkdirSync(path.join(PROJECT, ".forge", "sessions", "s0"));
-					memory.fileSystem.writeFileSync(STATE, JSON.stringify(sessionState("user")));
+					memory.fileSystem.mkdirSync(path.join(PROJECT, ".forge", "sessions", "s0"), {
+						recursive: true,
+					});
+					memory.fileSystem.writeFileSync(
+						STATE,
+						JSON.stringify(sessionState(...recorded)),
+					);
 					studio.appHidden = false;
 				}
 
@@ -158,6 +177,37 @@ describe(keepStudioHiddenAsync, () => {
 
 		expect(run.hides).toStrictEqual([1000]);
 		expect(run.studio.appHidden).toBeFalse();
+	});
+
+	it("should hide Studio again when its session records another Studio's start time", async () => {
+		expect.assertions(1);
+
+		const run = watching({
+			opensAt: 5000,
+			recorded: ["user", { startTime: "41" }],
+			userShowsAt: 2000,
+		});
+		await run.run();
+
+		expect(run.hides).toStrictEqual([2000]);
+	});
+
+	it("should hide Studio again when its session records another Studio's PID", async () => {
+		expect.assertions(1);
+
+		const run = watching({ opensAt: 5000, recorded: ["user", { pid: 43 }], userShowsAt: 2000 });
+		await run.run();
+
+		expect(run.hides).toStrictEqual([2000]);
+	});
+
+	it("should hide Studio again when its session records the hidden desktop", async () => {
+		expect.assertions(1);
+
+		const run = watching({ opensAt: 5000, recorded: ["hidden"], userShowsAt: 2000 });
+		await run.run();
+
+		expect(run.hides).toStrictEqual([2000]);
 	});
 
 	it("should stop when Studio exits", async () => {

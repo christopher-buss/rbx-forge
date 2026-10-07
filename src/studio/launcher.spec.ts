@@ -753,6 +753,21 @@ describe("macOS Studio launch", () => {
 		expect(launches).toHaveLength(0);
 	});
 
+	it("should start a hidden Studio directly on Linux, never through LaunchServices, without a warning", async () => {
+		expect.assertions(2);
+
+		const { launches, native } = macosNative();
+		const { launch } = makeLauncher({ files: { [MACOS_STUDIO_PATH]: "" }, native });
+
+		await expect(
+			launch({ ...launchOf(), desktop: "hidden", studioPath: MACOS_STUDIO_PATH }),
+		).resolves.toStrictEqual({
+			studio: { desktop: "user", pid: 1000, startTime: "1000" },
+			type: "launched",
+		});
+		expect(launches).toHaveLength(0);
+	});
+
 	it("should open a hidden place in the background with the platform launcher and warn that it may not stay hidden", async () => {
 		expect.assertions(2);
 
