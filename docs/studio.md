@@ -247,7 +247,9 @@ it has been the active app once, which a hidden launch never makes it. When the
 item is disabled, forge activates Studio, waits until the item enables, hides
 Studio again if it was hidden, gives focus back to the app that had it, and
 then saves. Studio shows for about a second, once per Studio process; later
-saves stay hidden. Studio restores a window minimized to
+saves stay hidden. When the item stays disabled for a few seconds, for example
+during Play mode or while Studio loads, forge restores Studio's visibility and
+focus and fails the save with `menu_disabled`. Studio restores a window minimized to
 the Dock when it saves, so forge minimizes that window again for up to two
 seconds after the press; the window can show briefly. Saves fail with `timeout`
 while the screen is locked. Grant Accessibility access to the terminal
@@ -311,10 +313,11 @@ that now has the place open.
 
 ## Showing and hiding Studio on macOS
 
-`forge hide` saves the session Studio and hides that app. `forge show` saves it
-and unhides it. Both retain the same PID, undo history, script tabs, owner, and
-Rojo. They preserve focus, Space, and window order; show does not raise Studio
-above other apps. The first save of a Studio that has never been active shows
+`forge hide` saves the session Studio and hides that app. `forge show` saves it,
+unhides it, and activates it, which brings its window to the front; a Studio
+launched hidden has no window on screen until it is active. Both retain the same
+PID, undo history, script tabs, owner, and Rojo. Hide preserves focus, Space,
+and window order. The first save of a Studio that has never been active shows
 it briefly (see [Saving](#saving)). Snapshot Studios are outside these commands. Each place has
 its own Studio process, so other open places stay as they are.
 

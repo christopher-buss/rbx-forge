@@ -17,8 +17,8 @@ background with no change of focus, so macOS needs no separate desktop object;
 but Studio keeps File > Save to File disabled until it has been the active app
 once. There, Studio started as a bare process becomes the frontmost app while it
 loads; a LaunchServices launch without activation never does. So on macOS, the
-hidden desktop is a background LaunchServices launch, kept hidden, never
-activated.
+hidden desktop is a background LaunchServices launch, kept hidden, and activated
+only briefly when a save needs it.
 
 ## Decisions
 
@@ -34,16 +34,16 @@ activated.
 - **macOS hidden.** forge launches the Studio app bundle through LaunchServices
   as a new instance, with activation off, and hides it as soon as it exists.
   Studio shows itself while it loads, so a detached watcher hides it again each
-  time, until the place is open and Studio has stayed hidden for a while, or
-  until Studio becomes the active app. Its windows can appear behind the front
-  app for a moment, never focused. The `user` desktop takes the same path with
+  time, until the place is open and Studio has stayed hidden for a while. It
+  never hides an active Studio. Its windows can appear behind the front app for
+  a moment, never focused. The `user` desktop takes the same path with
   activation on.
 - **macOS priming save.** When Save to File is disabled, the save remembers the
   frontmost app, activates Studio until the item enables, hides Studio again if
   it was hidden, gives the focus back, and then presses the item. Studio shows
-  only for that first save of a never-active Studio. An item still disabled at
-  the save deadline fails the save (`menu_disabled`), with visibility and focus
-  restored.
+  only for that first save of a never-active Studio, and only briefly: an item
+  still disabled after a short priming limit fails the save (`menu_disabled`),
+  with visibility and focus restored.
 - **Fallback.** When forge cannot launch on the hidden desktop (no executable,
   so it uses the platform launcher, or breakaway is denied), it opens Studio on
   the user's desktop with a warning. On macOS the platform launcher opens the
@@ -54,9 +54,11 @@ activated.
   the desktop. On macOS it keeps focus, apart from a priming save.
 - **`show` and `hide`.** On Windows, `forge show` and `forge hide` save Studio,
   close it, and open it again on the other desktop. Undo history and open script
-  tabs are lost. On macOS, they save, then hide or unhide the app in place;
-  state records the last successful forge visibility change as the desktop.
-  Native desktop and save results still report the user's desktop.
+  tabs are lost. On macOS, they save, then hide the app in place, or unhide and
+  activate it, since an unhidden Studio launched hidden has no window on screen
+  until it is active; state records the last successful forge visibility change
+  as the desktop. Native desktop and save results still report the user's
+  desktop.
 - **Close and block checks see the hidden desktop.** Closing Studio and finding
   a modal dialog enumerate the windows of Studio's desktop, so `stop` and `down`
   end a blocked Studio at once, as on the user's desktop.
@@ -86,7 +88,7 @@ activated.
   dialog dismissal, each able to act on the hidden desktop, and a macOS
   LaunchServices launch.
 - The macOS watcher's polling interval and quiet window, and the priming save's
-  polling interval, are a tuning surface.
+  polling interval and limit, are a tuning surface.
 - A never-active hidden Studio shows on screen and takes focus for about a
   second on its first save.
 - A hidden Studio is visible only through `forge status`, `forge show`, and the

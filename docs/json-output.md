@@ -260,11 +260,11 @@ its changed timestamp settles. `desktop` is `user` or `hidden`. On Windows,
 `user` means saving can take focus. `durationMs` includes waiting for an opening
 Studio. `--timeout <s>` defaults to 30 seconds.
 
-| Code              | Exit | Meaning                                                                                      |
-| ----------------- | ---- | -------------------------------------------------------------------------------------------- |
-| `studio_not_open` | 3    | No Studio has the target place open.                                                         |
-| `studio_busy`     | 1    | A modal blocks Studio before the save.                                                       |
-| `save_failed`     | 1    | `error.details.reason` is `timeout`, `studio_error`, `no_menu_item`, or `permission_denied`. |
+| Code              | Exit | Meaning                                                                                                       |
+| ----------------- | ---- | ------------------------------------------------------------------------------------------------------------- |
+| `studio_not_open` | 3    | No Studio has the target place open.                                                                          |
+| `studio_busy`     | 1    | A modal blocks Studio before the save.                                                                        |
+| `save_failed`     | 1    | `error.details.reason` is `timeout`, `studio_error`, `no_menu_item`, `menu_disabled`, or `permission_denied`. |
 
 The writable check runs before the save request; a read-only place returns
 `save_failed` with `permission_denied` without triggering a Studio save dialog.
