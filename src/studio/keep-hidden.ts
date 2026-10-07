@@ -63,8 +63,8 @@ export function createKeepHiddenLauncher(
 /**
  * Hide one exact macOS Studio every time it shows itself while loading,
  * until its place lock exists and it has stayed hidden for
- * {@link KEEP_HIDDEN_QUIET_MS}, it exits, it becomes the active app, a
- * session records another desktop for it, or the open bound passes.
+ * {@link KEEP_HIDDEN_QUIET_MS}, it exits, a session records another desktop
+ * for it, or the open bound passes.
  *
  * @param seams - The place lock, session states, native process identity, and polling clock.
  * @param payload - The {@link KeepHiddenTarget} as JSON.
@@ -87,11 +87,11 @@ export async function keepStudioHiddenAsync(
 	let isOpen = false;
 	while (pinned.isAlive() && clock.now() < deadline) {
 		if (pinned.appHidden() === false) {
-			if (isShownDeliberately(seams.fileSystem, pinned, root, { pid, startTime })) {
+			if (isShownBySession(seams.fileSystem, root, { pid, startTime })) {
 				return;
 			}
 
-			pinned.setAppHidden(true);
+			hideInactive(pinned);
 			quietSince = clock.now();
 		}
 
@@ -112,17 +112,18 @@ function ignoreError(): void {
 	// The launch already succeeded; the watcher is best effort.
 }
 
-function isShownDeliberately(
+function hideInactive(pinned: PinnedProcess): void {
+	// An active Studio is never re-hidden.
+	if (pinned.appActive() !== true) {
+		pinned.setAppHidden(true);
+	}
+}
+
+function isShownBySession(
 	fileSystem: Seams["fileSystem"],
-	pinned: PinnedProcess,
 	root: string,
 	{ pid, startTime }: Pick<KeepHiddenTarget, "pid" | "startTime">,
 ): boolean {
-	// Only a deliberate request, such as a priming save, activates Studio.
-	if (pinned.appActive() === true) {
-		return true;
-	}
-
 	const forge = forgeFiles(root);
 	return listSessions(fileSystem, forge).some((id) => {
 		const { state } = sessionFiles(forge, id);

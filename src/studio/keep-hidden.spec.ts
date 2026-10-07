@@ -20,6 +20,8 @@ const STATE = path.join(PROJECT, ".forge", "sessions", "s1", "state.json");
 interface Script {
 	/** A save activates Studio (priming its save menu) at this time. */
 	activatesAt?: number;
+	/** Another app becomes active at this time, leaving Studio shown. */
+	deactivatesAt?: number;
 	/** Studio exits at this time. */
 	exitsAt?: number;
 	/** Its place lock appears at this time. */
@@ -63,6 +65,7 @@ function sessionState(
 
 function watching({
 	activatesAt,
+	deactivatesAt,
 	exitsAt,
 	opensAt,
 	recorded = ["user"],
@@ -107,6 +110,10 @@ function watching({
 
 				if (activatesAt !== undefined && now === activatesAt) {
 					native.addon.pinProcess(42)?.activateApp();
+				}
+
+				if (deactivatesAt !== undefined && now === deactivatesAt) {
+					studio.appActive = false;
 				}
 
 				if (opensAt !== undefined && now >= opensAt) {
@@ -217,15 +224,15 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.hides).toStrictEqual([2000]);
 	});
 
-	it("should leave an active Studio shown and stop, so a priming save is not undone", async () => {
+	it("should leave Studio shown while it is the active app, then hide it once it is not", async () => {
 		expect.assertions(3);
 
-		const run = watching({ activatesAt: 2000, opensAt: 1000 });
+		const run = watching({ activatesAt: 2000, deactivatesAt: 4000, opensAt: 1000 });
 		await run.run();
 
-		expect(run.hides).toStrictEqual([]);
-		expect(run.studio.appHidden).toBeFalse();
-		expect(run.now()).toBe(2000);
+		expect(run.hides).toStrictEqual([4000]);
+		expect(run.studio.appHidden).toBeTrue();
+		expect(run.now()).toBe(4000 + KEEP_HIDDEN_QUIET_MS);
 	});
 
 	it("should stop when Studio exits", async () => {
