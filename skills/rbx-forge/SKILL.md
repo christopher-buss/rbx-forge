@@ -1,9 +1,8 @@
 ---
 name: rbx-forge
 description:
-  Dev loop for Roblox projects that use rbx-forge (`rbx-forge.config.ts`). Use
-  when implementing, testing, or debugging code in such a project, reading its
-  compile errors, or checking it in Roblox Studio.
+  Use before changing code, building, or using Roblox Studio in a Roblox
+  project, and when syncing Studio edits back.
 ---
 
 # rbx-forge
