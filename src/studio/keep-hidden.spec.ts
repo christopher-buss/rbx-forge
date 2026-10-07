@@ -18,6 +18,8 @@ const TARGET = { pid: 42, place: PLACE, startTime: "42" };
 const STATE = path.join(PROJECT, ".forge", "sessions", "s1", "state.json");
 
 interface Script {
+	/** A save activates Studio (priming its save menu) at this time. */
+	activatesAt?: number;
 	/** Studio exits at this time. */
 	exitsAt?: number;
 	/** Its place lock appears at this time. */
@@ -60,6 +62,7 @@ function sessionState(
 }
 
 function watching({
+	activatesAt,
 	exitsAt,
 	opensAt,
 	recorded = ["user"],
@@ -100,6 +103,10 @@ function watching({
 						JSON.stringify(sessionState(...recorded)),
 					);
 					studio.appHidden = false;
+				}
+
+				if (activatesAt !== undefined && now === activatesAt) {
+					native.addon.pinProcess(42)?.activateApp();
 				}
 
 				if (opensAt !== undefined && now >= opensAt) {
@@ -208,6 +215,17 @@ describe(keepStudioHiddenAsync, () => {
 		await run.run();
 
 		expect(run.hides).toStrictEqual([2000]);
+	});
+
+	it("should leave an active Studio shown and stop, so a priming save is not undone", async () => {
+		expect.assertions(3);
+
+		const run = watching({ activatesAt: 2000, opensAt: 1000 });
+		await run.run();
+
+		expect(run.hides).toStrictEqual([]);
+		expect(run.studio.appHidden).toBeFalse();
+		expect(run.now()).toBe(2000);
 	});
 
 	it("should stop when Studio exits", async () => {

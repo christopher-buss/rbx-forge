@@ -242,7 +242,12 @@ the desktop so an agent can tell whether the user saw the save.
 
 On macOS, forge presses the menu through Accessibility (AX) without activating
 Studio. It saves in the background, while minimized, and while the app is hidden;
-Studio keeps its focus and visibility. Studio restores a window minimized to
+Studio keeps its focus and visibility. Studio keeps Save to File disabled until
+it has been the active app once, which a hidden launch never makes it. When the
+item is disabled, forge activates Studio, waits until the item enables, hides
+Studio again if it was hidden, gives focus back to the app that had it, and
+then saves. Studio shows for about a second, once per Studio process; later
+saves stay hidden. Studio restores a window minimized to
 the Dock when it saves, so forge minimizes that window again for up to two
 seconds after the press; the window can show briefly. Saves fail with `timeout`
 while the screen is locked. Grant Accessibility access to the terminal
@@ -256,7 +261,8 @@ An agent edits through Studio, then runs `forge save --json`, then
 
 A Studio that is not open fails with `studio_not_open`; a modal before the
 request fails with `studio_busy`. `save_failed` carries `details.reason`:
-`timeout`, `studio_error`, `no_menu_item`, or `permission_denied`. The writable
+`timeout`, `studio_error`, `no_menu_item`, `menu_disabled` (macOS: Save to File
+stayed disabled until the deadline), or `permission_denied`. The writable
 check stops a read-only place before Studio can show a save error.
 
 `forge save --place <snapshot>` saves the Studio that has that snapshot open,
@@ -308,7 +314,8 @@ that now has the place open.
 `forge hide` saves the session Studio and hides that app. `forge show` saves it
 and unhides it. Both retain the same PID, undo history, script tabs, owner, and
 Rojo. They preserve focus, Space, and window order; show does not raise Studio
-above other apps. Snapshot Studios are outside these commands. Each place has
+above other apps. The first save of a Studio that has never been active shows
+it briefly (see [Saving](#saving)). Snapshot Studios are outside these commands. Each place has
 its own Studio process, so other open places stay as they are.
 
 The commands read the app's current hidden state, including a manual Cmd+H.

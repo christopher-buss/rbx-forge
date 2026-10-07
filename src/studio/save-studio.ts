@@ -19,6 +19,8 @@ export const STUDIO_SAVE_TIMEOUT_MS = 30_000;
 
 const POLL_MS = 100;
 const STABLE_MS = 250;
+/** How often priming reads Save to File; Studio shows until it enables. */
+const PRIME_POLL_MS = 10;
 
 /**
  * Save a verified Studio and wait until its changed place file settles.
@@ -59,13 +61,61 @@ export async function saveStudioAsync(
 
 function saveFailure(
 	place: string,
-	reason: "no_menu_item" | "permission_denied" | "studio_error" | "timeout",
+	reason: "menu_disabled" | "no_menu_item" | "permission_denied" | "studio_error" | "timeout",
 	cause?: unknown,
 ): ForgeError {
 	return new ForgeError("save_failed", `Could not save ${place}: ${reason}.`, {
 		cause,
 		details: { place, reason },
 	});
+}
+
+/**
+ * Make a never-active macOS Studio active until Save to File enables, then
+ * restore its hidden state and the previously frontmost app.
+ * @param seams - Time and the native addon.
+ * @param pinned - The Studio to activate and hide again.
+ * @param place - Its place, for the error.
+ * @param options - The save deadline and the session end.
+ * @rejects `save_failed` (`menu_disabled`) when the item stays disabled.
+ */
+async function primeStudioAsync(
+	seams: StudioSeams,
+	pinned: PinnedProcess,
+	place: string,
+	{ deadline, signal }: { deadline: number; signal: AbortSignal | undefined },
+): Promise<void> {
+	const native = seams.native();
+	const front = native.frontmostApplication();
+	const wasHidden = pinned.appHidden() === true;
+	try {
+		for (;;) {
+			// The keep-hidden watcher may hide Studio before it is active.
+			if (pinned.appActive() !== true) {
+				pinned.activateApp();
+			}
+
+			if (await pinned.saveMenuEnabled(deadline - seams.clock.now())) {
+				return;
+			}
+
+			signal?.throwIfAborted();
+			const remainingMs = deadline - seams.clock.now();
+			if (remainingMs <= 0) {
+				throw saveFailure(place, "menu_disabled");
+			}
+
+			await seams.clock.sleep(Math.min(PRIME_POLL_MS, remainingMs), signal);
+		}
+	} finally {
+		if (wasHidden) {
+			pinned.setAppHidden(true);
+		}
+
+		if (front !== null) {
+			native.pinProcess(front)?.activateApp();
+		}
+	}
 }
 
 async function requestStudioSaveAsync(
@@ -90,7 +140,12 @@ async function requestStudioSaveAsync(
 		throw new ForgeError("studio_busy", "A modal dialog blocks Roblox Studio.");
 	}
 
-	const outcome = await pinned.requestSave(remainingMs);
+	let outcome = await pinned.requestSave(remainingMs);
+	if (outcome === "menu_disabled") {
+		await primeStudioAsync(seams, pinned, place, { deadline, signal });
+		outcome = await pinned.requestSave(deadline - seams.clock.now());
+	}
+
 	if (outcome !== "requested") {
 		throw saveFailure(place, outcome);
 	}

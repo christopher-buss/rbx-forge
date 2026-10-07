@@ -134,7 +134,8 @@ _Avoid_: user Studio, external Studio
 **Hidden desktop**:\
 Where Studios that agents use run, apart from the user's desktop, changing
 nothing on the user's screen. On Windows, a desktop that forge makes; on macOS,
-a background LaunchServices launch, kept hidden and never activated.\
+a background LaunchServices launch, kept hidden and activated only for a\
+first save (priming save).\
 _Avoid_: forge desktop, invisible
 
 **Snapshot**:\
