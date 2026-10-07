@@ -65,6 +65,7 @@ function priming(
 	let sleeps = 0;
 	const abort = new AbortController();
 	const { pinProcess } = native.addon;
+	const saveRequests: Array<number> = [];
 	/**
 	 * Pin a process whose Save to File reads take {@link menuReadMs}.
 	 *
@@ -77,6 +78,10 @@ function priming(
 			? null
 			: {
 					...pinned,
+					requestSave: async (ms) => {
+						saveRequests.push(ms ?? Infinity);
+						return pinned.requestSave(ms);
+					},
 					saveMenuEnabled: async (ms) => {
 						now += menuReadMs;
 						return pinned.saveMenuEnabled(ms);
@@ -108,6 +113,7 @@ function priming(
 		entry,
 		now: () => now,
 		save: async () => saveStudioAsync(seams, { place: PLACE }, timeoutMs, abort.signal),
+		saveRequests,
 	};
 }
 
@@ -171,7 +177,7 @@ describe(saveStudioAsync, () => {
 	});
 
 	it("should report a timeout when Save to File enables only at the save deadline", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const run = priming({ saveMenuEnablesAtPoll: 1 }, { menuReadMs: 1000 });
 
@@ -180,6 +186,7 @@ describe(saveStudioAsync, () => {
 			details: { place: PLACE, reason: "timeout" },
 		});
 		expect(run.entry.appHidden).toBeTrue();
+		expect(run.saveRequests).toStrictEqual([1000]);
 	});
 
 	it("should restore hidden state and focus when the session ends while Studio primes", async () => {
