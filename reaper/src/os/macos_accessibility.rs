@@ -225,14 +225,7 @@ fn accessibility_denied() -> io::Error {
 pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
     let pinned = super::process::PinnedProcess::open(pid)?
         .ok_or_else(|| io::Error::other("Studio exited"))?;
-    // SAFETY: this query neither prompts nor changes the accessibility permission.
-    if !unsafe { AXIsProcessTrusted() } {
-        return Err(accessibility_denied());
-    }
-    let pid = i32::try_from(pid).map_err(io::Error::other)?;
-    let access = Access { deadline };
-    // SAFETY: the constructor returns an owned AX application for this PID.
-    let app = Owned::take(unsafe { AXUIElementCreateApplication(pid) })?;
+    let (access, app) = application(pid, deadline)?;
     let Some(save) = save_item(&access, &app)? else {
         return Ok("no_menu_item".to_owned());
     };
@@ -255,18 +248,23 @@ pub fn request(pid: u32, deadline: Instant) -> io::Result<String> {
 
 /// Whether File > Save to File exists and is enabled, without pressing it.
 pub fn save_enabled(pid: u32, deadline: Instant) -> io::Result<bool> {
+    let (access, app) = application(pid, deadline)?;
+    match save_item(&access, &app)? {
+        Some(save) => access.enabled(&save),
+        None => Ok(false),
+    }
+}
+
+/// The AX application for a PID, once the accessibility permission is granted.
+fn application(pid: u32, deadline: Instant) -> io::Result<(Access, Owned)> {
     // SAFETY: this query neither prompts nor changes the accessibility permission.
     if !unsafe { AXIsProcessTrusted() } {
         return Err(accessibility_denied());
     }
     let pid = i32::try_from(pid).map_err(io::Error::other)?;
-    let access = Access { deadline };
     // SAFETY: the constructor returns an owned AX application for this PID.
     let app = Owned::take(unsafe { AXUIElementCreateApplication(pid) })?;
-    match save_item(&access, &app)? {
-        Some(save) => access.enabled(&save),
-        None => Ok(false),
-    }
+    Ok((Access { deadline }, app))
 }
 
 fn save_item(access: &Access, app: &Owned) -> io::Result<Option<Owned>> {

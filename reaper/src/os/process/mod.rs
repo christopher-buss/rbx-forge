@@ -183,7 +183,7 @@ impl PinnedProcess {
     #[allow(
         clippy::unused_self,
         clippy::unnecessary_wraps,
-        reason = "shared macOS app visibility surface"
+        reason = "shared macOS app activation surface"
     )]
     pub fn app_active(&self) -> io::Result<Option<bool>> {
         #[cfg(target_os = "macos")]
@@ -199,7 +199,7 @@ impl PinnedProcess {
     #[allow(
         clippy::unused_self,
         clippy::unnecessary_wraps,
-        reason = "shared macOS app visibility surface"
+        reason = "shared macOS app activation surface"
     )]
     pub fn activate_app(&self) -> io::Result<bool> {
         #[cfg(target_os = "macos")]

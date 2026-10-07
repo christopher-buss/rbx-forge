@@ -171,6 +171,7 @@ impl PinnedProcess {
             .set_app_hidden(hidden)
             .map_err(|err| to_napi("change app visibility", &err))
     }
+
     /// Whether the macOS app is active, or none for a nongraphical or exited process.
     ///
     /// # Errors
@@ -563,7 +564,7 @@ impl Task for SaveMenuTask {
         if Instant::now() >= self.deadline {
             return Ok(false);
         }
-        studio_save::enabled(self.pid, self.deadline)
+        studio_save::save_menu_enabled(self.pid, self.deadline)
             .map_err(|err| to_napi("read Studio save menu", &err))
     }
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
