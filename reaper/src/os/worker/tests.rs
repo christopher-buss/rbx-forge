@@ -150,15 +150,13 @@ fn pairs(markers: &[(String, String)]) -> Vec<(&str, &str)> {
         .collect()
 }
 
-/// A `sleep` with these variables, and its row in the process table.
+/// A sleeper with these variables, and its row in the process table.
 #[cfg(unix)]
 fn marked_sleeper(
     variables: &[(String, String)],
 ) -> (std::process::Child, crate::os::process::ProcessEntry) {
-    let child = std::process::Command::new("sleep")
-        .arg("60")
+    let child = crate::os::test_sleeper::command()
         .envs(variables.iter().cloned())
-        .stdin(std::process::Stdio::null())
         .spawn()
         .unwrap();
     // `spawn` can return while `exec` still sets up the new image, whose
@@ -237,9 +235,8 @@ fn finish_kills_a_marked_descendant_that_left_the_group() {
     let markers = markers("escape");
     let pid_file = directory("escape").join("escaped.pid");
     let script = format!(
-        "perl -e 'setpgrp(0, 0); open(F, \">{file}.tmp\"); print F $$; close F; \
-         rename(\"{file}.tmp\", \"{file}\"); sleep 60' & \
-         while [ ! -s {file} ]; do sleep 0.05; done; exit 0",
+        "{sleeper} & while [ ! -s {file} ]; do sleep 0.05; done; exit 0",
+        sleeper = crate::os::test_sleeper::escaping_shell_line(&pid_file),
         file = pid_file.display()
     );
     let mut spec = shell("escape", &script, None);

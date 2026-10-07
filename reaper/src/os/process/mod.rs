@@ -320,9 +320,7 @@ mod tests {
             command.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 60"]);
             command
         } else {
-            let mut command = Command::new("sleep");
-            command.arg("60");
-            command
+            crate::os::test_sleeper::command()
         };
         command
             .stdin(Stdio::null())
@@ -528,10 +526,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn has_environment_reads_the_environment_the_process_started_with() {
-        let mut child = Command::new("sleep")
-            .arg("60")
+        let mut child = crate::os::test_sleeper::command()
             .env("FORGE_TEST_MARKER", "yes")
-            .stdin(Stdio::null())
             .spawn()
             .unwrap();
         let pinned = PinnedProcess::open(child.id()).unwrap().unwrap();
