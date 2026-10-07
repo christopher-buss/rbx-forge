@@ -186,7 +186,11 @@ unsafe fn send_bool(object: Object, method: &CStr, value: bool) {
     unsafe {
         let send: unsafe extern "C" fn(Object, Selector, ObjcBool) =
             transmute(objc_msgSend as *const ());
-        send(object, sel_registerName(method.as_ptr()), ObjcBool::from(value));
+        send(
+            object,
+            sel_registerName(method.as_ptr()),
+            ObjcBool::from(value),
+        );
     }
 }
 
@@ -194,7 +198,10 @@ fn class(name: &CStr) -> io::Result<Object> {
     // SAFETY: the name is a NUL-terminated class name.
     let class = unsafe { objc_getClass(name.as_ptr()) };
     if class.is_null() {
-        return Err(io::Error::other(format!("AppKit has no {} class", name.to_string_lossy())));
+        return Err(io::Error::other(format!(
+            "AppKit has no {} class",
+            name.to_string_lossy()
+        )));
     }
     Ok(class)
 }
@@ -252,13 +259,18 @@ unsafe extern "C" fn complete(block: *mut Completion, application: Object, error
             }
             let send: unsafe extern "C" fn(Object, Selector) -> i32 =
                 transmute(objc_msgSend as *const ());
-            Ok(send(application, sel_registerName(c"processIdentifier".as_ptr())))
+            Ok(send(
+                application,
+                sel_registerName(c"processIdentifier".as_ptr()),
+            ))
         }
     };
     // Once the result is stored, `launch` may free the block: own the outcome first.
     let outcome = Arc::clone(&completion.outcome);
     let (slot, ready) = &*outcome;
-    let mut guard = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = Some(result);
     ready.notify_all();
     drop(guard);
@@ -331,7 +343,9 @@ pub fn launch(request: &Launch<'_>) -> io::Result<u32> {
         );
     }
     let (slot, ready) = &*outcome;
-    let guard = slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let guard = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let (mut guard, _) = ready
         .wait_timeout_while(guard, LAUNCH_DEADLINE, |result| result.is_none())
         .unwrap_or_else(std::sync::PoisonError::into_inner);
