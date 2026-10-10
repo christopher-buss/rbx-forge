@@ -153,6 +153,7 @@ interface JoinRun {
 async function joinWithAsync(
 	flags: Record<string, boolean | string>,
 	setup: {
+		fileConfig?: CommandInput["config"];
 		serve?: (memory: MemoryFileSystem, ipc: MemoryTransport) => Promise<unknown>;
 		supervisor?: SupervisorLauncher;
 	},
@@ -174,6 +175,12 @@ async function joinWithAsync(
 					sleep: async () => {
 						now += 1000;
 					},
+				},
+				configLoader: async () => {
+					return {
+						path: path.join(PROJECT, "rbx-forge.config.json"),
+						value: { projectType: "luau", ...setup.fileConfig },
+					};
 				},
 				fileSystem: memory.fileSystem,
 				ipc,
@@ -213,6 +220,37 @@ async function joinedAsync(run: JoinRun): Promise<void> {
 
 describe("runStartAsync next to a running session", () => {
 	it.for([
+		{ config: {}, desktop: "hidden" },
+		{ config: { studio: { desktop: "user" } }, desktop: "user" },
+	] as const)(
+		"should resolve the join desktop $desktop from flags over the config file",
+		async ({ config, desktop }) => {
+			expect.assertions(1);
+
+			let session: FakeSession | undefined;
+			const run = await joinWithAsync(
+				{},
+				{
+					fileConfig: { studio: { desktop: "hidden" } },
+					serve: serving((served) => {
+						session = served;
+					}),
+				},
+				config,
+			);
+			await joinedAsync(run);
+			run.signals.fire("SIGINT");
+			await run.running;
+
+			expect(session!.join).toHaveBeenCalledExactlyOnceWith({
+				defaultDesktop: "user",
+				desktop,
+				parts: ["compiler", "studio"],
+			});
+		},
+	);
+
+	it.for([
 		{ config: {}, desktop: {} },
 		{ config: { studio: { desktop: "hidden" } }, desktop: { desktop: "hidden" } },
 	] as const)(
@@ -241,7 +279,7 @@ describe("runStartAsync next to a running session", () => {
 			expect(run.reporter.events).toStrictEqual([
 				{
 					message:
-						"Joined session s1: took the compiler; started Studio and Rojo. Press Ctrl+C to stop.",
+						"Joined running session s1: took the compiler; started Studio and Rojo. Press Ctrl+C to stop.",
 					type: "info",
 				},
 			]);
@@ -281,7 +319,10 @@ describe("runStartAsync next to a running session", () => {
 			parts: [],
 		});
 		expect(run.reporter.events).toStrictEqual([
-			{ message: "Joined session s1: it has no part. Press Ctrl+C to stop.", type: "info" },
+			{
+				message: "Joined running session s1: it has no part. Press Ctrl+C to stop.",
+				type: "info",
+			},
 		]);
 	});
 

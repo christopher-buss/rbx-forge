@@ -8,6 +8,7 @@ import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
 import type { PartId, ServicePart, SessionStatus, SessionStudio } from "./status.ts";
 import { createStatusStore } from "./status.ts";
+import type { StudioMover } from "./studio-move.ts";
 
 type Services = SessionStatus["services"];
 
@@ -111,7 +112,7 @@ describe(releasedResult, () => {
 	});
 });
 
-function makeHandlers(add: PartAdder = async () => []) {
+function makeHandlers(add: PartAdder = async () => [], move: StudioMover = vi.fn<StudioMover>()) {
 	const status = createStatusStore(
 		{
 			compiler: true,
@@ -134,12 +135,69 @@ function makeHandlers(add: PartAdder = async () => []) {
 	const handlers = createOwnerHandlers(
 		{ status },
 		{ end },
-		{ add, ownership, parts: { stopAsync }, studio: { isAttached: false } },
+		{ add, move, ownership, parts: { stopAsync }, studio: { isAttached: false } },
 	);
 	return { end, handlers, ownership, status, stopAsync };
 }
 
 describe(createOwnerHandlers, () => {
+	it.for([
+		{ defaultDesktop: "user", desktop: "hidden", parts: ["studio"] },
+		{ defaultDesktop: "hidden", parts: ["studio"] },
+		{ defaultDesktop: "user", parts: ["compiler"] },
+	] as const)(
+		"should preserve hidden Studio visibility for $parts with $desktop and $defaultDesktop",
+		async (request) => {
+			expect.assertions(1);
+
+			const move = vi.fn<StudioMover>();
+			const { handlers, status } = makeHandlers(undefined, move);
+			status.studio("open", "/p/game.rbxl", { desktop: "hidden", pid: 42, startTime: "1" });
+			await handlers.own(request);
+			await handlers.release({ type: "owner_gone" });
+
+			expect(move).not.toHaveBeenCalled();
+		},
+	);
+
+	it("should give back the parts it took when showing Studio fails", async () => {
+		expect.assertions(3);
+
+		const move = vi.fn<StudioMover>().mockRejectedValue(new Error("show failed"));
+		const { handlers, ownership, status } = makeHandlers(undefined, move);
+		status.studio("open", "/p/game.rbxl", { desktop: "hidden", pid: 42, startTime: "1" });
+
+		await expect(handlers.own({ defaultDesktop: "user", parts: ["studio"] })).rejects.toThrow(
+			"show failed",
+		);
+		expect(status.snapshot().services).toMatchObject({
+			compiler: { owner: null },
+			studio: { owner: null, pid: 42, status: "open" },
+		});
+		expect(ownership.isOwned).toBeFalse();
+	});
+
+	it("should show the hidden Studio it takes and leave it shown when its owner ends", async () => {
+		expect.assertions(4);
+
+		const move = vi
+			.fn<StudioMover>()
+			.mockResolvedValue({ durationMs: 0, from: "hidden", pid: 42, to: "user" });
+		const { handlers, status } = makeHandlers(undefined, move);
+		status.studio("open", "/p/game.rbxl", { desktop: "hidden", pid: 42, startTime: "1" });
+		status.service("rojo", "ready");
+
+		await expect(
+			handlers.own({ defaultDesktop: "user", parts: ["studio"] }),
+		).resolves.toStrictEqual({ added: [], taken: ["studio", "rojo", "compiler"] });
+		expect(move).toHaveBeenCalledExactlyOnceWith({ desktop: "user" });
+		expect(status.snapshot().services.studio).toMatchObject({ owner: "start", pid: 42 });
+
+		await handlers.release({ type: "owner_gone" });
+
+		expect(move).toHaveBeenCalledOnce();
+	});
+
 	it("should let go of nothing while no owner holds the session", async () => {
 		expect.assertions(2);
 

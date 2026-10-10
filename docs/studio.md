@@ -85,6 +85,12 @@ these hidden snapshots leave the user's screen and focus unchanged.
 `start`, `up --studio`, or `open`; the flag wins. On Linux the effective desktop
 is always `user`. A found Studio stays on its existing desktop.
 
+When `start` joins a running session and takes its hidden Studio, an effective
+desktop of `user` shows that same Studio in place, without saving, closing, or
+reopening it. An effective desktop of `hidden` preserves its visibility, and
+`--no-open` leaves Studio untouched. Ctrl+C, a closed terminal, or a killed
+`start` gives back a Studio it took without changing its visibility.
+
 On macOS, the hidden desktop is no separate desktop: forge launches Studio through
 LaunchServices without activating it, so it never takes focus, and hides it.
 Studio shows itself a few times while it loads; a watcher hides it again each

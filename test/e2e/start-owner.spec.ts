@@ -4,8 +4,9 @@
  * other processes meet its parts. Only NDJSON output, exit codes, and the
  * process table are checked.
  */
+import { chmodSync, readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, it, onTestFinished } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
@@ -62,6 +63,63 @@ function ownersOf({ services }: SessionStatus): Record<string, unknown> {
 }
 
 describe("forge start next to an agent's session", () => {
+	it.skipIf(!IS_WINDOWS).for([
+		{ config: {}, desktop: "user", flags: [] },
+		{ config: {}, desktop: "hidden", flags: ["--desktop", "hidden"] },
+		{ config: { studio: { desktop: "hidden" } }, desktop: "hidden", flags: [] },
+		{
+			config: { studio: { desktop: "hidden" } },
+			desktop: "user",
+			flags: ["--desktop", "user"],
+		},
+	])(
+		"should join hidden Studio in place with desktop $desktop and flags $flags",
+		async ({ config, desktop, flags }) => {
+			expect.assertions(5);
+
+			const fixture = await makeFixtureAsync({ ...PROJECT, ...config }, { studio: true });
+			await runForgeAsync(fixture, [...UP, "--studio", "--desktop", "hidden"]);
+			const before = await waitForStatusAsync(
+				fixture,
+				({ services }) => services.studio.status === "open",
+			);
+			const bytes = readFileSync(fixture.place);
+			chmodSync(fixture.place, 0o444);
+			onTestFinished(() => {
+				chmodSync(fixture.place, 0o666);
+			});
+			const { session } = await startReadyAsync(fixture, [...START, ...flags]);
+			const owned = await waitForStatusAsync(
+				fixture,
+				({ services }) => services.studio.owner === "start",
+			);
+
+			expect(owned.services.studio).toMatchObject({
+				desktop,
+				owner: "start",
+				pid: before.services.studio.pid,
+				status: "open",
+			});
+			expect(session.stdout()).toContain("Joined running session");
+			expect(readFileSync(fixture.place)).toStrictEqual(bytes);
+
+			session.child.kill("SIGKILL");
+			await session.closed;
+			const released = await waitForStatusAsync(
+				fixture,
+				({ services }) => services.studio.owner === null,
+			);
+
+			expect(released.services.studio).toMatchObject({
+				desktop,
+				owner: null,
+				pid: before.services.studio.pid,
+				status: "open",
+			});
+			expect(pidsOf(fixture, "studio")).toStrictEqual([before.services.studio.pid]);
+		},
+	);
+
 	it("should take the agent's compiler without a restart, add Studio and Rojo, and keep them from down and stop", async () => {
 		expect.assertions(5);
 

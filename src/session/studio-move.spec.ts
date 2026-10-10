@@ -12,6 +12,7 @@ import {
 	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
 import { createIdleTracker } from "./idle.ts";
+import { createOwnerHandlers } from "./ownership.ts";
 import { createStatusStore } from "./status.ts";
 import { createStudioMover } from "./studio-move.ts";
 
@@ -74,6 +75,57 @@ function fixture(platform: "darwin" | "win32", hidden = false) {
 }
 
 describe("session Studio visibility", () => {
+	it.for([
+		{ platform: "win32", visible: { windowHiding: false, windowVisibility: "user" } },
+		{ platform: "darwin", visible: { appHidden: false } },
+	] as const)(
+		"start shows the same hidden Studio on $platform without saving and gives it back shown",
+		async ({ platform, visible }) => {
+			expect.assertions(4);
+
+			const { memory, move, native, save, status } = fixture(platform, true);
+			status.owner("studio", null);
+			status.owner("rojo", null);
+			const handlers = createOwnerHandlers(
+				{ status },
+				{ end: () => {} },
+				{
+					add: async () => [],
+					move,
+					ownership: { added: new Set(), isOwned: false },
+					parts: { stopAsync: async () => {} },
+					studio: { isAttached: true },
+				},
+			);
+			await handlers.own({ defaultDesktop: "user", parts: ["studio"] });
+
+			expect(status.snapshot().services.studio).toMatchObject({
+				desktop: "user",
+				origin: "found",
+				owner: "start",
+				pid: 777,
+			});
+
+			await handlers.release({ signal: "SIGINT", type: "signal" });
+
+			expect(status.snapshot().services.studio).toMatchObject({
+				desktop: "user",
+				origin: "found",
+				owner: null,
+				pid: 777,
+				status: "open",
+			});
+			expect(native.processes.get(777)).toMatchObject({
+				alive: true,
+				...visible,
+			});
+			expect({
+				bytes: memory.fileSystem.readFileSync(path.join(PROJECT, "game.rbxl"), "utf8"),
+				saves: save.mock.calls,
+			}).toStrictEqual({ bytes: "unsaved bytes stay off disk", saves: [] });
+		},
+	);
+
 	it("shows and activates a hidden macOS app, then hides it without activation", async () => {
 		expect.assertions(3);
 
