@@ -22,6 +22,7 @@ function followingLightingStudio({
 	dismissFailsOnce = false,
 	hasDialog = true,
 	hasLock = true,
+	hiddenWindows = false,
 	identity,
 	kind,
 }: {
@@ -30,6 +31,7 @@ function followingLightingStudio({
 	dismissFailsOnce?: boolean;
 	hasDialog?: boolean;
 	hasLock?: boolean;
+	hiddenWindows?: boolean;
 	identity?: { pid: number; startTime: string };
 	kind?: "gone" | "reused";
 } = {}) {
@@ -42,6 +44,7 @@ function followingLightingStudio({
 			alive: true,
 			blocked: hasDialog,
 			desktop,
+			windowVisibility: hiddenWindows ? "hidden" : null,
 			...(hasDialog
 				? { dialog: { button: "Continue", title: "Lighting Technology Migration" } }
 				: {}),
@@ -153,6 +156,18 @@ describe("startup Lighting identity checks", () => {
 		});
 
 		await expect(watched).resolves.toBeUndefined();
+	});
+
+	it("dismisses the hidden session migration prompt on the user's desktop", async () => {
+		expect.assertions(2);
+
+		const run = followingLightingStudio({ desktop: "user", hiddenWindows: true });
+		for (let tick = 0; tick < 20; tick++) {
+			await Promise.resolve();
+		}
+
+		expect(run.studio.dialog).toBeUndefined();
+		expect(run.studio.blocked).toBeFalse();
 	});
 
 	it("retries a temporary accessibility failure while Studio finishes opening", async () => {

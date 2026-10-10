@@ -61,10 +61,7 @@ export function createStudioMover(
 			const moved =
 				setup.context.seams.host.platform === "darwin"
 					? changeMacVisibility(setup, scope, request, save)
-					: {
-							from: save.desktop,
-							process: await moveSavedAsync(setup, scope, attach, { request, save }),
-						};
+					: await moveSavedAsync(setup, scope, attach, { request, save });
 			return {
 				durationMs: setup.context.seams.clock.now() - started,
 				from: moved.from,
@@ -185,7 +182,7 @@ async function moveSavedAsync(
 	scope: SessionScope,
 	attach: MoveParts,
 	{ request, save }: { request: StudioMoveRequest; save: StudioSave },
-): Promise<LocatedStudio> {
+): Promise<{ from: StudioDesktop; process: LocatedStudio }> {
 	const previous = findPlaceStudio(setup.context.seams, save.place);
 	const recorded = setup.status.snapshot().services.studio;
 	if (
@@ -195,8 +192,8 @@ async function moveSavedAsync(
 		throw new ForgeError("studio_not_open", "The saved Studio is no longer open.");
 	}
 
-	if (save.desktop === request.desktop) {
-		return previous;
+	if (previous.desktop === request.desktop) {
+		return { from: previous.desktop, process: previous };
 	}
 
 	const executable =
@@ -208,9 +205,10 @@ async function moveSavedAsync(
 	await attach.state.followed;
 	scope.signal.throwIfAborted();
 	await closePreviousAsync(setup, scope, attach, { place: save.place, previous });
-	return reopenAsync(setup, scope, attach, {
+	const process = await reopenAsync(setup, scope, attach, {
 		...request,
 		place: save.place,
 		studioPath: executable,
 	});
+	return { from: previous.desktop, process };
 }

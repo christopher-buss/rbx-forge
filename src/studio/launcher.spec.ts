@@ -244,6 +244,18 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
+	it("should launch a hidden session on the user desktop with hidden windows", async () => {
+		expect.assertions(2);
+
+		const { native, spawns } = windowsNative();
+		const { launch } = makeLauncher({ files: { [STUDIO_EXE]: "" }, native, platform: "win32" });
+
+		await expect(
+			launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden", runScript: "session.lua" }),
+		).resolves.toMatchObject({ studio: { desktop: "hidden" } });
+		expect(spawns[0]).toMatchObject({ desktop: "user", hiddenWindows: true });
+	});
+
 	it("should launch and report a Studio on the hidden Windows desktop", async () => {
 		expect.assertions(2);
 

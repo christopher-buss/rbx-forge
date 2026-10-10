@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { assert, describe, expect, it, onTestFinished } from "vitest";
 
+import { studioProcess } from "../../src/studio/launcher.ts";
 import {
 	loadRealNative,
 	makeRunScriptStudioExecutable,
@@ -20,6 +21,7 @@ async function hiddenStudioAsync(
 	close = "exit",
 	variables: Record<string, string> = {},
 	desktop: "hidden" | "user" = "hidden",
+	hiddenWindows = false,
 ) {
 	const native = loadRealNative();
 	assert(native.spawnDetached !== undefined);
@@ -36,6 +38,7 @@ async function hiddenStudioAsync(
 			FIXTURE_STUDIO_CLOSE: close,
 			...variables,
 		},
+		hiddenWindows,
 		program: executable,
 	});
 	assert(pid !== null);
@@ -113,6 +116,28 @@ console.log(launch({ cwd: ${JSON.stringify(path.dirname(place))}, env: { ...proc
 }
 
 describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
+	it("launches a hidden session on the user desktop and preserves its visibility", async () => {
+		expect.assertions(2);
+
+		const { pin } = await hiddenStudioAsync("exit", {}, "user", true);
+
+		expect({ desktop: pin.desktop(), visibility: pin.windowVisibility() }).toStrictEqual({
+			desktop: "user",
+			visibility: "hidden",
+		});
+		expect(studioProcess(pin)).toMatchObject({ desktop: "hidden" });
+	});
+
+	it("keeps snapshots on the hidden desktop when their windows are shown there", async () => {
+		expect.assertions(2);
+
+		const { pin } = await hiddenStudioAsync();
+		assert(pin.setWindowVisibility("user"));
+
+		await expect.poll(() => pin.windowVisibility()).toBe("user");
+		expect(studioProcess(pin)).toMatchObject({ desktop: "hidden" });
+	});
+
 	it(
 		"dismisses a delayed snapshot prompt after the launching client exits",
 		{ timeout: 20_000 },

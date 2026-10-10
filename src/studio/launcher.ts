@@ -20,6 +20,7 @@ import {
 } from "./macos-launch.ts";
 import { createSnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
 import type { SnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
+import { startBreakingAway } from "./windows-launch.ts";
 
 /**
  * How long forge waits for the platform launcher to report. A launcher that
@@ -55,7 +56,7 @@ export interface StudioProcess {
 	startTime: string;
 }
 
-/** A verified Studio process with its actual desktop. */
+/** A verified Studio process with its current placement. */
 export type LocatedStudio = StudioProcess & { desktop: StudioDesktop };
 
 /**
@@ -90,13 +91,18 @@ type LauncherEnd =
 	| { type: "waiting" };
 
 /**
- * Read a verified Studio's identity and desktop from its pin.
+ * Read a verified Studio's identity and placement from its pin.
  *
  * @param pinned - A process verified as Studio.
- * @returns Its process identity and desktop.
+ * @returns Its process identity and placement.
  */
 export function studioProcess(pinned: PinnedProcess): LocatedStudio {
-	return { desktop: pinned.desktop(), pid: pinned.pid, startTime: pinned.startTime };
+	const desktop = pinned.desktop();
+	return {
+		desktop: desktop === "hidden" ? desktop : (pinned.windowVisibility() ?? desktop),
+		pid: pinned.pid,
+		startTime: pinned.startTime,
+	};
 }
 
 /**
@@ -271,32 +277,6 @@ async function launchThroughPlatformAsync(
 
 	child.unref();
 	return platformLaunchOutcome(desktop, host.platform);
-}
-
-/**
- * Windows: start Studio through the addon, out of this process's job.
- *
- * @param backend - The addon.
- * @param launch - The place, directory, and environment.
- * @param executable - The Studio executable.
- * @returns Its PID; `undefined` when breakaway or hidden desktop setup is unavailable.
- */
-function startBreakingAway(
-	backend: Pick<StudioLaunchBackend, "native">,
-	launch: StudioLaunch,
-	executable: string,
-): number | undefined {
-	const { spawnDetached } = backend.native();
-	const { cwd, env } = launch;
-	return (
-		spawnDetached?.({
-			args: studioArguments(launch),
-			cwd,
-			env: definedOnly(env),
-			program: executable,
-			...(launch.desktop === undefined ? {} : { desktop: launch.desktop }),
-		}) ?? undefined
-	);
 }
 
 async function waitForErrorAsync(child: ChildProcess): Promise<NodeJS.ErrnoException> {
