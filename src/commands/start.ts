@@ -3,6 +3,8 @@ import path from "node:path";
 import type { FlagDefinition } from "../cli/flags.ts";
 import type { JoinedSession, KnownSession } from "../client/session.ts";
 import { JOIN_SILENCE_MS, joinSessionAsync, probeSessionAsync } from "../client/session.ts";
+import { loadProjectConfigAsync } from "../config/load.ts";
+import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import type { OwnerJoin, OwnerRelease } from "../session/ownership.ts";
@@ -95,7 +97,12 @@ export async function runStartAsync(
 	}
 
 	const session = found?.session ?? (await waitForSessionAsync(context));
-	return joinAsync(context, session, wantedParts(context, input));
+	const { config } = await loadProjectConfigAsync(
+		context.cwd,
+		context.seams.configLoader,
+		input.config,
+	);
+	return joinAsync(context, session, wantedParts(context, input, config.studio.desktop));
 }
 
 /**
@@ -138,9 +145,14 @@ async function superviseAsync(
  *
  * @param context - The project root, for `--studio-path`.
  * @param flags - The parsed flags.
+ * @param desktop - The Studio desktop after flag and file precedence.
  * @returns The parts, and the Studio executable to start.
  */
-function wantedParts(context: CommandContext, { config, flags }: CommandInput): PartRequest {
+function wantedParts(
+	context: CommandContext,
+	{ flags }: CommandInput,
+	desktop: StudioDesktop | undefined,
+): PartRequest {
 	const parts: Array<AddablePart> = [];
 	if (flags["compiler"] !== false) {
 		parts.push("compiler");
@@ -153,7 +165,7 @@ function wantedParts(context: CommandContext, { config, flags }: CommandInput): 
 	const studioPath = flags[STUDIO_PATH_FLAG.name];
 	return {
 		defaultDesktop: "user",
-		...(config.studio?.desktop === undefined ? {} : { desktop: config.studio.desktop }),
+		desktop,
 		parts,
 		...(typeof studioPath === "string"
 			? { studioPath: path.resolve(context.cwd, studioPath) }
@@ -267,7 +279,7 @@ async function joinAsync(
 		}
 
 		reporter.emit({
-			message: `Joined session ${sessionId}: ${describeJoin(joined.joined)}. Press Ctrl+C to stop.`,
+			message: `Joined running session ${sessionId}: ${describeJoin(joined.joined)}. Press Ctrl+C to stop.`,
 			type: "info",
 		});
 		const released = await holdAsync(joined, stop.signal);

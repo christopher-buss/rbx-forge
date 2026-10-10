@@ -11,6 +11,7 @@ import type { Ownership } from "./ownership.ts";
 import { createOwnerHandlers } from "./ownership.ts";
 import type { PartAdder, PartRequests } from "./part-requests.ts";
 import { createPartRestarter } from "./part-restarts.ts";
+import type { PartStopper } from "./part-stops.ts";
 import { createPartStopper, planStops } from "./part-stops.ts";
 import type { SessionPlan } from "./plan.ts";
 import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./rojo-part.ts";
@@ -29,6 +30,7 @@ import {
 	followSessionStudio,
 	openStudioAsync,
 	prepareStudioAsync,
+	waitForStudioOpenAsync,
 } from "./studio-part.ts";
 import type { SaveWatch } from "./watch.ts";
 import { watchOptions, workerContext } from "./worker-context.ts";
@@ -336,6 +338,31 @@ function watchIdle({ config, context, idle, parts }: SessionSetup, scope: Sessio
 	scope.track(stopWhenIdleAsync(setup, scope.signal));
 }
 
+function cancelStudioReadiness(
+	session: SessionSetup,
+	state: BodyState,
+	request: Parameters<PartStopper>[0],
+): void {
+	const { services } = session.status.snapshot();
+	if (
+		planStops(services, request).stop.includes("studio") ||
+		(request.scope === "down" && (services.studio.owner === null || request.force))
+	) {
+		state.studio.cancelReady?.();
+	}
+}
+
+async function waitAttachedStudioAsync(
+	session: SessionSetup,
+	scope: SessionScope,
+	{ open }: StudioState,
+): Promise<void> {
+	const { place } = session.status.snapshot().services.studio;
+	assert(place !== undefined);
+	assert(open !== undefined);
+	await waitForStudioOpenAsync(session, { open, place, signal: scope.signal });
+}
+
 /**
  * Expose part requests after the initial Studio launch, then mark startup done.
  *
@@ -344,10 +371,9 @@ function watchIdle({ config, context, idle, parts }: SessionSetup, scope: Sessio
  * @param state - The services and Studio state.
  */
 function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: BodyState): void {
-	const { parts } = state;
-
 	const addStudio = createStudioAdder(session, scope, { ...state, state: state.studio });
-	const add = createPartAdder(session, parts, addStudio);
+	const add = createPartAdder(session, state.parts, addStudio);
+	const move = createStudioMover(session, scope);
 	const ownership: Ownership = {
 		added: new Set(session.owner === null ? [] : ALL_PARTS),
 		isOwned: session.owner !== null,
@@ -356,21 +382,21 @@ function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: B
 	session.parts.attach({
 		add: withNoOwner(session, add),
 		beforeStop: (request) => {
-			const { services } = session.status.snapshot();
-			if (
-				planStops(services, request).stop.includes("studio") ||
-				(request.scope === "down" && (services.studio.owner === null || request.force))
-			) {
-				state.studio.cancelReady?.();
-			}
+			cancelStudioReadiness(session, state, request);
 		},
-		move: createStudioMover(session, scope),
-		restart: createPartRestarter(session, { add, parts, stop }),
+		move,
+		restart: createPartRestarter(session, { add, parts: state.parts, stop }),
 		save: async (timeoutMs, signal) => {
 			return saveSessionStudioAsync(session, scope, timeoutMs, signal);
 		},
 		stop,
-		...createOwnerHandlers(session, scope, { add, ownership, parts, studio: state.studio }),
+		...createOwnerHandlers(session, scope, {
+			...state,
+			add,
+			move,
+			ownership,
+			waitForStudio: async () => waitAttachedStudioAsync(session, scope, state.studio),
+		}),
 	});
 	watchIdle(session, scope);
 }

@@ -90,10 +90,12 @@ Session commands:
 `restart`, and the idle timeout leave them alone. When a session runs (such as
 an agent's `up`), `start` joins it instead: it takes every running part (with
 `--no-open`, only the compiler), without a restart, and starts the missing ones.
-On Ctrl+C (or a closed terminal) it stops the parts it started and gives back
-the parts it took, which run on with no owner; the session ends when no part is
-left. It never closes Studio, and the close of its Studio stops nothing. Its
-flags:
+When it takes a hidden Studio, it shows that same process in place by default,
+without saving or reopening it. `--desktop hidden` or `studio.desktop: "hidden"`
+keeps its visibility unchanged. `--no-open` leaves Studio untouched. On Ctrl+C
+(or a closed terminal) it stops the parts it started and gives back the parts it
+took, which run on with no owner; the session ends when no part is left. It
+never closes Studio, and the close of its Studio stops nothing. Its flags:
 
 - `--no-compiler`: no compile, no build, no watch-mode compiler: only Rojo and
   Studio. The open step still builds when `open.buildFirst` is on.

@@ -7,6 +7,7 @@ import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
 import type { PartId, ServiceId, SessionStatus, StatusStore } from "./status.ts";
 import type { StopRequest } from "./stop-source.ts";
+import type { StudioMover } from "./studio-move.ts";
 import type { StudioState } from "./studio-part.ts";
 import { leaveStudio } from "./studio-part.ts";
 
@@ -77,9 +78,12 @@ export interface OwnerHandlers {
 export interface OwnerParts {
 	/** Starts the parts a join asks for. */
 	add: PartAdder;
+	move: StudioMover;
 	ownership: Ownership;
 	parts: Pick<ServiceParts, "stopAsync">;
 	studio: StudioState;
+	/** Waits for the attached Studio's place and initial synchronization. */
+	waitForStudio: () => Promise<void>;
 }
 
 /** What the owner handlers read and record. */
@@ -180,6 +184,24 @@ export function createOwnerHandlers(
 	};
 }
 
+async function showTakenStudioAsync(
+	{ move, waitForStudio }: Pick<OwnerParts, "move" | "waitForStudio">,
+	services: SessionStatus["services"],
+	taken: ReadonlyArray<PartId>,
+	request: PartRequest,
+): Promise<void> {
+	if (
+		!taken.includes("studio") ||
+		services.studio.desktop !== "hidden" ||
+		(request.desktop ?? request.defaultDesktop) !== "user"
+	) {
+		return;
+	}
+
+	await waitForStudio();
+	await move({ desktop: "user" });
+}
+
 /**
  * A `start` joins as the owner: take every running part (only the
  * compiler when it asks for no Studio), then start the parts it asks for,
@@ -196,9 +218,10 @@ export function createOwnerHandlers(
  */
 async function joinOwnerAsync(
 	{ status }: OwnerSetup,
-	{ add, ownership }: OwnerParts,
+	owner: OwnerParts,
 	join: { release: OwnerHandlers["release"]; request: PartRequest },
 ): Promise<OwnerJoin> {
+	const { add, ownership } = owner;
 	const { services, sessionId } = status.snapshot();
 	if (ownership.isOwned) {
 		throw new ForgeError(
@@ -218,6 +241,7 @@ async function joinOwnerAsync(
 
 	let added: Array<PartId>;
 	try {
+		await showTakenStudioAsync(owner, services, taken, join.request);
 		added = await add(join.request);
 	} catch (err) {
 		await join.release({ type: "owner_gone" });

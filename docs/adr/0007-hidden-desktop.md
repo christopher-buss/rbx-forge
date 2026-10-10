@@ -36,7 +36,9 @@ kept hidden, and activated only briefly when a save needs it.
   `--desktop <user|hidden>` override this. On Windows, `restart` keeps Studio's
   visibility and the state contract reports it (`services.studio.desktop`). On
   macOS the same defaults and overrides apply; Linux always uses the user's
-  desktop.
+  desktop. A `start` that joins a session shows the hidden Studio it takes when
+  its effective desktop is `user`, preserving the process without saving it. A
+  hidden desktop request and the owner's end preserve its visibility.
 - **macOS hidden.** forge launches the Studio app bundle through LaunchServices
   as a new instance, with activation off, and hides it as soon as it exists.
   Studio shows itself while it loads, so a detached watcher hides it again each
@@ -115,8 +117,9 @@ kept hidden, and activated only briefly when a save needs it.
 - Each Windows hidden session save briefly shows the File menu and moves focus.
   A never-active hidden macOS Studio shows and takes focus briefly on its first
   save.
-- A hidden Studio is visible only through `forge status`, `forge show`, and the
-  Studio MCP. No tray icon and no toast tell the user that it runs.
+- `forge status` and the Studio MCP expose a hidden Studio; `forge show` or a
+  `start` that takes it can show it. No tray icon and no toast tell the user
+  that it runs.
 - A snapshot launch on the hidden desktop takes longer to reach the place lock
   than a visible launch; the cause is not known. The launch deadline still
   covers it.
