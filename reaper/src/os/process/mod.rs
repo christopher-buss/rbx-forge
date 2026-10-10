@@ -450,22 +450,16 @@ mod tests {
 
     #[cfg(windows)]
     fn studio_fixture() -> std::path::PathBuf {
-        let mut fixture = std::env::current_exe()
+        // `pnpm build:reaper` builds it in release; cargo test leaves any debug copy stale.
+        std::env::current_exe()
             .unwrap()
             .parent()
             .unwrap()
             .parent()
             .unwrap()
-            .join("forge-studio-fixture.exe");
-        if !fixture.exists() {
-            fixture = fixture
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("release/forge-studio-fixture.exe");
-        }
-        fixture
+            .parent()
+            .unwrap()
+            .join("release/forge-studio-fixture.exe")
     }
 
     #[cfg(windows)]
@@ -473,10 +467,7 @@ mod tests {
     fn window_visibility_changes_the_pinned_fixture_and_rehides_new_windows() {
         use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
         let fixture = studio_fixture();
-        assert!(
-            fixture.exists(),
-            "build forge-studio-fixture before this test"
-        );
+        assert!(fixture.exists(), "run pnpm build:reaper before this test");
         let directory = tempfile::tempdir().unwrap();
         let args = vec![
             directory
