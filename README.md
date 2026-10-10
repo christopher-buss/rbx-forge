@@ -105,7 +105,7 @@ flags:
 - `--force`: when a crashed earlier session still has processes after the wait,
   kill them, each verified as that session's own.
 - `--desktop <user|hidden>`: where Studio opens on Windows and macOS. `start`
-  defaults to `user`; `up --studio` and `open` default to `hidden`. On Windows,
+  and `open` default to `user`; `up --studio` defaults to `hidden`. On Windows,
   a hidden session Studio runs on the user's desktop with hidden windows; a
   hidden snapshot uses a separate desktop. Each save of a hidden session Studio
   briefly shows the File menu and moves keyboard focus. See

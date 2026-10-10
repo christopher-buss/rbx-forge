@@ -62,9 +62,10 @@ each Studio you open, once you are done with it.
 
 - **Look once**: after a fresh build, `forge open --desktop hidden --json`
   builds a **snapshot** of the place (`data.place`) and opens it outside the
-  session. `forge stop --place <data.place> --json` closes that Studio alone.
-  Edits in a snapshot stay in the snapshot; to see a new edit, stop and open
-  again. `down` and the idle timeout leave snapshot Studios open.
+  session. Always pass `--desktop hidden` for agent snapshots: `open` defaults
+  to a visible Studio. `forge stop --place <data.place> --json` closes that
+  Studio alone. Edits in a snapshot stay in the snapshot; to see a new edit,
+  stop and open again. `down` and the idle timeout leave snapshot Studios open.
 - **Change in Studio**: `forge up --studio --json` **attaches** a Studio and its
   Rojo to the session, and Rojo live-syncs your edits. Rojo serves on
   `data.services.rojo.port`; give that port to the user and ask them to connect

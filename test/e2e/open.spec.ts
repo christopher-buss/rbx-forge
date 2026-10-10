@@ -33,9 +33,6 @@ const FORBID_BREAKAWAY = path.join(
 	"forbid-breakaway.ts",
 );
 const IS_WINDOWS = process.platform === "win32";
-const SNAPSHOT_DESKTOP = IS_WINDOWS ? "hidden" : "user";
-/** `open` keeps a hidden macOS launch in the background and hidden. */
-const HIDDEN_OPEN_FLAGS = process.platform === "darwin" ? ["-g", "-j"] : [];
 /** The fixture role that stands in for the POSIX platform launcher. */
 const LAUNCHER = process.platform === "darwin" ? "open" : "xdg-open";
 
@@ -135,7 +132,7 @@ describe("forge open", () => {
 			expect.assertions(3);
 
 			const fixture = await makeFixtureAsync({ projectType: "luau" }, { studio: true });
-			const opened = await runForgeAsync(fixture, ["open", "--json"], {
+			const opened = await runForgeAsync(fixture, ["open", "--desktop", "hidden", "--json"], {
 				FIXTURE_STUDIO_DIALOG_DELAY_MS: "7000",
 			});
 
@@ -181,7 +178,7 @@ describe("forge open", () => {
 			const fixture = await makeFixtureAsync({ projectType: "luau" }, { studio: true });
 			installNodeRojo(fixture.project);
 			const shell = makeRunScriptStudioExecutable();
-			const child = spawn(process.execPath, [BIN, "open", "--json"], {
+			const child = spawn(process.execPath, [BIN, "open", "--desktop", "hidden", "--json"], {
 				cwd: fixture.project,
 				env: withVariables(
 					fixture.environment(),
@@ -235,7 +232,7 @@ describe("forge open", () => {
 		expect({ data, status }).toMatchObject({
 			data: {
 				build: { hooks: [], output: snapshot },
-				desktop: SNAPSHOT_DESKTOP,
+				desktop: "user",
 				hooks: [],
 				place: snapshot,
 				pruned: [],
@@ -385,7 +382,7 @@ describe("forge open", () => {
 
 			expect(status).toBe(EXIT_SUCCESS);
 			expect(data).toMatchObject({ studio: null });
-			expect(studio.args).toStrictEqual([...HIDDEN_OPEN_FLAGS, parseOpened(data).place]);
+			expect(studio.args).toStrictEqual([parseOpened(data).place]);
 		},
 	);
 
