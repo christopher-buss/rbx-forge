@@ -30,6 +30,7 @@ import {
 	followSessionStudio,
 	openStudioAsync,
 	prepareStudioAsync,
+	waitForStudioOpenAsync,
 } from "./studio-part.ts";
 import type { SaveWatch } from "./watch.ts";
 import { watchOptions, workerContext } from "./worker-context.ts";
@@ -351,6 +352,17 @@ function cancelStudioReadiness(
 	}
 }
 
+async function waitAttachedStudioAsync(
+	session: SessionSetup,
+	scope: SessionScope,
+	{ open }: StudioState,
+): Promise<void> {
+	const { place } = session.status.snapshot().services.studio;
+	assert(place !== undefined);
+	assert(open !== undefined);
+	await waitForStudioOpenAsync(session, { open, place, signal: scope.signal });
+}
+
 /**
  * Expose part requests after the initial Studio launch, then mark startup done.
  *
@@ -359,10 +371,8 @@ function cancelStudioReadiness(
  * @param state - The services and Studio state.
  */
 function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: BodyState): void {
-	const { parts } = state;
-
 	const addStudio = createStudioAdder(session, scope, { ...state, state: state.studio });
-	const add = createPartAdder(session, parts, addStudio);
+	const add = createPartAdder(session, state.parts, addStudio);
 	const move = createStudioMover(session, scope);
 	const ownership: Ownership = {
 		added: new Set(session.owner === null ? [] : ALL_PARTS),
@@ -375,12 +385,18 @@ function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: B
 			cancelStudioReadiness(session, state, request);
 		},
 		move,
-		restart: createPartRestarter(session, { add, parts, stop }),
+		restart: createPartRestarter(session, { add, parts: state.parts, stop }),
 		save: async (timeoutMs, signal) => {
 			return saveSessionStudioAsync(session, scope, timeoutMs, signal);
 		},
 		stop,
-		...createOwnerHandlers(session, scope, { ...state, add, move, ownership }),
+		...createOwnerHandlers(session, scope, {
+			...state,
+			add,
+			move,
+			ownership,
+			waitForStudio: async () => waitAttachedStudioAsync(session, scope, state.studio),
+		}),
 	});
 	watchIdle(session, scope);
 }

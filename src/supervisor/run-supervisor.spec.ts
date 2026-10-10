@@ -193,7 +193,115 @@ function holdStudioPoll(original: Clock["sleep"], until: Promise<void>): Clock["
 	};
 }
 
+function pendingHiddenStudio() {
+	const pending = pendingStudio({ flags: NO_COMPILER });
+	const { run } = pending;
+	run.native.processes.get(1)!.appHidden = true;
+	run.studioLauncher.mockImplementation(async (launch) => {
+		await launch.beforeLaunch?.();
+		return { studio: { desktop: "hidden", pid: 1, startTime: "0" }, type: "launched" };
+	});
+	onTestFinished(async () => {
+		run.signals.fire("SIGINT");
+		await run.result;
+	});
+	return pending;
+}
+
 describe("managed Rojo plugin lifecycle", () => {
+	it("should show a taken hidden Studio only after its initial synchronization", async () => {
+		expect.assertions(4);
+
+		const { ready, run } = pendingHiddenStudio();
+		await flushAsync();
+		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+		await passAsync(run, FILE_POLL_MS);
+		const staying = new AbortController();
+		const joining = ownSessionAsync(run.ipc, CONTROL_TARGET, {
+			params: { defaultDesktop: "user", parts: ["studio"] },
+			responseTimeoutMs: 600_000,
+			signal: staying.signal,
+		});
+		joining.catch(ignoreFailure);
+		await flushAsync();
+
+		expect(stateOf(run)).toMatchObject({
+			services: { studio: { desktop: "hidden", owner: "start", pid: 1, status: "opening" } },
+		});
+		expect(run.native.processes.get(1)).toMatchObject({ alive: true, appHidden: true });
+
+		ready.resolve(true);
+
+		await expect(joining).resolves.toMatchObject({
+			joined: { added: [], taken: ["studio", "rojo"] },
+		});
+		expect(stateOf(run)).toMatchObject({
+			services: { studio: { desktop: "user", owner: "start", pid: 1, status: "open" } },
+		});
+	});
+
+	it.for(["timeout", "closed", "unacknowledged"] as const)(
+		"should give back a taken hidden Studio when its readiness is %s",
+		async (failure) => {
+			expect.assertions(3);
+
+			const { ready, run } = pendingHiddenStudio();
+			await flushAsync();
+			run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
+			await passAsync(run, FILE_POLL_MS);
+			const staying = new AbortController();
+			const joining = ownSessionAsync(run.ipc, CONTROL_TARGET, {
+				params: { defaultDesktop: "user", parts: ["studio"] },
+				responseTimeoutMs: 600_000,
+				signal: staying.signal,
+			});
+			joining.catch(ignoreFailure);
+			await flushAsync();
+			const failures = {
+				closed: async () => {
+					run.native.processes.get(1)!.alive = false;
+					await passAsync(run, FILE_POLL_MS);
+				},
+				timeout: async () => {
+					await passAsync(run, STUDIO_OPEN_BOUND_MS);
+				},
+				unacknowledged: async () => {
+					ready.resolve(false);
+					await flushAsync();
+				},
+			};
+			await failures[failure]();
+
+			await expect(joining).rejects.toMatchObject({ code: "studio_launch_failed" });
+			expect(stateOf(run)).toMatchObject({
+				services: {
+					rojo: { owner: null },
+					studio: { desktop: "hidden", owner: null, pid: 1 },
+				},
+			});
+			expect(run.native.processes.get(1)).toMatchObject({ appHidden: true });
+		},
+	);
+
+	it("should end a pending hidden Studio join when the session shuts down", async () => {
+		expect.assertions(2);
+
+		const { run } = pendingHiddenStudio();
+		await flushAsync();
+		const staying = new AbortController();
+		const joining = ownSessionAsync(run.ipc, CONTROL_TARGET, {
+			params: { defaultDesktop: "user", parts: ["studio"] },
+			responseTimeoutMs: 600_000,
+			signal: staying.signal,
+		});
+		joining.catch(ignoreFailure);
+		await flushAsync();
+		run.signals.fire("SIGINT");
+
+		await expect(joining).rejects.toMatchObject({ code: "studio_launch_failed" });
+		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
+	});
+
 	it("should wait for a manual launch's lock observation before closing it", async () => {
 		expect.assertions(2);
 

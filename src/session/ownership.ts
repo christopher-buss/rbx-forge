@@ -82,6 +82,8 @@ export interface OwnerParts {
 	ownership: Ownership;
 	parts: Pick<ServiceParts, "stopAsync">;
 	studio: StudioState;
+	/** Waits for the attached Studio's place and initial synchronization. */
+	waitForStudio: () => Promise<void>;
 }
 
 /** What the owner handlers read and record. */
@@ -183,18 +185,24 @@ export function createOwnerHandlers(
 }
 
 async function showTakenStudioAsync(
-	move: StudioMover,
+	{ move, waitForStudio }: Pick<OwnerParts, "move" | "waitForStudio">,
 	services: SessionStatus["services"],
 	taken: ReadonlyArray<PartId>,
 	request: PartRequest,
 ): Promise<void> {
 	if (
-		taken.includes("studio") &&
-		services.studio.desktop === "hidden" &&
-		(request.desktop ?? request.defaultDesktop) === "user"
+		!taken.includes("studio") ||
+		services.studio.desktop !== "hidden" ||
+		(request.desktop ?? request.defaultDesktop) !== "user"
 	) {
-		await move({ desktop: "user" });
+		return;
 	}
+
+	if (services.studio.status === "opening") {
+		await waitForStudio();
+	}
+
+	await move({ desktop: "user" });
 }
 
 /**
@@ -213,9 +221,10 @@ async function showTakenStudioAsync(
  */
 async function joinOwnerAsync(
 	{ status }: OwnerSetup,
-	{ add, move, ownership }: OwnerParts,
+	owner: OwnerParts,
 	join: { release: OwnerHandlers["release"]; request: PartRequest },
 ): Promise<OwnerJoin> {
+	const { add, ownership } = owner;
 	const { services, sessionId } = status.snapshot();
 	if (ownership.isOwned) {
 		throw new ForgeError(
@@ -235,7 +244,7 @@ async function joinOwnerAsync(
 
 	let added: Array<PartId>;
 	try {
-		await showTakenStudioAsync(move, services, taken, join.request);
+		await showTakenStudioAsync(owner, services, taken, join.request);
 		added = await add(join.request);
 	} catch (err) {
 		await join.release({ type: "owner_gone" });

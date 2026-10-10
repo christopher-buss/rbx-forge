@@ -95,6 +95,7 @@ describe("session Studio visibility", () => {
 					ownership: { added: new Set(), isOwned: false },
 					parts: { stopAsync: async () => {} },
 					studio: { isAttached: true },
+					waitForStudio: async () => {},
 				},
 			);
 			await handlers.own({ defaultDesktop: "user", parts: ["studio"] });

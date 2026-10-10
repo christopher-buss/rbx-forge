@@ -38,6 +38,8 @@ export interface StudioState {
 	isAttached: boolean;
 	/** Stops following the attached Studio, which stays open. */
 	letGo?: (() => void) | undefined;
+	/** Resolves when readiness completes or the Studio follow ends. */
+	open?: Promise<void>;
 	/** The managed launch keeps opening status until sync is acknowledged. */
 	waitsForSync?: boolean;
 }
@@ -138,6 +140,7 @@ export function followSessionStudio(
 	setup.status.studio("opening", opened.place, opened.studio, opened.origin);
 	const signal = AbortSignal.any([scope.signal, letGo.signal]);
 	const readiness = createStudioReadiness(setup, { ...scope, signal }, follow.state, opened);
+	follow.state.open = readiness.open;
 	const followed = followAsync(setup, { signal }, follow, {
 		...opened,
 		onOpen: readiness.onLock,
@@ -161,6 +164,35 @@ export function leaveStudio(state: StudioState, status: Pick<StatusRecorder, "st
 	state.letGo = undefined;
 	state.isAttached = false;
 	status.studioLeft();
+}
+
+/**
+ * Wait until Studio has the place open, for at most
+ * {@link STUDIO_OPEN_BOUND_MS}. The session's end ends the wait.
+ *
+ * @param setup - The clock.
+ * @param opening - The place, and whether Studio has it open.
+ * @param opening.open - Resolves once it has, or the follow ended.
+ * @param opening.place - The place file Studio opens.
+ * @param opening.signal - Ends the wait when the session ends.
+ * @rejects {ForgeError} `studio_launch_failed` once the bound passed.
+ */
+export async function waitForStudioOpenAsync(
+	setup: Pick<StudioSetup, "context" | "status">,
+	{ open, place, signal }: { open: Promise<void>; place: string; signal: AbortSignal },
+): Promise<void> {
+	if (
+		(await settlesWithinAsync(setup.context.seams.clock, open, STUDIO_OPEN_BOUND_MS, signal)) &&
+		setup.status.snapshot().services.studio.status === "open"
+	) {
+		return;
+	}
+
+	throw new ForgeError(
+		"studio_launch_failed",
+		`Roblox Studio did not open ${place} within ${STUDIO_OPEN_BOUND_MS / 1000} s.`,
+		{ hint: 'Check "forge status" and Studio\'s Rojo connection.' },
+	);
 }
 
 /**
@@ -207,7 +239,7 @@ export function createStudioAdder(
 		}
 
 		if (opening !== undefined && !hasEnded(scope)) {
-			await waitForOpenAsync(setup, opening);
+			await waitForStudioOpenAsync(setup, { ...opening, signal: scope.signal });
 		}
 
 		const added: Array<PartId> = opening === undefined ? [] : ["studio"];
@@ -387,34 +419,6 @@ async function attachAsync(
 		attach.parts.stop("rojo");
 		throw err;
 	}
-}
-
-/**
- * Wait until Studio has the place open, for at most
- * {@link STUDIO_OPEN_BOUND_MS}. The session's end ends the wait.
- *
- * @param setup - The clock.
- * @param opening - The place, and whether Studio has it open.
- * @param opening.open - Resolves once it has, or the follow ended.
- * @param opening.place - The place file Studio opens.
- * @rejects {ForgeError} `studio_launch_failed` once the bound passed.
- */
-async function waitForOpenAsync(
-	setup: Pick<StudioSetup, "context" | "status">,
-	{ open, place }: { open: Promise<void>; place: string },
-): Promise<void> {
-	if (
-		(await settlesWithinAsync(setup.context.seams.clock, open, STUDIO_OPEN_BOUND_MS)) &&
-		setup.status.snapshot().services.studio.status === "open"
-	) {
-		return;
-	}
-
-	throw new ForgeError(
-		"studio_launch_failed",
-		`Roblox Studio did not open ${place} within ${STUDIO_OPEN_BOUND_MS / 1000} s.`,
-		{ hint: 'Check "forge status" and Studio\'s Rojo connection.' },
-	);
 }
 
 /**

@@ -135,7 +135,14 @@ function makeHandlers(add: PartAdder = async () => [], move: StudioMover = vi.fn
 	const handlers = createOwnerHandlers(
 		{ status },
 		{ end },
-		{ add, move, ownership, parts: { stopAsync }, studio: { isAttached: false } },
+		{
+			add,
+			move,
+			ownership,
+			parts: { stopAsync },
+			studio: { isAttached: false },
+			waitForStudio: async () => {},
+		},
 	);
 	return { end, handlers, ownership, status, stopAsync };
 }
