@@ -52,7 +52,10 @@ The fields of the session commands. The agent workflow is in the
   it the build of the last edit; see below. `data.services.studio` has `status`
   (`opening`, `open`, `closed`, `off`), `place`, `origin` (`forge` when the
   session opened it, `found` when it already had the place open), and, for a
-  Studio forge started or attached, `pid` and `startTime`.
+  Studio forge started or attached, `pid` and `startTime`. On Windows,
+  `services.studio.desktop` records session visibility: `hidden` means hidden
+  windows on the user's desktop, and `user` means shown. `restart` retains this
+  visibility when it reopens Studio.
 - `forge up --studio --json`: `data.added` names `studio` and `rojo` when it
   started them. It returns once Rojo listens and Studio has the place open. A
   Studio that has the place open already is used. A busy configured `rojoPort`
@@ -237,7 +240,8 @@ no part stopped or started; an add failure, such as `compiler_missing` or
 `forge save --json` saves the session's Studio before syncback reads its place.
 `forge save --place <snapshot> --json` saves a snapshot Studio directly and
 returns the same data, including its actual desktop, without a running session.
-After editing in Studio, run `forge save --json`, then `forge syncback --json`.
+When the user requests syncback after editing in Studio, run
+`forge save --json`, then `forge syncback --json`.
 
 ```json
 {
@@ -257,8 +261,11 @@ After editing in Studio, run `forge save --json`, then `forge syncback --json`.
 
 `place` is absolute; `bytes` and the ISO `mtime` describe the saved file after
 its changed timestamp settles. `desktop` is `user` or `hidden`. On Windows,
-`user` means saving can take focus. `durationMs` includes waiting for an opening
-Studio. `--timeout <s>` defaults to 30 seconds.
+`desktop` reports the physical desktop, so a hidden session Studio returns
+`user` even when `services.studio.desktop` is `hidden`. Every save of that
+Studio briefly shows the File menu and moves keyboard focus. A hidden snapshot
+returns `hidden` and leaves the user's focus unchanged. `durationMs` includes
+waiting for an opening Studio. `--timeout <s>` defaults to 30 seconds.
 
 | Code              | Exit | Meaning                                                                                                       |
 | ----------------- | ---- | ------------------------------------------------------------------------------------------------------------- |
@@ -277,9 +284,9 @@ for the whole operation. `data.save` is the preceding save result (`place`,
 `pid`, `desktop`, `bytes`, `mtime`, `durationMs`). Its PID is the original
 Studio's; the outer PID changes when Windows reopens it.
 
-On Windows, `to` reports the actual desktop, including a warned fallback to
-`user` when hidden launch is unavailable. A save failure returns the save error
-and leaves the original Studio open.
+On Windows, `from` and `to` report session visibility on the user's desktop,
+including a warned fallback to `user` when hidden launch is unavailable. A save
+failure returns the save error and leaves the original Studio open.
 
 On macOS, both PIDs stay the same. `from` and `to` report app visibility:
 `hidden` for app-hidden, `user` for shown. `save.desktop` remains `user` because

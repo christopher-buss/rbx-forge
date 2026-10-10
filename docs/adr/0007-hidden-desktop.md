@@ -2,35 +2,40 @@
 status: accepted
 ---
 
-# Studio on a hidden desktop
+# Hidden Studio placement
 
 Studio edits (for example, through the Studio MCP) reach disk only after a save,
 and syncback reads the saved place. Studio has no API, IPC, command-line switch,
 or plugin API that saves a local place, so `forge save` presses File > Save to
 File through accessibility: UI Automation on Windows, AX on macOS. On Windows,
-every UI Automation action makes Studio the active window, also when it is
-minimised or behind other windows, and forge cannot give the focus back. So on
-Windows, forge runs the Studios of agents on a hidden desktop that it makes. A
-Studio there starts, loads plugins, saves, and serves the Studio MCP, and
-nothing changes on the user's screen. On macOS, an AX press saves in the
-background with no change of focus, so macOS needs no separate desktop object;
-but Studio keeps File > Save to File disabled until it has been the active app
-once. There, Studio started as a bare process becomes the frontmost app while it
-loads; a LaunchServices launch without activation never does. So on macOS, the
-hidden desktop is a background LaunchServices launch, kept hidden, and activated
-only briefly when a save needs it.
+expanding File makes Studio the active window, also when its main window is
+hidden, and forge cannot give the focus back. A separate desktop prevents this
+focus change, but Windows cannot move an existing window between desktop
+objects. Session Studios run on the user's desktop with hidden windows, so their
+placement permits visibility changes without crossing desktop objects. The
+separate hidden desktop serves only hidden snapshots. On macOS, an AX press
+saves in the background with no change of focus, so macOS needs no separate
+desktop object; but Studio keeps File > Save to File disabled until it has been
+the active app once. There, Studio started as a bare process becomes the
+frontmost app while it loads; a LaunchServices launch without activation never
+does. So on macOS, the hidden desktop is a background LaunchServices launch,
+kept hidden, and activated only briefly when a save needs it.
 
 ## Decisions
 
-- **One hidden desktop.** One named hidden desktop per Windows user session,
-  shared by all projects. forge opens it, or makes it if it does not exist, and
-  never destroys it.
-- **Defaults.** `up --studio` and `open` launch Studio on the hidden desktop;
-  `start`, for people, launches it on the user's desktop. `studio.desktop` in
-  the config and `--desktop <user|hidden>` override this. On Windows, `restart`
-  keeps Studio's desktop and the state contract reports it
-  (`services.studio.desktop`). On macOS the same defaults and overrides apply;
-  Linux always uses the user's desktop.
+- **Windows hidden session.** Studio launches on the user's desktop with
+  `STARTF_USESHOWWINDOW` / `SW_HIDE`, without activation, a taskbar button, or
+  an Alt+Tab entry. A watcher hides new top-level windows of its verified PID
+  while it is hidden, and ends when Studio exits or is shown.
+- **One hidden snapshot desktop.** One named hidden desktop per Windows user
+  session, shared by all projects. forge opens it, or makes it if it does not
+  exist, and never destroys it. Only hidden snapshots use it.
+- **Defaults.** `up --studio` and `open` launch Studio hidden; `start`, for
+  people, launches it on the user's desktop. `studio.desktop` in the config and
+  `--desktop <user|hidden>` override this. On Windows, `restart` keeps Studio's
+  visibility and the state contract reports it (`services.studio.desktop`). On
+  macOS the same defaults and overrides apply; Linux always uses the user's
+  desktop.
 - **macOS hidden.** forge launches the Studio app bundle through LaunchServices
   as a new instance, with activation off, and hides it as soon as it exists.
   Studio shows itself while it loads, so a detached watcher hides it again each
@@ -44,29 +49,43 @@ only briefly when a save needs it.
   only for that first save of a never-active Studio, and only briefly: an item
   still disabled after a short priming limit fails the save (`menu_disabled`),
   with visibility and focus restored.
-- **Fallback.** When forge cannot launch on the hidden desktop (no executable,
-  so it uses the platform launcher, or breakaway is denied), it opens Studio on
-  the user's desktop with a warning. On macOS the platform launcher opens the
-  place in the background (`open -g -j`), and forge warns that it cannot keep
-  Studio hidden.
-- **A visible save is allowed.** `forge save` also saves a Studio on the user's
-  desktop. On Windows it takes focus there, with no opt-in; the result reports
-  the desktop. On macOS it keeps focus, apart from a priming save.
+- **Fallback.** When forge cannot launch Studio hidden (no executable, so it
+  uses the platform launcher, or breakaway is denied), it opens Studio on the
+  user's desktop with a warning. On macOS the platform launcher opens the place
+  in the background (`open -g -j`), and forge warns that it cannot keep Studio
+  hidden.
+- **Windows hidden session save.** Expand File, then invoke Save to File, also
+  for hidden windows. Every save briefly shows the File menu and moves keyboard
+  focus to Studio until the user clicks elsewhere. The save result reports the
+  physical desktop (`user`), while `services.studio.desktop` reports visibility
+  (`hidden` or `user`). Agents save only when the user explicitly asks for
+  syncback. Saves on the separate hidden snapshot desktop leave the user's focus
+  unchanged. On macOS a save keeps focus, apart from a priming save.
 - **`show` and `hide`.** On Windows, `forge show` and `forge hide` save Studio,
-  close it, and open it again on the other desktop. Undo history and open script
-  tabs are lost. On macOS, they save, then hide the app in place, or unhide and
-  activate it, since an unhidden Studio launched hidden has no window on screen
-  until it is active; state records the last successful forge visibility change
-  as the desktop. Native desktop and save results still report the user's
-  desktop.
-- **Close and block checks see the hidden desktop.** Closing Studio and finding
-  a modal dialog enumerate the windows of Studio's desktop, so `stop` and `down`
-  end a blocked Studio at once, as on the user's desktop.
+  close it, and open it again with the requested visibility on the user's
+  desktop. Undo history and open script tabs are lost. On macOS, they save, then
+  hide the app in place, or unhide and activate it, since an unhidden Studio
+  launched hidden has no window on screen until it is active; state records the
+  last successful forge visibility change as the desktop. Native desktop and
+  save results still report the user's desktop.
+- **Close and block checks see hidden windows.** Closing Studio and finding a
+  modal dialog cover hidden session windows on the user's desktop and windows on
+  the separate snapshot desktop, so `stop` and `down` end a blocked Studio at
+  once.
 - **The place stays as the project builds it.** forge dismisses the lighting
-  migration dialog on the hidden desktop. It does not set `Lighting.Technology`.
+  migration dialog in hidden session windows and on the hidden snapshot desktop.
+  It does not set `Lighting.Technology`.
 
 ## Considered options
 
+- **Move a window between desktop objects.** Rejected: an experiment with
+  `SetParent` across desktops fails with an invalid parameter error.
+  [Microsoft's Sysinternals Desktops documentation](https://learn.microsoft.com/en-us/sysinternals/downloads/desktops)
+  states that Windows provides no way to move a window between desktop objects.
+- **Save without expanding File.** Rejected: in real Studio's Qt 5.15 menu UI,
+  File has no children while closed in UI Automation's control view, raw view,
+  or MSAA, even after a first save. Every save must expand the menu before
+  invoking Save to File.
 - **Keystroke Ctrl+S.** Rejected: it needs focus too, and it goes to whatever
   window has focus.
 - **Save, then give the focus back.** Rejected on Windows: Windows refuses
@@ -84,16 +103,19 @@ only briefly when a save needs it.
 
 ## Consequences
 
-- The addon gets a desktop option for detached launch, a save request, and a
-  dialog dismissal, each able to act on the hidden desktop, and a macOS
-  LaunchServices launch.
+- The addon provides hidden Windows launch on the user's desktop, verified-PID
+  window visibility changes (hide, show without activation, show and activate),
+  and a re-hide watcher. Save, close, and dialog checks cover hidden windows and
+  the snapshot desktop. macOS uses a LaunchServices launch.
 - The macOS watcher's polling interval and quiet window, and the priming save's
   polling interval and limit, are a tuning surface.
-- A never-active hidden Studio shows on screen and takes focus for about a
-  second on its first save.
+- Each Windows hidden session save briefly shows the File menu and moves focus.
+  A never-active hidden macOS Studio shows and takes focus briefly on its first
+  save.
 - A hidden Studio is visible only through `forge status`, `forge show`, and the
   Studio MCP. No tray icon and no toast tell the user that it runs.
-- A launch on the hidden desktop takes longer to reach the place lock than a
-  visible launch; the cause is not known. The launch deadline still covers it.
+- A snapshot launch on the hidden desktop takes longer to reach the place lock
+  than a visible launch; the cause is not known. The launch deadline still
+  covers it.
 - Menu names are English only, so the save fails on a Studio in another
   language.
