@@ -322,7 +322,7 @@ Options for the Roblox Studio that `stop`, `down`, and the idle timeout close.
 #### `studio.desktop`
 
 - Type: `"user" | "hidden"`
-- Default: `"user"` for `start`; `"hidden"` for `up --studio` and `open` on
+- Default: `"user"` for `start` and `open`; `"hidden"` for `up --studio` on
   Windows and macOS.
 - Flag: `--desktop <user|hidden>` on `start`, `up`, and `open`.
 

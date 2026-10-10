@@ -73,10 +73,12 @@ without taking focus, a taskbar button, or an Alt+Tab entry. A watcher hides new
 top-level windows of that Studio while it is hidden, and ends when Studio exits
 or is shown. It loads plugins and serves the Studio MCP while hidden.
 
-`forge open` defaults to a hidden snapshot on a separate Windows desktop.
-All projects share one named desktop in the Windows user session. Forge opens
-it or makes it and keeps it for later snapshot launches. Even saves of these
-snapshots leave the user's screen and focus unchanged.
+`forge open` defaults to a visible snapshot on the user's desktop on every OS.
+Use `forge open --desktop hidden` or set `studio.desktop: "hidden"` for a hidden
+snapshot on Windows or macOS. Hidden Windows snapshots use a separate desktop;
+all projects share one named desktop in the Windows user session. Forge opens
+it or makes it and keeps it for later hidden snapshot launches. Even saves of
+these hidden snapshots leave the user's screen and focus unchanged.
 
 `forge start` opens Studio on the user's desktop by default. Set
 `studio.desktop` in the config or pass `--desktop user` / `--desktop hidden` to
@@ -87,9 +89,10 @@ On macOS, the hidden desktop is no separate desktop: forge launches Studio throu
 LaunchServices without activating it, so it never takes focus, and hides it.
 Studio shows itself a few times while it loads; a watcher hides it again each
 time, until the place is open, so its windows can appear behind the front app
-for a moment. `start` and `--desktop user` bring Studio to the front. When forge
-finds no Studio app bundle, `open -g -j` opens the place in the background, and
-forge warns that it cannot keep Studio hidden.
+for a moment. `start` and `open` bring Studio to the front by default;
+`--desktop user` explicitly requests this. When a hidden launch finds no Studio
+app bundle, `open -g -j` opens the place in the background, and forge warns that
+it cannot keep Studio hidden.
 
 On Windows, `restart` reopens Studio with its previous visibility. When Windows cannot launch
 a hidden Studio directly, forge uses the platform launcher on the user desktop

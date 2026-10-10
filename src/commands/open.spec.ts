@@ -166,7 +166,9 @@ describe(runOpenAsync, () => {
 		});
 		await runOpenAsync(run.context, input({ studio: { desktop: "user" } }));
 
-		expect(run.launcher).toHaveBeenCalledWith(expect.objectContaining({ desktop: "user" }));
+		expect(run.launcher).toHaveBeenCalledWith(
+			expect.objectContaining({ desktop: "user", watchHiddenLighting: false }),
+		);
 	});
 
 	it("should use the snapshot's configured desktop", async () => {
@@ -216,23 +218,66 @@ describe(runOpenAsync, () => {
 		expect(run.reporter.events).toContainEqual({ message: warning, type: "warning" });
 	});
 
-	it("should launch a snapshot on the hidden desktop by default on Windows", async () => {
+	it.for([
+		["win32", "tools/rojo.exe"],
+		["darwin", "tools/rojo"],
+		["linux", "tools/rojo"],
+	] as const)("should launch a visible snapshot by default on %s", async ([platform, tool]) => {
 		expect.assertions(1);
 
-		const run = makeOpen({ files: { "tools/rojo.exe": "" }, platform: "win32" });
+		const run = makeOpen({ files: { [tool]: "" }, platform });
 		await runOpenAsync(run.context, input());
 
-		expect(run.launcher).toHaveBeenCalledWith(expect.objectContaining({ desktop: "hidden" }));
+		expect(run.launcher).toHaveBeenCalledWith(
+			expect.objectContaining({ desktop: "user", watchHiddenLighting: false }),
+		);
 	});
 
 	it("should launch a hidden macOS snapshot without the Windows Lighting watcher", async () => {
 		expect.assertions(1);
 
 		const run = makeOpen({ platform: "darwin" });
-		await runOpenAsync(run.context, input());
+		await runOpenAsync(run.context, input({ studio: { desktop: "hidden" } }));
 
 		expect(run.launcher).toHaveBeenCalledWith(
 			expect.objectContaining({ desktop: "hidden", watchHiddenLighting: false }),
+		);
+	});
+
+	it.for([
+		["win32", "tools/rojo.exe", "hidden", true],
+		["darwin", "tools/rojo", "hidden", false],
+		["linux", "tools/rojo", "user", false],
+	] as const)(
+		"should honor hidden snapshot config on %s with the platform's Lighting watcher",
+		async ([platform, tool, desktop, watchHiddenLighting]) => {
+			expect.assertions(1);
+
+			const run = makeOpen({
+				file: { studio: { desktop: "hidden" } },
+				files: { [tool]: "" },
+				platform,
+			});
+			await runOpenAsync(run.context, input());
+
+			expect(run.launcher).toHaveBeenCalledWith(
+				expect.objectContaining({ desktop, watchHiddenLighting }),
+			);
+		},
+	);
+
+	it("should let the hidden flag override visible config and watch Windows Lighting", async () => {
+		expect.assertions(1);
+
+		const run = makeOpen({
+			file: { studio: { desktop: "user" } },
+			files: { "tools/rojo.exe": "" },
+			platform: "win32",
+		});
+		await runOpenAsync(run.context, input({ studio: { desktop: "hidden" } }));
+
+		expect(run.launcher).toHaveBeenCalledWith(
+			expect.objectContaining({ desktop: "hidden", watchHiddenLighting: true }),
 		);
 	});
 

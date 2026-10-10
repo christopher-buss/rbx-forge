@@ -24,7 +24,7 @@ export const OPEN_FLAGS: ReadonlyArray<FlagDefinition> = [
 		name: "desktop",
 		config: "studio.desktop",
 		kind: "string",
-		text: "Studio desktop (default: hidden on Windows and macOS).",
+		text: "Studio desktop (default: user).",
 		value: "user|hidden",
 	},
 ];
@@ -158,6 +158,7 @@ export async function runOpenAsync(
 ): Promise<CommandResult> {
 	const { cwd, reporter, seams } = context;
 	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
+	const desktop = resolveStudioDesktop(config, seams.host.platform, "user");
 	const studioPath = input.flags["studio-path"];
 	const { snapshots } = forgeFiles(cwd);
 	const place = path.join(snapshots, snapshotName(seams.clock.now(), openPlacePath(config)));
@@ -173,9 +174,9 @@ export async function runOpenAsync(
 		}
 
 		const launched = await launchAsync(context, place, {
-			desktop: resolveStudioDesktop(config, seams.host.platform, "hidden"),
+			desktop,
 			studioPath: typeof studioPath === "string" ? path.resolve(cwd, studioPath) : undefined,
-			watchHiddenLighting: seams.host.platform === "win32",
+			watchHiddenLighting: seams.host.platform === "win32" && desktop === "hidden",
 		});
 
 		return { build: { ...build.value, hooks: build.hooks }, pruned, ...launched };

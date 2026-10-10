@@ -31,8 +31,8 @@ kept hidden, and activated only briefly when a save needs it.
 - **One hidden snapshot desktop.** One named hidden desktop per Windows user
   session, shared by all projects. forge opens it, or makes it if it does not
   exist, and never destroys it. Only hidden snapshots use it.
-- **Defaults.** `up --studio` and `open` launch Studio hidden; `start`, for
-  people, launches it on the user's desktop. `studio.desktop` in the config and
+- **Defaults.** `up --studio` launches Studio hidden; `start` and `open` launch
+  it visibly on the user's desktop. `studio.desktop` in the config and
   `--desktop <user|hidden>` override this. On Windows, `restart` keeps Studio's
   visibility and the state contract reports it (`services.studio.desktop`). On
   macOS the same defaults and overrides apply; Linux always uses the user's
