@@ -112,10 +112,7 @@ pub fn titled_window(pid: u32, wanted: &str) -> io::Result<Option<HWND>> {
         let mut owner = 0;
         // SAFETY: a window query writes a local PID.
         unsafe { GetWindowThreadProcessId(window, &raw mut owner) };
-        if owner == search.pid
-            && unsafe { IsWindowVisible(window) } != 0
-            && title(window) == search.wanted
-        {
+        if owner == search.pid && title(window) == search.wanted {
             search.found = Some(window);
         }
         TRUE

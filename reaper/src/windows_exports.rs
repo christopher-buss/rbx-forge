@@ -267,6 +267,7 @@ pub struct DetachedSpawn {
     /// A file stdout and stderr append to; `NUL` when missing.
     pub output: Option<String>,
     pub desktop: Option<String>,
+    pub hidden_windows: Option<bool>,
 }
 
 /// Start a process outside this process's job, with no console. Returns its
@@ -286,6 +287,7 @@ pub fn spawn_detached(spawn: DetachedSpawn) -> Result<Option<u32>> {
         env: &env,
         output: spawn.output.as_deref(),
         desktop: spawn.desktop.as_deref(),
+        hidden_windows: spawn.hidden_windows.unwrap_or(false),
     })
     .map_err(|err| to_napi(&format!("start {}", spawn.program), &err))
 }

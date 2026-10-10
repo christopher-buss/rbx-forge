@@ -150,6 +150,71 @@ impl PinnedProcess {
     #[allow(
         clippy::unused_self,
         clippy::unnecessary_wraps,
+        reason = "shared Windows visibility surface"
+    )]
+    pub fn window_visibility(&self) -> io::Result<Option<&'static str>> {
+        #[cfg(windows)]
+        {
+            crate::os::win::visibility::visibility(self)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(None)
+        }
+    }
+
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "shared Windows visibility surface"
+    )]
+    pub fn set_window_visibility(&self, state: &str) -> io::Result<bool> {
+        #[cfg(windows)]
+        {
+            crate::os::win::visibility::set(self, state)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = state;
+            Ok(false)
+        }
+    }
+
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "shared Windows visibility surface"
+    )]
+    pub fn start_window_hiding(&self) -> io::Result<bool> {
+        #[cfg(windows)]
+        {
+            crate::os::win::visibility::start(self)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(false)
+        }
+    }
+
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "shared Windows visibility surface"
+    )]
+    pub fn stop_window_hiding(&self) -> io::Result<bool> {
+        #[cfg(windows)]
+        {
+            crate::os::win::visibility::stop(self)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(false)
+        }
+    }
+
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
         reason = "shared macOS app visibility surface"
     )]
     pub fn app_hidden(&self) -> io::Result<Option<bool>> {
@@ -344,6 +409,160 @@ mod tests {
     use super::{PinnedProcess, start_time};
     use std::process::{Child, Command, Stdio};
     use std::time::Duration;
+
+    #[cfg(windows)]
+    fn fixture_windows(pid: u32) -> Vec<windows_sys::Win32::Foundation::HWND> {
+        use windows_sys::Win32::Foundation::{HWND, LPARAM, TRUE};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId};
+        unsafe extern "system" fn collect(window: HWND, context: LPARAM) -> i32 {
+            // SAFETY: the synchronous enumerator owns this local search.
+            let (wanted, windows) = unsafe { &mut *(context as *mut (u32, Vec<HWND>)) };
+            let mut pid = 0;
+            unsafe { GetWindowThreadProcessId(window, &raw mut pid) };
+            if pid == *wanted {
+                windows.push(window);
+            }
+            TRUE
+        }
+        let mut search = (pid, Vec::new());
+        assert_ne!(
+            unsafe { EnumWindows(Some(collect), (&raw mut search) as LPARAM) },
+            0
+        );
+        search.1
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn window_visibility_changes_the_pinned_fixture_and_rehides_new_windows() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        let mut fixture = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("forge-studio-fixture.exe");
+        if !fixture.exists() {
+            fixture = fixture
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("release/forge-studio-fixture.exe");
+        }
+        assert!(
+            fixture.exists(),
+            "build forge-studio-fixture before this test"
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let args = vec![
+            directory
+                .path()
+                .join("place.rbxl")
+                .to_str()
+                .unwrap()
+                .to_owned(),
+        ];
+        use std::os::windows::process::CommandExt;
+        let mut child = Command::new(fixture)
+            .args(&args)
+            .current_dir(directory.path())
+            .env(
+                "FIXTURE_STUDIO_WINDOW_TRIGGER",
+                directory.path().join("new-window"),
+            )
+            .env("FIXTURE_STUDIO_HIDE_WINDOWS", "1")
+            .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pin = PinnedProcess::open(child.id()).unwrap().unwrap();
+        struct Cleanup(PinnedProcess);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+            }
+        }
+        let cleanup = Cleanup(pin);
+        let pin = &cleanup.0;
+        let watching = directory.path().join("new-window.watching");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !watching.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(watching.exists());
+        let actual_hidden = || {
+            fixture_windows(pin.pid()).into_iter()
+            .all(|window| unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(window) } == 0)
+        };
+        let wait = |wanted| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while (pin.window_visibility().unwrap() != Some(wanted)
+                || (wanted == "hidden" && !actual_hidden()))
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(pin.window_visibility().unwrap(), Some(wanted));
+            assert_eq!(actual_hidden(), wanted == "hidden");
+        };
+        wait("hidden");
+        let desktop = crate::os::win::desktop::for_process(pin.pid()).unwrap();
+        assert_ne!(
+            desktop.name().unwrap(),
+            crate::os::win::desktop::HIDDEN_NAME
+        );
+        crate::os::win::visibility::with_hiding_paused(pin, || {
+            for window in fixture_windows(pin.pid()) {
+                unsafe {
+                    windows_sys::Win32::UI::WindowsAndMessaging::ShowWindowAsync(
+                        window,
+                        windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE,
+                    )
+                };
+                unsafe {
+                    windows_sys::Win32::UI::WindowsAndMessaging::ShowWindowAsync(
+                        window,
+                        windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE,
+                    )
+                };
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            assert!(!actual_hidden());
+            assert_eq!(pin.window_visibility().unwrap(), Some("hidden"));
+            Ok(())
+        })
+        .unwrap();
+        wait("hidden");
+        let foreground = unsafe { GetForegroundWindow() };
+        assert!(pin.set_window_visibility("user").unwrap());
+        wait("user");
+        assert_eq!(unsafe { GetForegroundWindow() }, foreground);
+        assert!(!pin.stop_window_hiding().unwrap());
+        assert!(pin.start_window_hiding().unwrap());
+        wait("hidden");
+        std::fs::write(directory.path().join("new-window"), "").unwrap();
+        let created = directory.path().join("new-window.created");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !created.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(created.exists());
+        wait("hidden");
+        assert!(pin.set_window_visibility("user").unwrap());
+        wait("user");
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(pin.window_visibility().unwrap(), Some("user"));
+        assert!(pin.kill().unwrap());
+        assert!(pin.wait_for_exit(Duration::from_secs(10)).unwrap());
+        assert_eq!(pin.window_visibility().unwrap(), None);
+        assert!(!pin.set_window_visibility("active").unwrap());
+        assert!(!pin.start_window_hiding().unwrap());
+        child.wait().unwrap();
+    }
 
     /// A child that stays alive until it is killed.
     fn sleeper() -> Child {

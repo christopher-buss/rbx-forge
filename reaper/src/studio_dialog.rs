@@ -31,7 +31,11 @@ pub fn dismiss(
     } else {
         "user"
     };
-    if requested_desktop != actual {
+    let hidden_in_place = requested_desktop == "hidden"
+        && actual == "user"
+        && crate::os::process::PinnedProcess::open(pid)?
+            .is_some_and(|pin| matches!(pin.window_visibility(), Ok(Some("hidden"))));
+    if requested_desktop != actual && !hidden_in_place {
         return Ok(false);
     }
     let Some(dialog) = window::titled_window(pid, title)? else {
@@ -127,8 +131,7 @@ unsafe fn bound(
     }
     let ms = u32::try_from(remaining.as_millis())
         .unwrap_or(u32::MAX)
-        .max(1)
-        .min(1000);
+        .clamp(1, 1000);
     unsafe {
         automation.SetConnectionTimeout(ms)?;
         automation.SetTransactionTimeout(ms)?;
