@@ -107,14 +107,32 @@ export interface PinnedProcess {
 	saveMenuEnabled: (timeoutMs: number) => Promise<boolean>;
 	/** Hide or unhide the macOS app without activation; false for no app. */
 	setAppHidden: (hidden: boolean) => boolean;
+	/**
+	 * Set every Windows top-level window; active also requests foreground
+	 * focus.
+	 */
+	setWindowVisibility: (visibility: "active" | "hidden" | "user") => boolean;
 	/** The start time read when it was pinned (see `processStartTime`). */
 	readonly startTime: string;
+	/**
+	 * Re-hide new Windows windows until shown or the verified process exits.
+	 */
+	startWindowHiding: () => boolean;
+	/** Stop the pinned process's Windows re-hide watcher. */
+	stopWindowHiding: () => boolean;
 	/**
 	 * Block until the process exits or the timeout passes.
 	 *
 	 * @returns `true` once it has exited.
 	 */
 	waitForExit: (timeoutMs: number) => boolean;
+	/** Whether the pinned Windows watcher is still running. */
+	windowHiding: () => boolean;
+	/**
+	 * Windows top-level window visibility; null off Windows or without
+	 * windows.
+	 */
+	windowVisibility: () => "hidden" | "user" | null;
 }
 
 /** What {@link NativePipeConnection.readLine} read. */
@@ -178,6 +196,11 @@ export interface DetachedSpawn {
 	desktop?: "hidden" | "user";
 	/** The whole environment of the new process. */
 	env: Record<string, string>;
+	/**
+	 * Start hidden on the inherited desktop; a separate watcher re-hides
+	 * windows.
+	 */
+	hiddenWindows?: boolean;
 	/** A file its stdout and stderr append to; `NUL` when missing. */
 	output?: string;
 	/** The executable's full path. */

@@ -15,7 +15,8 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::System::Threading::{
     CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_UNICODE_ENVIRONMENT,
     CreateProcessW, DETACHED_PROCESS, EXTENDED_STARTUPINFO_PRESENT,
-    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, STARTF_USESHOWWINDOW,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 
 use super::{AttributeList, check, command_line, environment_block, raw, wide};
@@ -32,6 +33,7 @@ pub struct Detached<'a> {
     /// A file its stdout and stderr append to; `NUL` when `None`.
     pub output: Option<&'a str>,
     pub desktop: Option<&'a str>,
+    pub hidden_windows: bool,
 }
 
 fn inheritable(file: File) -> io::Result<File> {
@@ -92,6 +94,10 @@ fn spawn_with_desktop(
     let mut startup: STARTUPINFOEXW = unsafe { zeroed() };
     startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).expect("fits in u32");
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    if detached.hidden_windows {
+        startup.StartupInfo.dwFlags |= STARTF_USESHOWWINDOW;
+        startup.StartupInfo.wShowWindow = 0; // SW_HIDE
+    }
     startup.StartupInfo.hStdInput = raw(&stdin);
     startup.StartupInfo.hStdOutput = raw(&output);
     startup.StartupInfo.hStdError = raw(&output);
@@ -138,10 +144,8 @@ fn spawn_with_desktop(
 
     // SAFETY: `CreateProcessW` returned new handles nothing else owns; they
     // close here, and the process runs on.
-    unsafe {
-        drop(OwnedHandle::from_raw_handle(info.hProcess.cast()));
-        drop(OwnedHandle::from_raw_handle(info.hThread.cast()));
-    }
+    let _process = unsafe { OwnedHandle::from_raw_handle(info.hProcess.cast()) };
+    let _thread = unsafe { OwnedHandle::from_raw_handle(info.hThread.cast()) };
     Ok(Some(info.dwProcessId))
 }
 
@@ -157,6 +161,7 @@ mod tests {
             env: &[],
             output: None,
             desktop,
+            hidden_windows: false,
         }
     }
 

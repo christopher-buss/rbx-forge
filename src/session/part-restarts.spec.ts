@@ -120,6 +120,25 @@ describe(createPartRestarter, () => {
 		});
 	});
 
+	it("reopens Studio with its recorded hidden visibility", async () => {
+		expect.assertions(1);
+
+		const services = servicesWith();
+		services.studio = {
+			...services.studio,
+			desktop: "hidden",
+			origin: "forge",
+			status: "open",
+		};
+		const { add, restart } = makeRestarter(EVERY_PART, { services });
+		await restart({ force: false });
+
+		expect(add).toHaveBeenCalledExactlyOnceWith({
+			desktop: "hidden",
+			parts: ["compiler", "studio"],
+		});
+	});
+
 	it("should add nothing and keep the owned parts when it stopped nothing", async () => {
 		expect.assertions(2);
 

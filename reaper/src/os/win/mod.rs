@@ -17,6 +17,7 @@ pub mod pipe;
 pub mod registry;
 pub mod security;
 pub mod testing;
+pub mod visibility;
 pub mod window;
 
 use std::ffi::{OsStr, c_void};

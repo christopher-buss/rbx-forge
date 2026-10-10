@@ -76,45 +76,52 @@ describe(runSaveAsync, () => {
 		},
 	);
 
-	it("dismisses the hidden Lighting migration dialog before checking whether Studio is busy", async () => {
-		expect.assertions(2);
+	it.for(["hidden", "user"] as const)(
+		"saves hidden Studio on the %s physical desktop after dismissing Lighting",
+		async (desktop) => {
+			expect.assertions(2);
 
-		const memory = createMemoryFileSystem({
-			"game.rbxl": "place",
-			"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
-		});
-		memory.setModifiedTime("game.rbxl", 1000);
-		const native = createFakeNative({
-			42: {
-				alive: true,
-				blocked: true,
-				desktop: "hidden",
-				dialog: { button: "Continue", title: "Lighting Technology Migration" },
-				executablePath: "RobloxStudioBeta.exe",
-				onSave: () => {
-					memory.setModifiedTime("game.rbxl", 2000);
+			const memory = createMemoryFileSystem({
+				"game.rbxl": "place",
+				"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+			});
+			memory.setModifiedTime("game.rbxl", 1000);
+			const native = createFakeNative({
+				42: {
+					alive: true,
+					blocked: true,
+					desktop,
+					dialog: { button: "Continue", title: "Lighting Technology Migration" },
+					executablePath: "RobloxStudioBeta.exe",
+					onSave: () => {
+						memory.setModifiedTime("game.rbxl", 2000);
+					},
+					windowVisibility: "hidden",
 				},
-			},
-		});
-		let now = 0;
-		const seams = createTestSeams({
-			clock: {
-				now: () => now,
-				sleep: async (ms) => {
-					now += ms;
+			});
+			let now = 0;
+			const seams = createTestSeams({
+				clock: {
+					now: () => now,
+					sleep: async (ms) => {
+						now += ms;
+					},
 				},
-			},
-			fileSystem: memory.fileSystem,
-			native: () => native.addon,
-		});
+				fileSystem: memory.fileSystem,
+				native: () => native.addon,
+			});
 
-		await expect(
-			saveStudioAsync(seams, { place: path.join(PROJECT, "game.rbxl") }),
-		).resolves.toMatchObject({ desktop: "hidden", mtime: "1970-01-01T00:00:02.000Z" });
-		expect(memory.fileSystem.readFileSync(path.join(PROJECT, "game.rbxl"), "utf8")).toBe(
-			"place",
-		);
-	});
+			await expect(
+				saveStudioAsync(seams, { place: path.join(PROJECT, "game.rbxl") }),
+			).resolves.toMatchObject({
+				desktop,
+				mtime: "1970-01-01T00:00:02.000Z",
+			});
+			expect(memory.fileSystem.readFileSync(path.join(PROJECT, "game.rbxl"), "utf8")).toBe(
+				"place",
+			);
+		},
+	);
 
 	it.for([
 		{ button: "Continue", desktop: "hidden", title: "Save changes?" },
@@ -191,24 +198,32 @@ describe(runSaveAsync, () => {
 		).rejects.toMatchObject({ code: "save_failed", details: { reason: "timeout" } });
 	});
 
-	it("reports studio_busy for a modal before saving", async () => {
-		expect.assertions(1);
+	it.for([null, "hidden"] as const)(
+		"reports studio_busy for a modal before saving with visibility %s",
+		async (windowVisibility) => {
+			expect.assertions(1);
 
-		const memory = createMemoryFileSystem({
-			"game.rbxl": "place",
-			"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
-		});
-		const native = createFakeNative({
-			42: { alive: true, blocked: true, executablePath: "RobloxStudioBeta.exe" },
-		});
+			const memory = createMemoryFileSystem({
+				"game.rbxl": "place",
+				"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+			});
+			const native = createFakeNative({
+				42: {
+					alive: true,
+					blocked: true,
+					executablePath: "RobloxStudioBeta.exe",
+					windowVisibility,
+				},
+			});
 
-		await expect(
-			saveStudioAsync(
-				createTestSeams({ fileSystem: memory.fileSystem, native: () => native.addon }),
-				{ place: path.join(PROJECT, "game.rbxl") },
-			),
-		).rejects.toMatchObject({ code: "studio_busy" });
-	});
+			await expect(
+				saveStudioAsync(
+					createTestSeams({ fileSystem: memory.fileSystem, native: () => native.addon }),
+					{ place: path.join(PROJECT, "game.rbxl") },
+				),
+			).rejects.toMatchObject({ code: "studio_busy" });
+		},
+	);
 
 	it("reports an accessibility deadline without treating a late disk write as a save", async () => {
 		expect.assertions(1);

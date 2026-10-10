@@ -162,6 +162,46 @@ pub struct PinnedProcess {
 
 #[napi]
 impl PinnedProcess {
+    /// Windows top-level visibility, or none without windows or after exit.
+    #[napi]
+    pub fn window_visibility(&self) -> Result<Option<String>> {
+        self.inner
+            .window_visibility()
+            .map(|state| state.map(str::to_owned))
+            .map_err(|err| to_napi("read window visibility", &err))
+    }
+
+    /// Hide, show without activation, or show and activate the pinned windows.
+    #[napi]
+    pub fn set_window_visibility(&self, state: String) -> Result<bool> {
+        self.inner
+            .set_window_visibility(&state)
+            .map_err(|err| to_napi("change window visibility", &err))
+    }
+
+    /// Whether the identity-bound Windows watcher is still running.
+    #[napi]
+    pub fn window_hiding(&self) -> Result<bool> {
+        self.inner
+            .window_hiding()
+            .map_err(|err| to_napi("read window hiding", &err))
+    }
+
+    /// Keep new windows hidden until stopped or the pinned process exits.
+    #[napi]
+    pub fn start_window_hiding(&self) -> Result<bool> {
+        self.inner
+            .start_window_hiding()
+            .map_err(|err| to_napi("start window hiding", &err))
+    }
+
+    /// Stop hiding before showing windows, including through another pin.
+    #[napi]
+    pub fn stop_window_hiding(&self) -> Result<bool> {
+        self.inner
+            .stop_window_hiding()
+            .map_err(|err| to_napi("stop window hiding", &err))
+    }
     /// The macOS app-hidden state, or none for a nongraphical or exited process.
     ///
     /// # Errors
@@ -557,7 +597,13 @@ impl Task for StudioSaveTask {
         if pinned.start_time() != self.start_time {
             return Err(Error::from_reason("Studio identity changed"));
         }
-        match studio_save::request(self.pid, self.deadline) {
+        #[cfg(windows)]
+        let result = os::win::visibility::with_hiding_paused(&pinned, || {
+            studio_save::request(self.pid, self.deadline)
+        });
+        #[cfg(not(windows))]
+        let result = studio_save::request(self.pid, self.deadline);
+        match result {
             _ if Instant::now() >= self.deadline => Ok("timeout".to_owned()),
             result => result.map_err(|err| to_napi("save Studio", &err)),
         }

@@ -48,6 +48,15 @@ fn main() -> io::Result<()> {
         ready_url = ready_url.map(|url| url.replacen("/ready/", "/ready/wrong-", 1));
     }
     let window = open_main_window(place)?;
+    #[cfg(windows)]
+    if env::var("FIXTURE_STUDIO_HIDE_WINDOWS").as_deref() == Ok("1") {
+        os::process::PinnedProcess::open(std::process::id())?
+            .ok_or_else(|| io::Error::other("fixture exited"))?
+            .start_window_hiding()?;
+        if let Ok(trigger) = env::var("FIXTURE_STUDIO_WINDOW_TRIGGER") {
+            fs::write(format!("{trigger}.watching"), "")?;
+        }
+    }
     install_close_handler();
     record_start(&args)?;
     let lock = format!("{place}.lock");
@@ -72,7 +81,34 @@ fn main() -> io::Result<()> {
         .and_then(|value| value.parse::<u64>().ok());
     let mut dialog_opened = false;
     let mut handled_close = 0;
+    let mut extra_window_opened = false;
+    #[cfg(windows)]
+    let mut extra_window = None;
     loop {
+        if !extra_window_opened
+            && let Ok(trigger) = env::var("FIXTURE_STUDIO_WINDOW_TRIGGER")
+            && Path::new(&trigger).exists()
+        {
+            #[cfg(windows)]
+            {
+                extra_window = Some(os::win::testing::open_test_window(
+                    "fixture new window",
+                    true,
+                )?);
+            }
+            fs::write(format!("{trigger}.created"), "")?;
+            extra_window_opened = true;
+        }
+        #[cfg(windows)]
+        if let Some(window) = extra_window
+            && let Ok(trigger) = env::var("FIXTURE_STUDIO_WINDOW_TRIGGER")
+        {
+            // SAFETY: the fixture owns this window until its process exits.
+            let visible = unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(window as _)
+            } != 0;
+            fs::write(format!("{trigger}.visible"), visible.to_string())?;
+        }
         if lock_pending && started.elapsed() >= Duration::from_millis(lock_delay) {
             fs::write(
                 &lock,

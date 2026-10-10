@@ -19,6 +19,7 @@ function savedStudio({
 	abortOnLetGo = false,
 	hasOrigin = true,
 	hasRecordedStart = true,
+	hiddenWindows = false,
 	slowLookup = false,
 } = {}) {
 	const place = path.join(PROJECT, "game.rbxl");
@@ -35,6 +36,7 @@ function savedStudio({
 			onSave: () => {
 				memory.setModifiedTime("game.rbxl", 2000);
 			},
+			windowVisibility: hiddenWindows ? "hidden" : null,
 		},
 	});
 	let now = 5000;
@@ -109,6 +111,20 @@ function savedStudio({
 }
 
 describe("move lifecycle validation", () => {
+	it("retains hidden windows when hiding again while the saved physical desktop is user", async () => {
+		expect.assertions(2);
+
+		const { move, native } = savedStudio({ hiddenWindows: true });
+
+		await expect(move({ desktop: "hidden", timeoutMs: 30_000 })).resolves.toMatchObject({
+			from: "hidden",
+			pid: 42,
+			save: { desktop: "user" },
+			to: "hidden",
+		});
+		expect(native.processes.get(42)).toMatchObject({ alive: true, windowVisibility: "hidden" });
+	});
+
 	it("keeps the saved Studio alive if the session ends while its old follow is released", async () => {
 		expect.assertions(2);
 

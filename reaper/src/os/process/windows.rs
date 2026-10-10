@@ -29,6 +29,10 @@ const MAX_PATH_UNITS: usize = 32_768;
 #[derive(Debug)]
 struct Handle(HANDLE);
 
+// SAFETY: Windows process handles support cross-thread queries and waits;
+// the receiving owner remains the only code that closes this handle.
+unsafe impl Send for Handle {}
+
 impl Drop for Handle {
     fn drop(&mut self) {
         // SAFETY: the handle came from `OpenProcess` and is closed only here.

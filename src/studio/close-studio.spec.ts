@@ -43,6 +43,36 @@ describe(findPlaceStudio, () => {
 		},
 	);
 
+	it("reports hidden session visibility independently of its physical desktop", () => {
+		expect.assertions(1);
+
+		const native = createFakeNative({
+			7: { ...STUDIO, desktop: "user", windowVisibility: "hidden" },
+		});
+
+		expect(
+			findPlaceStudio(
+				seamsWith(`7\nRobloxStudio\n${TEST_HOSTNAME}\n`, () => native.addon),
+				PLACE,
+			),
+		).toStrictEqual({ desktop: "hidden", pid: 7, startTime: "0" });
+	});
+
+	it("keeps a snapshot on its hidden physical desktop even when its windows are shown there", () => {
+		expect.assertions(1);
+
+		const native = createFakeNative({
+			7: { ...STUDIO, desktop: "hidden", windowVisibility: "user" },
+		});
+
+		expect(
+			findPlaceStudio(
+				seamsWith(`7\nRobloxStudio\n${TEST_HOSTNAME}\n`, () => native.addon),
+				PLACE,
+			),
+		).toStrictEqual({ desktop: "hidden", pid: 7, startTime: "0" });
+	});
+
 	it("should return undefined when the lock file names another computer", () => {
 		expect.assertions(1);
 

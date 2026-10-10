@@ -244,17 +244,119 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should launch and report a Studio on the hidden Windows desktop", async () => {
-		expect.assertions(2);
+	it("should launch a hidden session on the user desktop with hidden windows", async () => {
+		expect.assertions(3);
 
 		const { native, spawns } = windowsNative();
-		const { launch } = makeLauncher({ files: { [STUDIO_EXE]: "" }, native, platform: "win32" });
+		const spawner = createFakeSpawner();
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			files: { [STUDIO_EXE]: "" },
+			native,
+			platform: "win32",
+		});
+
+		await expect(
+			launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden", runScript: "session.lua" }),
+		).resolves.toMatchObject({ studio: { desktop: "hidden" } });
+		expect(spawns[0]).toMatchObject({ desktop: "user", hiddenWindows: true });
+
+		expect(spawner.calls[0]).toMatchObject({
+			args: [
+				"/forge/supervisor.mjs",
+				KEEP_HIDDEN_FLAG,
+				JSON.stringify({
+					isWindows: true,
+					pid: 900,
+					place: WINDOWS_PLACE,
+					startTime: "9000",
+				}),
+			],
+			options: { detached: true, windowsHide: true },
+		});
+	});
+
+	it("should launch and report a Studio on the hidden Windows desktop", async () => {
+		expect.assertions(3);
+
+		const { native, spawns } = windowsNative();
+		const spawner = createFakeSpawner();
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			files: { [STUDIO_EXE]: "" },
+			native,
+			platform: "win32",
+		});
 
 		await expect(
 			launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden" }),
 		).resolves.toMatchObject({ studio: { desktop: "hidden" } });
 		expect(spawns[0]).toMatchObject({ desktop: "hidden" });
+		expect(spawner.calls).toStrictEqual([]);
 	});
+
+	it("should watch snapshot lighting without starting the session window watcher", async () => {
+		expect.assertions(4);
+
+		const { native, spawns } = windowsNative();
+		const spawner = createFakeSpawner();
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			files: { [STUDIO_EXE]: "" },
+			native,
+			platform: "win32",
+		});
+		await launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden", watchHiddenLighting: true });
+
+		expect(spawns).toHaveLength(2);
+		expect(spawns[0]).toMatchObject({ desktop: "hidden" });
+		expect(spawns[1]!.args).toStrictEqual([
+			"/forge/supervisor.mjs",
+			"--watch-hidden-lighting",
+			JSON.stringify({ pid: 900, place: WINDOWS_PLACE, startTime: "9000" }),
+		]);
+		expect(spawner.calls).toStrictEqual([]);
+	});
+
+	it.for([
+		{ desktop: undefined, expectedPlacement: {} },
+		{ desktop: "user", expectedPlacement: { desktop: "user" } },
+	] as const)(
+		"should keep a shown Windows session visible with desktop %s",
+		async ({ desktop, expectedPlacement }) => {
+			expect.assertions(3);
+
+			const { native, spawns } = windowsNative();
+			const spawner = createFakeSpawner();
+			const { launch } = makeLauncher({
+				childProcess: spawner.runner,
+				files: { [STUDIO_EXE]: "" },
+				native,
+				platform: "win32",
+			});
+
+			await expect(
+				launch({ ...launchOf(WINDOWS_PLACE), desktop, runScript: "session.lua" }),
+			).resolves.toMatchObject({ type: "launched" });
+			expect(spawns).toStrictEqual([
+				{
+					args: [
+						"--task",
+						"RunScript",
+						"--localPlaceFile",
+						WINDOWS_PLACE,
+						"--runScriptFile",
+						"session.lua",
+					],
+					cwd: "/project",
+					env: { PATH: "/bin" },
+					program: STUDIO_EXE,
+					...expectedPlacement,
+				},
+			]);
+			expect(spawner.calls).toStrictEqual([]);
+		},
+	);
 
 	it("should pass the session RunScript arguments to Studio on Windows", async () => {
 		expect.assertions(1);
@@ -754,10 +856,15 @@ describe("macOS Studio launch", () => {
 	});
 
 	it("should start a hidden Studio directly on Linux, never through LaunchServices, without a warning", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const { launches, native } = macosNative();
-		const { launch } = makeLauncher({ files: { [MACOS_STUDIO_PATH]: "" }, native });
+		const spawner = createFakeSpawner();
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			files: { [MACOS_STUDIO_PATH]: "" },
+			native,
+		});
 
 		await expect(
 			launch({ ...launchOf(), desktop: "hidden", studioPath: MACOS_STUDIO_PATH }),
@@ -766,6 +873,7 @@ describe("macOS Studio launch", () => {
 			type: "launched",
 		});
 		expect(launches).toHaveLength(0);
+		expect(spawner.calls.map(({ file }) => file)).toStrictEqual([MACOS_STUDIO_PATH]);
 	});
 
 	it("should open a hidden place in the background with the platform launcher and warn that it may not stay hidden", async () => {

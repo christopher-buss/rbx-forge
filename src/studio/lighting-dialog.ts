@@ -1,6 +1,7 @@
 import type { PinnedProcess } from "../native/addon.ts";
 import type { StudioSeams, StudioTarget } from "./close-studio.ts";
 import { findPlaceStudio } from "./close-studio.ts";
+import { studioProcess } from "./launcher.ts";
 
 /**
  * Dismiss only the hidden Studio Lighting migration prompt.
@@ -13,11 +14,11 @@ export async function dismissLightingDialogAsync(
 	timeoutMs = 1000,
 ): Promise<boolean> {
 	return (
-		pinned.desktop() === "hidden" &&
+		studioProcess(pinned).desktop === "hidden" &&
 		(await pinned.dismissDialog(
 			"Lighting Technology Migration",
 			"Continue",
-			"hidden",
+			pinned.desktop(),
 			timeoutMs,
 		))
 	);
@@ -45,7 +46,10 @@ export async function watchHiddenLightingAsync(
 					hasLock = true;
 				}
 
-				if (pinned.desktop() !== "hidden" || (await dismissLightingDialogAsync(pinned))) {
+				if (
+					studioProcess(pinned).desktop !== "hidden" ||
+					(await dismissLightingDialogAsync(pinned))
+				) {
 					return;
 				}
 			}

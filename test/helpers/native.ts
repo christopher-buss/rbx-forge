@@ -9,6 +9,7 @@ import type {
 } from "../../src/native/addon.ts";
 import { dismissDialogAsync } from "./native-dialog.ts";
 import { appMembers, requestSaveAsync, saveMenuEnabledAsync } from "./native-studio.ts";
+import { windowMembers } from "./native-windows.ts";
 
 /** One process in the fake process table. */
 export interface FakeProcess {
@@ -72,6 +73,9 @@ export interface FakeProcess {
 	startTime?: string;
 	/** The timeout of every `waitForExit` call on its pins. */
 	waits?: Array<number>;
+	windowHiding?: boolean;
+	/** Windows top-level window visibility, independent of physical desktop. */
+	windowVisibility?: "hidden" | "user" | null;
 }
 
 /** A process of a session in the fake session table. */
@@ -180,6 +184,7 @@ function receiveClose(entry: FakeProcess): void {
 		case "throw":
 		case undefined: {
 			entry.alive = false;
+			entry.windowHiding = false;
 			entry.onClose?.();
 		}
 	}
@@ -228,6 +233,7 @@ function blockedNow(pid: number, entry: FakeProcess): boolean {
 function killEntry(entry: FakeProcess): boolean {
 	const wasAlive = entry.alive;
 	entry.alive = entry.ignoresKill === true && wasAlive;
+	entry.windowHiding = entry.alive && entry.windowHiding === true;
 	return wasAlive;
 }
 
@@ -242,6 +248,7 @@ function pinEntry(
 
 	return {
 		...appMembers(table, entry),
+		...windowMembers(entry),
 		desktop: () => entry.desktop ?? "user",
 		dismissDialog: async (title, button, desktop) => {
 			return dismissDialogAsync(entry, title, button, desktop);

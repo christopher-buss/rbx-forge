@@ -280,6 +280,73 @@ describe(keepStudioHiddenAsync, () => {
 	});
 });
 
+describe("windows detached window hiding", () => {
+	it("ends without polling when Studio exits before its watcher starts", async () => {
+		expect.assertions(1);
+
+		const native = createFakeNative({ 42: { alive: true, executablePath: "RobloxStudio" } });
+		const pinned = native.addon.pinProcess(42)!;
+		native.addon.pinProcess = () => {
+			return {
+				...pinned,
+				startWindowHiding: () => false,
+				windowHiding: () => {
+					throw new Error("watcher did not start");
+				},
+			};
+		};
+
+		let sleeps = 0;
+		const seams = createTestSeams({
+			clock: {
+				now: () => 0,
+				sleep: async () => {
+					sleeps++;
+				},
+			},
+			native: () => native.addon,
+		});
+		await keepStudioHiddenAsync(seams, JSON.stringify({ ...TARGET, isWindows: true }), PROJECT);
+
+		expect(sleeps).toBe(0);
+	});
+
+	it.for(["exit", "stop"] as const)(
+		"keeps the helper alive until the watcher %s",
+		async (end) => {
+			expect.assertions(3);
+
+			const native = createFakeNative({
+				42: { alive: true, executablePath: "RobloxStudio", windowVisibility: "hidden" },
+			});
+			const studio = native.processes.get(42)!;
+			let elapsed = 0;
+			const seams = createTestSeams({
+				clock: {
+					now: () => elapsed,
+					sleep: async (ms) => {
+						elapsed += ms;
+
+						expect(studio.windowHiding).toBeTrue();
+
+						studio.alive = end !== "exit";
+						studio.windowHiding = end !== "stop";
+					},
+				},
+				native: () => native.addon,
+			});
+			await keepStudioHiddenAsync(
+				seams,
+				JSON.stringify({ ...TARGET, isWindows: true }),
+				PROJECT,
+			);
+
+			expect(elapsed).toBe(KEEP_HIDDEN_POLL_MS);
+			expect(studio.windowVisibility).toBe("hidden");
+		},
+	);
+});
+
 describe(createKeepHiddenLauncher, () => {
 	it("should ignore a watcher that fails to start after the spawn returns", async () => {
 		expect.assertions(1);

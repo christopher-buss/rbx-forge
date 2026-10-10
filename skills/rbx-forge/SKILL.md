@@ -60,11 +60,11 @@ and `hint`. Branch on `error.code` and the exit code.
 Studio is for verification and debugging; the loop above runs without it. Close
 each Studio you open, once you are done with it.
 
-- **Look once**: after a fresh build, `forge open --json` builds a **snapshot**
-  of the place (`data.place`) and opens it outside the session.
-  `forge stop --place <data.place> --json` closes that Studio alone. Edits in a
-  snapshot stay in the snapshot; to see a new edit, stop and open again. `down`
-  and the idle timeout leave snapshot Studios open.
+- **Look once**: after a fresh build, `forge open --desktop hidden --json`
+  builds a **snapshot** of the place (`data.place`) and opens it outside the
+  session. `forge stop --place <data.place> --json` closes that Studio alone.
+  Edits in a snapshot stay in the snapshot; to see a new edit, stop and open
+  again. `down` and the idle timeout leave snapshot Studios open.
 - **Change in Studio**: `forge up --studio --json` **attaches** a Studio and its
   Rojo to the session, and Rojo live-syncs your edits. Rojo serves on
   `data.services.rojo.port`; give that port to the user and ask them to connect
@@ -75,10 +75,13 @@ each Studio you open, once you are done with it.
   the place open, the session uses that Studio. It is the user's: ask the user
   before you close it, and `forge sync` after their save first.
 - Play, and read the console, with the Roblox Studio MCP.
-- **Syncback**: after the user saves the place, `forge sync --json` pulls the
-  Studio edits into the project and runs its hooks; read the files it changed
-  before you edit them. `stop`, `restart`, `down`, and the idle timeout close
-  Studio without a save, so sync each save first.
+- **Syncback**: save Studio only when the user explicitly asks for syncback.
+  Then `forge save --json` writes the place and `forge sync --json` pulls its
+  edits into the project and runs its hooks; read the files it changed before
+  you edit them. If the user already saved, run `sync` directly. Every Windows
+  save of a hidden session Studio briefly shows the File menu and moves keyboard
+  focus. `stop`, `restart`, `down`, and the idle timeout close Studio without a
+  save, so sync requested edits before closing it.
 
 ## Owners
 

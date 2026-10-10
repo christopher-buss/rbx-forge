@@ -285,7 +285,7 @@ pub fn open_test_dialog(owner: isize, title: &str, button: &str) -> io::Result<i
                 100,
                 30,
                 dialog,
-                1_isize as *mut _,
+                std::ptr::dangling_mut(),
                 instance,
                 null(),
             );

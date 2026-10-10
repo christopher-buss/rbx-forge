@@ -452,6 +452,31 @@ describe(createPartStopper, () => {
 		expect(world.now()).toBe(2000);
 	});
 
+	it.for([DOWN, STOP])(
+		"closes a verified hidden Studio on the user desktop for $scope",
+		async (request) => {
+			expect.assertions(2);
+
+			const world = makeWorld(
+				servicesWith({
+					studio: {
+						...OPEN,
+						desktop: "hidden",
+						pid: STUDIO_PID,
+						startTime: String(STUDIO_PID),
+					},
+				}),
+			);
+			const studio = openStudio(world, { desktop: "user", windowVisibility: "hidden" });
+
+			await expect(stopAsync(world, request)).resolves.toMatchObject({
+				stopped: ["studio"],
+				studio: CLOSED_BY_REQUEST,
+			});
+			expect(studio).toMatchObject({ alive: false, closeRequests: 1 });
+		},
+	);
+
 	it("should close Studio, stop Rojo and the compiler, then end the session for down", async () => {
 		expect.assertions(5);
 
