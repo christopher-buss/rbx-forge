@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -34,6 +34,28 @@ async function commandSessionAsync(platform: NodeJS.Platform = "win32") {
 }
 
 describe("session Studio moves", () => {
+	it("waits for a move queued behind a save taking longer than two seconds", async () => {
+		expect.assertions(1);
+
+		const { context, move } = await commandSessionAsync();
+		vi.useFakeTimers();
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+		move.mockImplementation(async () => {
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 3000);
+			});
+			return { durationMs: 0, from: "hidden", pid: 43, to: "user" };
+		});
+		const result = runShowAsync(context, { config: {}, flags: {} });
+		await vi.advanceTimersByTimeAsync(3000);
+
+		await expect(result).resolves.toMatchObject({
+			data: { from: "hidden", pid: 43, to: "user" },
+		});
+	});
+
 	it("should report a hidden macOS app without saving", async () => {
 		expect.assertions(2);
 

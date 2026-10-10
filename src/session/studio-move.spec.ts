@@ -154,6 +154,52 @@ describe("session Studio visibility", () => {
 		expect(native.processes.get(777)!.windowHiding).toBeFalse();
 	});
 
+	it("keeps already hidden Windows windows hidden with a watcher", async () => {
+		expect.assertions(4);
+
+		const { move, native } = fixture("win32", true);
+		native.processes.get(777)!.windowHiding = false;
+
+		await expect(move({ desktop: "hidden" })).resolves.toMatchObject({
+			from: "hidden",
+			pid: 777,
+			to: "hidden",
+		});
+		expect(native.processes.get(777)!.windowHiding).toBeTrue();
+		await expect(move({ desktop: "hidden" })).resolves.toMatchObject({
+			from: "hidden",
+			pid: 777,
+			to: "hidden",
+		});
+		expect(native.processes.get(777)!.windowHiding).toBeTrue();
+	});
+
+	it("retries the Windows watcher after hiding succeeds but its watcher fails", async () => {
+		expect.assertions(4);
+
+		const { move, native } = fixture("win32");
+		const pin = native.addon.pinProcess;
+		const pinned = pin(777);
+		assert(pinned !== null);
+		const start = vi.fn<() => boolean>(pinned.startWindowHiding).mockReturnValueOnce(false);
+		native.addon.pinProcess = (pid) => {
+			const current = pin(pid);
+			assert(current !== null);
+			return { ...current, startWindowHiding: start };
+		};
+
+		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
+			code: "studio_launch_failed",
+		});
+		expect(native.processes.get(777)!.windowVisibility).toBe("hidden");
+		await expect(move({ desktop: "hidden" })).resolves.toMatchObject({
+			from: "hidden",
+			pid: 777,
+			to: "hidden",
+		});
+		expect(native.processes.get(777)!.windowHiding).toBeTrue();
+	});
+
 	it.for(["darwin", "win32"] as const)(
 		"retains %s visibility when cancelled",
 		async (platform) => {

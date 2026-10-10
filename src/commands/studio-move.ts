@@ -8,6 +8,7 @@ import { callSessionAsync } from "../ipc/client.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
+import { UP_TIMEOUT_MS } from "./up.ts";
 
 export const STUDIO_MOVE_FLAGS: ReadonlyArray<FlagDefinition> = [];
 
@@ -47,6 +48,8 @@ export async function runStudioMoveAsync(
 				desktop,
 				sessionId: session.identity.sessionId,
 			},
+			// Moves wait behind the session's save and lifecycle requests.
+			responseTimeoutMs: UP_TIMEOUT_MS,
 		},
 	);
 	return parseMoveResult(answer);

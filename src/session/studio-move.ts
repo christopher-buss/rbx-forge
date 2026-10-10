@@ -118,20 +118,21 @@ function changeWindowVisibility(pinned: PinnedProcess, desktop: StudioDesktop): 
 		throw new ForgeError("studio_not_open", "The Studio windows are no longer open.");
 	}
 
-	if (from !== desktop) {
-		if (!pinned.setWindowVisibility(desktop === "hidden" ? "hidden" : "active")) {
-			throw new ForgeError(
-				"studio_launch_failed",
-				"Studio could not change its window visibility.",
-			);
-		}
+	if (
+		from !== desktop &&
+		!pinned.setWindowVisibility(desktop === "hidden" ? "hidden" : "active")
+	) {
+		throw new ForgeError(
+			"studio_launch_failed",
+			"Studio could not change its window visibility.",
+		);
+	}
 
-		if (desktop === "hidden" && !pinned.startWindowHiding()) {
-			throw new ForgeError(
-				"studio_launch_failed",
-				"Studio could not start its window hiding watcher.",
-			);
-		}
+	if (desktop === "hidden" && !pinned.startWindowHiding()) {
+		throw new ForgeError(
+			"studio_launch_failed",
+			"Studio could not start its window hiding watcher.",
+		);
 	}
 
 	return from;

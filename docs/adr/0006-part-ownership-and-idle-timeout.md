@@ -22,9 +22,9 @@ the caller: `start` owns, `up` does not.
   owner stops an owned part (Ctrl+C or a closed terminal). `down`, `stop`,
   `restart`, and the idle timeout act only on parts with no owner;
   `stop --force` and `restart --force` also act on owned parts. Explicit `show`
-  and `hide` preserve ownership while changing Studio's desktop or visibility;
-  on Windows they save, close, and reopen Studio, including an owned part.
-  `down` never fails because of ownership: it reports what it stopped and kept.
+  and `hide` change Studio visibility in place, preserving its PID, origin, and
+  ownership without saving, closing, or reopening it. `down` never fails because
+  of ownership: it reports what it stopped and kept.
 - **`up` adds.** `up` starts the compiler, and `up --studio` also attaches
   Studio and Rojo. A second `up` starts only the parts that are missing or
   failed, and never removes one. Parts that `up` starts have no owner.
@@ -43,12 +43,11 @@ the caller: `start` owns, `up` does not.
 - **A found Studio stays open.** forge cannot tell a human from an agent, but it
   knows whether it opened a Studio. A Studio that already had the place open
   when the session attached it is a found Studio; the state contract reports its
-  origin. Only `--force`, or an explicit Windows `show` or `hide` that changes
-  its desktop, closes it. A desktop move saves first and reopens the saved place
-  with the same owner; the replacement's origin is forge. `down` and the idle
-  timeout stop its Rojo and let it go, open; `restart` keeps it and restarts the
-  compiler and Rojo. A Studio that the session opened stays closable, so the
-  Studios of forgotten agent sessions do not pile up.
+  origin. Only `--force` closes it. `show` and `hide` retain its found origin,
+  process, and owner without saving. `down` and the idle timeout stop its Rojo
+  and let it go, open; `restart` keeps it and restarts the compiler and Rojo. A
+  Studio that the session opened stays closable, so the Studios of forgotten
+  agent sessions do not pile up.
 - **A part fails alone.** A service's exit stops only its part, which is then
   `failed`. Nothing restarts it by itself. `up`, `start`, or `restart` starts it
   again: the compiler first, then Rojo, which needs the compiler's output. When
