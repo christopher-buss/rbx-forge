@@ -295,6 +295,69 @@ describe(createStudioLauncher, () => {
 		expect(spawner.calls).toStrictEqual([]);
 	});
 
+	it("should watch snapshot lighting without starting the session window watcher", async () => {
+		expect.assertions(4);
+
+		const { native, spawns } = windowsNative();
+		const spawner = createFakeSpawner();
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			files: { [STUDIO_EXE]: "" },
+			native,
+			platform: "win32",
+		});
+		await launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden", watchHiddenLighting: true });
+
+		expect(spawns).toHaveLength(2);
+		expect(spawns[0]).toMatchObject({ desktop: "hidden" });
+		expect(spawns[1]!.args).toStrictEqual([
+			"/forge/supervisor.mjs",
+			"--watch-hidden-lighting",
+			JSON.stringify({ pid: 900, place: WINDOWS_PLACE, startTime: "9000" }),
+		]);
+		expect(spawner.calls).toStrictEqual([]);
+	});
+
+	it.for([
+		{ desktop: undefined, expectedPlacement: {} },
+		{ desktop: "user", expectedPlacement: { desktop: "user" } },
+	] as const)(
+		"should keep a shown Windows session visible with desktop %s",
+		async ({ desktop, expectedPlacement }) => {
+			expect.assertions(3);
+
+			const { native, spawns } = windowsNative();
+			const spawner = createFakeSpawner();
+			const { launch } = makeLauncher({
+				childProcess: spawner.runner,
+				files: { [STUDIO_EXE]: "" },
+				native,
+				platform: "win32",
+			});
+
+			await expect(
+				launch({ ...launchOf(WINDOWS_PLACE), desktop, runScript: "session.lua" }),
+			).resolves.toMatchObject({ type: "launched" });
+			expect(spawns).toStrictEqual([
+				{
+					args: [
+						"--task",
+						"RunScript",
+						"--localPlaceFile",
+						WINDOWS_PLACE,
+						"--runScriptFile",
+						"session.lua",
+					],
+					cwd: "/project",
+					env: { PATH: "/bin" },
+					program: STUDIO_EXE,
+					...expectedPlacement,
+				},
+			]);
+			expect(spawner.calls).toStrictEqual([]);
+		},
+	);
+
 	it("should pass the session RunScript arguments to Studio on Windows", async () => {
 		expect.assertions(1);
 
