@@ -289,7 +289,11 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			killNewStudiosAtEnd();
 			const fixture = await compatibilitySnapshotAsync();
 			const pinSnapshot = snapshotCleanup(fixture.project);
-			const opened = await runForgeAsync(fixture, ["open", "--json"], realVariables());
+			const opened = await runForgeAsync(
+				fixture,
+				["open", "--desktop", "hidden", "--json"],
+				realVariables(),
+			);
 
 			expect(opened.status).toBe(0);
 
@@ -410,7 +414,13 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const after = foregroundOwner();
 
 			expect(saveOutcome(save)).toBe("saved");
-			expect(save.result.data).toMatchObject({ desktop, pid: lockPid, place: fixture.place });
+			// A hidden session Studio runs on the user's desktop with hidden
+			// windows.
+			expect(save.result.data).toMatchObject({
+				desktop: "user",
+				pid: lockPid,
+				place: fixture.place,
+			});
 			expect(statSync(fixture.place).mtimeMs).toBeGreaterThan(before);
 			expect(after).toStrictEqual(expectedFocus(lockPid));
 
@@ -438,7 +448,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const save = await runForgeAsync(fixture, ["save", "--json"], realVariables());
 
 			expect(saveOutcome(save)).toBe("saved");
-			expect(save.result.data).toMatchObject({ desktop: "hidden", pid: lockPid });
+			expect(save.result.data).toMatchObject({ desktop: "user", pid: lockPid });
 			expect(foregroundOwner()).toStrictEqual(notOwnedBy(lockPid));
 		},
 	);
