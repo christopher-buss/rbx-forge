@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 const SLEEP: &str = "FORGE_TEST_SLEEPER";
-/// The sleeper waits on one sleeper child instead.
+/// The sleeper waits on one sleeper child, then sleeps on.
 const PARENT: &str = "FORGE_TEST_SLEEPER_PARENT";
 /// The sleeper leaves its group, then writes its PID to this file.
 const PID_FILE: &str = "FORGE_TEST_SLEEPER_PID_FILE";
@@ -52,7 +52,6 @@ fn sleeps_when_asked() {
     if std::env::var_os(PARENT).is_some() {
         let mut child = command();
         child.env_remove(PARENT).spawn().unwrap().wait().unwrap();
-        return;
     }
     #[cfg(unix)]
     if let Some(file) = std::env::var_os(PID_FILE) {
