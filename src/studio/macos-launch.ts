@@ -68,7 +68,7 @@ export function keepHiddenWarning(
 	platform: NodeJS.Platform,
 	studio: StudioProcess,
 ): string | undefined {
-	if ((platform !== "darwin" && platform !== "win32") || studio.desktop !== "hidden") {
+	if (studio.desktop !== "hidden") {
 		return undefined;
 	}
 
