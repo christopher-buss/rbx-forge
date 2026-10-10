@@ -19,6 +19,8 @@ export const KEEP_HIDDEN_FLAG = "--keep-studio-hidden";
 
 /** One exact Studio to keep hidden, and the place it opens. */
 export interface KeepHiddenTarget {
+	/** Windows keeps hiding until explicitly stopped or Studio exits. */
+	isWindows?: boolean;
 	pid: number;
 	place: string;
 	startTime: string;
@@ -32,9 +34,10 @@ export type KeepHiddenLauncher = (launch: {
 }) => void;
 
 const keepHiddenTarget = type({
-	pid: "number.integer > 0",
-	place: "string",
-	startTime: "string > 0",
+	"isWindows?": "boolean",
+	"pid": "number.integer > 0",
+	"place": "string",
+	"startTime": "string > 0",
 });
 
 /**
@@ -54,14 +57,15 @@ export function createKeepHiddenLauncher(
 			[entry, KEEP_HIDDEN_FLAG, JSON.stringify(target)],
 			{ cwd, detached: true, env, stdio: "ignore", windowsHide: true },
 		);
-		// Without the watcher, Studio only shows itself briefly while loading.
+		// Detached ownership keeps the watcher alive after the launcher exits.
 		child.once("error", ignoreError);
 		child.unref();
 	};
 }
 
 /**
- * Hide one exact macOS Studio every time it shows itself while loading,
+ * Keep a Windows watcher alive until stopped or Studio exits. On macOS,
+ * hide one exact Studio every time it shows itself while loading,
  * until its place lock exists and it has stayed hidden for
  * {@link KEEP_HIDDEN_QUIET_MS}, it exits, a session records another desktop
  * for it, or the open bound passes.
@@ -69,43 +73,24 @@ export function createKeepHiddenLauncher(
  * @param seams - The place lock, session states, native process identity, and polling clock.
  * @param payload - The {@link KeepHiddenTarget} as JSON.
  * @param root - The project directory, whose sessions may show Studio.
+ * @returns Resolves when hiding ends.
  */
 export async function keepStudioHiddenAsync(
 	seams: Pick<Seams, "clock" | "fileSystem" | "native">,
 	payload: string,
 	root: string,
 ): Promise<void> {
-	const { pid, place, startTime } = keepHiddenTarget.assert(JSON.parse(payload));
+	const { isWindows, pid, place, startTime } = keepHiddenTarget.assert(JSON.parse(payload));
 	const pinned = seams.native().pinProcess(pid);
 	if (pinned?.startTime !== startTime) {
 		return;
 	}
 
-	const { clock } = seams;
-	const deadline = clock.now() + STUDIO_OPEN_BOUND_MS;
-	let quietSince = clock.now();
-	let isOpen = false;
-	while (pinned.isAlive() && clock.now() < deadline) {
-		if (pinned.appHidden() === false) {
-			if (isShownBySession(seams.fileSystem, root, { pid, startTime })) {
-				return;
-			}
-
-			hideInactive(pinned);
-			quietSince = clock.now();
-		}
-
-		if (!isOpen && hasStudioLock(seams.fileSystem, { pid, place })) {
-			isOpen = true;
-			quietSince = clock.now();
-		}
-
-		if (isOpen && clock.now() - quietSince >= KEEP_HIDDEN_QUIET_MS) {
-			return;
-		}
-
-		await clock.sleep(KEEP_HIDDEN_POLL_MS);
+	if (isWindows === true) {
+		return keepWindowsHiddenAsync(pinned, seams.clock);
 	}
+
+	await keepMacStudioHiddenAsync(seams, pinned, { pid, place, startTime }, root);
 }
 
 function ignoreError(): void {
@@ -132,4 +117,48 @@ function isShownBySession(
 			: undefined;
 		return studio?.pid === pid && studio.startTime === startTime && studio.desktop === "user";
 	});
+}
+
+async function keepMacStudioHiddenAsync(
+	seams: Pick<Seams, "clock" | "fileSystem">,
+	pinned: PinnedProcess,
+	{ pid, place, startTime }: KeepHiddenTarget,
+	root: string,
+): Promise<void> {
+	const { clock } = seams;
+
+	const deadline = clock.now() + STUDIO_OPEN_BOUND_MS;
+	let quietSince = clock.now();
+	let isOpen = false;
+	while (pinned.isAlive() && clock.now() < deadline) {
+		if (pinned.appHidden() === false) {
+			if (isShownBySession(seams.fileSystem, root, { pid, startTime })) {
+				return;
+			}
+
+			hideInactive(pinned);
+			quietSince = clock.now();
+		}
+
+		if (!isOpen && hasStudioLock(seams.fileSystem, { pid, place })) {
+			isOpen = true;
+			quietSince = clock.now();
+		}
+
+		if (isOpen && clock.now() - quietSince >= KEEP_HIDDEN_QUIET_MS) {
+			return;
+		}
+
+		await clock.sleep(KEEP_HIDDEN_POLL_MS);
+	}
+}
+
+async function keepWindowsHiddenAsync(pinned: PinnedProcess, clock: Seams["clock"]): Promise<void> {
+	if (!pinned.startWindowHiding()) {
+		return;
+	}
+
+	while (pinned.windowHiding()) {
+		await clock.sleep(KEEP_HIDDEN_POLL_MS);
+	}
 }

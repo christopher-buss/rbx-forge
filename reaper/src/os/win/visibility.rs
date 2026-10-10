@@ -109,6 +109,13 @@ fn windows(pid: u32) -> io::Result<Vec<HWND>> {
     Ok(search.windows)
 }
 
+pub fn running(pin: &PinnedProcess) -> io::Result<bool> {
+    if !pin.is_alive()? {
+        return Ok(false);
+    }
+    Ok(event(pin)?.as_ref().map(stopped).transpose()? == Some(false))
+}
+
 pub fn visibility(pin: &PinnedProcess) -> io::Result<Option<&'static str>> {
     if !pin.is_alive()? {
         return Ok(None);

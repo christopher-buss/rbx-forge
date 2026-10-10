@@ -185,6 +185,22 @@ impl PinnedProcess {
         clippy::unnecessary_wraps,
         reason = "shared Windows visibility surface"
     )]
+    pub fn window_hiding(&self) -> io::Result<bool> {
+        #[cfg(windows)]
+        {
+            crate::os::win::visibility::running(self)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(false)
+        }
+    }
+
+    #[allow(
+        clippy::unused_self,
+        clippy::unnecessary_wraps,
+        reason = "shared Windows visibility surface"
+    )]
     pub fn start_window_hiding(&self) -> io::Result<bool> {
         #[cfg(windows)]
         {
@@ -433,9 +449,7 @@ mod tests {
     }
 
     #[cfg(windows)]
-    #[test]
-    fn window_visibility_changes_the_pinned_fixture_and_rehides_new_windows() {
-        use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    fn studio_fixture() -> std::path::PathBuf {
         let mut fixture = std::env::current_exe()
             .unwrap()
             .parent()
@@ -451,6 +465,14 @@ mod tests {
                 .unwrap()
                 .join("release/forge-studio-fixture.exe");
         }
+        fixture
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn window_visibility_changes_the_pinned_fixture_and_rehides_new_windows() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        let fixture = studio_fixture();
         assert!(
             fixture.exists(),
             "build forge-studio-fixture before this test"

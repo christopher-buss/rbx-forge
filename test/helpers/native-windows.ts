@@ -10,7 +10,11 @@ export function windowMembers(
 	entry: FakeProcess,
 ): Pick<
 	PinnedProcess,
-	"setWindowVisibility" | "startWindowHiding" | "stopWindowHiding" | "windowVisibility"
+	| "setWindowVisibility"
+	| "startWindowHiding"
+	| "stopWindowHiding"
+	| "windowHiding"
+	| "windowVisibility"
 > {
 	return {
 		setWindowVisibility: (visibility) => {
@@ -38,6 +42,7 @@ export function windowMembers(
 			entry.windowHiding = false;
 			return wasWatching;
 		},
+		windowHiding: () => entry.alive && entry.windowHiding === true,
 		windowVisibility: () => (entry.alive ? (entry.windowVisibility ?? null) : null),
 	};
 }

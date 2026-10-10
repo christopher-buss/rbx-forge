@@ -126,6 +126,8 @@ export interface PinnedProcess {
 	 * @returns `true` once it has exited.
 	 */
 	waitForExit: (timeoutMs: number) => boolean;
+	/** Whether the pinned Windows watcher is still running. */
+	windowHiding: () => boolean;
 	/**
 	 * Windows top-level window visibility; null off Windows or without
 	 * windows.
@@ -194,7 +196,10 @@ export interface DetachedSpawn {
 	desktop?: "hidden" | "user";
 	/** The whole environment of the new process. */
 	env: Record<string, string>;
-	/** Start hidden on the inherited desktop, and re-hide new windows. */
+	/**
+	 * Start hidden on the inherited desktop; a separate watcher re-hides
+	 * windows.
+	 */
 	hiddenWindows?: boolean;
 	/** A file its stdout and stderr append to; `NUL` when missing. */
 	output?: string;

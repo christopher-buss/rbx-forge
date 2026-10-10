@@ -25,8 +25,9 @@ kept hidden, and activated only briefly when a save needs it.
 
 - **Windows hidden session.** Studio launches on the user's desktop with
   `STARTF_USESHOWWINDOW` / `SW_HIDE`, without activation, a taskbar button, or
-  an Alt+Tab entry. A watcher hides new top-level windows of its verified PID
-  while it is hidden, and ends when Studio exits or is shown.
+  an Alt+Tab entry. A detached helper owns the watcher that hides new top-level
+  windows of its verified PID while it is hidden, and ends when Studio exits or
+  is shown.
 - **One hidden snapshot desktop.** One named hidden desktop per Windows user
   session, shared by all projects. forge opens it, or makes it if it does not
   exist, and never destroys it. Only hidden snapshots use it.

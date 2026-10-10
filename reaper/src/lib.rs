@@ -179,6 +179,14 @@ impl PinnedProcess {
             .map_err(|err| to_napi("change window visibility", &err))
     }
 
+    /// Whether the identity-bound Windows watcher is still running.
+    #[napi]
+    pub fn window_hiding(&self) -> Result<bool> {
+        self.inner
+            .window_hiding()
+            .map_err(|err| to_napi("read window hiding", &err))
+    }
+
     /// Keep new windows hidden until stopped or the pinned process exits.
     #[napi]
     pub fn start_window_hiding(&self) -> Result<bool> {

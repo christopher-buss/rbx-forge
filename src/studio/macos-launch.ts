@@ -54,26 +54,39 @@ export async function launchServicesStartAsync(
 }
 
 /**
- * Keep a hidden macOS Studio hidden while it loads, from a detached watcher.
+ * Keep hidden Studio windows hidden from a detached watcher.
  *
  * @param keepHidden - Starts the watcher.
  * @param launch - The place, directory, and environment.
- * @param platform - The host OS; only macOS needs the watcher.
+ * @param platform - The host OS; Windows and macOS need the watcher.
  * @param studio - The pinned Studio and the desktop it got.
  * @returns A warning when the watcher could not start.
  */
 export function keepHiddenWarning(
 	keepHidden: KeepHiddenLauncher,
-	{ cwd, env, place }: Pick<StudioLaunch, "cwd" | "env" | "place">,
+	{ cwd, env, place, runScript }: Pick<StudioLaunch, "cwd" | "env" | "place" | "runScript">,
 	platform: NodeJS.Platform,
 	studio: StudioProcess,
 ): string | undefined {
-	if (platform !== "darwin" || studio.desktop !== "hidden") {
+	if ((platform !== "darwin" && platform !== "win32") || studio.desktop !== "hidden") {
+		return undefined;
+	}
+
+	if (platform === "win32" && runScript === undefined) {
 		return undefined;
 	}
 
 	try {
-		keepHidden({ cwd, env, target: { pid: studio.pid, place, startTime: studio.startTime } });
+		keepHidden({
+			cwd,
+			env,
+			target: {
+				...(platform === "win32" ? { isWindows: true } : {}),
+				pid: studio.pid,
+				place,
+				startTime: studio.startTime,
+			},
+		});
 		return undefined;
 	} catch (err) {
 		return `Studio opened hidden, but may show its windows while it loads: the watcher that keeps it hidden could not start: ${String(err)}`;

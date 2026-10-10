@@ -245,27 +245,54 @@ describe(createStudioLauncher, () => {
 	});
 
 	it("should launch a hidden session on the user desktop with hidden windows", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const { native, spawns } = windowsNative();
-		const { launch } = makeLauncher({ files: { [STUDIO_EXE]: "" }, native, platform: "win32" });
+		const spawner = createFakeSpawner();
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			files: { [STUDIO_EXE]: "" },
+			native,
+			platform: "win32",
+		});
 
 		await expect(
 			launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden", runScript: "session.lua" }),
 		).resolves.toMatchObject({ studio: { desktop: "hidden" } });
 		expect(spawns[0]).toMatchObject({ desktop: "user", hiddenWindows: true });
+
+		expect(spawner.calls[0]).toMatchObject({
+			args: [
+				"/forge/supervisor.mjs",
+				KEEP_HIDDEN_FLAG,
+				JSON.stringify({
+					isWindows: true,
+					pid: 900,
+					place: WINDOWS_PLACE,
+					startTime: "9000",
+				}),
+			],
+			options: { detached: true, windowsHide: true },
+		});
 	});
 
 	it("should launch and report a Studio on the hidden Windows desktop", async () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const { native, spawns } = windowsNative();
-		const { launch } = makeLauncher({ files: { [STUDIO_EXE]: "" }, native, platform: "win32" });
+		const spawner = createFakeSpawner();
+		const { launch } = makeLauncher({
+			childProcess: spawner.runner,
+			files: { [STUDIO_EXE]: "" },
+			native,
+			platform: "win32",
+		});
 
 		await expect(
 			launch({ ...launchOf(WINDOWS_PLACE), desktop: "hidden" }),
 		).resolves.toMatchObject({ studio: { desktop: "hidden" } });
 		expect(spawns[0]).toMatchObject({ desktop: "hidden" });
+		expect(spawner.calls).toStrictEqual([]);
 	});
 
 	it("should pass the session RunScript arguments to Studio on Windows", async () => {

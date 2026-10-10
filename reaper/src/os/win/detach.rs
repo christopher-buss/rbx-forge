@@ -144,20 +144,8 @@ fn spawn_with_desktop(
 
     // SAFETY: `CreateProcessW` returned new handles nothing else owns; they
     // close here, and the process runs on.
-    let process = unsafe { OwnedHandle::from_raw_handle(info.hProcess.cast()) };
+    let _process = unsafe { OwnedHandle::from_raw_handle(info.hProcess.cast()) };
     let _thread = unsafe { OwnedHandle::from_raw_handle(info.hThread.cast()) };
-    if detached.hidden_windows {
-        let watching = crate::os::process::PinnedProcess::open(info.dwProcessId)
-            .and_then(|pin| pin.map(|pin| pin.start_window_hiding()).transpose());
-        if let Err(error) = watching {
-            // No caller receives this PID when watcher setup fails.
-            unsafe {
-                windows_sys::Win32::System::Threading::TerminateProcess(raw(&process), 1);
-                windows_sys::Win32::System::Threading::WaitForSingleObject(raw(&process), 5000);
-            }
-            return Err(error);
-        }
-    }
     Ok(Some(info.dwProcessId))
 }
 

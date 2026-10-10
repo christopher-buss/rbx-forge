@@ -352,7 +352,7 @@ async function startDirectAsync(
  * Start Studio itself.
  *
  * @param backend - The spawn seam, host, and addon.
- * @param keepHidden - Starts the watcher that keeps a hidden macOS Studio hidden.
+ * @param keepHidden - Starts the watcher that keeps hidden Studio windows hidden.
  * @param launch - The place, directory, and environment.
  * @param executable - The Studio executable.
  * @returns The pinned Studio; the platform launcher's outcome when the

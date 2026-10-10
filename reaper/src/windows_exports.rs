@@ -267,6 +267,7 @@ pub struct DetachedSpawn {
     /// A file stdout and stderr append to; `NUL` when missing.
     pub output: Option<String>,
     pub desktop: Option<String>,
+    /// Start with hidden windows; the detached session helper owns re-hiding.
     pub hidden_windows: Option<bool>,
 }
 
