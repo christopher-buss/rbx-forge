@@ -11,6 +11,7 @@ import {
 	PROJECT,
 	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
+import { createIdleTracker } from "./idle.ts";
 import { createStatusStore } from "./status.ts";
 import { createStudioMover } from "./studio-move.ts";
 
@@ -60,18 +61,79 @@ function fixture(platform: "darwin" | "win32", hidden = false) {
 	status.service("rojo", "ready");
 	status.started();
 	const abort = new AbortController();
+	const idle = createIdleTracker(1, 0);
 	const move = createStudioMover(
 		fromPartial({
 			context: createCommandContext({ seams }),
-			idle: { activity: () => {} },
+			idle,
 			status,
 		}),
 		fromPartial({ signal: abort.signal }),
 	);
-	return { abort, memory, move, native, save, seams, status };
+	return { abort, idle, memory, move, native, save, seams, status };
 }
 
 describe("session Studio visibility", () => {
+	it("shows and activates a hidden macOS app, then hides it without activation", async () => {
+		expect.assertions(3);
+
+		const { move, native } = fixture("darwin", true);
+		const pin = native.addon.pinProcess;
+		const pinned = pin(777);
+		assert(pinned !== null);
+		const visibility = vi.fn<(hidden: boolean) => boolean>(pinned.setAppHidden);
+		native.addon.pinProcess = (pid) => {
+			const current = pin(pid);
+			assert(current !== null);
+			return { ...current, setAppHidden: visibility };
+		};
+
+		await move({ desktop: "user" });
+
+		expect(visibility).toHaveBeenCalledWith(false);
+		expect(native.processes.get(777)).toMatchObject({
+			activations: 1,
+			appActive: true,
+			appHidden: false,
+			windowVisibility: "hidden",
+		});
+
+		await move({ desktop: "hidden" });
+
+		expect(native.processes.get(777)).toMatchObject({
+			activations: 1,
+			appActive: false,
+			appHidden: true,
+			windowVisibility: "hidden",
+		});
+	});
+
+	it("resets the idle timeout after a visibility request succeeds or fails", async () => {
+		expect.assertions(4);
+
+		const { idle, move, seams, status } = fixture("win32");
+		seams.clock.now = () => 5000;
+
+		await expect(move({ desktop: "hidden" })).resolves.toMatchObject({ to: "hidden" });
+		expect(idle.idleAt()).toBe(65_000);
+
+		seams.clock.now = () => 10_000;
+		status.studio("closed", path.join(PROJECT, "game.rbxl"), null);
+
+		await expect(move({ desktop: "user" })).rejects.toMatchObject({ code: "studio_not_open" });
+		expect(idle.idleAt()).toBe(70_000);
+	});
+
+	it("cancels before checking whether a session Studio is open", async () => {
+		expect.assertions(1);
+
+		const { abort, move, status } = fixture("win32");
+		status.studio("closed", path.join(PROJECT, "game.rbxl"), null);
+		abort.abort();
+
+		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({ name: "AbortError" });
+	});
+
 	it.for(["darwin", "win32"] as const)(
 		"hides and shows the same %s Studio without saving or replacing its parts",
 		async (platform) => {
@@ -226,6 +288,7 @@ describe("session Studio visibility", () => {
 
 			await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
 				code: "studio_not_open",
+				message: "No session Studio is open.",
 			});
 		},
 	);
@@ -237,7 +300,10 @@ describe("session Studio visibility", () => {
 		const snapshot = status.snapshot();
 		vi.spyOn(status, "snapshot").mockReturnValue({ ...snapshot, phase });
 
-		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({ code: "not_running" });
+		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
+			code: "not_running",
+			message: "The session is stopping.",
+		});
 	});
 
 	it.for(["opening", "closed"] as const)("rejects a Studio that is %s", async (studioStatus) => {
@@ -255,6 +321,7 @@ describe("session Studio visibility", () => {
 
 		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
 			code: "studio_not_open",
+			message: "No session Studio is open.",
 		});
 	});
 
@@ -272,6 +339,7 @@ describe("session Studio visibility", () => {
 
 		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
 			code: "studio_not_open",
+			message: "No session Studio is open.",
 		});
 
 		vi.mocked(status.snapshot).mockReturnValue({
@@ -281,6 +349,7 @@ describe("session Studio visibility", () => {
 
 		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
 			code: "studio_not_open",
+			message: "No session Studio is open.",
 		});
 	});
 
@@ -292,6 +361,7 @@ describe("session Studio visibility", () => {
 
 		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
 			code: "studio_not_open",
+			message: "No session Studio is open.",
 		});
 	});
 
@@ -361,6 +431,10 @@ describe("session Studio visibility", () => {
 
 		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
 			code: "studio_not_open",
+			message: {
+				darwin: "The Studio app is no longer open.",
+				win32: "The Studio windows are no longer open.",
+			}[platform],
 		});
 	});
 
@@ -379,6 +453,10 @@ describe("session Studio visibility", () => {
 
 			await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
 				code: "studio_launch_failed",
+				message: {
+					darwin: "Studio could not change its app visibility.",
+					win32: "Studio could not change its window visibility.",
+				}[platform],
 			});
 			expect(status.snapshot().services.studio.desktop).toBe("user");
 		},
@@ -397,6 +475,7 @@ describe("session Studio visibility", () => {
 
 		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
 			code: "studio_launch_failed",
+			message: "Studio could not start its window hiding watcher.",
 		});
 	});
 });
