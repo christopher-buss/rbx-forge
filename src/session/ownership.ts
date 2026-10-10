@@ -198,10 +198,7 @@ async function showTakenStudioAsync(
 		return;
 	}
 
-	if (services.studio.status === "opening") {
-		await waitForStudio();
-	}
-
+	await waitForStudio();
 	await move({ desktop: "user" });
 }
 

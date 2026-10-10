@@ -148,6 +148,26 @@ function makeHandlers(add: PartAdder = async () => [], move: StudioMover = vi.fn
 }
 
 describe(createOwnerHandlers, () => {
+	it("should take an already visible Studio without requesting a visibility change", async () => {
+		expect.assertions(3);
+
+		const move = vi.fn<StudioMover>();
+		const { handlers, status } = makeHandlers(undefined, move);
+		status.studio("open", "/p/game.rbxl", { desktop: "user", pid: 42, startTime: "1" });
+		status.service("rojo", "ready");
+
+		await expect(
+			handlers.own({ defaultDesktop: "user", parts: ["studio"] }),
+		).resolves.toStrictEqual({ added: [], taken: ["studio", "rojo", "compiler"] });
+		expect(move).not.toHaveBeenCalled();
+		expect(status.snapshot().services.studio).toMatchObject({
+			desktop: "user",
+			owner: "start",
+			pid: 42,
+			status: "open",
+		});
+	});
+
 	it.for([
 		{ defaultDesktop: "user", desktop: "hidden", parts: ["studio"] },
 		{ defaultDesktop: "hidden", parts: ["studio"] },

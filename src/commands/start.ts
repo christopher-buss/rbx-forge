@@ -165,7 +165,7 @@ function wantedParts(
 	const studioPath = flags[STUDIO_PATH_FLAG.name];
 	return {
 		defaultDesktop: "user",
-		...(desktop === undefined ? {} : { desktop }),
+		desktop,
 		parts,
 		...(typeof studioPath === "string"
 			? { studioPath: path.resolve(context.cwd, studioPath) }
