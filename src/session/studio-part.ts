@@ -33,7 +33,7 @@ export { STUDIO_OPEN_BOUND_MS } from "./studio-readiness.ts";
 export interface StudioState {
 	/** Ends a pending sync wait without ending the Studio follow. */
 	cancelReady?: (() => void) | undefined;
-	/** The current follow, settled before a desktop move closes Studio. */
+	/** The current Studio follow. */
 	followed?: Promise<void>;
 	isAttached: boolean;
 	/** Stops following the attached Studio, which stays open. */

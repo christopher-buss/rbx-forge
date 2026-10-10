@@ -193,20 +193,14 @@ async function moveStudioAsync(
 	parameters: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
 	requireSession(target, parameters);
-	const { desktop, studioPath, timeoutMs } = parameters;
-	if (
-		typeof timeoutMs !== "number" ||
-		!Number.isFinite(timeoutMs) ||
-		timeoutMs <= 0 ||
-		(desktop !== "hidden" && desktop !== "user") ||
-		(studioPath !== undefined && typeof studioPath !== "string")
-	) {
-		throw new ForgeError("usage", "moveStudio takes a desktop and positive save timeoutMs.");
+	const { desktop } = parameters;
+	if (desktop !== "hidden" && desktop !== "user") {
+		throw new ForgeError("usage", "moveStudio takes a desktop of user or hidden.");
 	}
 
 	if (target.parts.moveAsync === undefined) {
 		throw new ForgeError("studio_not_open", "No session Studio is open.");
 	}
 
-	return { ...(await target.parts.moveAsync({ desktop, studioPath, timeoutMs })) };
+	return { ...(await target.parts.moveAsync({ desktop })) };
 }

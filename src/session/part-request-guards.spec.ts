@@ -11,7 +11,7 @@ describe("guarded session stops", () => {
 		const parts = createPartRequests();
 		parts.attach(fromPartial({}));
 
-		await expect(parts.moveAsync({ desktop: "user", timeoutMs: 1000 })).rejects.toMatchObject({
+		await expect(parts.moveAsync({ desktop: "user" })).rejects.toMatchObject({
 			code: "studio_not_open",
 			message: "No session Studio is open.",
 		});

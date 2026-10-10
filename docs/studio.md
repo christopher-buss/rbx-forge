@@ -312,45 +312,38 @@ the place as the project builds it and never changes that property.
 
 ## Showing and hiding Studio on Windows
 
-`forge show` saves the session Studio and reopens that saved place on the user's
-desktop. `forge hide` saves it and reopens it on the user's desktop with its
-windows hidden. Both wait until the replacement has the place open, keep Rojo
-running, and preserve
-the Studio's owner. They use the saved file without rebuilding it, so edits
-made in Studio survive. Undo history and open script tabs are lost when Studio
-reopens. These commands also move an owned or found Studio: the replacement
-keeps the owner and its origin becomes forge. Snapshot Studios are outside
-these commands.
+`forge show` reveals every top-level window of the session Studio, including
+hidden modal dialogs, and activates it. `forge hide` hides those windows
+without moving keyboard focus. A re-hide watcher hides new windows while Studio
+is hidden and stops when Studio is shown.
 
-`--timeout <s>` controls the save wait (30 seconds by default).
-`--studio-path <exe>` selects the executable used to reopen Studio. A failed
-save leaves the original Studio open. Requests run in order with other session
-saves and lifecycle changes. If Studio already has the requested visibility,
-forge saves it and retains its PID.
+Both commands change the same Studio in place: its PID, undo history, open
+script tabs, owner, origin, and Rojo stay intact. They never save, close, reopen,
+or run syncback, so unsaved edits remain in Studio. They also work on owned and
+found session Studios; snapshot Studios are outside these commands.
 
-If Windows cannot launch Studio hidden, forge warns and opens Studio visibly
-on the user's desktop. The result's `to` and `forge status` report the actual
-visibility. `save.desktop` reports the saved Studio's physical desktop (`user`
-for a hidden session Studio). `save.pid` identifies the saved Studio; `pid`
-identifies the Studio that now has the place open.
+Requests run in order with session saves and lifecycle changes. Showing an
+already shown Studio or hiding an already hidden Studio succeeds without a
+change. Neither command takes `--timeout` or `--studio-path`.
+
+The result contains `from`, `to`, `pid`, and `durationMs`; `from` and `to` use
+`hidden` and `user` for visibility. `forge status` reports the new visibility
+in `services.studio.desktop`.
 
 ## Showing and hiding Studio on macOS
 
-`forge hide` saves the session Studio and hides that app. `forge show` saves it,
-unhides it, and activates it, which brings its window to the front; a Studio
-launched hidden has no window on screen until it is active. Both retain the same
-PID, undo history, script tabs, owner, and Rojo. Hide preserves focus, Space,
-and window order. The first save of a Studio that has never been active shows
-it briefly (see [Saving](#saving)). Snapshot Studios are outside these commands. Each place has
-its own Studio process, so other open places stay as they are.
+`forge hide` hides the session Studio app without moving focus. `forge show`
+unhides and activates it, bringing its window to the front. Both change the
+same app in place without saving or running syncback, retaining its PID,
+undo history, script tabs, owner, origin, and Rojo.
 
 The commands read the app's current hidden state, including a manual Cmd+H.
 Their result uses `from` and `to` as app visibility: `hidden` means app-hidden,
 `user` means shown. `services.studio.desktop` records the last successful forge
-visibility command. Manual Cmd+H or Dock changes do not update this status marker;
-the next show or hide reads their actual effect. `save.desktop` remains `user`
-because it records the desktop object, and macOS has only the user's. A restart can open a visible Studio again;
-keeping the desktop across a restart refers to Windows placement.
+visibility command. Manual Cmd+H or Dock changes do not update this status
+marker; the next show or hide reads their actual effect. A restart can open a
+visible Studio again; retaining visibility across a restart applies to Windows.
 
-As on Windows, `--timeout <s>` controls saving first. A save failure leaves app
-visibility and PID unchanged. `--studio-path` applies only to Windows reopening.
+Showing an already shown app or hiding an already hidden app succeeds without
+a change. Snapshot Studios are outside these commands. Each place has its own
+Studio process, so other open places stay as they are.

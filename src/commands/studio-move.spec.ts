@@ -1,6 +1,4 @@
-import { fromAny } from "@total-typescript/shoehorn";
-
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -15,22 +13,13 @@ import type { IpcHandler } from "../ipc/server.ts";
 import { runHideAsync } from "./hide.ts";
 import { runShowAsync } from "./show.ts";
 
-const SAVE = {
-	bytes: 500,
-	desktop: "hidden",
-	durationMs: 100,
-	mtime: "2026-01-01T00:00:00Z",
-	pid: 42,
-	place: "/project/game.rbxl",
-};
-
 async function commandSessionAsync(platform: NodeJS.Platform = "win32") {
 	const memory = createMemoryFileSystem();
 	const ipc = createMemoryTransport();
 	const handlers = await serveFakeSessionAsync(memory, ipc);
 	const move = vi
 		.fn<IpcHandler>()
-		.mockResolvedValue({ durationMs: 1000, from: "hidden", pid: 43, save: SAVE, to: "user" });
+		.mockResolvedValue({ durationMs: 1000, from: "hidden", pid: 43, to: "user" });
 	handlers.moveStudio = move;
 	const reporter = createRecordingReporter();
 	const context = createCommandContext({
@@ -45,7 +34,29 @@ async function commandSessionAsync(platform: NodeJS.Platform = "win32") {
 }
 
 describe("session Studio moves", () => {
-	it("should report a hidden macOS app while saving on its user desktop", async () => {
+	it("waits for a move queued behind a save taking longer than two seconds", async () => {
+		expect.assertions(1);
+
+		const { context, move } = await commandSessionAsync();
+		vi.useFakeTimers();
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+		move.mockImplementation(async () => {
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 3000);
+			});
+			return { durationMs: 0, from: "hidden", pid: 43, to: "user" };
+		});
+		const result = runShowAsync(context, { config: {}, flags: {} });
+		await vi.advanceTimersByTimeAsync(3000);
+
+		await expect(result).resolves.toMatchObject({
+			data: { from: "hidden", pid: 43, to: "user" },
+		});
+	});
+
+	it("should report a hidden macOS app without saving", async () => {
 		expect.assertions(2);
 
 		const { context, move, reporter } = await commandSessionAsync("darwin");
@@ -53,12 +64,11 @@ describe("session Studio moves", () => {
 			durationMs: 300,
 			from: "user",
 			pid: 42,
-			save: { ...SAVE, desktop: "user" },
 			to: "hidden",
 		});
 
 		await expect(runHideAsync(context, { config: {}, flags: {} })).resolves.toMatchObject({
-			data: { from: "user", pid: 42, save: { desktop: "user", pid: 42 }, to: "hidden" },
+			data: { from: "user", pid: 42, to: "hidden" },
 			summary: "Studio is hidden (PID 42).",
 		});
 		expect(reporter.events).toStrictEqual([]);
@@ -72,12 +82,11 @@ describe("session Studio moves", () => {
 			durationMs: 300,
 			from: "hidden",
 			pid: 42,
-			save: { ...SAVE, desktop: "user" },
 			to: "user",
 		});
 
 		await expect(runShowAsync(context, { config: {}, flags: {} })).resolves.toMatchObject({
-			data: { from: "hidden", pid: 42, save: { desktop: "user", pid: 42 }, to: "user" },
+			data: { from: "hidden", pid: 42, to: "user" },
 			summary: "Studio is shown (PID 42).",
 		});
 		expect(reporter.events).toStrictEqual([]);
@@ -94,44 +103,25 @@ describe("session Studio moves", () => {
 		},
 	);
 
-	it("should show the actual fallback desktop and save metadata", async () => {
+	it("requests only the target visibility and reports the unchanged PID", async () => {
 		expect.assertions(2);
 
 		const { context, move } = await commandSessionAsync();
 
-		await expect(
-			runHideAsync(context, {
-				config: {},
-				flags: { "studio-path": "Studio.exe", "timeout": "3" },
-			}),
-		).resolves.toMatchObject({
-			data: { durationMs: 1000, from: "hidden", pid: 43, save: SAVE, to: "user" },
+		await expect(runShowAsync(context, { config: {}, flags: {} })).resolves.toMatchObject({
+			data: { durationMs: 1000, from: "hidden", pid: 43, to: "user" },
 		});
-		expect(move).toHaveBeenCalledWith(
-			expect.objectContaining({
-				desktop: "hidden",
-				studioPath: fromAny(expect.stringContaining("Studio.exe")),
-				timeoutMs: 3000,
-			}),
-		);
+		expect(move.mock.calls[0]![0]).toMatchObject({
+			desktop: "user",
+			sessionId: "s1",
+		});
 	});
 
-	it("should request the user desktop with the default save timeout", async () => {
+	it("should preserve the error reported by the session", async () => {
 		expect.assertions(1);
 
 		const { context, move } = await commandSessionAsync();
-		await runShowAsync(context, { config: {}, flags: {} });
-
-		expect(move).toHaveBeenCalledWith(
-			expect.objectContaining({ desktop: "user", timeoutMs: 30_000 }),
-		);
-	});
-
-	it("should preserve the save error reported by the session", async () => {
-		expect.assertions(1);
-
-		const { context, move } = await commandSessionAsync();
-		move.mockRejectedValue(new ForgeError("studio_busy", "A modal blocks the save."));
+		move.mockRejectedValue(new ForgeError("studio_busy", "Visibility change failed."));
 
 		await expect(runShowAsync(context, { config: {}, flags: {} })).rejects.toMatchObject({
 			code: "studio_busy",
@@ -148,17 +138,6 @@ describe("session Studio moves", () => {
 			code: "internal_error",
 		});
 	});
-
-	it.for(["0", "-1", "NaN", "Infinity"])(
-		"should reject the invalid timeout %s",
-		async (timeout) => {
-			expect.assertions(1);
-
-			await expect(
-				runShowAsync(createCommandContext(), { config: {}, flags: { timeout } }),
-			).rejects.toMatchObject({ code: "usage" });
-		},
-	);
 
 	it("should reject moving between desktops on another platform", async () => {
 		expect.assertions(1);

@@ -63,7 +63,7 @@ export interface PartRequests {
 	 * fails.
 	 */
 	close: () => void;
-	/** Save and reopen Studio on the requested desktop in the session queue. */
+	/** Change Studio visibility in place in the session queue. */
 	moveAsync: StudioMover;
 	/**
 	 * A `start` joins as the owner.

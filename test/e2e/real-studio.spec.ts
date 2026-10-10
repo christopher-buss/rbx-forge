@@ -321,10 +321,10 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 	);
 
 	it(
-		"moves the saved session Studio between desktops without restarting Rojo",
+		"shows, hides, and saves the same session Studio while hidden",
 		{ timeout: 600_000 },
 		async () => {
-			expect.assertions(5);
+			expect.assertions(4);
 
 			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("saved.rbxl");
@@ -340,28 +340,41 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const shown = await runForgeAsync(fixture, ["show", "--json"], realVariables());
 			const [, visible] = await waitForLoadedAsync(fixture, sessionId);
 
-			expect(shown.status).toBe(0);
-			expect(shown.result.data).toMatchObject({
-				from: "hidden",
-				pid: visible,
-				save: { pid: original, place: fixture.place },
-				to: "user",
+			expect(shown).toMatchObject({
+				result: {
+					data: {
+						from: "hidden",
+						pid: original,
+						to: "user",
+					},
+				},
+				status: 0,
 			});
 
-			assert(visible !== original, "show replaces Studio");
+			assert(visible === original, "show retains Studio PID");
 
 			const hidden = await runForgeAsync(fixture, ["hide", "--json"], realVariables());
 			const [, replacement] = await waitForLoadedAsync(fixture, sessionId);
 
-			expect(hidden.status).toBe(0);
-			expect(hidden.result.data).toMatchObject({
-				from: "user",
-				pid: replacement,
-				save: { pid: visible, place: fixture.place },
-				to: "hidden",
+			expect(hidden).toMatchObject({
+				result: {
+					data: {
+						from: "user",
+						pid: original,
+						to: "hidden",
+					},
+				},
+				status: 0,
 			});
 
-			assert(replacement !== visible, "hide replaces Studio");
+			assert(replacement === original, "hide retains Studio PID");
+
+			const saved = await runForgeAsync(fixture, ["save", "--json"], realVariables());
+
+			expect(saved).toMatchObject({
+				result: { data: { pid: original, place: fixture.place } },
+				status: 0,
+			});
 
 			const after = await runForgeAsync(fixture, ["status", "--json"], realVariables());
 

@@ -279,17 +279,15 @@ The writable check runs before the save request; a read-only place returns
 ## The `show` and `hide` result
 
 `forge show --json` and `forge hide --json` return `data.from` and `data.to` as
-`user` or `hidden`, `data.pid` for the resulting Studio, and `data.durationMs`
-for the whole operation. `data.save` is the preceding save result (`place`,
-`pid`, `desktop`, `bytes`, `mtime`, `durationMs`). Its PID is the original
-Studio's; the outer PID changes when Windows reopens it.
+`user` or `hidden`, `data.pid` for the same session Studio, and
+`data.durationMs` for the visibility change. Neither command saves, closes, or
+reopens Studio, and neither triggers syncback. There is no `data.save` field.
 
-On Windows, `from` and `to` report session visibility on the user's desktop,
-including a warned fallback to `user` when hidden launch is unavailable. A save
-failure returns the save error and leaves the original Studio open.
+On Windows, `from` and `to` report window visibility on the user's desktop; show
+reveals every top-level window and activates Studio, while hide preserves
+keyboard focus. On macOS, they report app visibility: `hidden` for app-hidden,
+`user` for shown. `services.studio.desktop` records the new visibility. Manual
+Cmd+H changes are read by the next show or hide.
 
-On macOS, both PIDs stay the same. `from` and `to` report app visibility:
-`hidden` for app-hidden, `user` for shown. `save.desktop` remains `user` because
-macOS has no hidden desktop. `services.studio.desktop` records the last
-successful forge visibility command; manual Cmd+H changes are read by the next
-show or hide.
+An already requested visibility succeeds with `from` equal to `to` and the same
+PID. Neither command takes `--timeout` or `--studio-path`.
