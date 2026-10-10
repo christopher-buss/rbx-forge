@@ -364,7 +364,7 @@ function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: B
 				state.studio.cancelReady?.();
 			}
 		},
-		move: createStudioMover(session, scope, { ...state, state: state.studio }),
+		move: createStudioMover(session, scope),
 		restart: createPartRestarter(session, { add, parts, stop }),
 		save: async (timeoutMs, signal) => {
 			return saveSessionStudioAsync(session, scope, timeoutMs, signal);

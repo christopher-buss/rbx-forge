@@ -62,13 +62,15 @@ kept hidden, and activated only briefly when a save needs it.
   (`hidden` or `user`). Agents save only when the user explicitly asks for
   syncback. Saves on the separate hidden snapshot desktop leave the user's focus
   unchanged. On macOS a save keeps focus, apart from a priming save.
-- **`show` and `hide`.** On Windows, `forge show` and `forge hide` save Studio,
-  close it, and open it again with the requested visibility on the user's
-  desktop. Undo history and open script tabs are lost. On macOS, they save, then
-  hide the app in place, or unhide and activate it, since an unhidden Studio
-  launched hidden has no window on screen until it is active; state records the
-  last successful forge visibility change as the desktop. Native desktop and
-  save results still report the user's desktop.
+- **`show` and `hide`.** Both platforms change the same session Studio in place
+  without saving, closing, reopening, or running syncback. Its PID, undo
+  history, script tabs, Rojo, owner, and origin stay intact. Windows show
+  reveals every top-level window, including hidden modal dialogs, and activates
+  Studio; hide preserves keyboard focus and starts the re-hide watcher. Show
+  stops that watcher. macOS hides the app in place or unhides and activates it.
+  An already requested visibility succeeds unchanged. State records the last
+  successful visibility change; native desktop and save results still report the
+  physical desktop.
 - **Close and block checks see hidden windows.** Closing Studio and finding a
   modal dialog cover hidden session windows on the user's desktop and windows on
   the separate snapshot desktop, so `stop` and `down` end a blocked Studio at

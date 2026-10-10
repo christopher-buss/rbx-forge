@@ -94,42 +94,27 @@ function makeTarget() {
 }
 
 describe(controlHandlers, () => {
-	it.for([
-		{},
-		{ desktop: "other", timeoutMs: 100 },
-		{ desktop: "user", timeoutMs: "100" },
-		{ desktop: "user", timeoutMs: NaN },
-		{ desktop: "user", timeoutMs: 0 },
-		{ desktop: "user", studioPath: 7, timeoutMs: 100 },
-	])("should reject malformed move parameters %j", async (parameters) => {
-		expect.assertions(1);
-
-		await expect(
-			makeTarget().handlers.moveStudio!({ ...parameters, sessionId: "s1" }),
-		).rejects.toMatchObject({
-			code: "usage",
-			message: "moveStudio takes a desktop and positive save timeoutMs.",
-		});
-	});
-
-	it.for([undefined, "/opt/Studio"])(
-		"should reject unavailable Studio after accepting the optional path %s",
-		async (studioPath) => {
+	it.for([{}, { desktop: "other" }, { desktop: 7 }])(
+		"should reject malformed move parameters %j",
+		async (parameters) => {
 			expect.assertions(1);
 
 			await expect(
-				makeTarget().handlers.moveStudio!({
-					desktop: "user",
-					sessionId: "s1",
-					studioPath,
-					timeoutMs: 100,
-				}),
+				makeTarget().handlers.moveStudio!({ ...parameters, sessionId: "s1" }),
 			).rejects.toMatchObject({
-				code: "studio_not_open",
-				message: "No session Studio is open.",
+				code: "usage",
+				message: "moveStudio takes a desktop of user or hidden.",
 			});
 		},
 	);
+
+	it("accepts a visibility request without a save timeout", async () => {
+		expect.assertions(1);
+
+		await expect(
+			makeTarget().handlers.moveStudio!({ desktop: "user", sessionId: "s1" }),
+		).rejects.toMatchObject({ code: "studio_not_open", message: "No session Studio is open." });
+	});
 
 	it("should reject a move addressed to a replaced session before looking for its Studio", async () => {
 		expect.assertions(1);

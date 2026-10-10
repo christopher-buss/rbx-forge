@@ -80,7 +80,7 @@ Session commands:
 | `forge up`                  | Start a session in the background with the watch-mode compiler. Returns when its first compile is done, or it failed. `--studio` also attaches Studio and Rojo. On a running session, starts only the missing or failed parts. |
 | `forge status`              | Each part's state and owner, the Rojo port, the last compile with its diagnostics, and the last syncback run with its hooks. `--wait`: see below.                                                                              |
 | `forge save`                | Save the session Studio to disk before syncback. `--place <snapshot>` saves a snapshot Studio. `--timeout <s>` controls the wait.                                                                                              |
-| `forge show` / `forge hide` | Save and show or hide the session Studio. Windows reopens it with windows shown or hidden on the user's desktop; macOS unhides or hides the same app. Keeps Rojo running and preserves ownership.                              |
+| `forge show` / `forge hide` | Show or hide the same session Studio in place without saving or running syncback. Keeps its PID, undo history, script tabs, Rojo, and ownership.                                                                               |
 | `forge sync`                | Run syncback and its hooks through the running session, and report the result.                                                                                                                                                 |
 | `forge logs <name>`         | Print a full log: `compile`, `compiler`, `rojo`, `start`, `supervisor`, or `syncback`. `-f`/`--follow` keeps printing new lines.                                                                                               |
 | `forge restart`             | Restart the session's parts that have no owner: the compiler, then a fresh Studio with Rojo on the same port. See below.                                                                                                       |
@@ -143,10 +143,9 @@ with the project's `rojo plugin install`, then restart Studio. See
 A Studio that already had the place open when the session attached it is a found
 Studio (`origin: "found"` in `status`; a Studio the session opened is `forge`).
 Only `stop --force` and `restart --force` close it during cleanup. Explicit
-Windows `show` and `hide` also save and reopen it when changing its visibility;
-the replacement keeps its owner and has origin `forge`. `down` and the idle
-timeout stop its Rojo and leave it open, `restart` keeps it, and `stop` fails
-with `studio_found` (exit 1).
+`show` and `hide` change its visibility in place, keeping its owner and origin
+without saving. `down` and the idle timeout stop its Rojo and leave it open,
+`restart` keeps it, and `stop` fails with `studio_found` (exit 1).
 
 `down` acts only on parts with no owner. A part that a `forge start` terminal
 owns keeps running, and so does the session: `down` names it in

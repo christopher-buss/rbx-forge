@@ -3,7 +3,7 @@ import { fromAny } from "@total-typescript/shoehorn";
 import { chmodSync } from "node:fs";
 import { assert, describe, expect, it, onTestFinished } from "vitest";
 
-import { EXIT_FAILURE, EXIT_NOT_RUNNING } from "../../src/exit-codes.ts";
+import { EXIT_NOT_RUNNING } from "../../src/exit-codes.ts";
 import { parseResult } from "../helpers/output.ts";
 import { makeProject, runBinAsync } from "./run-bin.ts";
 import { IS_WINDOWS, makeFixtureAsync, START_STUDIO, startReadyAsync } from "./session-fixture.ts";
@@ -27,9 +27,9 @@ describe("forge show and hide", () => {
 	);
 
 	it.skipIf(!IS_WINDOWS).for(["show", "hide"])(
-		"keeps the original Studio when %s cannot save its read-only place",
+		"changes %s visibility in place without saving its read-only place",
 		async (command) => {
-			expect.assertions(3);
+			expect.assertions(5);
 
 			const fixture = await makeFixtureAsync(
 				{ open: { buildFirst: true } },
@@ -44,12 +44,9 @@ describe("forge show and hide", () => {
 			const moved = await runForgeAsync(fixture, [command, "--json"]);
 			const after = await runForgeAsync(fixture, ["status", "--json"]);
 
-			expect(moved.status).toBe(EXIT_FAILURE);
-			expect(moved.result).toMatchObject({
-				command,
-				error: { code: "save_failed", details: { reason: "permission_denied" } },
-				ok: false,
-			});
+			expect(moved.status).toBe(0);
+			expect(moved.result).toMatchObject({ command, ok: true });
+			expect(moved.result.data).not.toHaveProperty("save");
 
 			assert(before.result.data !== undefined, "status returns session data");
 
@@ -58,8 +55,16 @@ describe("forge show and hide", () => {
 				studio: { desktop: unknown; owner: unknown; pid: number };
 			} = fromAny(before.result.data["services"]);
 
+			expect(moved.result.data).toMatchObject({ pid: services.studio.pid });
 			expect(after.result.data).toMatchObject({
-				services: { rojo: services.rojo, studio: { ...services.studio, status: "open" } },
+				services: {
+					rojo: services.rojo,
+					studio: {
+						...services.studio,
+						desktop: { hide: "hidden", show: "user" }[command],
+						status: "open",
+					},
+				},
 			});
 		},
 	);

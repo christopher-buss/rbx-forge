@@ -15,14 +15,6 @@ const MOVED = {
 	durationMs: 1000,
 	from: "hidden",
 	pid: 43,
-	save: {
-		bytes: 500,
-		desktop: "hidden",
-		durationMs: 100,
-		mtime: "2026-01-01T00:00:00Z",
-		pid: 42,
-		place: "/project/game.rbxl",
-	},
 	to: "user",
 };
 
@@ -61,32 +53,27 @@ function delayedMove(responseAfterMs: number): IpcConnection {
 }
 
 describe("move command validation", () => {
-	it("reports the actual desktop and explains the reopen cost", async () => {
+	it("reports visibility without a warning", async () => {
 		expect.assertions(2);
 
 		const { context, reporter } = await movingSessionAsync();
 
 		await expect(runShowAsync(context, { config: {}, flags: {} })).resolves.toStrictEqual({
 			data: MOVED,
-			summary: "Studio is on the user desktop (PID 43).",
+			summary: "Studio is shown (PID 43).",
 		});
-		expect(reporter.events).toContainEqual({
-			message: "Reopening Studio loses undo history and open script tabs.",
-			type: "warning",
-		});
+		expect(reporter.events).toStrictEqual([]);
 	});
 
-	it("allows the save, reopen deadline, and cleanup response grace to elapse", async () => {
+	it("uses the normal IPC response deadline", async () => {
 		expect.assertions(1);
 
 		const { context } = await movingSessionAsync();
-		context.seams.ipc.connectAsync = async () => delayedMove(240_500);
+		context.seams.ipc.connectAsync = async () => delayedMove(500);
 
-		await expect(
-			runShowAsync(context, { config: {}, flags: { timeout: "1" } }),
-		).resolves.toStrictEqual({
+		await expect(runShowAsync(context, { config: {}, flags: {} })).resolves.toStrictEqual({
 			data: MOVED,
-			summary: "Studio is on the user desktop (PID 43).",
+			summary: "Studio is shown (PID 43).",
 		});
 	});
 
@@ -109,17 +96,6 @@ describe("move command validation", () => {
 		await expect(runShowAsync(context, { config: {}, flags: {} })).rejects.toMatchObject({
 			code: "usage",
 			message: "Showing and hiding Studio requires Windows or macOS.",
-		});
-	});
-
-	it("explains malformed save deadlines", async () => {
-		expect.assertions(1);
-
-		await expect(
-			runShowAsync(createCommandContext(), { config: {}, flags: { timeout: "0" } }),
-		).rejects.toMatchObject({
-			code: "usage",
-			message: "--timeout must be a positive number of seconds.",
 		});
 	});
 

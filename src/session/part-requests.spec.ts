@@ -36,11 +36,9 @@ describe(createPartRequests, () => {
 		const requests = createPartRequests();
 		requests.attach({ add: vi.fn<PartAdder>(), restart: noRestart, stop: noStop, ...NO_OWNER });
 
-		await expect(requests.moveAsync({ desktop: "user", timeoutMs: 100 })).rejects.toMatchObject(
-			{
-				code: "studio_not_open",
-			},
-		);
+		await expect(requests.moveAsync({ desktop: "user" })).rejects.toMatchObject({
+			code: "studio_not_open",
+		});
 	});
 
 	it("should reject a stop after close without invoking its preflight", async () => {

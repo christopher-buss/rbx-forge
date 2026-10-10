@@ -3,11 +3,11 @@ import type { CommandContext, CommandInput } from "./context.ts";
 import { runStudioMoveAsync } from "./studio-move.ts";
 
 /**
- * Save and hide the session Studio.
+ * Hide the session Studio.
  * @param context - The project and seams.
- * @param input - The save timeout and Studio path flags.
- * @returns The visibility transition, PID, save, and elapsed time.
- * @rejects The session, save, close, or launch error.
+ * @param input - The command flags.
+ * @returns The visibility transition, unchanged PID and elapsed time.
+ * @rejects The session or visibility error.
  */
 export async function runHideAsync(
 	context: CommandContext,

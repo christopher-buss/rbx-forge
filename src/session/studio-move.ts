@@ -1,214 +1,138 @@
-import assert from "node:assert/strict";
-
-import { recoveryOptions } from "../client/studio.ts";
-import type { CommandContext } from "../commands/context.ts";
 import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
-import { settlesWithinAsync } from "../seams/clock.ts";
-import { closeStudioAsync, findPlaceStudio } from "../studio/close-studio.ts";
-import type { LocatedStudio, StudioProcess } from "../studio/launcher.ts";
-import type { StudioSave } from "../studio/save-studio.ts";
-import { forgeFiles } from "../supervisor/session-files.ts";
+import type { PinnedProcess } from "../native/addon.ts";
+import { findPlaceStudio } from "../studio/close-studio.ts";
+import type { LocatedStudio } from "../studio/launcher.ts";
 import type { SessionScope } from "./run-session.ts";
-import type { ServiceParts } from "./service-parts.ts";
-import { saveSessionStudioAsync } from "./session-save.ts";
-import { openStudioAsync } from "./studio-launch.ts";
-import type { StudioSetup, StudioState } from "./studio-part.ts";
-import { followSessionStudio, STUDIO_OPEN_BOUND_MS } from "./studio-part.ts";
+import type { StudioSetup } from "./studio-part.ts";
 
-/**
- * A serialized save and desktop or app visibility change of the session
- * Studio.
- */
+/** A serialized visibility change of the session Studio. */
 export interface StudioMoveRequest {
 	desktop: StudioDesktop;
-	studioPath?: string | undefined;
-	timeoutMs: number;
 }
-/** The desktop or app visibility transition and the preceding save. */
+/** The visibility transition of the same Studio process. */
 export interface StudioMove {
 	durationMs: number;
 	from: StudioDesktop;
 	pid: number;
-	save: StudioSave;
 	to: StudioDesktop;
 }
 /** The session's move use-case. */
 export type StudioMover = (request: StudioMoveRequest) => Promise<StudioMove>;
 
-interface MoveParts {
-	parts: ServiceParts;
-	state: StudioState;
-	steps: CommandContext;
-}
-
 /**
- * Move Studio while retaining its Rojo and owner and the saved place bytes.
- * @param setup - The session config, status, activity, and launch identity.
- * @param scope - The session lifetime and tracked follows.
- * @param attach - The service parts, current follow, and worker context.
+ * Change Studio visibility while retaining its process, Rojo, and owner.
+ * @param setup - The session status, activity, and native seams.
+ * @param scope - The session lifetime.
  * @returns The serialized move handler.
  */
-export function createStudioMover(
-	setup: StudioSetup,
-	scope: SessionScope,
-	attach: MoveParts,
-): StudioMover {
+export function createStudioMover(setup: StudioSetup, scope: SessionScope): StudioMover {
 	return async (request) => {
-		const started = setup.context.seams.clock.now();
-		try {
-			const save = await saveSessionStudioAsync(setup, scope, request.timeoutMs);
-			const moved =
-				setup.context.seams.host.platform === "darwin"
-					? changeMacVisibility(setup, scope, request, save)
-					: await moveSavedAsync(setup, scope, attach, { request, save });
-			return {
-				durationMs: setup.context.seams.clock.now() - started,
-				from: moved.from,
-				pid: moved.process.pid,
-				save,
-				to: moved.process.desktop,
-			};
-		} finally {
-			setup.idle.activity(setup.context.seams.clock.now());
-		}
+		const { seams } = setup.context;
+		const started = seams.clock.now();
+		return Promise.resolve().then(() => {
+			try {
+				scope.signal.throwIfAborted();
+				const { pinned, place, previous } = sessionStudio(setup);
+				scope.signal.throwIfAborted();
+				const from =
+					seams.host.platform === "darwin"
+						? changeMacVisibility(pinned, request.desktop)
+						: changeWindowVisibility(pinned, request.desktop);
+				setup.status.studio("open", place, {
+					...previous,
+					desktop: request.desktop,
+				});
+				return {
+					durationMs: seams.clock.now() - started,
+					from,
+					pid: previous.pid,
+					to: request.desktop,
+				};
+			} finally {
+				setup.idle.activity(seams.clock.now());
+			}
+		});
 	};
 }
 
-function changeMacVisibility(
-	setup: StudioSetup,
-	scope: SessionScope,
-	request: StudioMoveRequest,
-	save: StudioSave,
-): { from: StudioDesktop; process: LocatedStudio } {
-	const previous = findPlaceStudio(setup.context.seams, save.place);
-	const recorded = setup.status.snapshot().services.studio;
-	const pinned = setup.context.seams.native().pinProcess(save.pid);
+function sessionStudio(setup: StudioSetup): {
+	pinned: PinnedProcess;
+	place: string;
+	previous: LocatedStudio;
+} {
+	const { phase, services } = setup.status.snapshot();
+	if (phase === "stopped" || phase === "stopping") {
+		throw new ForgeError("not_running", "The session is stopping.");
+	}
+
+	const recorded = services.studio;
+	if (recorded.status !== "open" || recorded.place === undefined) {
+		throw new ForgeError("studio_not_open", "No session Studio is open.");
+	}
+
+	const { seams } = setup.context;
+	const previous = findPlaceStudio(seams, recorded.place);
+	const pinned = previous === undefined ? null : seams.native().pinProcess(previous.pid);
 	if (
+		previous === undefined ||
 		pinned === null ||
-		previous?.pid !== save.pid ||
+		previous.pid !== recorded.pid ||
 		pinned.startTime !== previous.startTime ||
 		(recorded.startTime !== undefined && recorded.startTime !== previous.startTime)
 	) {
-		throw new ForgeError("studio_not_open", "The saved Studio is no longer open.");
+		throw new ForgeError("studio_not_open", "No session Studio is open.");
 	}
 
-	scope.signal.throwIfAborted();
+	return { pinned, place: recorded.place, previous };
+}
+
+function changeMacVisibility(pinned: PinnedProcess, desktop: StudioDesktop): StudioDesktop {
 	const isHidden = pinned.appHidden();
 	if (isHidden === null) {
-		throw new ForgeError("studio_not_open", "The saved Studio app is no longer open.");
+		throw new ForgeError("studio_not_open", "The Studio app is no longer open.");
 	}
 
-	if (
-		isHidden !== (request.desktop === "hidden") &&
-		!pinned.setAppHidden(request.desktop === "hidden")
-	) {
-		throw new ForgeError("studio_launch_failed", "Studio could not change its app visibility.");
+	const from = isHidden ? "hidden" : "user";
+	if (from !== desktop) {
+		if (!pinned.setAppHidden(desktop === "hidden")) {
+			throw new ForgeError(
+				"studio_launch_failed",
+				"Studio could not change its app visibility.",
+			);
+		}
+
+		// An unhidden Studio launched hidden has no window on screen until
+		// active.
+		if (desktop === "user") {
+			pinned.activateApp();
+		}
 	}
 
-	// An unhidden Studio launched hidden has no window on screen until active.
-	if (request.desktop === "user") {
-		pinned.activateApp();
-	}
-
-	const process = { ...previous, desktop: request.desktop };
-	setup.status.studio("open", save.place, process);
-	return { from: isHidden ? "hidden" : "user", process };
+	return from;
 }
 
-async function closePreviousAsync(
-	setup: StudioSetup,
-	scope: SessionScope,
-	attach: MoveParts,
-	{ place, previous }: { place: string; previous: StudioProcess },
-): Promise<void> {
-	const { origin } = setup.status.snapshot().services.studio;
-	assert(origin !== undefined, "An open session Studio has an origin.");
-	try {
-		await closeStudioAsync(
-			setup.context.seams,
-			{ place, process: previous },
-			recoveryOptions(setup.context.env, forgeFiles(setup.context.cwd), setup.config),
-		);
-	} catch (err) {
-		followSessionStudio(setup, scope, attach, {
-			origin,
-			place,
-			studio: previous,
-		});
-		throw err;
+function changeWindowVisibility(pinned: PinnedProcess, desktop: StudioDesktop): StudioDesktop {
+	const from = pinned.windowVisibility();
+	if (from === null) {
+		throw new ForgeError("studio_not_open", "The Studio windows are no longer open.");
 	}
 
-	attach.state.isAttached = false;
-	setup.status.studio("closed", place, previous);
-}
+	if (from !== desktop) {
+		if (!pinned.setWindowVisibility(desktop === "hidden" ? "hidden" : "active")) {
+			throw new ForgeError(
+				"studio_launch_failed",
+				"Studio could not change its window visibility.",
+			);
+		}
 
-async function reopenAsync(
-	setup: StudioSetup,
-	scope: SessionScope,
-	attach: MoveParts,
-	request: StudioMoveRequest & { place: string },
-): Promise<LocatedStudio> {
-	const launch = {
-		...setup,
-		config: { ...setup.config, open: { ...setup.config.open, buildOutputPath: request.place } },
-	};
-	const opened = await openStudioAsync(
-		launch,
-		attach.steps,
-		{ desktop: request.desktop, signal: scope.signal, studioPath: request.studioPath },
-		{ isBuilt: true },
-	);
-	const { open } = followSessionStudio(setup, scope, attach, opened);
-	const isReady = await settlesWithinAsync(setup.context.seams.clock, open, STUDIO_OPEN_BOUND_MS);
-	const actual = findPlaceStudio(setup.context.seams, request.place);
-	if (
-		!isReady ||
-		actual === undefined ||
-		setup.status.snapshot().services.studio.status !== "open"
-	) {
-		throw new ForgeError(
-			"studio_launch_failed",
-			"Studio did not reopen the saved place before the launch deadline.",
-		);
+		if (desktop === "hidden" && !pinned.startWindowHiding()) {
+			throw new ForgeError(
+				"studio_launch_failed",
+				"Studio could not start its window hiding watcher.",
+			);
+		}
 	}
 
-	setup.status.studio("open", request.place, actual, "forge");
-	return actual;
-}
-
-async function moveSavedAsync(
-	setup: StudioSetup,
-	scope: SessionScope,
-	attach: MoveParts,
-	{ request, save }: { request: StudioMoveRequest; save: StudioSave },
-): Promise<{ from: StudioDesktop; process: LocatedStudio }> {
-	const previous = findPlaceStudio(setup.context.seams, save.place);
-	const recorded = setup.status.snapshot().services.studio;
-	if (
-		previous?.pid !== save.pid ||
-		(recorded.startTime !== undefined && recorded.startTime !== previous.startTime)
-	) {
-		throw new ForgeError("studio_not_open", "The saved Studio is no longer open.");
-	}
-
-	if (previous.desktop === request.desktop) {
-		return { from: previous.desktop, process: previous };
-	}
-
-	const executable =
-		request.studioPath ??
-		setup.context.seams.native().pinProcess(save.pid)?.executablePath() ??
-		undefined;
-	attach.state.letGo?.();
-	attach.state.cancelReady?.();
-	await attach.state.followed;
-	scope.signal.throwIfAborted();
-	await closePreviousAsync(setup, scope, attach, { place: save.place, previous });
-	const process = await reopenAsync(setup, scope, attach, {
-		...request,
-		place: save.place,
-		studioPath: executable,
-	});
-	return { from: previous.desktop, process };
+	return from;
 }

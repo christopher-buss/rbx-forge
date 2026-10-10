@@ -83,6 +83,13 @@ each Studio you open, once you are done with it.
   focus. `stop`, `restart`, `down`, and the idle timeout close Studio without a
   save, so sync requested edits before closing it.
 
+To let a person inspect unsaved session edits, use `forge show --json` and later
+`forge hide --json`. Both change the same Studio in place on Windows and macOS,
+retaining its PID, undo history, script tabs, owner, and Rojo. They leave edits
+unsaved and run no syncback. Show activates Studio; hide preserves focus. The
+result contains `from`, `to`, `pid`, and `durationMs`, with no `save` field.
+Neither command takes `--timeout` or `--studio-path`.
+
 ## Owners
 
 A part with `owner: "start"` belongs to the user's `forge start` terminal, and
