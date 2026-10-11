@@ -9,8 +9,9 @@ import type { PinnedProcess } from "../native/addon.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { listParts } from "../session/part-names.ts";
 import type { AddablePart, PartRequest } from "../session/part-requests.ts";
+import { ADD_PARTS_WAIT_MS } from "../session/part-restarts.ts";
 import { isPartRunning } from "../session/part-stops.ts";
-import type { PartId, SessionStatus } from "../session/status.ts";
+import type { PartId, ServiceId, SessionStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
 import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import type { SessionRequest, SupervisorMessage } from "../supervisor/channel.ts";
@@ -18,6 +19,7 @@ import { failureError, parseMessage } from "../supervisor/channel.ts";
 import type { ForgeFiles } from "../supervisor/session-files.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
+import { noteWaited, notReadyError, notReadyMessage, unresponsive } from "./not-ready.ts";
 import { START_FLAGS } from "./start.ts";
 import { isStudioReady, studioCancelled } from "./up-studio.ts";
 
@@ -80,8 +82,12 @@ interface UpState {
 	hasRequestedStudio: boolean;
 	/** When a session last answered, or when `up` began to wait for one. */
 	lastAnswer: number;
+	/** The status the session last answered with. */
+	lastStatus: SessionStatus | undefined;
 	launched: Launched | undefined;
 	relaunched: boolean;
+	/** The service parts `up` saw starting: their failure fails it. */
+	waited: Set<ServiceId>;
 	/** The parts `up` asks for, and the Studio executable to start. */
 	wanted: PartRequest;
 }
@@ -135,14 +141,15 @@ export function describeParts({ services }: SessionStatus): string {
  *   it started the session.
  * @rejects {ForgeError} `usage`; `detach_unsupported` when the host forbids
  *   a detached process; the session's own startup failure (such as
- *   `compiler_missing`); an attach failure (such as `port_in_use`);
- *   `supervisor_unresponsive` when it is not ready in time.
+ *   `compiler_missing`); an attach failure (such as `port_in_use`); as
+ *   `noteWaited` when a part it waited for fails; as `notReadyError` when
+ *   the session answers but a part is not ready in time; else
+ *   `supervisor_unresponsive`.
  */
 export async function runUpAsync(
 	context: CommandContext,
 	input: CommandInput,
 ): Promise<CommandResult> {
-	const { clock } = context.seams;
 	const wanted = wantedParts(context, input);
 	const request: SessionRequest = {
 		compiler: input.flags["compiler"] !== false,
@@ -150,15 +157,17 @@ export async function runUpAsync(
 		open: false,
 	};
 	const found = await probeSessionAsync(context.seams, forgeFiles(context.cwd));
-	const now = clock.now();
+	const now = context.seams.clock.now();
 	const state: UpState = {
 		added: undefined,
 		deadline: now + UP_TIMEOUT_MS,
 		hasRequestedStudio: false,
 		lastAnswer: now,
+		lastStatus: undefined,
 		launched:
 			found === undefined ? launch(context, forgeFiles(context.cwd), request) : undefined,
 		relaunched: false,
+		waited: new Set(),
 		wanted,
 	};
 	const { added, isStarted, status } = await waitReadyAsync(context, request, state);
@@ -329,6 +338,7 @@ async function addOnceAsync(
 	state: UpState,
 	{ session, status }: { session: KnownSession; status: SessionStatus },
 ): Promise<boolean> {
+	const { clock, ipc } = context.seams;
 	const isOwn = status.pid === state.launched?.pid;
 	if ((isOwn && !state.wanted.parts.includes("studio")) || state.added !== undefined) {
 		return false;
@@ -337,7 +347,10 @@ async function addOnceAsync(
 	try {
 		// The session answers once its own parts started: a whole startup.
 		state.hasRequestedStudio = state.wanted.parts.includes("studio");
-		state.added = await addPartsAsync(context.seams.ipc, session, state.wanted, UP_TIMEOUT_MS);
+		state.added = await addPartsAsync(ipc, session, state.wanted, ADD_PARTS_WAIT_MS);
+		// The add answered: the next probe reads the status after it.
+		state.lastAnswer = clock.now();
+		state.deadline = Math.max(state.deadline, state.lastAnswer + UP_POLL_MS);
 	} catch (err) {
 		// The session ended meanwhile: wait for the next one, as for silence.
 		if (!(err instanceof ForgeError) || err.code !== "not_running") {
@@ -355,7 +368,7 @@ async function addOnceAsync(
  * @param context - The seams.
  * @param state - Where `up` is; notes the answer.
  * @returns The status once the session is ready, else `undefined`.
- * @rejects {ForgeError} As {@link addOnceAsync}.
+ * @rejects {ForgeError} As {@link addOnceAsync}; as `noteWaited`.
  */
 async function probeReadyAsync(
 	context: CommandContext,
@@ -367,6 +380,8 @@ async function probeReadyAsync(
 	}
 
 	state.lastAnswer = context.seams.clock.now();
+	state.lastStatus = found.status;
+	noteWaited(state.waited, found.status.services);
 	if (
 		(await addOnceAsync(context, state, found)) ||
 		!isReady(found.status) ||
@@ -392,12 +407,6 @@ async function probeReadyAsync(
 	};
 }
 
-function unresponsive(what: string): ForgeError {
-	return new ForgeError("supervisor_unresponsive", what, {
-		hint: 'Check "forge logs start" and "forge status", or stop the session and try again.',
-	});
-}
-
 /**
  * Give up once the time is over; start a session when the one `up` waits
  * for stayed silent too long, once.
@@ -405,15 +414,19 @@ function unresponsive(what: string): ForgeError {
  * @param context - The seams.
  * @param request - What a new session runs.
  * @param state - Where `up` is.
- * @throws {ForgeError} `supervisor_unresponsive`.
+ * @throws {ForgeError} As `notReadyError` when the session answers;
+ *   else `supervisor_unresponsive`.
  */
 function checkWait(context: CommandContext, request: SessionRequest, state: UpState): void {
 	const now = context.seams.clock.now();
+	const isAnswering = now - state.lastAnswer < JOIN_SILENCE_MS;
 	if (now >= state.deadline) {
-		throw unresponsive(`The session was not ready within ${UP_TIMEOUT_MS / 1000} s.`);
+		const services = isAnswering ? state.lastStatus?.services : undefined;
+		const late = unresponsive(notReadyMessage("The session", UP_TIMEOUT_MS));
+		throw notReadyError(services, UP_TIMEOUT_MS) ?? late;
 	}
 
-	if (state.launched !== undefined || now - state.lastAnswer < JOIN_SILENCE_MS) {
+	if (isAnswering || state.launched !== undefined) {
 		return;
 	}
 

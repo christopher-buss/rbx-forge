@@ -27,7 +27,8 @@ import { createPartRecorder, createStudioRecorder } from "./status-recorders.ts"
 
 /**
  * Where a service's part is: `off` when it does not run (never started, or
- * stopped on request); `failed` once its service exited by itself.
+ * stopped on request); `failed` once its service exited by itself, or forge
+ * stopped it for missing a bound.
  */
 export type PartStatus = "failed" | "off" | "ready" | "starting";
 
@@ -38,6 +39,8 @@ export type PartOwner = "start";
 export interface PartFailure {
 	/** The exit code; `null` when a signal or a kill ended it. */
 	exitCode: null | number;
+	/** Why forge stopped it; absent when it exited by itself. */
+	failure?: string;
 	/** The last lines of its output. */
 	outputTail: Array<string>;
 }
@@ -353,6 +356,7 @@ const OWNER = "'start' | null";
 
 const servicePart = type({
 	"exitCode?": INTEGER_OR_NULL,
+	"failure?": TEXT,
 	"outputTail?": "string[]",
 	"owner": OWNER,
 	"status": "'failed' | 'off' | 'ready' | 'starting'",

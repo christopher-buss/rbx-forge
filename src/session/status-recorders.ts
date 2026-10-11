@@ -75,6 +75,7 @@ function setPart(
 	next: Partial<PartFailure> & Pick<ServicePart, "status">,
 ): void {
 	delete part.exitCode;
+	delete part.failure;
 	delete part.outputTail;
 	Object.assign(part, next);
 }

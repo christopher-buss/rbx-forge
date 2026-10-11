@@ -120,7 +120,12 @@ with no compiler (Luau with no `luau.watch.command`) gets a session with no
 part. `up` takes `--syncback`, `--force`, and `--no-compiler` (start no part).
 On a running session, `up` starts the parts it asks for that are missing or
 failed, such as a compiler that crashed, or the Rojo of an attached Studio, and
-names them in `data.added`; it never stops or restarts a part that runs.
+names them in `data.added`; it never stops or restarts a part that runs. A first
+build that does not end in 300 s fails the compiler and `up` with
+`compile_timeout` (read `forge logs compiler`); the next `up` or `restart`
+starts a new compiler. A part still starting after 300 s fails `up` with
+`compile_timeout` (the compiler), `service_failed` (Rojo), or
+`studio_launch_failed` (Studio).
 
 `up --studio` also attaches Studio and Rojo, once the compiler's build is fresh:
 it uses the Studio that has the place open (verified as `stop` does), or builds
@@ -164,7 +169,9 @@ Rojo and the compiler, and waits until the reaper reports each old process tree
 gone; when one is not, it fails with `cleanup_in_progress` and starts nothing.
 Then it starts the compiler and, once its first build is done, builds the place,
 opens it in a new Studio, and serves Rojo on the same port. So a deleted output
-folder or a reinstalled `node_modules` recovers. A failed compiler starts again
+folder or a reinstalled `node_modules` recovers. A first build that does not end
+in 300 s fails the compiler and the restart, and Studio does not open again; the
+next `up` or `restart` starts a new compiler. A failed compiler starts again
 too. It names the parts that a `forge start` terminal owns in `data.kept` and
 leaves them alone; `--force` restarts them too, and they keep their owner. A
 found Studio stays open (unless `--force`); the compiler and Rojo restart, and

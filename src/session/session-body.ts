@@ -284,7 +284,7 @@ async function runServicesAsync(
 		? await startRojoAsync(session, scope, parts, await resolveRojoAsync(session))
 		: undefined;
 	if (session.compiler !== undefined) {
-		await startCompilerAsync(session, parts, session.compiler);
+		await startCompilerAsync(session, scope, parts, session.compiler);
 	}
 
 	const isServing = rojo !== undefined && (await waitForRojoAsync(session, scope, parts, rojo));
@@ -372,7 +372,7 @@ async function waitAttachedStudioAsync(
  */
 function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: BodyState): void {
 	const addStudio = createStudioAdder(session, scope, { ...state, state: state.studio });
-	const add = createPartAdder(session, state.parts, addStudio);
+	const add = createPartAdder(session, scope, state.parts, addStudio);
 	const move = createStudioMover(session, scope);
 	const ownership: Ownership = {
 		added: new Set(session.owner === null ? [] : ALL_PARTS),
