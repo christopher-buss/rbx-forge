@@ -1,7 +1,9 @@
 import type { CommandContext } from "../commands/context.ts";
 import { ForgeError } from "../errors.ts";
 import { logFilePath } from "../output/log-file.ts";
+import { settlesWithinAsync } from "../seams/clock.ts";
 import type { BuildWatch } from "./build-watch.ts";
+import { FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
 import type { PartAdder } from "./part-requests.ts";
 import type {
 	RunningPart,
@@ -40,7 +42,9 @@ export interface AdderSetup extends CompilerSetup {
 /**
  * Start the watch-mode compiler as its part. A compiler that reports
  * compiles is `starting` until its first build, and its builds are read
- * from a fresh start; any other compiler is `ready` once it runs.
+ * from a fresh start; one whose first build does not end within
+ * {@link FRESH_BUILD_TIMEOUT_MS} is stopped as `failed`. Any other compiler
+ * is `ready` once it runs.
  *
  * @param setup - The builds and reporter.
  * @param parts - Starts the part.
@@ -50,7 +54,7 @@ export interface AdderSetup extends CompilerSetup {
  */
 export async function startCompilerAsync(
 	setup: CompilerSetup,
-	parts: Pick<ServiceParts, "startAsync">,
+	parts: Pick<ServiceParts, "startAsync" | "stop">,
 	compiler: CompilerService,
 ): Promise<RunningPart | undefined> {
 	if (!compiler.parsesDiagnostics) {
@@ -58,7 +62,16 @@ export async function startCompilerAsync(
 	}
 
 	setup.builds.restart();
-	return parts.startAsync(compiler.service, { ...compileReader(setup), initial: "starting" });
+	const firstBuild = Promise.withResolvers<void>();
+	const part = await parts.startAsync(compiler.service, {
+		...compileReader(setup, firstBuild.resolve),
+		initial: "starting",
+	});
+	if (part !== undefined) {
+		void failSlowFirstBuildAsync(setup, parts, firstBuild.promise);
+	}
+
+	return part;
 }
 
 /**
@@ -73,7 +86,7 @@ export async function startCompilerAsync(
  */
 export function createPartAdder(
 	setup: AdderSetup,
-	parts: Pick<ServiceParts, "isRunning" | "startAsync">,
+	parts: Pick<ServiceParts, "isRunning" | "startAsync" | "stop">,
 	addStudio: PartAdder,
 ): PartAdder {
 	return async (request) => {
@@ -93,22 +106,51 @@ export function createPartAdder(
 }
 
 /**
+ * Stop the compiler as `failed` when its first build does not end in time.
+ *
+ * @param setup - The clock.
+ * @param parts - Stops the part.
+ * @param firstBuild - Resolves on its first build, or once it stopped.
+ */
+async function failSlowFirstBuildAsync(
+	setup: CompilerSetup,
+	parts: Pick<ServiceParts, "stop">,
+	firstBuild: Promise<void>,
+): Promise<void> {
+	const { clock } = setup.context.seams;
+	if (await settlesWithinAsync(clock, firstBuild, FRESH_BUILD_TIMEOUT_MS)) {
+		return;
+	}
+
+	parts.stop(
+		"compiler",
+		`The compiler's first build did not end within ${FRESH_BUILD_TIMEOUT_MS / 1000} s`,
+	);
+}
+
+/**
  * Read the watch-mode compiler's output as builds, and report each one. Once
  * the compiler stops, every wait for a build fails until one starts again.
  *
  * @param setup - The session's builds and reporter.
+ * @param settled - Called on each build, and once it stopped.
  * @returns What its service reads each line with, and does once it stopped.
  */
-function compileReader(setup: CompilerSetup): Pick<ServiceHooks, "onLine" | "onStopped"> {
+function compileReader(
+	setup: CompilerSetup,
+	settled: () => void,
+): Pick<ServiceHooks, "onLine" | "onStopped"> {
 	return {
 		onLine: (line) => {
 			const build = setup.builds.read(line);
 			if (build !== undefined) {
+				settled();
 				const { diagnostics, errors } = build;
 				setup.context.reporter.emit({ diagnostics, errors, type: "compiled" });
 			}
 		},
 		onStopped: () => {
+			settled();
 			setup.builds.fail(
 				new ForgeError("service_failed", "The compiler stopped, so no build comes.", {
 					details: { reason: "service_failed:compiler" },

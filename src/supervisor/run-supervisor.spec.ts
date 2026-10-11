@@ -5338,7 +5338,7 @@ describe("idle timeout", () => {
 		const run = startCommand({ ...IDLE_UP, owned: true, projectType: "rbxts" });
 		const isEnded = endedFlag(run);
 		await flushAsync();
-		await jumpAsync(run, 10 * MINUTE_MS);
+		await jumpAsync(run, 4 * MINUTE_MS);
 		const wasEnded = isEnded();
 		run.owner.request({ signal: "SIGINT", type: "signal" });
 		await run.result;
