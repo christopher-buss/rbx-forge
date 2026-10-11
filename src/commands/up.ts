@@ -18,6 +18,7 @@ import { failureError, parseMessage } from "../supervisor/channel.ts";
 import type { ForgeFiles } from "../supervisor/session-files.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
+import { notReadyError } from "./not-ready.ts";
 import { START_FLAGS } from "./start.ts";
 import { isStudioReady, studioCancelled } from "./up-studio.ts";
 
@@ -80,6 +81,8 @@ interface UpState {
 	hasRequestedStudio: boolean;
 	/** When a session last answered, or when `up` began to wait for one. */
 	lastAnswer: number;
+	/** The status the session last answered with. */
+	lastStatus?: SessionStatus;
 	launched: Launched | undefined;
 	relaunched: boolean;
 	/** The parts `up` asks for, and the Studio executable to start. */
@@ -136,7 +139,8 @@ export function describeParts({ services }: SessionStatus): string {
  * @rejects {ForgeError} `usage`; `detach_unsupported` when the host forbids
  *   a detached process; the session's own startup failure (such as
  *   `compiler_missing`); an attach failure (such as `port_in_use`);
- *   `supervisor_unresponsive` when it is not ready in time.
+ *   when the session answers but a part is not ready in time, as
+ *   `notReadyError`; else `supervisor_unresponsive`.
  */
 export async function runUpAsync(
 	context: CommandContext,
@@ -367,6 +371,7 @@ async function probeReadyAsync(
 	}
 
 	state.lastAnswer = context.seams.clock.now();
+	state.lastStatus = found.status;
 	if (
 		(await addOnceAsync(context, state, found)) ||
 		!isReady(found.status) ||
@@ -405,15 +410,21 @@ function unresponsive(what: string): ForgeError {
  * @param context - The seams.
  * @param request - What a new session runs.
  * @param state - Where `up` is.
- * @throws {ForgeError} `supervisor_unresponsive`.
+ * @throws {ForgeError} As `notReadyError` when the session answers;
+ *   else `supervisor_unresponsive`.
  */
 function checkWait(context: CommandContext, request: SessionRequest, state: UpState): void {
 	const now = context.seams.clock.now();
+	const isAnswering = now - state.lastAnswer < JOIN_SILENCE_MS;
+	if (isAnswering && state.lastStatus !== undefined && now >= state.deadline) {
+		throw notReadyError(state.lastStatus.services, UP_TIMEOUT_MS);
+	}
+
 	if (now >= state.deadline) {
 		throw unresponsive(`The session was not ready within ${UP_TIMEOUT_MS / 1000} s.`);
 	}
 
-	if (state.launched !== undefined || now - state.lastAnswer < JOIN_SILENCE_MS) {
+	if (isAnswering || state.launched !== undefined) {
 		return;
 	}
 

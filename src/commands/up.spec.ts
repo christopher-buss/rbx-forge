@@ -620,6 +620,53 @@ describe(runUpAsync, () => {
 		expect(up.now()).toBe(UP_TIMEOUT_MS);
 	});
 
+	it("should fail with compile_timeout when a session that answers keeps its compiler starting", async () => {
+		expect.assertions(2);
+
+		const { run, up } = makeUp();
+		await serveFakeSessionAsync(
+			up.memory,
+			up.ipc,
+			compilerStatus("starting", { phase: "starting" }),
+		);
+
+		await expect(run()).rejects.toMatchObject({
+			code: "compile_timeout",
+			hint: 'Read its output with "forge logs compiler".',
+			message: `The compiler was not ready within ${UP_TIMEOUT_MS / 1000} s.`,
+		});
+		expect(up.detachedSupervisor).not.toHaveBeenCalled();
+	});
+
+	it("should fail with service_failed when a session that answers keeps Rojo starting", async () => {
+		expect.assertions(1);
+
+		const { run, up } = makeUp();
+		const status = makeStatus({ phase: "starting" });
+		status.services.rojo.status = "starting";
+		await serveFakeSessionAsync(up.memory, up.ipc, status);
+
+		await expect(run()).rejects.toMatchObject({
+			code: "service_failed",
+			hint: 'Read its output with "forge logs rojo".',
+			message: `Rojo was not ready within ${UP_TIMEOUT_MS / 1000} s.`,
+		});
+	});
+
+	it("should fail with studio_launch_failed when a session that answers keeps Studio opening", async () => {
+		expect.assertions(1);
+
+		const { run, up } = makeUp(undefined, { config: {}, flags: { studio: true } });
+		const status = makeStatus();
+		status.services.studio = { owner: null, status: "opening" };
+		await serveFakeSessionAsync(up.memory, up.ipc, status);
+
+		await expect(run()).rejects.toMatchObject({
+			code: "studio_launch_failed",
+			message: `Studio was not ready within ${UP_TIMEOUT_MS / 1000} s.`,
+		});
+	});
+
 	it("should start a session once when the one it waits for stays silent, then give up", async () => {
 		expect.assertions(3);
 

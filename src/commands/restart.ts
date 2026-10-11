@@ -18,6 +18,7 @@ import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import { failureError } from "../supervisor/channel.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
+import { notReadyError } from "./not-ready.ts";
 import { describeParts, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
 
 export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
@@ -54,8 +55,9 @@ export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
  *   meanwhile; `cleanup_in_progress` when an old tree is not proven gone
  *   (nothing started again); Studio's close failure, such as
  *   `identity_mismatch` (nothing stopped or started); the add's failure, such
- *   as `compiler_missing` or `port_in_use`; `supervisor_unresponsive` when it
- *   is not ready in time; config errors from `loadProjectConfigAsync`.
+ *   as `compiler_missing` or `port_in_use`; `compile_timeout` or
+ *   `service_failed` when a part is not ready in time; config errors from
+ *   `loadProjectConfigAsync`.
  */
 export async function runRestartAsync(
 	context: CommandContext,
@@ -142,8 +144,8 @@ function restartSummary(
  * @param context - The seams.
  * @param session - Its endpoint and token.
  * @returns Its status once ready.
- * @rejects {ForgeError} As `fetchStatusAsync`; `supervisor_unresponsive`
- *   after {@link UP_TIMEOUT_MS}.
+ * @rejects {ForgeError} As `fetchStatusAsync`; as `notReadyError` after
+ *   {@link UP_TIMEOUT_MS}.
  */
 async function waitReadyAsync(
 	{ seams }: CommandContext,
@@ -157,11 +159,7 @@ async function waitReadyAsync(
 		}
 
 		if (seams.clock.now() >= deadline) {
-			throw new ForgeError(
-				"supervisor_unresponsive",
-				`The session was not ready within ${UP_TIMEOUT_MS / 1000} s.`,
-				{ hint: 'Check "forge status" and "forge logs compiler".' },
-			);
+			throw notReadyError(status.services, UP_TIMEOUT_MS);
 		}
 
 		await seams.clock.sleep(UP_POLL_MS);
