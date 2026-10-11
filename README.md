@@ -164,7 +164,9 @@ Rojo and the compiler, and waits until the reaper reports each old process tree
 gone; when one is not, it fails with `cleanup_in_progress` and starts nothing.
 Then it starts the compiler and, once its first build is done, builds the place,
 opens it in a new Studio, and serves Rojo on the same port. So a deleted output
-folder or a reinstalled `node_modules` recovers. A failed compiler starts again
+folder or a reinstalled `node_modules` recovers. A first build that does not end
+in 300 s fails the compiler and the restart, and Studio does not open again; the
+next `up` or `restart` starts a new compiler. A failed compiler starts again
 too. It names the parts that a `forge start` terminal owns in `data.kept` and
 leaves them alone; `--force` restarts them too, and they keep their owner. A
 found Studio stays open (unless `--force`); the compiler and Rojo restart, and

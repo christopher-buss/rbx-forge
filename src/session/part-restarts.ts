@@ -1,7 +1,7 @@
 import type { AutoRecoveryMode } from "../config/schema.ts";
-import { ForgeError } from "../errors.ts";
+import { ForgeError, toForgeError } from "../errors.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
-import type { AddablePart, PartAdder } from "./part-requests.ts";
+import type { AddablePart, PartAdder, PartRequest } from "./part-requests.ts";
 import type { KeptPart, PartStopper, StudioOutcome } from "./part-stops.ts";
 import { STOP_PARTS_WAIT_MS } from "./part-stops.ts";
 import { ROJO_LISTEN_BOUND_MS } from "./rojo-part.ts";
@@ -120,7 +120,7 @@ export function createPartRestarter(
 		// The adder starts Rojo again for a Studio that stays.
 		const hasWork = parts.length > 0 || stops.stopped.includes("rojo");
 		const added = hasWork
-			? await restart.add({
+			? await addAsync(restart.add, {
 					desktop: services.studio.desktop,
 					parts,
 					studioPath,
@@ -134,6 +134,32 @@ export function createPartRestarter(
 			...(stops.studio === undefined ? {} : { studio: stops.studio }),
 		};
 	};
+}
+
+/**
+ * Start the parts again; a failure of a restart that would open Studio says
+ * that Studio did not open again.
+ *
+ * @param add - The adder.
+ * @param request - The parts to start.
+ * @returns The parts it started.
+ * @rejects As the adder.
+ */
+async function addAsync(add: PartAdder, request: PartRequest): Promise<Array<PartId>> {
+	try {
+		return await add(request);
+	} catch (err) {
+		if (!request.parts.includes("studio")) {
+			throw err;
+		}
+
+		const { code, details, hint, message } = toForgeError(err);
+		throw new ForgeError(code, `${message} forge did not open Studio again.`, {
+			cause: err,
+			details,
+			hint,
+		});
+	}
 }
 
 /**

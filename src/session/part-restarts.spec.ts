@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
+import { ForgeError } from "../errors.ts";
 import type { AddablePart, PartAdder } from "./part-requests.ts";
 import type { RestarterParts } from "./part-restarts.ts";
 import { createPartRestarter, restartedParts } from "./part-restarts.ts";
@@ -118,6 +119,31 @@ describe(createPartRestarter, () => {
 			parts: ["compiler", "studio"],
 			studioPath: "/opt/Studio",
 		});
+	});
+
+	it("should say Studio did not open again when the compiler's first build fails", async () => {
+		expect.assertions(1);
+
+		const { add, restart } = makeRestarter(EVERY_PART);
+		add.mockRejectedValue(
+			new ForgeError("compile_timeout", "No fresh build within 300 s.", { hint: "Logs." }),
+		);
+
+		await expect(restart({ force: false })).rejects.toMatchObject({
+			code: "compile_timeout",
+			hint: "Logs.",
+			message: "No fresh build within 300 s. forge did not open Studio again.",
+		});
+	});
+
+	it("should pass an add's failure on as it is when it starts no Studio", async () => {
+		expect.assertions(1);
+
+		const failure = new ForgeError("compiler_missing", "No compiler.");
+		const { add, restart } = makeRestarter({ ...EVERY_PART, stopped: ["compiler"] });
+		add.mockRejectedValue(failure);
+
+		await expect(restart({ force: false })).rejects.toBe(failure);
 	});
 
 	it("reopens Studio with its recorded hidden visibility", async () => {

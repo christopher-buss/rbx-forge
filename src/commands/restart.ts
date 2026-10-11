@@ -55,7 +55,8 @@ export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
  *   meanwhile; `cleanup_in_progress` when an old tree is not proven gone
  *   (nothing started again); Studio's close failure, such as
  *   `identity_mismatch` (nothing stopped or started); the add's failure, such
- *   as `compiler_missing` or `port_in_use`; `compile_timeout` or
+ *   as `compiler_missing` or `port_in_use` (it says when Studio did not
+ *   open again); `compile_timeout` or
  *   `service_failed` when a part is not ready in time; config errors from
  *   `loadProjectConfigAsync`.
  */

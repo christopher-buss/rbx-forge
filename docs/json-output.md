@@ -233,7 +233,10 @@ opens once the compiler's first build is done; Rojo keeps its port. Failures:
 `details.parts`) when a stopped service's process tree is not proven gone, with
 nothing started again; Studio's close failure, such as `identity_mismatch`, with
 no part stopped or started; an add failure, such as `compiler_missing` or
-`port_in_use`.
+`port_in_use`, whose message says when Studio did not open again (such as
+`compile_timeout` when the compiler's first build does not end in time). A part
+that stays starting fails it with `compile_timeout` (the compiler) or
+`service_failed` (Rojo).
 
 ## The save result
 
