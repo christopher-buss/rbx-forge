@@ -33,6 +33,7 @@ import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { Pause, PausePoint } from "../session/pause.ts";
 import { neverPauseAsync } from "../session/pause.ts";
 import { ROJO_LISTEN_BOUND_MS } from "../session/rojo-part.ts";
@@ -5338,7 +5339,8 @@ describe("idle timeout", () => {
 		const run = startCommand({ ...IDLE_UP, owned: true, projectType: "rbxts" });
 		const isEnded = endedFlag(run);
 		await flushAsync();
-		await jumpAsync(run, 4 * MINUTE_MS);
+		// Below the first-build bound, which would fail the silent compiler.
+		await jumpAsync(run, FRESH_BUILD_TIMEOUT_MS - MINUTE_MS);
 		const wasEnded = isEnded();
 		run.owner.request({ signal: "SIGINT", type: "signal" });
 		await run.result;
