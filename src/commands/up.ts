@@ -9,6 +9,7 @@ import type { PinnedProcess } from "../native/addon.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { listParts } from "../session/part-names.ts";
 import type { AddablePart, PartRequest } from "../session/part-requests.ts";
+import { ADD_PARTS_WAIT_MS } from "../session/part-restarts.ts";
 import { isPartRunning } from "../session/part-stops.ts";
 import type { PartId, ServiceId, SessionStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
@@ -337,6 +338,7 @@ async function addOnceAsync(
 	state: UpState,
 	{ session, status }: { session: KnownSession; status: SessionStatus },
 ): Promise<boolean> {
+	const { clock, ipc } = context.seams;
 	const isOwn = status.pid === state.launched?.pid;
 	if ((isOwn && !state.wanted.parts.includes("studio")) || state.added !== undefined) {
 		return false;
@@ -345,7 +347,10 @@ async function addOnceAsync(
 	try {
 		// The session answers once its own parts started: a whole startup.
 		state.hasRequestedStudio = state.wanted.parts.includes("studio");
-		state.added = await addPartsAsync(context.seams.ipc, session, state.wanted, UP_TIMEOUT_MS);
+		state.added = await addPartsAsync(ipc, session, state.wanted, ADD_PARTS_WAIT_MS);
+		// The add answered: the next probe reads the status after it.
+		state.lastAnswer = clock.now();
+		state.deadline = Math.max(state.deadline, state.lastAnswer + UP_POLL_MS);
 	} catch (err) {
 		// The session ended meanwhile: wait for the next one, as for silence.
 		if (!(err instanceof ForgeError) || err.code !== "not_running") {

@@ -50,6 +50,13 @@ export interface RestarterParts {
 }
 
 /**
+ * How long an add may take the session to answer, from the bounds it runs
+ * with: the compiler's first build, Rojo's listen, and Studio's open.
+ */
+export const ADD_PARTS_WAIT_MS: number =
+	FRESH_BUILD_TIMEOUT_MS + ROJO_LISTEN_BOUND_MS + STUDIO_OPEN_BOUND_MS;
+
+/**
  * How long a restart may take the session to answer, from the bounds it
  * runs with: the stop (`STOP_PARTS_WAIT_MS`), each of the two services'
  * grace and tree check, then the adds: the compiler's first build, Rojo's
@@ -59,13 +66,7 @@ export interface RestarterParts {
  * @returns The wait, in milliseconds.
  */
 export function restartWaitMs(graceMs: number): number {
-	return (
-		STOP_PARTS_WAIT_MS +
-		2 * (graceMs + TREE_CHECK_MS) +
-		FRESH_BUILD_TIMEOUT_MS +
-		ROJO_LISTEN_BOUND_MS +
-		STUDIO_OPEN_BOUND_MS
-	);
+	return STOP_PARTS_WAIT_MS + 2 * (graceMs + TREE_CHECK_MS) + ADD_PARTS_WAIT_MS;
 }
 
 /**
