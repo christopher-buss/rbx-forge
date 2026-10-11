@@ -155,18 +155,23 @@ describe(startCompilerAsync, () => {
 	});
 
 	it.for([
-		["the compiler's bound ends first", false],
-		["the wait's bound ends first", true],
+		["the compiler's bound ends first", false, `${FIRST_BUILD_LATE}.`],
+		[
+			"the wait's bound ends first",
+			true,
+			`No fresh build within ${FRESH_BUILD_TIMEOUT_MS / 1000} s: the first compile has not ended.`,
+		],
 	] as const)(
 		"should fail a wait for its build with compile_timeout when %s",
-		async ([, isWaitFirst]) => {
-			expect.assertions(2);
+		async ([, isWaitFirst, message]) => {
+			expect.assertions(3);
 
 			const error = await waitForStuckAsync(isWaitFirst);
 
 			assert(error instanceof ForgeError);
 
 			expect(error.code).toBe("compile_timeout");
+			expect(error.message).toBe(message);
 			expect(error.hint).toContain("forge logs compiler");
 		},
 	);
