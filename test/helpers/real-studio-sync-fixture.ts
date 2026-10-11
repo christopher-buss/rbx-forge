@@ -23,6 +23,7 @@ import { createRecordingReporter } from "./seams.ts";
 export interface Observation {
 	name: string;
 	connection: string;
+	loadCount: number;
 	sequence: number;
 	value: string;
 }
@@ -30,33 +31,19 @@ export interface Observation {
 /** Paths to the complete stock model, saved place and test-only Lua. */
 export const SYNC_FIXTURES = path.join(import.meta.dirname, "../fixtures");
 
-/** Fail before changing a shared managed plugin used by another Studio. */
-export function requireClosedStudios(): void {
-	const listed = spawnSync("tasklist", ["/FO", "CSV", "/NH"], {
-		encoding: "utf8",
-		windowsHide: true,
-	});
-	assert.equal(listed.status, 0);
-	assert(
-		!listed.stdout.includes('"RobloxStudioBeta.exe"'),
-		"Close existing Studios before running managed plugin sync tests",
-	);
-}
-
 /**
- * Stage the prepared model only immediately before launching the owned Studio.
+ * Install the gated test plugin without changing the managed Rojo plugin.
  *
- * @param target - The managed path and restoration flag.
+ * @param target - The owned plugin path and cleanup flag.
  * @param model - The complete temporary plugin.
  */
 export async function installSyncModelAsync(
-	target: { didInstall: boolean; managed: string },
+	target: { didInstall: boolean; plugin: string },
 	model: string,
 ): Promise<void> {
-	requireClosedStudios();
-	await mkdir(path.dirname(target.managed), { recursive: true });
+	await mkdir(path.dirname(target.plugin), { recursive: true });
 	target.didInstall = true;
-	await copyFile(model, target.managed);
+	await copyFile(model, target.plugin);
 }
 
 /**
@@ -135,7 +122,17 @@ export function genuineRojo(): string {
 }
 
 /**
- * Preserve complete stock reconciliation packages and exact current patches.
+ * Give the model and its launch marker the same private namespace.
+ * @param source - Shipped plugin or generated marker source.
+ * @param token - The owned launch token.
+ * @returns The source with isolated marker names.
+ */
+export function rewriteSyncMarkerNamespace(source: string, token: string): string {
+	return source.replaceAll("ROJO_OPEN_", () => `FORGE_SYNC_TEST_${token}_`);
+}
+
+/**
+ * Preserve shipped synchronization logic with a private test marker namespace.
  *
  * @param native - The real model reader/writer.
  * @param directory - The temporary directory, never the managed plugin path.
@@ -145,34 +142,32 @@ export function genuineRojo(): string {
 export function prepareSyncModel(
 	native: NativeAddon,
 	directory: string,
-	identity: { port: number; projectName: string },
+	identity: { port: number; projectName: string; token: string },
 ): string {
-	const model = path.join(directory, "RojoManagedPlugin.rbxm");
+	const model = path.join(directory, `ForgeSyncTest-${identity.token}.rbxm`);
 	writeFileSync(
 		model,
 		gunzipSync(readFileSync(path.join(SYNC_FIXTURES, "models/rojo-7.7.1.rbxm.gz"))),
 	);
 	const settingsPath = ["Rojo", "Plugin", "Settings"];
-	const [settings] = native.readModelScriptSources(model, [settingsPath]);
-	assert(settings !== undefined);
+	const bootstrapPath = ["Rojo", "Plugin"];
+	const [settings, bootstrap] = native.readModelScriptSources(model, [
+		settingsPath,
+		bootstrapPath,
+	]);
+	assert(settings !== undefined && bootstrap !== undefined);
 	const replacements = SCRIPTS.map(({ name, hash, source }) => {
 		return {
 			path: ["Rojo", "Plugin", name],
-			source: `-- rbx-forge patch ${VERSION} stock ${hash}\n${source}`,
+			source: `-- rbx-forge patch ${VERSION} stock ${hash}\n${rewriteSyncMarkerNamespace(source, identity.token)}`,
 		};
 	});
-	const isolated = `${settingsProxy(identity)}\n${settings}`;
 	native.writeModelScriptSources(model, [
 		...replacements,
-		{ path: settingsPath, source: isolated },
+		{ path: settingsPath, source: `${settingsProxy(identity)}\n${settings}` },
+		{ path: bootstrapPath, source: `${launchGate(identity.token)}\n${bootstrap}` },
 	]);
-	assert.deepEqual(
-		native.readModelScriptSources(
-			model,
-			replacements.map(({ path: scriptPath }) => scriptPath),
-		),
-		replacements.map(({ source }) => source),
-	);
+
 	return model;
 }
 
@@ -196,6 +191,7 @@ export async function syncCollectorAsync(
 		observations.push({
 			name: url.searchParams.get("name") ?? "",
 			connection: url.searchParams.get("connection") ?? "",
+			loadCount: Number(url.searchParams.get("loadCount")),
 			sequence: Number(url.searchParams.get("sequence")),
 			value: url.searchParams.get("value") ?? "",
 		});
@@ -238,4 +234,17 @@ function settingsProxy(identity: { port: number; projectName: string }): string 
 	return readFileSync(path.join(SYNC_FIXTURES, "studio/sync-settings.lua"), "utf8")
 		.replace("__FORGE_SYNC_PORT__", () => JSON.stringify(String(identity.port)))
 		.replace("__FORGE_SYNC_NAME__", () => JSON.stringify(identity.projectName));
+}
+
+function launchGate(token: string): string {
+	return `-- Test plugin: only the matching RunScript launch may load Rojo.
+local deadline = os.clock() + 90
+while game:GetAttribute("__ForgeSyncTestLaunch") ~= ${JSON.stringify(token)} do
+	if os.clock() >= deadline then
+		return
+	end
+	task.wait(0.1)
+end
+local counter = ${JSON.stringify(`__ForgeSyncTestLoads_${token}`)}
+game:SetAttribute(counter, (game:GetAttribute(counter) or 0) + 1)`;
 }

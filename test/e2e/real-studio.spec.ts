@@ -4,9 +4,9 @@
  * Windows with Studio installed and logged in, and genuine Rojo 7.7.1 (see
  * `genuineRojo`); CI never runs it. It opens Studio windows on the desktop.
  *
- * Each test notes the Studio PIDs that run before it, and at its end kills
- * only Studios that were not there: a Studio the user has open is never
- * touched. It changes no Studio setting and installs nothing.
+ * Each test cleans up only the Studio returned by its launcher or recorded
+ * in its session, through a PID and start-time pin. The managed Rojo plugin
+ * must already have the current patch; these tests never install or patch it.
  *
  * Places (`test/fixtures/studio/`):
  *
@@ -35,9 +35,14 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, expect, it, onTestFinished } from "vitest";
 
 import type { PinnedProcess } from "../../src/native/addon.ts";
+import { readVariable } from "../../src/process/environment.ts";
+import { parseStatus } from "../../src/session/status.ts";
+import { SCRIPTS, VERSION } from "../../src/studio/rojo-plugin.ts";
 import { parseOpened } from "../helpers/output.ts";
+import { loadRealNative } from "../helpers/real-native.ts";
+import { studioCleanup } from "../helpers/real-studio-cleanup.ts";
 import { genuineRojo } from "../helpers/real-studio-sync-fixture.ts";
-import { pinNow, waitForDeathAsync } from "../helpers/worker-log.ts";
+import { pinNow } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
 import { makeFixtureAsync } from "./session-fixture.ts";
 import type { UpRun } from "./up-fixture.ts";
@@ -56,63 +61,32 @@ const QUIET_MS = 3000;
 const CLOSED_END: unknown = expect.toBeOneOf(["exited", "lock_released"]);
 
 /**
- * The PIDs of the Studios that run now.
- *
- * @returns Their PIDs.
+ * Fail before production `up` could install or patch the shared managed model.
  */
-function studioPids(): Array<number> {
-	const { stdout } = spawnSync(
-		"tasklist",
-		// cspell:disable-next-line -- a tasklist filter
-		["/FI", "IMAGENAME eq RobloxStudioBeta.exe", "/FO", "CSV", "/NH"],
-		{ encoding: "utf8", windowsHide: true },
+function requireCurrentManagedPlugin(): void {
+	const home = readVariable(env, "RBX_FORGE_TEST_REAL_USERPROFILE", process.platform);
+	assert(home !== undefined);
+	const managed = path.join(home, "AppData/Local/Roblox/Plugins/RojoManagedPlugin.rbxm");
+	assert(
+		existsSync(managed),
+		"Install the current managed Rojo plugin before real Studio e2e tests",
 	);
-	return Array.from(stdout.matchAll(/^"RobloxStudioBeta\.exe","(\d+)"/gm), ([, pid]) => {
-		return Number(pid);
-	});
-}
-
-/**
- * Kill, when the test ends, every Studio that did not run before it.
- */
-function killNewStudiosAtEnd(): void {
-	const before = new Set(studioPids());
-	onTestFinished(async () => {
-		const added = studioPids().filter((pid) => !before.has(pid));
-		for (const pid of added) {
-			pinNow(pid)?.kill();
-		}
-
-		await waitForDeathAsync(added, 10_000);
-	});
-}
-
-function snapshotCleanup(project: string): (pid: number) => PinnedProcess {
-	let studio: PinnedProcess | undefined;
+	const original = readFileSync(managed);
+	const modified = statSync(managed).mtimeMs;
+	const native = loadRealNative();
+	const sources = native.readModelScriptSources(
+		managed,
+		SCRIPTS.map(({ name }) => ["Rojo", "Plugin", name]),
+	);
+	assert.deepEqual(
+		sources,
+		SCRIPTS.map(({ hash, source }) => `-- rbx-forge patch ${VERSION} stock ${hash}\n${source}`),
+		"Update the managed Rojo plugin before real Studio e2e tests",
+	);
 	onTestFinished(() => {
-		studio?.kill();
-		studio?.waitForExit(10_000);
-		const query = `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like '*--watch-hidden-lighting*' -and $_.CommandLine -like '*${path.basename(project).replaceAll("'", "''")}*' } | ForEach-Object ProcessId`;
-		const { status, stdout } = spawnSync(
-			"powershell.exe",
-			["-NoProfile", "-NonInteractive", "-Command", query],
-			{ encoding: "utf8", windowsHide: true },
-		);
-		assert(status === 0);
-		const pids = stdout.trim().split(/\s+/).filter(Boolean);
-		for (const text of pids) {
-			const watcher = pinNow(Number(text));
-			if (watcher !== undefined && !watcher.waitForExit(5000)) {
-				watcher.kill();
-				watcher.waitForExit(5000);
-			}
-		}
+		assert.deepEqual(readFileSync(managed), original);
+		assert.equal(statSync(managed).mtimeMs, modified);
 	});
-	return (pid) => {
-		studio = pinNow(pid);
-		assert(studio !== undefined);
-		return studio;
-	};
 }
 
 /**
@@ -197,12 +171,26 @@ async function upStudioAsync(
 	fixture: Fixture,
 	desktop: "hidden" | "user" = "user",
 ): Promise<string> {
+	requireCurrentManagedPlugin();
+	const own = studioCleanup(fixture.project);
 	const up = await runForgeAsync(
 		fixture,
 		["up", "--studio", "--desktop", desktop, "--json"],
 		realVariables(),
 	);
-	return String(up.result.data!["sessionId"]);
+	const sessionId = String(up.result.data!["sessionId"]);
+	const state = parseStatus(
+		JSON.parse(
+			readFileSync(
+				path.join(fixture.project, ".forge/sessions", sessionId, "state.json"),
+				"utf8",
+			),
+		),
+	);
+	const studio = state?.services.studio;
+	assert(studio?.pid !== undefined && studio.startTime !== undefined);
+	own({ pid: studio.pid, startTime: studio.startTime });
+	return sessionId;
 }
 
 /**
@@ -211,10 +199,13 @@ async function upStudioAsync(
  *
  * @param fixture - The project.
  * @param sessionId - The session that opens Studio.
- * @returns The PID the session recorded, and the PID the lock file names.
+ * @returns The PID the session recorded, the lock PID and its verified pin.
  * @rejects When Studio does not open the place in time.
  */
-async function waitForLoadedAsync(fixture: Fixture, sessionId: string): Promise<[unknown, number]> {
+async function waitForLoadedAsync(
+	fixture: Fixture,
+	sessionId: string,
+): Promise<[unknown, number, PinnedProcess]> {
 	const state = path.join(fixture.project, ".forge", "sessions", sessionId, "state.json");
 	const deadline = Date.now() + OPEN_MS;
 	while (!existsSync(state) || !readFileSync(state, "utf8").includes('"status":"open"')) {
@@ -227,24 +218,26 @@ async function waitForLoadedAsync(fixture: Fixture, sessionId: string): Promise<
 
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the session's state contract
 	const status = JSON.parse(readFileSync(state, "utf8")) as {
-		services: { studio: { pid?: number } };
+		services: { studio: { pid?: number; startTime?: string } };
 	};
 	const lockPid = Number(readFileSync(`${fixture.place}.lock`, "utf8").split(/\r?\n/, 1)[0]);
+	assert(status.services.studio.pid === lockPid);
 	const pinned = pinNow(lockPid);
+	assert(pinned !== undefined && pinned.startTime === status.services.studio.startTime);
 	let quietSince = Date.now();
 	while (Date.now() - quietSince < QUIET_MS) {
 		if (Date.now() > deadline) {
 			throw new Error(`Studio did not open ${fixture.place} in time`);
 		}
 
-		if (pinned?.isBlocked() === true) {
+		if (pinned.isBlocked()) {
 			quietSince = Date.now();
 		}
 
 		await sleep(100);
 	}
 
-	return [status.services.studio.pid, lockPid];
+	return [status.services.studio.pid, lockPid, pinned];
 }
 
 /**
@@ -286,9 +279,8 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 		async () => {
 			expect.assertions(6);
 
-			killNewStudiosAtEnd();
 			const fixture = await compatibilitySnapshotAsync();
-			const pinSnapshot = snapshotCleanup(fixture.project);
+			const pinSnapshot = studioCleanup();
 			const opened = await runForgeAsync(
 				fixture,
 				["open", "--desktop", "hidden", "--json"],
@@ -299,7 +291,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 			const { place, studio } = parseOpened(opened.result.data);
 			assert(studio !== null);
-			const pinned = pinSnapshot(studio.pid);
+			const pinned = pinSnapshot(studio);
 			note({
 				bytes: statSync(place).size,
 				command: "snapshot-open",
@@ -330,7 +322,6 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 		async () => {
 			expect.assertions(4);
 
-			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("saved.rbxl");
 			const sessionId = await upStudioAsync(fixture, "hidden");
 			const [, original] = await waitForLoadedAsync(fixture, sessionId);
@@ -401,7 +392,6 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 		async ({ desktop, expectedFocus }) => {
 			expect.assertions(5);
 
-			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("unsaved.rbxl");
 			const sessionId = await upStudioAsync(fixture, desktop);
 			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
@@ -440,7 +430,6 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 		async () => {
 			expect.assertions(3);
 
-			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("compatibility.rbxl");
 			const sessionId = await upStudioAsync(fixture, "hidden");
 			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
@@ -459,11 +448,10 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 		async () => {
 			expect.assertions(4);
 
-			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("saved.rbxl");
 			const started = Date.now();
 			const sessionId = await upStudioAsync(fixture);
-			const [recorded, lockPid] = await waitForLoadedAsync(fixture, sessionId);
+			const [recorded, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 			const opened = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables());
 			note({ closeMs: Date.now() - opened, openMs: opened - started, test: "down" });
@@ -472,7 +460,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			expect(down.result.data).toMatchObject({
 				studio: { end: CLOSED_END, forced: false, pid: lockPid, status: "closed" },
 			});
-			await expect(waitForDeathAsync([lockPid], 10_000)).resolves.toStrictEqual([]);
+			await expect.poll(() => pinned.isAlive(), { timeout: 10_000 }).toBeFalse();
 			expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
 		},
 	);
@@ -480,10 +468,9 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 	it("should close the session's Studio with stop", { timeout: 240_000 }, async () => {
 		expect.assertions(2);
 
-		killNewStudiosAtEnd();
 		const fixture = await makeRealProjectAsync("saved.rbxl");
 		const sessionId = await upStudioAsync(fixture);
-		const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
+		const [, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 		const loaded = Date.now();
 		const stop = await runForgeAsync(fixture, ["stop", "--json"], realVariables());
 		note({ closeMs: Date.now() - loaded, test: "stop" });
@@ -494,7 +481,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			pid: lockPid,
 			stopped: true,
 		});
-		await expect(waitForDeathAsync([lockPid], 10_000)).resolves.toStrictEqual([]);
+		await expect.poll(() => pinned.isAlive(), { timeout: 10_000 }).toBeFalse();
 	});
 
 	it(
@@ -503,10 +490,9 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 		async () => {
 			expect.assertions(3);
 
-			killNewStudiosAtEnd();
 			const fixture = await makeRealProjectAsync("unsaved.rbxl");
 			const sessionId = await upStudioAsync(fixture);
-			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
+			const [, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 			const loaded = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables());
 			note({ closeMs: Date.now() - loaded, test: "dialog" });
@@ -520,7 +506,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 					status: "closed",
 				},
 			});
-			await expect(waitForDeathAsync([lockPid], 10_000)).resolves.toStrictEqual([]);
+			await expect.poll(() => pinned.isAlive(), { timeout: 10_000 }).toBeFalse();
 			expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
 		},
 	);

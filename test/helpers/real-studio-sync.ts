@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import type { Buffer } from "node:buffer";
 import type { ChildProcess } from "node:child_process";
-import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { copyFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { Server } from "node:http";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -22,7 +22,7 @@ import {
 	genuineRojo,
 	installSyncModelAsync,
 	prepareSyncModel,
-	requireClosedStudios,
+	rewriteSyncMarkerNamespace,
 	spawnSyncRojo,
 	SYNC_FIXTURES,
 	syncCollectorAsync,
@@ -31,12 +31,16 @@ import { makeTemporaryDirectory } from "./temporary-directory.ts";
 
 /** The real engine, its source probe and explicitly owned processes. */
 export interface RealStudioSync {
+	cleanupAsync: () => Promise<void>;
 	isBlocked: () => boolean;
 	observeForAsync: (milliseconds: number) => Promise<Array<Observation>>;
 	projectName: string;
 	restartRojoAsync: (otherName?: string) => Promise<void>;
+	sampleCursor: () => number;
+	samplesSince: (cursor: number) => Array<Observation>;
 	sessionId: string;
 	stopRojoAsync: () => Promise<void>;
+	studio: PinnedProcess;
 	waitForReadyAsync: () => Promise<boolean>;
 	waitForValueAsync: (value: string) => Promise<Observation>;
 	writeProbe: (value: string) => void;
@@ -49,15 +53,15 @@ interface Runtime {
 	didInstall: boolean;
 	directory: string;
 	executable: string;
-	managed: string;
 	observations: Array<Observation>;
-	original: Buffer | undefined;
+	plugin: string;
 	port: number;
 	projectName: string;
 	readiness?: StudioReadyListener;
 	rojo: string;
 	sessionId: string;
 	studio: PinnedProcess | undefined;
+	token: string;
 }
 
 /**
@@ -69,7 +73,6 @@ interface Runtime {
  * @rejects Missing prerequisites, launch failure or absent engine observations.
  */
 export async function makeRealStudioSyncAsync(withMarker: boolean): Promise<RealStudioSync> {
-	requireClosedStudios();
 	const runtime = await runtimeAsync();
 	onTestFinished(async () => cleanupAsync(runtime));
 	writeProbe(runtime, "initial");
@@ -83,15 +86,14 @@ async function runtimeAsync(): Promise<Runtime> {
 	const rojo = genuineRojo();
 	const directory = makeTemporaryDirectory();
 	const context = createSyncContext(directory);
-	const { seams } = context;
-	const executable = findStudioExecutable(seams, { env: context.env });
+	const executable = findStudioExecutable(context.seams, { env: context.env });
 	assert(executable !== undefined, "Install and log in to Studio before running sync tests");
 	const home = readVariable(context.env, "USERPROFILE", "win32");
 	assert(home !== undefined);
-	const managed = path.join(home, "AppData/Local/Roblox/Plugins/RojoManagedPlugin.rbxm");
-	const original = existsSync(managed) ? readFileSync(managed) : undefined;
+	const token = randomBytes(32).toString("hex");
+	const plugin = path.join(home, "AppData/Local/Roblox/Plugins", `ForgeSyncTest-${token}.rbxm`);
 	const observations: Array<Observation> = [];
-	const port = await seams.network.freePortAsync();
+	const port = await context.seams.network.freePortAsync();
 	return {
 		child: undefined,
 		collector: await syncCollectorAsync(observations),
@@ -99,14 +101,14 @@ async function runtimeAsync(): Promise<Runtime> {
 		didInstall: false,
 		directory,
 		executable: executable.path,
-		managed,
 		observations,
-		original,
+		plugin,
 		port,
 		projectName: "",
 		rojo,
 		sessionId: "",
 		studio: undefined,
+		token,
 	};
 }
 
@@ -148,11 +150,7 @@ async function cleanupAsync(runtime: Runtime): Promise<void> {
 			runtime.collector.server.closeAllConnections();
 			runtime.collector.server.close();
 			if (runtime.didInstall) {
-				if (runtime.original === undefined) {
-					rmSync(runtime.managed, { force: true });
-				} else {
-					writeFileSync(runtime.managed, runtime.original);
-				}
+				rmSync(runtime.plugin, { force: true });
 			}
 		}
 	}
@@ -234,27 +232,28 @@ async function observerScriptAsync(runtime: Runtime, withMarker: boolean): Promi
 			},
 			signal: AbortSignal.timeout(15_000),
 		});
-		marker = readFileSync(generated.runScript, "utf8");
+		// The installed managed plugin cannot consume this test plugin's marker.
+		marker = rewriteSyncMarkerNamespace(
+			readFileSync(generated.runScript, "utf8"),
+			runtime.token,
+		);
 	}
 
 	const script = path.join(directory, "observe.lua");
 	const observer = readFileSync(path.join(SYNC_FIXTURES, "studio/sync-observer.lua"), "utf8");
 	writeFileSync(
 		script,
-		`${observer.replace("__FORGE_OBSERVER_URL__", () => {
-			return JSON.stringify(collector.url);
-		})}\n${marker}`,
+		`game:SetAttribute("__ForgeSyncTestLaunch", ${JSON.stringify(runtime.token)})\n${observer.replace(
+			"__FORGE_OBSERVER_URL__",
+			() => JSON.stringify(collector.url),
+		)}\n${marker}`,
 	);
 	return script;
 }
 
 async function launchAsync(runtime: Runtime, withMarker: boolean): Promise<void> {
-	const {
-		context,
-		context: { seams },
-		directory,
-		executable,
-	} = runtime;
+	const { context, directory, executable } = runtime;
+	const { seams } = context;
 	const model = prepareSyncModel(seams.native(), directory, runtime);
 	const place = path.join(directory, "forge-sync.rbxl");
 	copyFileSync(path.join(SYNC_FIXTURES, "studio/saved.rbxl"), place);
@@ -274,8 +273,8 @@ async function launchAsync(runtime: Runtime, withMarker: boolean): Promise<void>
 		"Sync test requires a direct Studio launch",
 	);
 	const studio = seams.native().pinProcess(launched.studio.pid) ?? undefined;
-	runtime.studio = studio;
 	assert(studio !== undefined && studio.startTime === launched.studio.startTime);
+	runtime.studio = studio;
 }
 
 async function waitForValueAsync({ observations }: Runtime, value: string): Promise<Observation> {
@@ -300,21 +299,26 @@ async function stopRojoAsync(runtime: Runtime): Promise<void> {
 }
 
 function controls(runtime: Runtime): RealStudioSync {
-	const { observations, projectName } = runtime;
+	const { observations, projectName, studio } = runtime;
+	assert(studio !== undefined);
 	return {
-		isBlocked: () => runtime.studio?.isBlocked() ?? true,
+		cleanupAsync: async () => cleanupAsync(runtime),
+		isBlocked: () => studio.isBlocked(),
 		observeForAsync: async (milliseconds) => {
 			const start = observations.length;
 			await sleep(milliseconds);
-			assert(runtime.studio?.isAlive() === true);
+			assert(studio.isAlive());
 			return observations.slice(start);
 		},
 		projectName,
 		restartRojoAsync: async (otherName) => restartRojoAsync(runtime, otherName),
+		sampleCursor: () => observations.length - 1,
+		samplesSince: (cursor) => observations.slice(cursor),
 		get sessionId() {
 			return runtime.sessionId;
 		},
 		stopRojoAsync: async () => stopRojoAsync(runtime),
+		studio,
 		waitForReadyAsync: async () => runtime.readiness?.ready ?? false,
 		waitForValueAsync: async (value) => waitForValueAsync(runtime, value),
 		writeProbe: (value) => {
