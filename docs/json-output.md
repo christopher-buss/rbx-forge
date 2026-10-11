@@ -44,8 +44,14 @@ The fields of the session commands. The agent workflow is in the
   session. On a running session, `up` starts the parts it asks for that are
   `off` or `failed`, and never touches a part that runs. `data.added` names the
   parts this `up` started (`[]` when none). It returns when no part is
-  `starting`: the first compile is done, or the part failed (see
-  [Parts](#parts)). A project with no compiler gets a session with no part.
+  `starting`: the first compile is done, or the part's service exited (see
+  [Parts](#parts)). A project with no compiler gets a session with no part. A
+  first build that does not end in 300 s fails the compiler and `up` with
+  `compile_timeout`; a Rojo that does not listen in time fails `up` with
+  `service_failed`. When the session answers but a part is still starting after
+  300 s, `up` fails with `compile_timeout` (the compiler), `service_failed`
+  (Rojo), or `studio_launch_failed` (Studio); else with
+  `supervisor_unresponsive`.
 - `forge status --json --wait`: `data.services.compiler.lastBuild` has `errors`
   and `diagnostics` (`file`, `line`, `column`, `code`, `message`, `severity`),
   and `startedAt` and `at` (when the compile started and ended). `--wait` makes
@@ -81,12 +87,14 @@ Exit 6 means processes still live or the supervisor does not answer: retry with
 has:
 
 - `status`: `starting`, `ready`, `off` (not run, or stopped on request), or
-  `failed` (its service exited by itself).
+  `failed` (its service exited by itself, or forge stopped it: Rojo that does
+  not listen in time, a compiler whose first build does not end in 300 s).
 - `owner`: `start` (the `forge start` terminal that owns it) or `null`. A
   `start` owns the parts it started and those it took when it joined; its end
   stops the first and gives back the second (`owner` becomes `null`).
-- With `failed` only: `exitCode` (`null` when a signal ended it) and
-  `outputTail`, the last lines of its output. `forge logs <part>` has all of it.
+- With `failed` only: `exitCode` (`null` when a signal ended it), `failure` (why
+  forge stopped it; absent when it exited by itself), and `outputTail`, the last
+  lines of its output. `forge logs <part>` has all of it.
 
 A service's exit stops only its part: the session and its other parts keep
 running. A second `forge up` (or `forge restart`) starts a `failed` compiler
@@ -234,9 +242,12 @@ opens once the compiler's first build is done; Rojo keeps its port. Failures:
 nothing started again; Studio's close failure, such as `identity_mismatch`, with
 no part stopped or started; an add failure, such as `compiler_missing` or
 `port_in_use`, whose message says when Studio did not open again (such as
-`compile_timeout` when the compiler's first build does not end in time). A part
-that stays starting fails it with `compile_timeout` (the compiler) or
-`service_failed` (Rojo).
+`compile_timeout` when the compiler's first build does not end in 300 s). Once
+the session answers, a part still starting after 300 s fails it with
+`compile_timeout` (the compiler), `service_failed` (Rojo), or
+`studio_launch_failed` (Studio); a session still starting with no such part
+fails it with `supervisor_unresponsive`; a session that stops meanwhile fails it
+with `not_running`.
 
 ## The save result
 

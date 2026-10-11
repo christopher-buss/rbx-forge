@@ -120,7 +120,12 @@ with no compiler (Luau with no `luau.watch.command`) gets a session with no
 part. `up` takes `--syncback`, `--force`, and `--no-compiler` (start no part).
 On a running session, `up` starts the parts it asks for that are missing or
 failed, such as a compiler that crashed, or the Rojo of an attached Studio, and
-names them in `data.added`; it never stops or restarts a part that runs.
+names them in `data.added`; it never stops or restarts a part that runs. A first
+build that does not end in 300 s fails the compiler and `up` with
+`compile_timeout` (read `forge logs compiler`); the next `up` or `restart`
+starts a new compiler. A part still starting after 300 s fails `up` with
+`compile_timeout` (the compiler), `service_failed` (Rojo), or
+`studio_launch_failed` (Studio).
 
 `up --studio` also attaches Studio and Rojo, once the compiler's build is fresh:
 it uses the Studio that has the place open (verified as `stop` does), or builds
