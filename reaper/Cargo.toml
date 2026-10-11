@@ -27,8 +27,8 @@ path = "src/bin/studio-fixture.rs"
 test = false
 
 [dependencies]
-napi = { version = "3.13.0", default-features = false, features = [ "napi6" ] }
-napi-derive = "3.6.9"
+napi = { version = "=3.13.0", default-features = false, features = [ "napi6" ] }
+napi-derive = "=3.6.9"
 rbx_binary = "3.0.1"
 rbx_dom_weak = "4.2.0"
 serde = { version = "1.0.229", features = [ "derive" ] }
@@ -67,7 +67,7 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [build-dependencies]
-napi-build = "2.5.0"
+napi-build = "=2.5.0"
 
 [profile.release]
 codegen-units = 1
