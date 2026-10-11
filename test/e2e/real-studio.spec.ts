@@ -34,6 +34,8 @@ import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, expect, it, onTestFinished } from "vitest";
 
+import type { PinnedProcess } from "../../src/native/addon.ts";
+import { readVariable } from "../../src/process/environment.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import { SCRIPTS, VERSION } from "../../src/studio/rojo-plugin.ts";
 import { parseOpened } from "../helpers/output.ts";
@@ -62,7 +64,7 @@ const CLOSED_END: unknown = expect.toBeOneOf(["exited", "lock_released"]);
  * Fail before production `up` could install or patch the shared managed model.
  */
 function requireCurrentManagedPlugin(): void {
-	const home = env["RBX_FORGE_TEST_REAL_USERPROFILE"];
+	const home = readVariable(env, "RBX_FORGE_TEST_REAL_USERPROFILE", process.platform);
 	assert(home !== undefined);
 	const managed = path.join(home, "AppData/Local/Roblox/Plugins/RojoManagedPlugin.rbxm");
 	assert(
@@ -197,10 +199,13 @@ async function upStudioAsync(
  *
  * @param fixture - The project.
  * @param sessionId - The session that opens Studio.
- * @returns The PID the session recorded, and the PID the lock file names.
+ * @returns The PID the session recorded, the lock PID and its verified pin.
  * @rejects When Studio does not open the place in time.
  */
-async function waitForLoadedAsync(fixture: Fixture, sessionId: string): Promise<[unknown, number]> {
+async function waitForLoadedAsync(
+	fixture: Fixture,
+	sessionId: string,
+): Promise<[unknown, number, PinnedProcess]> {
 	const state = path.join(fixture.project, ".forge", "sessions", sessionId, "state.json");
 	const deadline = Date.now() + OPEN_MS;
 	while (!existsSync(state) || !readFileSync(state, "utf8").includes('"status":"open"')) {
@@ -232,7 +237,7 @@ async function waitForLoadedAsync(fixture: Fixture, sessionId: string): Promise<
 		await sleep(100);
 	}
 
-	return [status.services.studio.pid, lockPid];
+	return [status.services.studio.pid, lockPid, pinned];
 }
 
 /**
@@ -446,9 +451,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			const fixture = await makeRealProjectAsync("saved.rbxl");
 			const started = Date.now();
 			const sessionId = await upStudioAsync(fixture);
-			const [recorded, lockPid] = await waitForLoadedAsync(fixture, sessionId);
-			const pinned = pinNow(lockPid);
-			assert(pinned !== undefined);
+			const [recorded, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 			const opened = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables());
 			note({ closeMs: Date.now() - opened, openMs: opened - started, test: "down" });
@@ -467,9 +470,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 		const fixture = await makeRealProjectAsync("saved.rbxl");
 		const sessionId = await upStudioAsync(fixture);
-		const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
-		const pinned = pinNow(lockPid);
-		assert(pinned !== undefined);
+		const [, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 		const loaded = Date.now();
 		const stop = await runForgeAsync(fixture, ["stop", "--json"], realVariables());
 		note({ closeMs: Date.now() - loaded, test: "stop" });
@@ -491,9 +492,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 			const fixture = await makeRealProjectAsync("unsaved.rbxl");
 			const sessionId = await upStudioAsync(fixture);
-			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
-			const pinned = pinNow(lockPid);
-			assert(pinned !== undefined);
+			const [, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 			const loaded = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables());
 			note({ closeMs: Date.now() - loaded, test: "dialog" });

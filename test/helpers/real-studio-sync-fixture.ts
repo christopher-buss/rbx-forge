@@ -23,6 +23,7 @@ import { createRecordingReporter } from "./seams.ts";
 export interface Observation {
 	name: string;
 	connection: string;
+	loadCount: number;
 	sequence: number;
 	value: string;
 }
@@ -121,6 +122,16 @@ export function genuineRojo(): string {
 }
 
 /**
+ * Give the model and its launch marker the same private namespace.
+ * @param source - Shipped plugin or generated marker source.
+ * @param token - The owned launch token.
+ * @returns The source with isolated marker names.
+ */
+export function rewriteSyncMarkerNamespace(source: string, token: string): string {
+	return source.replaceAll("ROJO_OPEN_", () => `FORGE_SYNC_TEST_${token}_`);
+}
+
+/**
  * Preserve shipped synchronization logic with a private test marker namespace.
  *
  * @param native - The real model reader/writer.
@@ -145,14 +156,10 @@ export function prepareSyncModel(
 		bootstrapPath,
 	]);
 	assert(settings !== undefined && bootstrap !== undefined);
-	const markerName = `FORGE_SYNC_TEST_${identity.token}_`;
 	const replacements = SCRIPTS.map(({ name, hash, source }) => {
 		return {
 			path: ["Rojo", "Plugin", name],
-			source: `-- rbx-forge patch ${VERSION} stock ${hash}\n${source.replaceAll(
-				"ROJO_OPEN_",
-				() => markerName,
-			)}`,
+			source: `-- rbx-forge patch ${VERSION} stock ${hash}\n${rewriteSyncMarkerNamespace(source, identity.token)}`,
 		};
 	});
 	native.writeModelScriptSources(model, [
@@ -184,6 +191,7 @@ export async function syncCollectorAsync(
 		observations.push({
 			name: url.searchParams.get("name") ?? "",
 			connection: url.searchParams.get("connection") ?? "",
+			loadCount: Number(url.searchParams.get("loadCount")),
 			sequence: Number(url.searchParams.get("sequence")),
 			value: url.searchParams.get("value") ?? "",
 		});
@@ -236,5 +244,7 @@ while game:GetAttribute("__ForgeSyncTestLaunch") ~= ${JSON.stringify(token)} do
 		return
 	end
 	task.wait(0.1)
-end`;
+end
+local counter = ${JSON.stringify(`__ForgeSyncTestLoads_${token}`)}
+game:SetAttribute(counter, (game:GetAttribute(counter) or 0) + 1)`;
 }

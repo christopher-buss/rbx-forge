@@ -48,21 +48,32 @@ describe.skipIf(!IS_ENABLED)("real Studio Rojo synchronization", () => {
 
 			const spectator = await makeRealStudioSyncAsync(true);
 			const connected = await spectator.waitForValueAsync("initial");
+
+			expect(connected.loadCount).toBe(1);
+
 			const spectatorPin = spectator.studio;
+			const cursor = spectator.sampleCursor();
 			const owned = await makeRealStudioSyncAsync(true);
 			await owned.waitForValueAsync("initial");
 			owned.writeProbe("owned-edit");
 			await owned.waitForValueAsync("owned-edit");
 			await owned.cleanupAsync();
-			const observations = await spectator.observeForAsync(3000);
+			await spectator.observeForAsync(3000);
+			const observations = spectator.samplesSince(cursor);
 
 			expect(spectatorPin.isAlive()).toBeTrue();
 			expect(spectator.studio).toBe(spectatorPin);
 			expect(observations.length).toBeGreaterThan(1);
-			expect(
-				observations.every(({ connection }) => connection === connected.connection),
-			).toBeTrue();
-			expect(observations.every(({ value }) => value === "initial")).toBeTrue();
+			expect(observations.map(({ sequence: _sequence, ...sample }) => sample)).toStrictEqual(
+				Array.from({ length: observations.length }, () => {
+					return {
+						name: spectator.projectName,
+						connection: connected.connection,
+						loadCount: connected.loadCount,
+						value: "initial",
+					};
+				}),
+			);
 		},
 	);
 

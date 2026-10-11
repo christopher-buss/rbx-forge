@@ -22,6 +22,7 @@ import {
 	genuineRojo,
 	installSyncModelAsync,
 	prepareSyncModel,
+	rewriteSyncMarkerNamespace,
 	spawnSyncRojo,
 	SYNC_FIXTURES,
 	syncCollectorAsync,
@@ -35,6 +36,8 @@ export interface RealStudioSync {
 	observeForAsync: (milliseconds: number) => Promise<Array<Observation>>;
 	projectName: string;
 	restartRojoAsync: (otherName?: string) => Promise<void>;
+	sampleCursor: () => number;
+	samplesSince: (cursor: number) => Array<Observation>;
 	sessionId: string;
 	stopRojoAsync: () => Promise<void>;
 	studio: PinnedProcess;
@@ -83,15 +86,14 @@ async function runtimeAsync(): Promise<Runtime> {
 	const rojo = genuineRojo();
 	const directory = makeTemporaryDirectory();
 	const context = createSyncContext(directory);
-	const { seams } = context;
-	const executable = findStudioExecutable(seams, { env: context.env });
+	const executable = findStudioExecutable(context.seams, { env: context.env });
 	assert(executable !== undefined, "Install and log in to Studio before running sync tests");
 	const home = readVariable(context.env, "USERPROFILE", "win32");
 	assert(home !== undefined);
 	const token = randomBytes(32).toString("hex");
 	const plugin = path.join(home, "AppData/Local/Roblox/Plugins", `ForgeSyncTest-${token}.rbxm`);
 	const observations: Array<Observation> = [];
-	const port = await seams.network.freePortAsync();
+	const port = await context.seams.network.freePortAsync();
 	return {
 		child: undefined,
 		collector: await syncCollectorAsync(observations),
@@ -231,9 +233,9 @@ async function observerScriptAsync(runtime: Runtime, withMarker: boolean): Promi
 			signal: AbortSignal.timeout(15_000),
 		});
 		// The installed managed plugin cannot consume this test plugin's marker.
-		marker = readFileSync(generated.runScript, "utf8").replaceAll(
-			"ROJO_OPEN_",
-			() => `FORGE_SYNC_TEST_${runtime.token}_`,
+		marker = rewriteSyncMarkerNamespace(
+			readFileSync(generated.runScript, "utf8"),
+			runtime.token,
 		);
 	}
 
@@ -250,12 +252,8 @@ async function observerScriptAsync(runtime: Runtime, withMarker: boolean): Promi
 }
 
 async function launchAsync(runtime: Runtime, withMarker: boolean): Promise<void> {
-	const {
-		context,
-		context: { seams },
-		directory,
-		executable,
-	} = runtime;
+	const { context, directory, executable } = runtime;
+	const { seams } = context;
 	const model = prepareSyncModel(seams.native(), directory, runtime);
 	const place = path.join(directory, "forge-sync.rbxl");
 	copyFileSync(path.join(SYNC_FIXTURES, "studio/saved.rbxl"), place);
@@ -314,6 +312,8 @@ function controls(runtime: Runtime): RealStudioSync {
 		},
 		projectName,
 		restartRojoAsync: async (otherName) => restartRojoAsync(runtime, otherName),
+		sampleCursor: () => observations.length - 1,
+		samplesSince: (cursor) => observations.slice(cursor),
 		get sessionId() {
 			return runtime.sessionId;
 		},

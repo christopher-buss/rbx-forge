@@ -27,8 +27,8 @@ describe("real Studio sync plugin isolation", () => {
 		expect(bootstrap).toStartWith(
 			"-- Test plugin: only the matching RunScript launch may load Rojo.\n",
 		);
-		expect(bootstrap).toContain(
-			'game:GetAttribute("__ForgeSyncTestLaunch") ~= "owned-launch-token"',
+		expect(bootstrap).toMatch(
+			/while game:GetAttribute\("__ForgeSyncTestLaunch"\) ~= "owned-launch-token" do\n\tif os.clock\(\) >= deadline then\n\t\treturn\n\tend\n\ttask.wait\(0.1\)\nend\nlocal counter = "__ForgeSyncTestLoads_owned-launch-token"\ngame:SetAttribute\(counter, \(game:GetAttribute\(counter\) or 0\) \+ 1\)\n[\s\S]*require\(/,
 		);
 
 		expect(
