@@ -1,13 +1,20 @@
+import assert from "node:assert/strict";
 import { describe, expect, it, vi } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import { createCommandContext, createTestSeams } from "../../test/helpers/seams.ts";
+import { ForgeError } from "../errors.ts";
 import type { BuildWatch } from "./build-watch.ts";
-import { FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
+import { createBuildWatch, FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
 import type { AdderSetup } from "./compiler-part.ts";
 import { createPartAdder, startCompilerAsync } from "./compiler-part.ts";
 import type { PartAdder } from "./part-requests.ts";
+import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
+
+function makeScope() {
+	return { track: vi.fn<SessionScope["track"]>() };
+}
 
 const COMPILER = {
 	parsesDiagnostics: true,
@@ -24,7 +31,8 @@ function makeAdder(started: Awaited<ReturnType<ServiceParts["startAsync"]>>) {
 		resolveCompiler: () => COMPILER,
 	};
 	const parts = { isRunning: () => false, startAsync, stop: vi.fn<ServiceParts["stop"]>() };
-	return { add: createPartAdder(setup, parts, addStudio), addStudio, restart, startAsync };
+	const add = createPartAdder(setup, makeScope(), parts, addStudio);
+	return { add, addStudio, restart, startAsync };
 }
 
 describe(createPartAdder, () => {
@@ -76,31 +84,100 @@ function startStuck() {
 		},
 		context: createCommandContext({ seams: createTestSeams({ clock: manual.clock }) }),
 	};
-	return { manual, read, setup, startAsync, stop };
+	return { manual, read, scope: makeScope(), setup, startAsync, stop };
+}
+
+const FIRST_BUILD_LATE = `The compiler's first build did not end within ${FRESH_BUILD_TIMEOUT_MS / 1000} s`;
+
+/**
+ * Start a compiler that never builds, with a real build watch, and a wait
+ * for its build 1 ms before or after it.
+ *
+ * @param isWaitFirst - Whether the wait begins first.
+ * @returns How the wait ended.
+ */
+async function waitForStuckAsync(isWaitFirst: boolean): Promise<unknown> {
+	const manual = createManualClock();
+	const context = createCommandContext({ seams: createTestSeams({ clock: manual.clock }) });
+	const builds = createBuildWatch({
+		clock: manual.clock,
+		edits: () => {},
+		recorder: { building: vi.fn<() => void>(), compiled: vi.fn<() => void>() },
+		tracks: true,
+	});
+	const startAsync = vi.fn<ServiceParts["startAsync"]>().mockResolvedValue({
+		stopped: Promise.resolve(),
+	});
+	const stop = vi.fn<ServiceParts["stop"]>(() => {
+		startAsync.mock.calls[0]![1].onStopped!();
+	});
+	let outcome: Promise<unknown> = Promise.resolve();
+	const steps = [
+		async () => {
+			const parts = { startAsync, stop };
+			await startCompilerAsync({ builds, context }, makeScope(), parts, COMPILER);
+		},
+		async () => {
+			outcome = builds.waitAsync(FRESH_BUILD_TIMEOUT_MS).catch((err: unknown) => err);
+		},
+	];
+	const [first, second] = isWaitFirst ? steps.toReversed() : steps;
+	await first!();
+	await vi.waitUntil(() => manual.pending() === 1);
+	manual.advance(1);
+	await second!();
+	await vi.waitUntil(() => manual.pending() === 2);
+	manual.advance(FRESH_BUILD_TIMEOUT_MS - 1);
+	await vi.waitUntil(() => manual.pending() < 2);
+	manual.advance(1);
+	return outcome;
 }
 
 describe(startCompilerAsync, () => {
 	it("should fail a compiler whose first build does not end in time", async () => {
 		expect.assertions(1);
 
-		const { manual, setup, startAsync, stop } = startStuck();
-		await startCompilerAsync(setup, { startAsync, stop }, COMPILER);
+		const { manual, scope, setup, startAsync, stop } = startStuck();
+		await startCompilerAsync(setup, scope, { startAsync, stop }, COMPILER);
 		manual.advance(FRESH_BUILD_TIMEOUT_MS);
 		await vi.waitUntil(() => stop.mock.calls.length > 0);
 
-		expect(stop).toHaveBeenCalledExactlyOnceWith(
-			"compiler",
-			"The compiler's first build did not end within 300 s",
-		);
+		expect(stop).toHaveBeenCalledExactlyOnceWith("compiler", FIRST_BUILD_LATE);
 	});
+
+	it("should track the wait for its first build", async () => {
+		expect.assertions(1);
+
+		const { scope, setup, startAsync, stop } = startStuck();
+		await startCompilerAsync(setup, scope, { startAsync, stop }, COMPILER);
+
+		expect(scope.track).toHaveBeenCalledOnce();
+	});
+
+	it.for([
+		["the compiler's bound ends first", false],
+		["the wait's bound ends first", true],
+	] as const)(
+		"should fail a wait for its build with compile_timeout when %s",
+		async ([, isWaitFirst]) => {
+			expect.assertions(2);
+
+			const error = await waitForStuckAsync(isWaitFirst);
+
+			assert(error instanceof ForgeError);
+
+			expect(error.code).toBe("compile_timeout");
+			expect(error.hint).toContain("forge logs compiler");
+		},
+	);
 
 	it("should keep a compiler whose first build ended", async () => {
 		expect.assertions(1);
 
-		const { manual, read, setup, startAsync, stop } = startStuck();
+		const { manual, read, scope, setup, startAsync, stop } = startStuck();
 		const at = "2026-01-01T00:00:00.000Z";
 		read.mockReturnValue({ at, diagnostics: [], errors: 0, startedAt: at });
-		await startCompilerAsync(setup, { startAsync, stop }, COMPILER);
+		await startCompilerAsync(setup, scope, { startAsync, stop }, COMPILER);
 		startAsync.mock.calls[0]![1].onLine!("built");
 		await vi.waitUntil(() => manual.pending() === 0);
 		manual.advance(FRESH_BUILD_TIMEOUT_MS);

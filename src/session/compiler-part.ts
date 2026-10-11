@@ -5,6 +5,7 @@ import { settlesWithinAsync } from "../seams/clock.ts";
 import type { BuildWatch } from "./build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
 import type { PartAdder } from "./part-requests.ts";
+import type { SessionScope } from "./run-session.ts";
 import type {
 	RunningPart,
 	ServiceHooks,
@@ -47,6 +48,7 @@ export interface AdderSetup extends CompilerSetup {
  * is `ready` once it runs.
  *
  * @param setup - The builds and reporter.
+ * @param scope - Tracks the wait for its first build.
  * @param parts - Starts the part.
  * @param compiler - The resolved compiler.
  * @returns Its running part, or `undefined` when the session is ending.
@@ -54,6 +56,7 @@ export interface AdderSetup extends CompilerSetup {
  */
 export async function startCompilerAsync(
 	setup: CompilerSetup,
+	scope: Pick<SessionScope, "track">,
 	parts: Pick<ServiceParts, "startAsync" | "stop">,
 	compiler: CompilerService,
 ): Promise<RunningPart | undefined> {
@@ -68,7 +71,7 @@ export async function startCompilerAsync(
 		initial: "starting",
 	});
 	if (part !== undefined) {
-		void failSlowFirstBuildAsync(setup, parts, firstBuild.promise);
+		scope.track(failSlowFirstBuildAsync(setup, parts, firstBuild.promise));
 	}
 
 	return part;
@@ -80,12 +83,14 @@ export async function startCompilerAsync(
  * its Rojo, through `addStudio`. A part that runs is never touched.
  *
  * @param setup - The builds, reporter, and compiler resolution.
+ * @param scope - Tracks each compiler's wait for its first build.
  * @param parts - The session's service parts.
  * @param addStudio - Adds Studio and Rojo, once the compiler runs.
  * @returns The adder the control channel calls.
  */
 export function createPartAdder(
 	setup: AdderSetup,
+	scope: Pick<SessionScope, "track">,
 	parts: Pick<ServiceParts, "isRunning" | "startAsync" | "stop">,
 	addStudio: PartAdder,
 ): PartAdder {
@@ -96,7 +101,9 @@ export function createPartAdder(
 				? setup.resolveCompiler()
 				: undefined;
 		const part =
-			compiler === undefined ? undefined : await startCompilerAsync(setup, parts, compiler);
+			compiler === undefined
+				? undefined
+				: await startCompilerAsync(setup, scope, parts, compiler);
 		if (part !== undefined) {
 			added.push("compiler");
 		}
@@ -106,9 +113,10 @@ export function createPartAdder(
 }
 
 /**
- * Stop the compiler as `failed` when its first build does not end in time.
+ * Stop the compiler as `failed` when its first build does not end in time;
+ * every wait for a build then fails with `compile_timeout`.
  *
- * @param setup - The clock.
+ * @param setup - The clock and builds.
  * @param parts - Stops the part.
  * @param firstBuild - Resolves on its first build, or once it stopped.
  */
@@ -122,10 +130,14 @@ async function failSlowFirstBuildAsync(
 		return;
 	}
 
-	parts.stop(
-		"compiler",
-		`The compiler's first build did not end within ${FRESH_BUILD_TIMEOUT_MS / 1000} s`,
+	const why = `The compiler's first build did not end within ${FRESH_BUILD_TIMEOUT_MS / 1000} s`;
+	// The first failure wins: the stop's own failure does not replace it.
+	setup.builds.fail(
+		new ForgeError("compile_timeout", `${why}.`, {
+			hint: 'Read its output with "forge logs compiler".',
+		}),
 	);
+	parts.stop("compiler", why);
 }
 
 /**
