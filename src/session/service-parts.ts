@@ -211,7 +211,11 @@ async function followPartAsync(
 	if (isRequested) {
 		setup.status.service(id, "off");
 	} else {
-		setup.status.serviceFailed(id, { exitCode: report.exitCode, outputTail: run.tail });
+		setup.status.serviceFailed(id, {
+			exitCode: report.exitCode,
+			...(stopping?.failure === undefined ? {} : { failure: stopping.failure }),
+			outputTail: run.tail,
+		});
 		const why = stopping?.failure ?? `${id} exited (${describeExit(report)})`;
 		setup.context.reporter.emit({
 			message: `${why}; the session goes on without it. Its output is in ${logFilePath(setup.context.cwd, id)}.`,

@@ -14,6 +14,7 @@ import {
 import { JOIN_SILENCE_MS } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import type { Clock } from "../seams/clock.ts";
+import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { SessionStatus } from "../session/status.ts";
 import type { SessionRequest, SupervisorMessage } from "../supervisor/channel.ts";
 import { encodeMessage } from "../supervisor/channel.ts";
@@ -24,6 +25,7 @@ import { runUpAsync, UP_FLAGS, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
 const INPUT: CommandInput = { config: {}, flags: {} };
 const LAUNCH_DIRECTORY = path.join(PROJECT, ".forge", "launch");
 const PLACE = path.join(PROJECT, "game.rbxl");
+const FIRST_BUILD_LATE = `The compiler's first build did not end within ${FRESH_BUILD_TIMEOUT_MS / 1000} s`;
 
 /** What each `sleep` of `up` runs, in order; later sleeps run nothing. */
 type Tick = () => Promise<void> | void;
@@ -180,6 +182,28 @@ describe(runUpAsync, () => {
 		});
 	});
 
+	it("should fail with compile_timeout when its own session's compiler times out", async () => {
+		expect.assertions(1);
+
+		const { run } = makeUp((_request, self) => {
+			self.ticks.push(async () => {
+				const status = compilerStatus("starting", { phase: "starting", pid: 700 });
+				const session = await serveFakeSessionAsync(self.memory, self.ipc, status);
+				self.ticks.push(() => {
+					session.status = compilerStatus("failed", { pid: 700 });
+					session.status.services.compiler.failure = FIRST_BUILD_LATE;
+				});
+			});
+			return 700;
+		});
+
+		await expect(run()).rejects.toMatchObject({
+			code: "compile_timeout",
+			hint: 'Read its output with "forge logs compiler".',
+			message: `${FIRST_BUILD_LATE}.`,
+		});
+	});
+
 	it("should relay an event the supervisor wrote in two parts once", async () => {
 		expect.assertions(1);
 
@@ -258,6 +282,46 @@ describe(runUpAsync, () => {
 		expect(asked).toStrictEqual([{ defaultDesktop: "hidden", parts: ["compiler"] }]);
 		expect(up.detachedSupervisor).not.toHaveBeenCalled();
 		expect(up.now()).toBe(UP_POLL_MS);
+	});
+
+	it("should fail with compile_timeout when the compiler it joined times out", async () => {
+		expect.assertions(1);
+
+		const { run, up } = makeUp();
+		const session = await serveFakeSessionAsync(
+			up.memory,
+			up.ipc,
+			compilerStatus("starting", { phase: "starting" }),
+		);
+		session.addParts = () => ({ added: [] });
+		up.ticks.push(() => {
+			session.status = compilerStatus("failed");
+			session.status.services.compiler.failure = FIRST_BUILD_LATE;
+		});
+
+		await expect(run()).rejects.toMatchObject({
+			code: "compile_timeout",
+			hint: 'Read its output with "forge logs compiler".',
+		});
+	});
+
+	it("should return when the compiler it waited for exits by itself", async () => {
+		expect.assertions(1);
+
+		const { run, up } = makeUp();
+		const session = await serveFakeSessionAsync(
+			up.memory,
+			up.ipc,
+			compilerStatus("starting", { phase: "starting" }),
+		);
+		session.addParts = () => ({ added: [] });
+		up.ticks.push(() => {
+			session.status = compilerStatus("failed");
+		});
+
+		await expect(run()).resolves.toMatchObject({
+			data: { services: { compiler: { status: "failed" } } },
+		});
 	});
 
 	it("should ask a running session for no part with --no-compiler", async () => {
@@ -650,6 +714,18 @@ describe(runUpAsync, () => {
 			code: "service_failed",
 			hint: 'Read its output with "forge logs rojo".',
 			message: `Rojo was not ready within ${UP_TIMEOUT_MS / 1000} s.`,
+		});
+	});
+
+	it("should fail with supervisor_unresponsive when a session that answers starts no part", async () => {
+		expect.assertions(1);
+
+		const { run, up } = makeUp();
+		await serveFakeSessionAsync(up.memory, up.ipc, makeStatus({ phase: "starting" }));
+
+		await expect(run()).rejects.toMatchObject({
+			code: "supervisor_unresponsive",
+			message: `The session was not ready within ${UP_TIMEOUT_MS / 1000} s.`,
 		});
 	});
 

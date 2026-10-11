@@ -297,6 +297,19 @@ describe(runRestartAsync, () => {
 		expect(run.now()).toBe(3 * UP_POLL_MS);
 	});
 
+	it("should fail with supervisor_unresponsive when the session starts no part in time", async () => {
+		expect.assertions(1);
+
+		const run = makeRestart();
+		await serveAsync(run, EVERY_PART, everyPart({ phase: "starting" }));
+
+		await expect(restartAsync(run)).rejects.toMatchObject({
+			code: "supervisor_unresponsive",
+			hint: 'Check "forge status" and "forge logs compiler".',
+			message: `The session was not ready within ${UP_TIMEOUT_MS / 1000} s.`,
+		});
+	});
+
 	it("should fail with compile_timeout when the compiler is not ready in time", async () => {
 		expect.assertions(2);
 

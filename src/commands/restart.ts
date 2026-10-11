@@ -18,7 +18,7 @@ import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import { failureError } from "../supervisor/channel.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
-import { notReadyError } from "./not-ready.ts";
+import { notReadyError, notReadyMessage } from "./not-ready.ts";
 import { describeParts, UP_POLL_MS, UP_TIMEOUT_MS } from "./up.ts";
 
 export const RESTART_FLAGS: ReadonlyArray<FlagDefinition> = [
@@ -160,7 +160,16 @@ async function waitReadyAsync(
 		}
 
 		if (seams.clock.now() >= deadline) {
-			throw notReadyError(status.services, UP_TIMEOUT_MS);
+			throw (
+				notReadyError(status.services, UP_TIMEOUT_MS) ??
+				new ForgeError(
+					"supervisor_unresponsive",
+					notReadyMessage("The session", UP_TIMEOUT_MS),
+					{
+						hint: 'Check "forge status" and "forge logs compiler".',
+					},
+				)
+			);
 		}
 
 		await seams.clock.sleep(UP_POLL_MS);

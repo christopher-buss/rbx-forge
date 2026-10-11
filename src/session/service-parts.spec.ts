@@ -112,6 +112,21 @@ describe(createServiceParts, () => {
 		);
 	});
 
+	it("should mark a part stopped with a failure failed, and record why", async () => {
+		expect.assertions(1);
+
+		const run = await makePartsAsync();
+		const rojo = await run.parts.startAsync(ROJO, { initial: "starting" });
+		run.parts.stop("rojo", "rojo did not listen");
+		run.fake.exit("rojo", EXITED);
+		await rojo!.stopped;
+
+		expect(run.status.snapshot().services.rojo).toMatchObject({
+			failure: "rojo did not listen",
+			status: "failed",
+		});
+	});
+
 	it("should have the session track each part until its status tells how it ended", async () => {
 		expect.assertions(2);
 
