@@ -57,8 +57,8 @@ and `hint`. Branch on `error.code` and the exit code.
 
 ## Studio
 
-Studio is for verification and debugging; the loop above runs without it. Close
-each Studio you open, once you are done with it.
+Studio is for verification and debugging; the loop above runs without it. Open
+Studio through forge, and close each Studio you open once you are done with it.
 
 - **Look once**: after a fresh build, `forge open --desktop hidden --json`
   builds a **snapshot** of the place (`data.place`) and opens it outside the
@@ -72,6 +72,11 @@ each Studio you open, once you are done with it.
   the Rojo plugin. When you know at the start that you will work in Studio, use
   this instead of a snapshot. `forge stop --json` closes the Studio and its
   Rojo, and every snapshot Studio; the compiler runs on.
+- **Another place**: forge opens only the project place. For a scratch place,
+  save it as a file before you open it in Studio, and close it with
+  `forge stop --place <file> --json`; `data.stopped: true` confirms it closed.
+  `down` and the idle timeout leave that Studio open, and a place with no file
+  has no lock file for `stop` to find.
 - **The user's Studio**: when `up --studio` reports that a Studio already has
   the place open, the session uses that Studio. It is the user's: ask the user
   before you close it, and `forge sync` after their save first.
