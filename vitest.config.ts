@@ -3,10 +3,10 @@ import { defaultExclude, defineConfig } from "vitest/config";
 
 const setupFiles = ["./test/setup/jest-extended.ts"];
 
-/** Swaps the global managed plugin; no Studio, real or stand-in, may run. */
+/** Opt-in real engine synchronization with an owned, gated test plugin. */
 const REAL_STUDIO_SPEC = "test/integration/real-studio-sync.spec.ts";
 
-/** Kills every new `RobloxStudioBeta.exe`, stand-ins included. */
+/** Opt-in real Studio lifecycle tests with pinned process ownership. */
 const REAL_STUDIO_E2E_SPEC = "test/e2e/real-studio.spec.ts";
 
 /**
@@ -74,7 +74,8 @@ export default defineConfig({
 			{
 				extends: true,
 				test: {
-					// Runs after `integration`: its specs spawn Studio stand-ins.
+					// Keep the real Studio project ordered after integration
+					// (#177).
 					name: "integration-real-studio",
 					clearMocks: true,
 					include: [REAL_STUDIO_SPEC],
@@ -103,7 +104,7 @@ export default defineConfig({
 			{
 				extends: true,
 				test: {
-					// Runs after `e2e`: its specs spawn Studio stand-ins.
+					// Keep the real Studio project ordered after e2e (#177).
 					name: "e2e-real-studio",
 					clearMocks: true,
 					hookTimeout: 30_000,

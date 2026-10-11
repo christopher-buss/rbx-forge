@@ -87,7 +87,9 @@ failure stops the release with no change.
 
 - On Windows the gate sets `RBX_FORGE_TEST_REAL_STUDIO=1`: the real-Studio
   specs, which CI never runs, run here. Install Studio and log in first; the
-  specs open Studio windows.
+  specs open Studio windows. The managed Rojo plugin must already have the
+  current forge patch; the specs leave its bytes unchanged and clean up only
+  Studios they launch. Other Studios may remain open.
 - On macOS the gate runs the rest; the real-Studio specs are Windows only.
 - Release only when CI is green for HEAD; the gate does not check it.
 

@@ -1,9 +1,9 @@
 /**
  * Windows-only opt-in: RBX_FORGE_TEST_REAL_STUDIO=1, logged-in Studio, genuine
  * Rojo 7.7.1 (optionally RBX_FORGE_TEST_REAL_ROJO, an absolute executable
- * path). Opens desktop Studio windows and temporarily replaces the managed
- * plugin, restoring its exact bytes or absence. Requires all other Studios
- * closed. Settings persistence is isolated in the temporary model; App,
+ * path). Opens desktop Studio windows with a separate test plugin gated by
+ * an unguessable RunScript launch token. The managed plugin remains untouched.
+ * Settings persistence is isolated in the temporary model; App,
  * ServeSession, reconciliation and HTTP/WebSocket transport use the shipped
  * implementation. These direct-launch integration cases observe actual
  * in-Studio tree values; CLI launch/readiness orchestration is covered
@@ -37,6 +37,32 @@ describe.skipIf(!IS_ENABLED)("real Studio Rojo synchronization", () => {
 			expect(observed.name).toBe(studio.projectName);
 			expect(edited.name).toBe(studio.projectName);
 			expect(studio.isBlocked()).toBeFalse();
+		},
+	);
+
+	it(
+		"should preserve another Studio's independent connection through launch and cleanup",
+		{ timeout: 240_000 },
+		async () => {
+			expect.assertions(5);
+
+			const spectator = await makeRealStudioSyncAsync(true);
+			const connected = await spectator.waitForValueAsync("initial");
+			const spectatorPin = spectator.studio;
+			const owned = await makeRealStudioSyncAsync(true);
+			await owned.waitForValueAsync("initial");
+			owned.writeProbe("owned-edit");
+			await owned.waitForValueAsync("owned-edit");
+			await owned.cleanupAsync();
+			const observations = await spectator.observeForAsync(3000);
+
+			expect(spectatorPin.isAlive()).toBeTrue();
+			expect(spectator.studio).toBe(spectatorPin);
+			expect(observations.length).toBeGreaterThan(1);
+			expect(
+				observations.every(({ connection }) => connection === connected.connection),
+			).toBeTrue();
+			expect(observations.every(({ value }) => value === "initial")).toBeTrue();
 		},
 	);
 

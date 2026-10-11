@@ -30,33 +30,19 @@ export interface Observation {
 /** Paths to the complete stock model, saved place and test-only Lua. */
 export const SYNC_FIXTURES = path.join(import.meta.dirname, "../fixtures");
 
-/** Fail before changing a shared managed plugin used by another Studio. */
-export function requireClosedStudios(): void {
-	const listed = spawnSync("tasklist", ["/FO", "CSV", "/NH"], {
-		encoding: "utf8",
-		windowsHide: true,
-	});
-	assert.equal(listed.status, 0);
-	assert(
-		!listed.stdout.includes('"RobloxStudioBeta.exe"'),
-		"Close existing Studios before running managed plugin sync tests",
-	);
-}
-
 /**
- * Stage the prepared model only immediately before launching the owned Studio.
+ * Install the gated test plugin without changing the managed Rojo plugin.
  *
- * @param target - The managed path and restoration flag.
+ * @param target - The owned plugin path and cleanup flag.
  * @param model - The complete temporary plugin.
  */
 export async function installSyncModelAsync(
-	target: { didInstall: boolean; managed: string },
+	target: { didInstall: boolean; plugin: string },
 	model: string,
 ): Promise<void> {
-	requireClosedStudios();
-	await mkdir(path.dirname(target.managed), { recursive: true });
+	await mkdir(path.dirname(target.plugin), { recursive: true });
 	target.didInstall = true;
-	await copyFile(model, target.managed);
+	await copyFile(model, target.plugin);
 }
 
 /**
@@ -135,7 +121,7 @@ export function genuineRojo(): string {
 }
 
 /**
- * Preserve complete stock reconciliation packages and exact current patches.
+ * Preserve shipped synchronization logic with a private test marker namespace.
  *
  * @param native - The real model reader/writer.
  * @param directory - The temporary directory, never the managed plugin path.
@@ -145,34 +131,36 @@ export function genuineRojo(): string {
 export function prepareSyncModel(
 	native: NativeAddon,
 	directory: string,
-	identity: { port: number; projectName: string },
+	identity: { port: number; projectName: string; token: string },
 ): string {
-	const model = path.join(directory, "RojoManagedPlugin.rbxm");
+	const model = path.join(directory, `ForgeSyncTest-${identity.token}.rbxm`);
 	writeFileSync(
 		model,
 		gunzipSync(readFileSync(path.join(SYNC_FIXTURES, "models/rojo-7.7.1.rbxm.gz"))),
 	);
 	const settingsPath = ["Rojo", "Plugin", "Settings"];
-	const [settings] = native.readModelScriptSources(model, [settingsPath]);
-	assert(settings !== undefined);
+	const bootstrapPath = ["Rojo", "Plugin"];
+	const [settings, bootstrap] = native.readModelScriptSources(model, [
+		settingsPath,
+		bootstrapPath,
+	]);
+	assert(settings !== undefined && bootstrap !== undefined);
+	const markerName = `FORGE_SYNC_TEST_${identity.token}_`;
 	const replacements = SCRIPTS.map(({ name, hash, source }) => {
 		return {
 			path: ["Rojo", "Plugin", name],
-			source: `-- rbx-forge patch ${VERSION} stock ${hash}\n${source}`,
+			source: `-- rbx-forge patch ${VERSION} stock ${hash}\n${source.replaceAll(
+				"ROJO_OPEN_",
+				() => markerName,
+			)}`,
 		};
 	});
-	const isolated = `${settingsProxy(identity)}\n${settings}`;
 	native.writeModelScriptSources(model, [
 		...replacements,
-		{ path: settingsPath, source: isolated },
+		{ path: settingsPath, source: `${settingsProxy(identity)}\n${settings}` },
+		{ path: bootstrapPath, source: `${launchGate(identity.token)}\n${bootstrap}` },
 	]);
-	assert.deepEqual(
-		native.readModelScriptSources(
-			model,
-			replacements.map(({ path: scriptPath }) => scriptPath),
-		),
-		replacements.map(({ source }) => source),
-	);
+
 	return model;
 }
 
@@ -238,4 +226,15 @@ function settingsProxy(identity: { port: number; projectName: string }): string 
 	return readFileSync(path.join(SYNC_FIXTURES, "studio/sync-settings.lua"), "utf8")
 		.replace("__FORGE_SYNC_PORT__", () => JSON.stringify(String(identity.port)))
 		.replace("__FORGE_SYNC_NAME__", () => JSON.stringify(identity.projectName));
+}
+
+function launchGate(token: string): string {
+	return `-- Test plugin: only the matching RunScript launch may load Rojo.
+local deadline = os.clock() + 90
+while game:GetAttribute("__ForgeSyncTestLaunch") ~= ${JSON.stringify(token)} do
+	if os.clock() >= deadline then
+		return
+	end
+	task.wait(0.1)
+end`;
 }
