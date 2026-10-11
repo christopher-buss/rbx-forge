@@ -93,6 +93,8 @@ local knip = new Step {
     check = "pnpm knip"
 }
 
+local realStudioFiles = List("src/**", "test/**", "reaper/**", "plugin/**")
+
 steps {
     ...guards
     ["lint"] = lint
@@ -121,6 +123,24 @@ hooks {
                 step_condition = "exec('git diff --name-only origin/main...HEAD -- src/') != ''"
                 check = "pnpm mutation"
                 profiles = List("agent")
+            }
+            ["build-real-studio"] {
+                glob = realStudioFiles
+                check = new Script {
+                    windows = "pnpm build:all"
+                }
+                exclusive = true
+            }
+            ["real-studio"] {
+                glob = realStudioFiles
+                check = new Script {
+                    windows = "pnpm exec vitest run --project integration-real-studio && pnpm exec vitest run --project e2e-real-studio"
+                }
+                env {
+                    ["RBX_FORGE_TEST_REAL_STUDIO"] = "1"
+                }
+                depends = List("build-real-studio")
+                exclusive = true
             }
         }
     }
