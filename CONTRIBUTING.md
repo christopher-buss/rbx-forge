@@ -49,6 +49,14 @@ merge-base with `origin/main`, including pushes to a remote URL. Keep
 `origin/main` available and current with `git fetch origin`. Knip runs on every
 push. CI runs the full checks for every change that is not docs-only.
 
+On Windows, pre-push also runs `build:all`, then the `integration-real-studio`
+and `e2e-real-studio` projects in order with `RBX_FORGE_TEST_REAL_STUDIO=1` when
+files under `src/`, `test/`, `reaper/`, or `plugin/` changed. This runs for
+every profile. Install Studio and log in first, with the current forge patch
+already in the managed Rojo plugin. Other Studios may remain open; the specs
+leave them and their plugins untouched. A build or test failure stops the push.
+Other platforms and changes outside those paths skip the gate.
+
 Run the rest by hand, or all of it with `hk check`:
 
 ```bash
