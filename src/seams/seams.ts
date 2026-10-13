@@ -38,8 +38,6 @@ export interface Seams {
 	/** Starts the detached supervisor of a `forge up` session. */
 	detachedSupervisor: DetachedLauncher;
 	fileSystem: FileSystem;
-	/** Reads the forge Studio plugin model that ships with forge. */
-	forgePlugin: () => Uint8Array;
 	host: Host;
 	/** Finds the Studio the Roblox installer put on this computer. */
 	installedStudio: InstalledStudio;
@@ -56,6 +54,8 @@ export interface Seams {
 	prompter: Prompter;
 	/** A new random id, such as a session id. */
 	randomId: () => string;
+	/** Reads the forge Studio plugin model that ships with forge. */
+	readForgePlugin: () => Uint8Array;
 	/** Starts a session's `forge-reaper`, which owns its workers. */
 	reaper: ReaperLauncher;
 	signals: Signals;

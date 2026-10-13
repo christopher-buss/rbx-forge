@@ -24,7 +24,7 @@ export function installForgePlugin(context: Pick<CommandContext, "env" | "seams"
 	const target = path.join(folder, FORGE_PLUGIN_FILE);
 	const temporary = `${target}.${host.pid}.tmp`;
 	try {
-		const bundled = context.seams.forgePlugin();
+		const bundled = context.seams.readForgePlugin();
 		if (fileSystem.existsSync(target) && fileSystem.readFileSync(target).equals(bundled)) {
 			return;
 		}

@@ -35,7 +35,7 @@ import { createSignals } from "./signals.ts";
 /** What the real seams are built from. */
 export interface NodeSeamsOptions {
 	/** The bundled `forge-plugin/ForgePlugin.rbxm` next to the CLI. */
-	forgePlugin: string;
+	forgePluginPath: string;
 	/** Prompt input: the process stdin. */
 	input: NodeJS.ReadableStream;
 	/**
@@ -65,7 +65,7 @@ const PROCESS_BACKEND = { childProcess: nodeChildProcessRunner, clock: nodeClock
  * @returns Seams backed by Node, c12, the native addon, and the terminal.
  */
 export function createNodeSeams({
-	forgePlugin,
+	forgePluginPath,
 	input,
 	nativeDirectory,
 	noInstalledStudio,
@@ -83,7 +83,6 @@ export function createNodeSeams({
 			supervisorEntry,
 		),
 		fileSystem: nodeFileSystem,
-		forgePlugin: () => nodeFs.readFileSync(forgePlugin),
 		host: nodeHost,
 		installedStudio: installedStudioLookup(noInstalledStudio),
 		ipc: createNodeIpcTransport(native),
@@ -92,6 +91,7 @@ export function createNodeSeams({
 		processRunner: createChildProcessRunner(PROCESS_BACKEND),
 		prompter: createReadlinePrompter(input, output),
 		randomId: randomUUID,
+		readForgePlugin: () => nodeFs.readFileSync(forgePluginPath),
 		reaper: createNodeReaperLauncher(nativeDirectory, native, requireModule),
 		signals: createSignals(process),
 		studioLauncher: createNodeStudioLauncher(native, noInstalledStudio, supervisorEntry),

@@ -62,7 +62,7 @@ function createSupervisorSeams(): Seams {
 	return createNodeSeams({
 		// Runs from source name a model (`RBX_FORGE_PLUGIN_MODEL`); builds ship
 		// one.
-		forgePlugin:
+		forgePluginPath:
 			process.env["RBX_FORGE_PLUGIN_MODEL"] ??
 			fileURLToPath(new URL("forge-plugin/ForgePlugin.rbxm", import.meta.url)),
 		input: process.stdin,

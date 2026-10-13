@@ -18,10 +18,10 @@ const USER_ID = process.getuid?.();
 function makeSeams(
 	nativeDirectory?: string,
 	skipInstalledStudio = false,
-	forgePlugin = "/forge/forge-plugin/ForgePlugin.rbxm",
+	forgePluginPath = "/forge/forge-plugin/ForgePlugin.rbxm",
 ): ReturnType<typeof createNodeSeams> {
 	return createNodeSeams({
-		forgePlugin,
+		forgePluginPath,
 		input: new PassThrough(),
 		nativeDirectory,
 		noInstalledStudio: skipInstalledStudio,
@@ -40,7 +40,7 @@ describe(createNodeSeams, () => {
 
 		const decoder = new TextDecoder();
 
-		expect(decoder.decode(makeSeams(undefined, false, model).forgePlugin())).toBe("model");
+		expect(decoder.decode(makeSeams(undefined, false, model).readForgePlugin())).toBe("model");
 	});
 
 	it("should read and write the real disk", () => {
@@ -192,7 +192,7 @@ describe(createNodeSeams, () => {
 
 		const input = new PassThrough();
 		const { prompter } = createNodeSeams({
-			forgePlugin: "/forge/forge-plugin/ForgePlugin.rbxm",
+			forgePluginPath: "/forge/forge-plugin/ForgePlugin.rbxm",
 			input,
 			nativeDirectory: undefined,
 			noInstalledStudio: false,

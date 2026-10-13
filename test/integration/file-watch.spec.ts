@@ -12,7 +12,7 @@ describe("real directory watch", () => {
 
 		const directory = makeTemporaryDirectory();
 		const { fileSystem } = createNodeSeams({
-			forgePlugin: "/forge/forge-plugin/ForgePlugin.rbxm",
+			forgePluginPath: "/forge/forge-plugin/ForgePlugin.rbxm",
 			input: new PassThrough(),
 			nativeDirectory: undefined,
 			noInstalledStudio: false,
