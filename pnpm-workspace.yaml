@@ -11,6 +11,7 @@ minimumReleaseAgeExclude:
 
 minimumReleaseAgeExcludePrune: true
 
+# The plugin's Jest runtime (plugin/test.project.json).
 publicHoistPattern:
   - "@rbxts-js/*"
   - "@typescript/*"

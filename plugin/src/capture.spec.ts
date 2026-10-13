@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import { describe, expect, it, jest } from "@rbxts/jest-globals";
 
 import { CAPTURE_INSTANCE, CAPTURE_URL_ATTRIBUTE, startPlugin } from "./capture";
