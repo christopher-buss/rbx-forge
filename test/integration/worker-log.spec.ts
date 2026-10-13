@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import { readWorkerLog } from "../helpers/worker-log.ts";
@@ -10,7 +10,7 @@ import { readWorkerLog } from "../helpers/worker-log.ts";
 const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 
 describe("fixture worker log", () => {
-	it("should read a worker record being appended only once it is whole", () => {
+	it("should read a worker record being appended only once it is whole", ({ expect }) => {
 		expect.assertions(2);
 
 		const file = path.join(makeTemporaryDirectory(), "workers.ndjson");
@@ -23,7 +23,7 @@ describe("fixture worker log", () => {
 		expect(readWorkerLog(file)).toStrictEqual([{ role: "rojo" }, { args: [], role: "rbxtsc" }]);
 	});
 
-	it("should skip the part of a record its writer was killed in", () => {
+	it("should skip the part of a record its writer was killed in", ({ expect }) => {
 		expect.assertions(1);
 
 		const file = path.join(makeTemporaryDirectory(), "workers.ndjson");
@@ -32,7 +32,7 @@ describe("fixture worker log", () => {
 		expect(readWorkerLog(file)).toStrictEqual([{ role: "rojo" }, { role: "rbxtsc" }]);
 	});
 
-	it("should keep a worker's record whole after a killed writer's part", () => {
+	it("should keep a worker's record whole after a killed writer's part", ({ expect }) => {
 		expect.assertions(1);
 
 		const file = path.join(makeTemporaryDirectory(), "workers.ndjson");

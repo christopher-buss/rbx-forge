@@ -2,7 +2,7 @@ import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
 import process from "node:process";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { catchForgeError } from "../../test/helpers/errors.ts";
@@ -55,7 +55,7 @@ describe(nativeTarget, () => {
 		[{ arch: "arm64", libc: "gnu", platform: "linux" }, "linux-arm64-gnu"],
 		[{ arch: "x64", libc: "musl", platform: "linux" }, "linux-x64-musl"],
 		[{ arch: "arm64", libc: "musl", platform: "linux" }, "linux-arm64-musl"],
-	] as const)("should name the build for %o as %s", ([host, target]) => {
+	] as const)("should name the build for %o as %s", ([host, target], { expect }) => {
 		expect.assertions(1);
 
 		expect(nativeTarget(host)).toBe(target);
@@ -66,13 +66,13 @@ describe(nativeTarget, () => {
 		{ arch: "x64", libc: undefined, platform: "freebsd" },
 		{ arch: "x64", libc: undefined, platform: "linux" },
 		{ arch: "x64", libc: "gnu", platform: "darwin" },
-	] as const)("should have no build for %o", (host) => {
+	] as const)("should have no build for %o", (host, { expect }) => {
 		expect.assertions(1);
 
 		expect(nativeTarget(host)).toBeUndefined();
 	});
 
-	it("should have a build for every target the crate is built for", () => {
+	it("should have a build for every target the crate is built for", ({ expect }) => {
 		expect.assertions(1);
 
 		const targets = packageJson.napi.targets.map((triple) => {
@@ -84,7 +84,7 @@ describe(nativeTarget, () => {
 });
 
 describe(readHost, () => {
-	it("should read the C library from the process report on Linux", () => {
+	it("should read the C library from the process report on Linux", ({ expect }) => {
 		expect.assertions(1);
 
 		const report = { getReport: () => ({ header: { glibcVersionRuntime: "2.39" } }) };
@@ -96,7 +96,7 @@ describe(readHost, () => {
 		});
 	});
 
-	it("should take a Linux report without a glibc version as musl", () => {
+	it("should take a Linux report without a glibc version as musl", ({ expect }) => {
 		expect.assertions(1);
 
 		const report = { getReport: () => ({ header: {} }) };
@@ -106,7 +106,7 @@ describe(readHost, () => {
 		);
 	});
 
-	it("should not build a process report off Linux", () => {
+	it("should not build a process report off Linux", ({ expect }) => {
 		expect.assertions(2);
 
 		const getReport = vi.fn<() => object>();
@@ -120,7 +120,7 @@ describe(readHost, () => {
 });
 
 describe(createNativeLoader, () => {
-	it("should load the platform package when no directory is given", () => {
+	it("should load the platform package when no directory is given", ({ expect }) => {
 		expect.assertions(2);
 
 		const { addon } = createFakeNative();
@@ -130,7 +130,7 @@ describe(createNativeLoader, () => {
 		expect(requireModule).toHaveBeenCalledExactlyOnceWith("@rbx-forge/native-win32-x64-msvc");
 	});
 
-	it("should load the build in a directory when one is given", () => {
+	it("should load the build in a directory when one is given", ({ expect }) => {
 		expect.assertions(1);
 
 		const directory = path.resolve("/native");
@@ -142,7 +142,7 @@ describe(createNativeLoader, () => {
 		);
 	});
 
-	it("should load once and keep the addon", () => {
+	it("should load once and keep the addon", ({ expect }) => {
 		expect.assertions(2);
 
 		const requireModule = vi.fn<(id: string) => unknown>(() => createFakeNative().addon);
@@ -152,7 +152,7 @@ describe(createNativeLoader, () => {
 		expect(requireModule).toHaveBeenCalledOnce();
 	});
 
-	it("should read the host only when it loads", () => {
+	it("should read the host only when it loads", ({ expect }) => {
 		expect.assertions(1);
 
 		const readHostSpy = vi.fn<() => NativeHost>(() => WINDOWS);
@@ -165,7 +165,7 @@ describe(createNativeLoader, () => {
 		expect(readHostSpy).not.toHaveBeenCalled();
 	});
 
-	it("should fail with native_missing on a host with no build", () => {
+	it("should fail with native_missing on a host with no build", ({ expect }) => {
 		expect.assertions(2);
 
 		const load = makeLoader({ host: { arch: "ia32", libc: undefined, platform: "win32" } });
@@ -175,7 +175,7 @@ describe(createNativeLoader, () => {
 		expect(error.message).toBe("rbx-forge has no native build for win32-ia32.");
 	});
 
-	it("should fail with native_missing when the build does not load", () => {
+	it("should fail with native_missing when the build does not load", ({ expect }) => {
 		expect.assertions(4);
 
 		const cause = new Error("Cannot find module");
@@ -196,7 +196,7 @@ describe(createNativeLoader, () => {
 		expect(error.cause).toBe(cause);
 	});
 
-	it("should report a thrown value that is not an error", () => {
+	it("should report a thrown value that is not an error", ({ expect }) => {
 		expect.assertions(1);
 
 		const load = makeLoader({
@@ -211,7 +211,7 @@ describe(createNativeLoader, () => {
 		);
 	});
 
-	it("should fail with native_missing when the module is not the addon", () => {
+	it("should fail with native_missing when the module is not the addon", ({ expect }) => {
 		expect.assertions(3);
 
 		const load = makeLoader({ requireModule: () => ({ nativeVersion: () => "0.0.0" }) });
@@ -226,7 +226,7 @@ describe(createNativeLoader, () => {
 });
 
 describe(isExecutableFile, () => {
-	it("should accept the Node executable and refuse a missing file", () => {
+	it("should accept the Node executable and refuse a missing file", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(isExecutableFile(process.execPath)).toBeTrue();
@@ -245,7 +245,7 @@ describe(createReaperLocator, () => {
 		});
 	}
 
-	it("should find forge-reaper.exe next to the platform package's manifest", () => {
+	it("should find forge-reaper.exe next to the platform package's manifest", ({ expect }) => {
 		expect.assertions(2);
 
 		const resolveModule = vi.fn<(id: string) => string>((id) => path.resolve("/modules", id));
@@ -258,7 +258,9 @@ describe(createReaperLocator, () => {
 		);
 	});
 
-	it("should find forge-reaper without an extension off Windows, in a given directory", () => {
+	it("should find forge-reaper without an extension off Windows, in a given directory", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const directory = path.resolve("/native");
@@ -268,7 +270,7 @@ describe(createReaperLocator, () => {
 		);
 	});
 
-	it("should fail with reaper_unavailable on a host with no build", () => {
+	it("should fail with reaper_unavailable on a host with no build", ({ expect }) => {
 		expect.assertions(2);
 
 		const error = catchForgeError(
@@ -283,7 +285,7 @@ describe(createReaperLocator, () => {
 		expect(error.message).toBe("rbx-forge has no reaper for win32-ia32.");
 	});
 
-	it("should fail with reaper_unavailable when the platform package is missing", () => {
+	it("should fail with reaper_unavailable when the platform package is missing", ({ expect }) => {
 		expect.assertions(4);
 
 		const cause = new Error("Cannot find module");
@@ -305,7 +307,7 @@ describe(createReaperLocator, () => {
 		expect(error.cause).toBe(cause);
 	});
 
-	it("should report a thrown value that is not an error", () => {
+	it("should report a thrown value that is not an error", ({ expect }) => {
 		expect.assertions(1);
 
 		const locate = makeLocator({
@@ -320,7 +322,9 @@ describe(createReaperLocator, () => {
 		);
 	});
 
-	it("should fail with reaper_unavailable when the binary is missing or cannot run", () => {
+	it("should fail with reaper_unavailable when the binary is missing or cannot run", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const directory = path.resolve("/native");
@@ -336,7 +340,7 @@ describe(createReaperLocator, () => {
 		);
 	});
 
-	it("should read the host only when it looks up", () => {
+	it("should read the host only when it looks up", ({ expect }) => {
 		expect.assertions(1);
 
 		const readHostSpy = vi.fn<() => NativeHost>(() => WINDOWS);

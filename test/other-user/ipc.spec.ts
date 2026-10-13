@@ -12,7 +12,8 @@ import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import process from "node:process";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import { startIpcServer } from "../../src/ipc/server.ts";
 import { endpointFor } from "../../src/supervisor/endpoint.ts";
@@ -48,9 +49,10 @@ function otherUser(): string {
 /**
  * A directory under `/tmp` that every user may enter, removed at the end.
  *
+ * @param onTestFinished - Register cleanup for this test.
  * @returns Its path.
  */
-function sharedDirectory(): string {
+function sharedDirectory(onTestFinished: TestContext["onTestFinished"]): string {
 	const directory = mkdtempSync("/tmp/rbx-forge-other-");
 	chmodSync(directory, 0o755);
 	onTestFinished(() => {
@@ -59,7 +61,10 @@ function sharedDirectory(): string {
 	return directory;
 }
 
-async function listenAsync(endpoint: string): Promise<void> {
+async function listenAsync(
+	endpoint: string,
+	onTestFinished: TestContext["onTestFinished"],
+): Promise<void> {
 	const server = createServer();
 	await new Promise<void>((resolve) => {
 		server.listen(endpoint, resolve);
@@ -87,7 +92,7 @@ function connectAsOther(socket: string): string {
 describe("another local user", () => {
 	it.skipIf(!IS_WINDOWS)(
 		"should be denied the control pipe, though a default pipe lets it in",
-		async () => {
+		async ({ expect, onTestFinished }) => {
 			expect.assertions(2);
 
 			const native = loadTestNative();
@@ -103,7 +108,7 @@ describe("another local user", () => {
 			});
 			// A pipe with the default DACL grants read to everyone.
 			const control = `${endpoint}-control`;
-			await listenAsync(control);
+			await listenAsync(control, onTestFinished);
 
 			expect(native.connectPipeAs!(control, otherUser(), password, false)).toBe(0);
 			expect([
@@ -115,12 +120,12 @@ describe("another local user", () => {
 
 	it.skipIf(IS_WINDOWS)(
 		"should be denied the control socket, though an open socket lets it in",
-		async () => {
+		async ({ expect, onTestFinished }) => {
 			expect.assertions(2);
 
-			const runtime = sharedDirectory();
+			const runtime = sharedDirectory(onTestFinished);
 			const control = path.join(runtime, "control.sock");
-			await listenAsync(control);
+			await listenAsync(control, onTestFinished);
 			chmodSync(control, 0o777);
 			const endpoint = endpointFor({
 				buildOutputPath: "game.rbxl",

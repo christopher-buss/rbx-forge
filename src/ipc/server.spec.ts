@@ -1,4 +1,5 @@
-import { assert, describe, expect, it, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
+import type { TestContext } from "vitest";
 
 import type { ScriptedConnection } from "../../test/helpers/fake-ipc.ts";
 import { queueListener, scriptedConnection } from "../../test/helpers/fake-ipc.ts";
@@ -54,14 +55,14 @@ function options(handlers: IpcServerOptions["handlers"] = {}): IpcServerOptions 
 	return { handlers, token: TOKEN };
 }
 
-function answered(written: ReadonlyArray<string>): unknown {
+function answered(written: ReadonlyArray<string>, expect: TestContext["expect"]): unknown {
 	expect(written).toHaveLength(1);
 
 	return JSON.parse(written[0]!);
 }
 
 describe(serveConnectionAsync, () => {
-	it("should answer a request that follows the right hello, then close", async () => {
+	it("should answer a request that follows the right hello, then close", async ({ expect }) => {
 		expect.assertions(4);
 
 		const status = vi.fn<IpcHandler>().mockResolvedValue({ running: true });
@@ -71,7 +72,7 @@ describe(serveConnectionAsync, () => {
 		]);
 		await serveConnectionAsync(connection, options({ status }));
 
-		expect(answered(connection.written)).toStrictEqual({
+		expect(answered(connection.written, expect)).toStrictEqual({
 			ok: true,
 			result: { running: true },
 			type: "response",
@@ -85,7 +86,7 @@ describe(serveConnectionAsync, () => {
 		["a token of another length", '{"protocol":1,"token":"secret","type":"hello"}'],
 		["another protocol", `{"protocol":2,"token":"${TOKEN}","type":"hello"}`],
 		["no hello", STATUS],
-	] as const)("should close without an answer on %s", async ([, hello]) => {
+	] as const)("should close without an answer on %s", async ([, hello], { expect }) => {
 		expect.assertions(3);
 
 		const status = vi.fn<IpcHandler>();
@@ -97,7 +98,7 @@ describe(serveConnectionAsync, () => {
 		expect(connection.isClosed()).toBeTrue();
 	});
 
-	it("should count each request it reads as activity, before its answer", async () => {
+	it("should count each request it reads as activity, before its answer", async ({ expect }) => {
 		expect.assertions(2);
 
 		const onRequest = vi.fn<() => void>();
@@ -118,7 +119,7 @@ describe(serveConnectionAsync, () => {
 		expect(onRequest).toHaveBeenCalledOnce();
 	});
 
-	it("should count no activity for a client with the wrong token", async () => {
+	it("should count no activity for a client with the wrong token", async ({ expect }) => {
 		expect.assertions(1);
 
 		const onRequest = vi.fn<() => void>();
@@ -130,7 +131,9 @@ describe(serveConnectionAsync, () => {
 		expect(onRequest).not.toHaveBeenCalled();
 	});
 
-	it("should close without an answer when the hello or request never comes", async () => {
+	it("should close without an answer when the hello or request never comes", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const silent = scriptedConnection([]);
@@ -144,33 +147,33 @@ describe(serveConnectionAsync, () => {
 		expect(helloOnly.readTimeouts).toStrictEqual([5, 5]);
 	});
 
-	it("should answer a request it cannot read as a usage failure", async () => {
+	it("should answer a request it cannot read as a usage failure", async ({ expect }) => {
 		expect.assertions(2);
 
 		const connection = scriptedConnection([HELLO, "nonsense"]);
 		await serveConnectionAsync(connection, options());
 
-		expect(answered(connection.written)).toStrictEqual({
+		expect(answered(connection.written, expect)).toStrictEqual({
 			error: { code: "usage", message: "The request is not one this session reads." },
 			ok: false,
 			type: "response",
 		});
 	});
 
-	it("should answer a method it does not serve as unavailable", async () => {
+	it("should answer a method it does not serve as unavailable", async ({ expect }) => {
 		expect.assertions(2);
 
 		const connection = scriptedConnection([HELLO, '{"method":"sync","type":"request"}']);
 		await serveConnectionAsync(connection, options());
 
-		expect(answered(connection.written)).toStrictEqual({
+		expect(answered(connection.written, expect)).toStrictEqual({
 			error: { code: "command_unavailable", message: "This session does not serve sync." },
 			ok: false,
 			type: "response",
 		});
 	});
 
-	it("should answer a handler's failure with its code, details, and hint", async () => {
+	it("should answer a handler's failure with its code, details, and hint", async ({ expect }) => {
 		expect.assertions(4);
 
 		const failing = scriptedConnection([HELLO, STATUS]);
@@ -192,12 +195,12 @@ describe(serveConnectionAsync, () => {
 			}),
 		);
 
-		expect(answered(failing.written)).toStrictEqual({
+		expect(answered(failing.written, expect)).toStrictEqual({
 			error: { code: "hook_failed", details: { a: 1 }, hint: "fix", message: "bad" },
 			ok: false,
 			type: "response",
 		});
-		expect(answered(crashing.written)).toStrictEqual({
+		expect(answered(crashing.written, expect)).toStrictEqual({
 			error: {
 				code: "internal_error",
 				hint: "This is a bug in forge. Please report it.",
@@ -208,7 +211,7 @@ describe(serveConnectionAsync, () => {
 		});
 	});
 
-	it("should answer a failure without details or hint with neither", async () => {
+	it("should answer a failure without details or hint with neither", async ({ expect }) => {
 		expect.assertions(2);
 
 		const connection = scriptedConnection([HELLO, STATUS]);
@@ -221,7 +224,7 @@ describe(serveConnectionAsync, () => {
 			}),
 		);
 
-		expect(answered(connection.written)).toStrictEqual({
+		expect(answered(connection.written, expect)).toStrictEqual({
 			error: { code: "not_running", message: "gone" },
 			ok: false,
 			type: "response",
@@ -230,7 +233,9 @@ describe(serveConnectionAsync, () => {
 });
 
 describe("serveConnectionAsync with an owner", () => {
-	it("should answer the join, then hold the connection until a release, and answer it", async () => {
+	it("should answer the join, then hold the connection until a release, and answer it", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const { join, leave, owner } = makeOwner();
@@ -259,7 +264,7 @@ describe("serveConnectionAsync with an owner", () => {
 	it.for([
 		["closes", { type: "closed" }],
 		["sends a line that is too long", { type: "too_long" }],
-	] as const)("should let go with no answer once the owner %s", async ([, end]) => {
+	] as const)("should let go with no answer once the owner %s", async ([, end], { expect }) => {
 		expect.assertions(3);
 
 		const { leave, owner } = makeOwner();
@@ -271,7 +276,7 @@ describe("serveConnectionAsync with an owner", () => {
 		expect(connection.isClosed()).toBeTrue();
 	});
 
-	it("should let go at once when the owner never got the join's answer", async () => {
+	it("should let go at once when the owner never got the join's answer", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { leave, owner } = makeOwner();
@@ -283,7 +288,7 @@ describe("serveConnectionAsync with an owner", () => {
 		expect(connection.readTimeouts).toStrictEqual([IPC_WAIT_MS, IPC_WAIT_MS]);
 	});
 
-	it("should answer a failed join and hold nothing", async () => {
+	it("should answer a failed join and hold nothing", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { leave, owner } = makeOwner(async () => {
@@ -298,7 +303,7 @@ describe("serveConnectionAsync with an owner", () => {
 		expect(leave).not.toHaveBeenCalled();
 	});
 
-	it("should answer a failed release with its failure", async () => {
+	it("should answer a failed release with its failure", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { leave, owner } = makeOwner();
@@ -313,13 +318,13 @@ describe("serveConnectionAsync with an owner", () => {
 		});
 	});
 
-	it("should answer own as unavailable with no owner", async () => {
+	it("should answer own as unavailable with no owner", async ({ expect }) => {
 		expect.assertions(2);
 
 		const connection = scriptedConnection([HELLO, OWN]);
 		await serveConnectionAsync(connection, options());
 
-		expect(answered(connection.written)).toStrictEqual({
+		expect(answered(connection.written, expect)).toStrictEqual({
 			error: { code: "command_unavailable", message: "This session does not serve own." },
 			ok: false,
 			type: "response",
@@ -328,7 +333,7 @@ describe("serveConnectionAsync with an owner", () => {
 });
 
 describe(startIpcServer, () => {
-	it("should end an owner's hold without a let go once it closes", async () => {
+	it("should end an owner's hold without a let go once it closes", async ({ expect }) => {
 		expect.assertions(3);
 
 		const listener = queueListener();
@@ -346,7 +351,7 @@ describe(startIpcServer, () => {
 		expect(connection.isClosed()).toBeTrue();
 	});
 
-	it("should serve each client on its own until closed", async () => {
+	it("should serve each client on its own until closed", async ({ expect }) => {
 		expect.assertions(3);
 
 		const listener = queueListener();
@@ -379,7 +384,7 @@ describe(startIpcServer, () => {
 		expect(listener.isClosed()).toBeTrue();
 	});
 
-	it("should stop serving when the listener fails", async () => {
+	it("should stop serving when the listener fails", async ({ expect }) => {
 		expect.assertions(1);
 
 		const listener: IpcListener = {

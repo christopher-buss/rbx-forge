@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { Prompter } from "./prompter.ts";
 import { createReadlinePrompter } from "./prompter.ts";
@@ -42,7 +42,7 @@ function makeTerminal(): Terminal {
 }
 
 describe(createReadlinePrompter, () => {
-	it("should show the question with its choices and default", async () => {
+	it("should show the question with its choices and default", async ({ expect }) => {
 		expect.assertions(1);
 
 		const terminal = makeTerminal();
@@ -53,7 +53,7 @@ describe(createReadlinePrompter, () => {
 		expect(terminal.output()).toBe("Project type? (rbxts/luau) [rbxts] ");
 	});
 
-	it("should return the chosen value, ignoring case and spaces", async () => {
+	it("should return the chosen value, ignoring case and spaces", async ({ expect }) => {
 		expect.assertions(1);
 
 		const terminal = makeTerminal();
@@ -63,7 +63,7 @@ describe(createReadlinePrompter, () => {
 		await expect(answer).resolves.toBe("luau");
 	});
 
-	it("should return the fallback choice for an empty answer", async () => {
+	it("should return the fallback choice for an empty answer", async ({ expect }) => {
 		expect.assertions(1);
 
 		const terminal = makeTerminal();
@@ -73,7 +73,7 @@ describe(createReadlinePrompter, () => {
 		await expect(answer).resolves.toBe("luau");
 	});
 
-	it("should ask again after an answer that is not a choice", async () => {
+	it("should ask again after an answer that is not a choice", async ({ expect }) => {
 		expect.assertions(2);
 
 		const terminal = makeTerminal();
@@ -89,7 +89,7 @@ describe(createReadlinePrompter, () => {
 		["YES", true],
 		["n", false],
 		["no", false],
-	] as const)("should read %s as %s", async ([line, expected]) => {
+	] as const)("should read %s as %s", async ([line, expected], { expect }) => {
 		expect.assertions(1);
 
 		const terminal = makeTerminal();
@@ -102,7 +102,7 @@ describe(createReadlinePrompter, () => {
 	it.for([
 		[true, "Replace? (y/n) [y] "],
 		[false, "Replace? (y/n) [n] "],
-	] as const)("should show the yes/no default %s", async ([fallback, shown]) => {
+	] as const)("should show the yes/no default %s", async ([fallback, shown], { expect }) => {
 		expect.assertions(1);
 
 		const terminal = makeTerminal();
@@ -113,7 +113,7 @@ describe(createReadlinePrompter, () => {
 		expect(terminal.output()).toBe(shown);
 	});
 
-	it("should let go of the input after an answer", async () => {
+	it("should let go of the input after an answer", async ({ expect }) => {
 		expect.assertions(1);
 
 		const terminal = makeTerminal();
@@ -124,17 +124,20 @@ describe(createReadlinePrompter, () => {
 		expect(terminal.input.listenerCount("data")).toBe(0);
 	});
 
-	it.for([true, false])("should return the fallback %s for an empty answer", async (fallback) => {
-		expect.assertions(1);
+	it.for([true, false])(
+		"should return the fallback %s for an empty answer",
+		async (fallback, { expect }) => {
+			expect.assertions(1);
 
-		const terminal = makeTerminal();
-		const answer = terminal.prompter.confirm("Replace?", fallback);
-		terminal.answer("");
+			const terminal = makeTerminal();
+			const answer = terminal.prompter.confirm("Replace?", fallback);
+			terminal.answer("");
 
-		await expect(answer).resolves.toBe(fallback);
-	});
+			await expect(answer).resolves.toBe(fallback);
+		},
+	);
 
-	it("should ask again after an answer that is not yes or no", async () => {
+	it("should ask again after an answer that is not yes or no", async ({ expect }) => {
 		expect.assertions(1);
 
 		const terminal = makeTerminal();
@@ -144,7 +147,7 @@ describe(createReadlinePrompter, () => {
 		await expect(answer).resolves.toBeTrue();
 	});
 
-	it("should fail as interrupted when the input closes", async () => {
+	it("should fail as interrupted when the input closes", async ({ expect }) => {
 		expect.assertions(1);
 
 		const terminal = makeTerminal();

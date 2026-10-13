@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
 import { MTIME_SLACK_MS, newestSourceEdit } from "./source-edits.ts";
@@ -33,7 +33,7 @@ function project(
 }
 
 describe(newestSourceEdit, () => {
-	it("should find the newest file under the compiler's root directory", () => {
+	it("should find the newest file under the compiler's root directory", ({ expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -49,7 +49,9 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should skip dependencies, hidden entries, the output directory, and times after the bound", () => {
+	it("should skip dependencies, hidden entries, the output directory, and times after the bound", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -71,7 +73,7 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should read each of the root directories from a commented tsconfig", () => {
+	it("should read each of the root directories from a commented tsconfig", ({ expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -92,7 +94,7 @@ describe(newestSourceEdit, () => {
 		{ name: "a --project file", args: ["--project", "game/tsconfig.json"] },
 		{ name: "a -p directory", args: ["-p", "game"] },
 		{ name: "a -p after other arguments", args: ["--verbose", "-p", "game"] },
-	])("should read the tsconfig of $name, relative to its directory", ({ args }) => {
+	])("should read the tsconfig of $name, relative to its directory", ({ args }, { expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -108,7 +110,7 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should skip a file removed after its directory was read", () => {
+	it("should skip a file removed after its directory was read", ({ expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({ "src/a.ts": ["", 1000], "tsconfig.json": [TSCONFIG, 0] });
@@ -122,7 +124,9 @@ describe(newestSourceEdit, () => {
 		expect(newestSourceEdit(removed, { args: [], cwd: PROJECT }, NOW)).toBeUndefined();
 	});
 
-	it("should count a file whose time is ahead of the bound by no more than the clock slack", () => {
+	it("should count a file whose time is ahead of the bound by no more than the clock slack", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -135,7 +139,7 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should read the tsconfig that rbxts.project names over the arguments", () => {
+	it("should read the tsconfig that rbxts.project names over the arguments", ({ expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -154,7 +158,9 @@ describe(newestSourceEdit, () => {
 		).toStrictEqual({ at: 3000, path: path.join("lib", "src", "b.ts") });
 	});
 
-	it("should take the root and output directories a tsconfig extends, relative to the base", () => {
+	it("should take the root and output directories a tsconfig extends, relative to the base", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -173,7 +179,9 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should let a tsconfig override what it extends, from each of several bases", () => {
+	it("should let a tsconfig override what it extends, from each of several bases", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -196,7 +204,7 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should skip a base that is a package, and one that is missing", () => {
+	it("should skip a base that is a package, and one that is missing", ({ expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -220,7 +228,7 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should expand configDir to the directory of the tsconfig that extends", () => {
+	it("should expand configDir to the directory of the tsconfig that extends", ({ expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -243,7 +251,9 @@ describe(newestSourceEdit, () => {
 		).toStrictEqual({ at: 1000, path: path.join("game", "src", "a.ts") });
 	});
 
-	it("should keep the root directories of a base that the tsconfig does not set", () => {
+	it("should keep the root directories of a base that the tsconfig does not set", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -258,7 +268,7 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should end a cycle of tsconfigs that extend each other", () => {
+	it("should end a cycle of tsconfigs that extend each other", ({ expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -272,7 +282,7 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should let null clear an option a tsconfig extends", () => {
+	it("should let null clear an option a tsconfig extends", ({ expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -301,7 +311,9 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should follow the references of a tsconfig, as a build of the solution does", () => {
+	it("should follow the references of a tsconfig, as a build of the solution does", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -339,7 +351,9 @@ describe(newestSourceEdit, () => {
 		).toStrictEqual({ at: 3000, path: path.join("packages", "b", "src", "b.ts") });
 	});
 
-	it("should read a solution tsconfig with no root directory of its own through its references", () => {
+	it("should read a solution tsconfig with no root directory of its own through its references", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -353,7 +367,7 @@ describe(newestSourceEdit, () => {
 		});
 	});
 
-	it("should read the project's tsconfig when the arguments name none", () => {
+	it("should read the project's tsconfig when the arguments name none", ({ expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({ "src/a.ts": ["", 2000], "tsconfig.json": [TSCONFIG, 0] });
@@ -363,7 +377,7 @@ describe(newestSourceEdit, () => {
 		).toMatchObject({ at: 2000 });
 	});
 
-	it("should keep the first file it finds of two with the same time", () => {
+	it("should keep the first file it finds of two with the same time", ({ expect }) => {
 		expect.assertions(1);
 
 		const fileSystem = project({
@@ -387,7 +401,7 @@ describe(newestSourceEdit, () => {
 		},
 		{ name: "a missing root directory", files: { "tsconfig.json": [TSCONFIG, 0] } },
 		{ name: "no edit", files: { "src/a.ts": ["", FUTURE], "tsconfig.json": [TSCONFIG, 0] } },
-	] as const)("should find no edit with $name", ({ files }) => {
+	] as const)("should find no edit with $name", ({ files }, { expect }) => {
 		expect.assertions(1);
 
 		expect(newestSourceEdit(project(files), { args: [], cwd: PROJECT }, NOW)).toBeUndefined();

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createFakeReaper } from "../../test/helpers/fake-reaper.ts";
 import type { FakeReaper, FakeReaperOptions } from "../../test/helpers/fake-reaper.ts";
@@ -81,7 +81,9 @@ async function finishAsync(
 }
 
 describe(createReaperRunner, () => {
-	it("should run the process as a reaper worker with its output in a spool file", async () => {
+	it("should run the process as a reaper worker with its output in a spool file", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const setup = await setupAsync();
@@ -102,7 +104,9 @@ describe(createReaperRunner, () => {
 		]);
 	});
 
-	it("should report the exit, hand every line over, log it, and remove the spool", async () => {
+	it("should report the exit, hand every line over, log it, and remove the spool", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const setup = await setupAsync();
@@ -124,7 +128,7 @@ describe(createReaperRunner, () => {
 		});
 	});
 
-	it("should keep only the last 50 lines", async () => {
+	it("should keep only the last 50 lines", async ({ expect }) => {
 		expect.assertions(1);
 
 		const setup = await setupAsync();
@@ -138,7 +142,7 @@ describe(createReaperRunner, () => {
 	it.for([
 		[9, "SIGKILL"],
 		[999, null],
-	] as const)("should name signal %d as %s", async ([signal, name]) => {
+	] as const)("should name signal %d as %s", async ([signal, name], { expect }) => {
 		expect.assertions(1);
 
 		const setup = await setupAsync();
@@ -148,7 +152,7 @@ describe(createReaperRunner, () => {
 		await expect(outcome).resolves.toMatchObject({ exitCode: null, signal: name });
 	});
 
-	it("should give each run its own worker id", async () => {
+	it("should give each run its own worker id", async ({ expect }) => {
 		expect.assertions(2);
 
 		const setup = await setupAsync();
@@ -163,7 +167,9 @@ describe(createReaperRunner, () => {
 		expect(setup.fake.spawned[0]).not.toHaveProperty("verbatimArguments");
 	});
 
-	it("should stop the whole tree at once when the run outlives its timeout", async () => {
+	it("should stop the whole tree at once when the run outlives its timeout", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const setup = await setupAsync();
@@ -183,7 +189,7 @@ describe(createReaperRunner, () => {
 		});
 	});
 
-	it("should clear the timer when the run ends first", async () => {
+	it("should clear the timer when the run ends first", async ({ expect }) => {
 		expect.assertions(2);
 
 		const setup = await setupAsync();
@@ -194,7 +200,7 @@ describe(createReaperRunner, () => {
 		expect([setup.clock.pending(), setup.fake.calls]).toStrictEqual([0, ["spawn start-1"]]);
 	});
 
-	it("should report spawn_failed when the reaper rejects the run", async () => {
+	it("should report spawn_failed when the reaper rejects the run", async ({ expect }) => {
 		expect.assertions(1);
 
 		const error = new ForgeError("process_failed", "The reaper did not start start-1: nope");
@@ -207,7 +213,7 @@ describe(createReaperRunner, () => {
 		});
 	});
 
-	it("should pass on any other spawn error", async () => {
+	it("should pass on any other spawn error", async ({ expect }) => {
 		expect.assertions(1);
 
 		const error = new ForgeError("reaper_unavailable", "gone");
@@ -216,7 +222,7 @@ describe(createReaperRunner, () => {
 		await expect(setup.runner(SPEC)).rejects.toBe(error);
 	});
 
-	it("should start nothing once the session is stopping", async () => {
+	it("should start nothing once the session is stopping", async ({ expect }) => {
 		expect.assertions(2);
 
 		const setup = await setupAsync();

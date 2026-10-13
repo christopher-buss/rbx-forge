@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { CompileReport } from "./diagnostics.ts";
 import { createDiagnosticsParser } from "./diagnostics.ts";
@@ -34,7 +34,7 @@ function parseAll(lines: ReadonlyArray<string>): {
 }
 
 describe(createDiagnosticsParser, () => {
-	it("should read TypeScript errors with their location and code", () => {
+	it("should read TypeScript errors with their location and code", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseAll(recorded("type-errors.txt"))).toStrictEqual({
@@ -71,7 +71,7 @@ describe(createDiagnosticsParser, () => {
 		});
 	});
 
-	it("should read roblox-ts errors with every line of their message", () => {
+	it("should read roblox-ts errors with every line of their message", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseAll(recorded("roblox-ts-errors.txt")).final).toStrictEqual({
@@ -98,7 +98,7 @@ describe(createDiagnosticsParser, () => {
 		});
 	});
 
-	it("should read an error with no location", () => {
+	it("should read an error with no location", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseAll(recorded("project-error.txt")).final).toStrictEqual({
@@ -116,7 +116,7 @@ describe(createDiagnosticsParser, () => {
 		});
 	});
 
-	it("should find nothing in the output of a clean compile", () => {
+	it("should find nothing in the output of a clean compile", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseAll(recorded("success.txt"))).toStrictEqual({
@@ -125,7 +125,7 @@ describe(createDiagnosticsParser, () => {
 		});
 	});
 
-	it("should end a watch-mode compile at its summary line", () => {
+	it("should end a watch-mode compile at its summary line", ({ expect }) => {
 		expect.assertions(2);
 
 		const { final, summaries } = parseAll(recorded("watch.txt"));
@@ -138,7 +138,7 @@ describe(createDiagnosticsParser, () => {
 		expect(final).toStrictEqual({ diagnostics: [], errors: 0 });
 	});
 
-	it("should take the error count from the summary line", () => {
+	it("should take the error count from the summary line", ({ expect }) => {
 		expect.assertions(1);
 
 		const { summaries } = parseAll([
@@ -156,13 +156,13 @@ describe(createDiagnosticsParser, () => {
 		["10:00:00 AM - Found 0 errors. Watching for file changes.", 0],
 		["Found 2 errors in the same file, starting at: src/a.ts:3", 2],
 		["Found 1 error in src/a.ts:3", 1],
-	] as const)("should read the summary line %j", ([line, errors]) => {
+	] as const)("should read the summary line %j", ([line, errors], { expect }) => {
 		expect.assertions(1);
 
 		expect(parseAll([line]).summaries).toStrictEqual([{ diagnostics: [], errors }]);
 	});
 
-	it("should not take a message line that mentions a count for a summary", () => {
+	it("should not take a message line that mentions a count for a summary", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseAll(["error TS roblox-ts: Found 3 errors in the plugin"])).toStrictEqual({
@@ -174,7 +174,7 @@ describe(createDiagnosticsParser, () => {
 		});
 	});
 
-	it("should read the plain format and its indented message chain", () => {
+	it("should read the plain format and its indented message chain", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -207,7 +207,7 @@ describe(createDiagnosticsParser, () => {
 		});
 	});
 
-	it("should count warnings as diagnostics but not as errors", () => {
+	it("should count warnings as diagnostics but not as errors", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -227,7 +227,7 @@ describe(createDiagnosticsParser, () => {
 		});
 	});
 
-	it("should ignore lines outside a diagnostic", () => {
+	it("should ignore lines outside a diagnostic", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -236,7 +236,7 @@ describe(createDiagnosticsParser, () => {
 		).toStrictEqual({ diagnostics: [], errors: 0 });
 	});
 
-	it("should end a diagnostic at a start line", () => {
+	it("should end a diagnostic at a start line", ({ expect }) => {
 		expect.assertions(1);
 
 		const { final } = parseAll([
@@ -255,7 +255,7 @@ describe(createDiagnosticsParser, () => {
 		"[\u001B[90m21:32:12\u001B[0m] File change detected. Starting incremental compilation...\r",
 		"10:00:00 AM - File change detected. Starting incremental compilation...",
 		"[10:00:00] tsconfig change detected (tsconfig.json) \u2014 reloading...",
-	])("should take %j for a start line", (line) => {
+	])("should take %j for a start line", (line, { expect }) => {
 		expect.assertions(1);
 
 		expect(createDiagnosticsParser().read(line)).toStrictEqual({ type: "start" });
@@ -265,7 +265,7 @@ describe(createDiagnosticsParser, () => {
 		"compiling as game..",
 		"src/a.ts:1:1 - error TS1005: File change detected. Starting incremental compilation...",
 		"",
-	])("should not take %j for a start line", (line) => {
+	])("should not take %j for a start line", (line, { expect }) => {
 		expect.assertions(1);
 
 		expect(createDiagnosticsParser().read(line)).toBeUndefined();

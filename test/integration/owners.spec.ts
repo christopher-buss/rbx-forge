@@ -4,7 +4,7 @@
  * the endpoint, and the owner's end stops what it started and gives back
  * what it took.
  */
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { callSessionAsync, ownSessionAsync } from "../../src/ipc/client.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
@@ -72,7 +72,9 @@ async function pidOfRoleAsync(
 }
 
 describe("part owners", () => {
-	it("should stop what start started and run on with a part up added, once start goes", async () => {
+	it("should stop what start started and run on with a part up added, once start goes", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync({ studio: { autoRecovery: "keep" } });
@@ -113,7 +115,9 @@ describe("part owners", () => {
 		}).toStrictEqual({ compiler: true, rojo: [] });
 	}, 60_000);
 
-	it("should let a start join an up session, take its compiler, and give it back on release", async () => {
+	it("should let a start join an up session, take its compiler, and give it back on release", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();

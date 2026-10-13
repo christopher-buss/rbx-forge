@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS, EXIT_USAGE } from "../../src/exit-codes.ts";
 import { makeFixtureProject } from "../helpers/fixture-project.ts";
@@ -49,7 +49,7 @@ function makeFixture(config?: object): Fixture {
 }
 
 describe("forge typegen", () => {
-	it("should write the service types of Rojo's sourcemap", async () => {
+	it("should write the service types of Rojo's sourcemap", async ({ expect }) => {
 		expect.assertions(4);
 
 		const { forge, project } = makeFixture();
@@ -82,7 +82,7 @@ interface Workspace {
 		expect(existsSync(path.join(project, ".forge", "sourcemap.json"))).toBeFalse();
 	});
 
-	it("should pass the project and every instance to Rojo", async () => {
+	it("should pass the project and every instance to Rojo", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { forge, log } = makeFixture({
@@ -102,7 +102,9 @@ interface Workspace {
 		]);
 	});
 
-	it("should filter by --include, --exclude, and --max-depth, and write to --output", async () => {
+	it("should filter by --include, --exclude, and --max-depth, and write to --output", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { forge, project } = makeFixture();
@@ -133,7 +135,7 @@ interface Workspace {
 `);
 	});
 
-	it("should exit 2 for a --max-depth below 1", async () => {
+	it("should exit 2 for a --max-depth below 1", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { forge } = makeFixture();
@@ -143,7 +145,7 @@ interface Workspace {
 		expect(parseResult(stdout).error!.message).toStartWith("--max-depth: ");
 	});
 
-	it("should run typegen hooks around Rojo", async () => {
+	it("should run typegen hooks around Rojo", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { forge, log } = makeFixture({
@@ -160,7 +162,9 @@ interface Workspace {
 		]);
 	});
 
-	it("should fail with sourcemap_invalid and write nothing for a bad sourcemap", async () => {
+	it("should fail with sourcemap_invalid and write nothing for a bad sourcemap", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { forge, project } = makeFixture();
@@ -171,7 +175,7 @@ interface Workspace {
 		expect(existsSync(path.join(project, "src"))).toBeFalse();
 	});
 
-	it("should refuse a Luau project", async () => {
+	it("should refuse a Luau project", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge, log } = makeFixture({ projectType: "luau" });

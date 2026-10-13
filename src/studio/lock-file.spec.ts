@@ -1,7 +1,7 @@
 // cspell:ignore SAPPHIR VERYLONGCOMPUTE VERYLONGCOMPUT VERYLONGCOMPUTX
 // cspell:ignore verylongcomputername STRASSE straße
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
 import {
@@ -16,13 +16,13 @@ import {
 const WINDOWS_LOCK = "47212\nRobloxStudioBeta\nSAPPHIRE\n4378769e-07d9-4eda-b5ee-187aa6c43cda\n\n";
 
 describe(parseStudioLock, () => {
-	it("should read the PID from the first line of a Studio lock file", () => {
+	it("should read the PID from the first line of a Studio lock file", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseStudioLock(WINDOWS_LOCK)).toStrictEqual({ host: "SAPPHIRE", pid: 47_212 });
 	});
 
-	it("should read a lock file with CRLF line endings", () => {
+	it("should read a lock file with CRLF line endings", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseStudioLock("512\r\nRobloxStudio\r\nmac-mini\r\n")).toStrictEqual({
@@ -31,13 +31,13 @@ describe(parseStudioLock, () => {
 		});
 	});
 
-	it("should read a lock file that holds only the PID", () => {
+	it("should read a lock file that holds only the PID", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseStudioLock("7")).toStrictEqual({ host: undefined, pid: 7 });
 	});
 
-	it("should read the largest PID", () => {
+	it("should read the largest PID", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseStudioLock("4294967295\n")).toStrictEqual({
@@ -48,14 +48,14 @@ describe(parseStudioLock, () => {
 
 	it.for(["1\nRobloxStudio\n\n", "1\nRobloxStudio\n  \n"])(
 		"should find no host in %j",
-		(text) => {
+		(text, { expect }) => {
 			expect.assertions(1);
 
 			expect(parseStudioLock(text)).toStrictEqual({ host: undefined, pid: 1 });
 		},
 	);
 
-	it("should trim the host", () => {
+	it("should trim the host", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseStudioLock("1\nRobloxStudio\n SAPPHIRE \nguid")!.host).toBe("SAPPHIRE");
@@ -72,7 +72,7 @@ describe(parseStudioLock, () => {
 		"1.5\n",
 		" 12\n",
 		"99999999999\n",
-	])("should find no PID in %j", (text) => {
+	])("should find no PID in %j", (text, { expect }) => {
 		expect.assertions(1);
 
 		expect(parseStudioLock(text)).toBeUndefined();
@@ -86,7 +86,7 @@ describe(isStudioExecutable, () => {
 		"/Applications/RobloxStudio.app/Contents/MacOS/RobloxStudio",
 		"/tmp/fixture/RobloxStudioBeta",
 		"RobloxStudio.exe",
-	])("should accept %s", (executable) => {
+	])("should accept %s", (executable, { expect }) => {
 		expect.assertions(1);
 
 		expect(isStudioExecutable(executable)).toBeTrue();
@@ -101,7 +101,7 @@ describe(isStudioExecutable, () => {
 		"/opt/RobloxStudioBeta_exe",
 		"RobloxPlayerBeta.exe",
 		"",
-	])("should reject %s", (executable) => {
+	])("should reject %s", (executable, { expect }) => {
 		expect.assertions(1);
 
 		expect(isStudioExecutable(executable)).toBeFalse();
@@ -117,7 +117,7 @@ describe(isLockHost, () => {
 		["DESKTOP-ABCDEFGH", "desktop-abcdefgh.corp.example.com"],
 		// Windows NetBIOS names stop at 15 characters.
 		["VERYLONGCOMPUTE", "verylongcomputername"],
-	])("should accept lock host %s on host %s", ([lockHost, hostname]) => {
+	])("should accept lock host %s on host %s", ([lockHost, hostname], { expect }) => {
 		expect.assertions(1);
 
 		expect(isLockHost(lockHost!, hostname!)).toBeTrue();
@@ -133,7 +133,7 @@ describe(isLockHost, () => {
 		["", "SAPPHIRE"],
 		// Names compare in lower case, where "ß" stays: it does not become "ss".
 		["STRASSE", "straße"],
-	])("should reject lock host %s on host %s", ([lockHost, hostname]) => {
+	])("should reject lock host %s on host %s", ([lockHost, hostname], { expect }) => {
 		expect.assertions(1);
 
 		expect(isLockHost(lockHost!, hostname!)).toBeFalse();
@@ -141,7 +141,7 @@ describe(isLockHost, () => {
 });
 
 describe(studioLockPath, () => {
-	it("should put the lock file next to the place, named after it", () => {
+	it("should put the lock file next to the place, named after it", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(studioLockPath("/project/game.rbxl")).toBe("/project/game.rbxl.lock");
@@ -151,7 +151,7 @@ describe(studioLockPath, () => {
 describe(readLockFile, () => {
 	const lockPath = path.join(PROJECT, "game.rbxl.lock");
 
-	it("should read the lock file's content", () => {
+	it("should read the lock file's content", ({ expect }) => {
 		expect.assertions(1);
 
 		const { fileSystem } = createMemoryFileSystem({ "game.rbxl.lock": "7" });
@@ -159,7 +159,7 @@ describe(readLockFile, () => {
 		expect(readLockFile(fileSystem, lockPath)).toBe("7");
 	});
 
-	it("should return undefined when there is no lock file", () => {
+	it("should return undefined when there is no lock file", ({ expect }) => {
 		expect.assertions(1);
 
 		const { fileSystem } = createMemoryFileSystem();
@@ -167,7 +167,7 @@ describe(readLockFile, () => {
 		expect(readLockFile(fileSystem, lockPath)).toBeUndefined();
 	});
 
-	it("should throw other read errors", () => {
+	it("should throw other read errors", ({ expect }) => {
 		expect.assertions(1);
 
 		const error = Object.assign(new Error("EACCES: denied"), { code: "EACCES" });

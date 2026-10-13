@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { ResolvedConfig } from "./resolve.ts";
 import { DEFAULT_CONFIG, resolveConfig } from "./resolve.ts";
@@ -95,13 +95,13 @@ function fileWith(layer: ConfigLayer): ForgeConfig {
 }
 
 describe(resolveConfig, () => {
-	it.for(CASES)("should take the default $type when no layer sets it", (option) => {
+	it.for(CASES)("should take the default $type when no layer sets it", (option, { expect }) => {
 		expect.assertions(1);
 
 		expect(option.read(resolveConfig(FILE, {}))).toStrictEqual(option.defaultValue);
 	});
 
-	it.for(CASES)("should take the file's $type over the default", (option) => {
+	it.for(CASES)("should take the file's $type over the default", (option, { expect }) => {
 		expect.assertions(1);
 
 		const config = resolveConfig(fileWith(option.fileLayer), {});
@@ -109,7 +109,7 @@ describe(resolveConfig, () => {
 		expect(option.read(config)).toStrictEqual(option.fileValue);
 	});
 
-	it.for(CASES)("should take the flag's $type over the file", (option) => {
+	it.for(CASES)("should take the flag's $type over the file", (option, { expect }) => {
 		expect.assertions(1);
 
 		const config = resolveConfig(fileWith(option.fileLayer), option.flagLayer);
@@ -117,7 +117,7 @@ describe(resolveConfig, () => {
 		expect(option.read(config)).toStrictEqual(option.flagValue);
 	});
 
-	it.for(CASES)("should take the flag's $type over the default", (option) => {
+	it.for(CASES)("should take the flag's $type over the default", (option, { expect }) => {
 		expect.assertions(1);
 
 		const config = resolveConfig(FILE, option.flagLayer);
@@ -125,7 +125,7 @@ describe(resolveConfig, () => {
 		expect(option.read(config)).toStrictEqual(option.flagValue);
 	});
 
-	it("should take the project type from the file, and a flag over it", () => {
+	it("should take the project type from the file, and a flag over it", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(resolveConfig({ projectType: "luau" }, {}).projectType).toBe("luau");
@@ -134,7 +134,7 @@ describe(resolveConfig, () => {
 		);
 	});
 
-	it("should merge objects key by key across layers", () => {
+	it("should merge objects key by key across layers", ({ expect }) => {
 		expect.assertions(1);
 
 		const config = resolveConfig(fileWith({ typegen: { outputPath: "out.d.ts" } }), {
@@ -149,7 +149,7 @@ describe(resolveConfig, () => {
 		});
 	});
 
-	it("should replace a hook list, never append to it", () => {
+	it("should replace a hook list, never append to it", ({ expect }) => {
 		expect.assertions(1);
 
 		const config = resolveConfig(fileWith({ hooks: { build: { post: ["a"], pre: ["b"] } } }), {
@@ -159,7 +159,7 @@ describe(resolveConfig, () => {
 		expect(config.hooks).toStrictEqual({ build: { post: ["a"], pre: ["c"] } });
 	});
 
-	it("should never change the defaults", () => {
+	it("should never change the defaults", ({ expect }) => {
 		expect.assertions(1);
 
 		resolveConfig(FILE, {}).typegen.include.push("Workspace/**");

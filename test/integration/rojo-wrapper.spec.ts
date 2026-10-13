@@ -7,7 +7,7 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { resolveConfig } from "../../src/config/resolve.ts";
 import { writeRojoWrapper } from "../../src/rojo/wrapper-project.ts";
@@ -29,7 +29,9 @@ async function readApiAsync(port: number, route: string): Promise<Record<string,
 }
 
 describe.skipIf(!HAS_ROJO)("real Rojo wrapper", () => {
-	it("should watch a directory reached through the operating system's temporary path", () => {
+	it("should watch a directory reached through the operating system's temporary path", ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const directory = makeTemporaryDirectory();
@@ -57,7 +59,10 @@ fs.writeFileSync(directory + '/watched.txt', 'content');`;
 		expect(result.stdout.trim()).toBe("watched.txt");
 	});
 
-	it("should reload replaced project files without changing the Rojo session or root serve fields", async () => {
+	it("should reload replaced project files without changing the Rojo session or root serve fields", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(4);
 
 		const port = await nodeNetwork.freePortAsync();
@@ -193,7 +198,7 @@ fs.writeFileSync(directory + '/watched.txt', 'content');`;
 		{ name: () => "my.game", projectPath: "my.game.project.jsonc" },
 	])(
 		"should preserve JSONC root fields and the unnamed $projectPath tree",
-		async ({ name, projectPath }) => {
+		async ({ name, projectPath }, { expect, onTestFinished }) => {
 			expect.assertions(5);
 
 			const port = await nodeNetwork.freePortAsync();

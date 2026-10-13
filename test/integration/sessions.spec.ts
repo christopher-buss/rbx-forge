@@ -5,7 +5,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import {
 	isProcessAlive,
@@ -58,7 +58,7 @@ function isLockFree(file: string): boolean {
 }
 
 describe("sessions", () => {
-	it("should stop gracefully with zero survivors and no escalation", async () => {
+	it("should stop gracefully with zero survivors and no escalation", async ({ expect }) => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();
@@ -80,7 +80,9 @@ describe("sessions", () => {
 		}).toStrictEqual({ files: [], survivors: [] });
 	}, 60_000);
 
-	it("should clean up a reaper that hangs at terminate by force, leaf first", async () => {
+	it("should clean up a reaper that hangs at terminate by force, leaf first", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();
@@ -113,7 +115,7 @@ describe("sessions", () => {
 		}).toStrictEqual({ files: [], survivors: [] });
 	}, 60_000);
 
-	it("should keep the barrier blocked until the reaper has exited", async () => {
+	it("should keep the barrier blocked until the reaper has exited", async ({ expect }) => {
 		expect.assertions(2);
 
 		const project = await makeProjectAsync();
@@ -148,7 +150,9 @@ describe("sessions", () => {
 		});
 	}, 60_000);
 
-	it("should start a new session only once every worker of a hard-killed one is gone", async () => {
+	it("should start a new session only once every worker of a hard-killed one is gone", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();
@@ -183,7 +187,9 @@ describe("sessions", () => {
 		).resolves.toStrictEqual([]);
 	}, 60_000);
 
-	it("should never let a reaper paused before its lease spawn after its supervisor died", async () => {
+	it("should never let a reaper paused before its lease spawn after its supervisor died", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync();

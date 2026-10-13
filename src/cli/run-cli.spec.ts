@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { captureOutput } from "../../test/helpers/output.ts";
 import type { CapturedOutput } from "../../test/helpers/output.ts";
@@ -93,7 +93,7 @@ const portFlag: FlagDefinition = {
 
 describe(runCliAsync, () => {
 	describe("pages", () => {
-		it.for(["--version", "-v"])("should print the version for %s", async (flag) => {
+		it.for(["--version", "-v"])("should print the version for %s", async (flag, { expect }) => {
 			expect.assertions(2);
 
 			const cli = makeCli();
@@ -102,16 +102,19 @@ describe(runCliAsync, () => {
 			expect(cli.captured.stdout()).toBe("1.2.3\n");
 		});
 
-		it.for([[], ["--help"], ["-h"]])("should print the help page for %o", async (argv) => {
-			expect.assertions(2);
+		it.for([[], ["--help"], ["-h"]])(
+			"should print the help page for %o",
+			async (argv, { expect }) => {
+				expect.assertions(2);
 
-			const cli = makeCli();
+				const cli = makeCli();
 
-			await expect(cli.run(...argv)).resolves.toBe(EXIT_SUCCESS);
-			expect(cli.captured.stdout()).toBe(renderHelp(COMMANDS));
-		});
+				await expect(cli.run(...argv)).resolves.toBe(EXIT_SUCCESS);
+				expect(cli.captured.stdout()).toBe(renderHelp(COMMANDS));
+			},
+		);
 
-		it("should print a command's help page", async () => {
+		it("should print a command's help page", async ({ expect }) => {
 			expect.assertions(2);
 
 			const cli = makeCli();
@@ -121,7 +124,9 @@ describe(runCliAsync, () => {
 			expect(cli.captured.stdout()).toBe(renderCommandHelp(init!));
 		});
 
-		it("should print help, not run the command, when --help is beside a command", async () => {
+		it("should print help, not run the command, when --help is beside a command", async ({
+			expect,
+		}) => {
 			expect.assertions(1);
 
 			const { command, runs } = recordingProbe();
@@ -137,21 +142,24 @@ describe(runCliAsync, () => {
 			{ argv: ["serve"], command: null, message: 'Unknown command "serve".' },
 			{ argv: ["init", "extra"], command: "init", message: 'Unexpected argument "extra".' },
 			{ argv: ["init", "--type"], command: "init", message: "argument missing" },
-		])("should exit with the usage code for $argv", async ({ argv, command, message }) => {
-			expect.assertions(4);
+		])(
+			"should exit with the usage code for $argv",
+			async ({ argv, command, message }, { expect }) => {
+				expect.assertions(4);
 
-			const cli = makeCli();
+				const cli = makeCli();
 
-			await expect(cli.run(...argv)).resolves.toBe(EXIT_USAGE);
+				await expect(cli.run(...argv)).resolves.toBe(EXIT_USAGE);
 
-			const result = cli.captured.result();
+				const result = cli.captured.result();
 
-			expect(result).toMatchObject({ command, exitCode: EXIT_USAGE, ok: false });
-			expect(result.error!.message).toContain(message);
-			expect(result.error!.hint).toBe('Run "forge --help" for usage.');
-		});
+				expect(result).toMatchObject({ command, exitCode: EXIT_USAGE, ok: false });
+				expect(result.error!.message).toContain(message);
+				expect(result.error!.hint).toBe('Run "forge --help" for usage.');
+			},
+		);
 
-		it("should write usage errors to stderr at a terminal", async () => {
+		it("should write usage errors to stderr at a terminal", async ({ expect }) => {
 			expect.assertions(2);
 
 			const cli = makeCli({ tty: true });
@@ -163,7 +171,9 @@ describe(runCliAsync, () => {
 			);
 		});
 
-		it("should pass the one argument of a command that reads one, and no more", async () => {
+		it("should pass the one argument of a command that reads one, and no more", async ({
+			expect,
+		}) => {
 			expect.assertions(4);
 
 			const { command, runs } = recordingProbe();
@@ -177,7 +187,7 @@ describe(runCliAsync, () => {
 			expect(runs.map(({ input }) => input.argument)).toStrictEqual(["rojo", undefined]);
 		});
 
-		it("should report a bad flag value as usage, naming the flag", async () => {
+		it("should report a bad flag value as usage, naming the flag", async ({ expect }) => {
 			expect.assertions(3);
 
 			const { command, runs } = recordingProbe([portFlag]);
@@ -192,7 +202,7 @@ describe(runCliAsync, () => {
 	});
 
 	describe("output format", () => {
-		it("should write NDJSON when stdout is not a terminal", async () => {
+		it("should write NDJSON when stdout is not a terminal", async ({ expect }) => {
 			expect.assertions(1);
 
 			const cli = makeCli({
@@ -205,7 +215,7 @@ describe(runCliAsync, () => {
 			]);
 		});
 
-		it("should write NDJSON for --json at a terminal", async () => {
+		it("should write NDJSON for --json at a terminal", async ({ expect }) => {
 			expect.assertions(1);
 
 			const cli = makeCli({
@@ -219,7 +229,7 @@ describe(runCliAsync, () => {
 			]);
 		});
 
-		it("should write the command's summary at a terminal", async () => {
+		it("should write the command's summary at a terminal", async ({ expect }) => {
 			expect.assertions(2);
 
 			const command = probe(async () => ({ data: {}, summary: "All done." }));
@@ -231,7 +241,9 @@ describe(runCliAsync, () => {
 	});
 
 	describe("prompting", () => {
-		it("should let a command prompt when stdin and stdout are terminals", async () => {
+		it("should let a command prompt when stdin and stdout are terminals", async ({
+			expect,
+		}) => {
 			expect.assertions(1);
 
 			const { command, runs } = recordingProbe();
@@ -244,16 +256,22 @@ describe(runCliAsync, () => {
 			{ name: "--json", argv: ["--json"], environment: {} },
 			{ name: "CI=true", argv: [], environment: { CI: "true" } },
 			{ name: "CI=1", argv: [], environment: { CI: "1" } },
-		])("should not let a command prompt with $name", async ({ argv, environment }) => {
-			expect.assertions(1);
+		])(
+			"should not let a command prompt with $name",
+			async ({ argv, environment }, { expect }) => {
+				expect.assertions(1);
 
-			const { command, runs } = recordingProbe();
-			await makeCli({ commands: [command], environment, tty: true }).run("probe", ...argv);
+				const { command, runs } = recordingProbe();
+				await makeCli({ commands: [command], environment, tty: true }).run(
+					"probe",
+					...argv,
+				);
 
-			expect(runs.map(({ context }) => context.interactive)).toStrictEqual([false]);
-		});
+				expect(runs.map(({ context }) => context.interactive)).toStrictEqual([false]);
+			},
+		);
 
-		it.for(["", "0", "false"])("should still prompt with CI=%s", async (ci) => {
+		it.for(["", "0", "false"])("should still prompt with CI=%s", async (ci, { expect }) => {
 			expect.assertions(1);
 
 			const { command, runs } = recordingProbe();
@@ -262,7 +280,7 @@ describe(runCliAsync, () => {
 			expect(runs.map(({ context }) => context.interactive)).toStrictEqual([true]);
 		});
 
-		it("should not let a command prompt when stdout is not a terminal", async () => {
+		it("should not let a command prompt when stdout is not a terminal", async ({ expect }) => {
 			expect.assertions(1);
 
 			const { command, runs } = recordingProbe();
@@ -274,16 +292,21 @@ describe(runCliAsync, () => {
 		it.for([
 			{ name: "stdin only", stdinIsTty: true, tty: false },
 			{ name: "stdout only", stdinIsTty: false, tty: true },
-		])("should not let a command prompt when $name is a terminal", async (terminal) => {
-			expect.assertions(1);
+		])(
+			"should not let a command prompt when $name is a terminal",
+			async (terminal, { expect }) => {
+				expect.assertions(1);
 
-			const { command, runs } = recordingProbe();
-			await makeCli({ commands: [command], ...terminal }).run("probe");
+				const { command, runs } = recordingProbe();
+				await makeCli({ commands: [command], ...terminal }).run("probe");
 
-			expect(runs.map(({ context }) => context.interactive)).toStrictEqual([false]);
-		});
+				expect(runs.map(({ context }) => context.interactive)).toStrictEqual([false]);
+			},
+		);
 
-		it("should exit with needs_confirmation when init would replace a file unasked", async () => {
+		it("should exit with needs_confirmation when init would replace a file unasked", async ({
+			expect,
+		}) => {
 			expect.assertions(2);
 
 			const { fileSystem } = createMemoryFileSystem({ "rbx-forge.config.ts": "old" });
@@ -298,7 +321,9 @@ describe(runCliAsync, () => {
 	});
 
 	describe("commands", () => {
-		it("should hand the command its context and the config values of passed flags", async () => {
+		it("should hand the command its context and the config values of passed flags", async ({
+			expect,
+		}) => {
 			expect.assertions(3);
 
 			const { command, runs } = recordingProbe([
@@ -320,7 +345,7 @@ describe(runCliAsync, () => {
 			expect({ ...run!.input.flags }).toStrictEqual({ dry: true, port: "4000" });
 		});
 
-		it("should read --no-<flag> as false for a boolean config flag", async () => {
+		it("should read --no-<flag> as false for a boolean config flag", async ({ expect }) => {
 			expect.assertions(1);
 
 			const { command, runs } = recordingProbe([
@@ -331,7 +356,7 @@ describe(runCliAsync, () => {
 			expect(runs[0]!.input.config).toStrictEqual({ open: { buildFirst: false } });
 		});
 
-		it("should report a config error with its code and exit code", async () => {
+		it("should report a config error with its code and exit code", async ({ expect }) => {
 			expect.assertions(2);
 
 			const configLoader = vi.fn<ConfigLoader>().mockResolvedValue({
@@ -356,7 +381,7 @@ describe(runCliAsync, () => {
 			]);
 		});
 
-		it("should pass on a ForgeError's own exit code", async () => {
+		it("should pass on a ForgeError's own exit code", async ({ expect }) => {
 			expect.assertions(1);
 
 			const command = probe(async () => {
@@ -371,21 +396,24 @@ describe(runCliAsync, () => {
 		it.for([
 			{ name: "an Error", thrown: new Error("boom") },
 			{ name: "a string", thrown: "boom" },
-		])("should report $name thrown by a command as internal_error", async ({ thrown }) => {
-			expect.assertions(2);
+		])(
+			"should report $name thrown by a command as internal_error",
+			async ({ thrown }, { expect }) => {
+				expect.assertions(2);
 
-			const command = probe(async () => {
-				// oxlint-disable-next-line typescript/only-throw-error -- A non-Error throw is the case under test.
-				throw thrown;
-			});
-			const cli = makeCli({ commands: [command] });
+				const command = probe(async () => {
+					// oxlint-disable-next-line typescript/only-throw-error -- A non-Error throw is the case under test.
+					throw thrown;
+				});
+				const cli = makeCli({ commands: [command] });
 
-			await expect(cli.run("probe")).resolves.toBe(EXIT_FAILURE);
-			expect(cli.captured.result().error).toStrictEqual({
-				code: "internal_error",
-				hint: "This is a bug in forge. Please report it.",
-				message: "boom",
-			});
-		});
+				await expect(cli.run("probe")).resolves.toBe(EXIT_FAILURE);
+				expect(cli.captured.result().error).toStrictEqual({
+					code: "internal_error",
+					hint: "This is a bug in forge. Please report it.",
+					message: "boom",
+				});
+			},
+		);
 	});
 });

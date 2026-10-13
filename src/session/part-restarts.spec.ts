@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { ForgeError } from "../errors.ts";
@@ -51,7 +51,7 @@ describe(restartedParts, () => {
 			true,
 			[],
 		],
-	])("should restart %s", ([, services, stopped, force, expected]) => {
+	])("should restart %s", ([, services, stopped, force, expected], { expect }) => {
 		expect.assertions(1);
 
 		expect(restartedParts(services, stopped, force)).toStrictEqual(expected);
@@ -96,7 +96,9 @@ const EVERY_PART: PartStops = {
 };
 
 describe(createPartRestarter, () => {
-	it("should stop in the restart scope, then start the parts again, the compiler first", async () => {
+	it("should stop in the restart scope, then start the parts again, the compiler first", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { add, restart, stop } = makeRestarter(EVERY_PART);
@@ -121,7 +123,9 @@ describe(createPartRestarter, () => {
 		});
 	});
 
-	it("should say Studio did not open again when the compiler's first build fails", async () => {
+	it("should say Studio did not open again when the compiler's first build fails", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { add, restart } = makeRestarter(EVERY_PART);
@@ -136,7 +140,7 @@ describe(createPartRestarter, () => {
 		});
 	});
 
-	it("should pass an add's failure on as it is when it starts no Studio", async () => {
+	it("should pass an add's failure on as it is when it starts no Studio", async ({ expect }) => {
 		expect.assertions(1);
 
 		const failure = new ForgeError("compiler_missing", "No compiler.");
@@ -146,7 +150,7 @@ describe(createPartRestarter, () => {
 		await expect(restart({ force: false })).rejects.toBe(failure);
 	});
 
-	it("reopens Studio with its recorded hidden visibility", async () => {
+	it("reopens Studio with its recorded hidden visibility", async ({ expect }) => {
 		expect.assertions(1);
 
 		const services = servicesWith();
@@ -165,7 +169,9 @@ describe(createPartRestarter, () => {
 		});
 	});
 
-	it("should add nothing and keep the owned parts when it stopped nothing", async () => {
+	it("should add nothing and keep the owned parts when it stopped nothing", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const kept: PartStops["kept"] = [{ owner: "start", part: "compiler" }];
@@ -179,7 +185,9 @@ describe(createPartRestarter, () => {
 		expect(add).not.toHaveBeenCalled();
 	});
 
-	it("should start nothing, not even a failed compiler, when it cannot close Studio", async () => {
+	it("should start nothing, not even a failed compiler, when it cannot close Studio", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const studio = {
@@ -200,7 +208,7 @@ describe(createPartRestarter, () => {
 		expect(add).not.toHaveBeenCalled();
 	});
 
-	it("should start Rojo again for a found Studio that stays", async () => {
+	it("should start Rojo again for a found Studio that stays", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { add, restart } = makeRestarter({
@@ -220,7 +228,7 @@ describe(createPartRestarter, () => {
 		expect(add).toHaveBeenCalledExactlyOnceWith({ parts: [], studioPath: undefined });
 	});
 
-	it("should start a failed compiler with no owner again", async () => {
+	it("should start a failed compiler with no owner again", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { add, restart } = makeRestarter(
@@ -232,7 +240,7 @@ describe(createPartRestarter, () => {
 		expect(add).toHaveBeenCalledExactlyOnceWith({ parts: ["compiler"], studioPath: undefined });
 	});
 
-	it("should start nothing when a stopped service's tree left processes", async () => {
+	it("should start nothing when a stopped service's tree left processes", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { add, hasSurvivors, restart } = makeRestarter(EVERY_PART, {
@@ -250,7 +258,7 @@ describe(createPartRestarter, () => {
 		expect(hasSurvivors.mock.calls).toStrictEqual([["rojo"], ["compiler"]]);
 	});
 
-	it("should name every service whose tree left processes", async () => {
+	it("should name every service whose tree left processes", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { restart } = makeRestarter(EVERY_PART, { survivors: ["rojo", "compiler"] });

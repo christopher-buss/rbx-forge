@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import type { FakeChild, SpawnCall } from "../../test/helpers/fake-process.ts";
@@ -107,7 +107,9 @@ async function launchedAsync(options: HarnessOptions = {}): Promise<Harness & { 
 }
 
 describe(launchReaperAsync, () => {
-	it("should start the reaper in its own session on POSIX, hidden, with piped streams", async () => {
+	it("should start the reaper in its own session on POSIX, hidden, with piped streams", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { call, reaper } = await launchedAsync();
@@ -128,7 +130,7 @@ describe(launchReaperAsync, () => {
 		]);
 	});
 
-	it("should keep the reaper in the host's console on Windows", async () => {
+	it("should keep the reaper in the host's console on Windows", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { call } = await launchedAsync({ platform: "win32" });
@@ -136,7 +138,9 @@ describe(launchReaperAsync, () => {
 		expect(call.options).toMatchObject({ detached: false });
 	});
 
-	it("should fail with reaper_unavailable and its stderr when it exits before the lease", async () => {
+	it("should fail with reaper_unavailable and its stderr when it exits before the lease", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { child, launching } = startLaunch();
@@ -150,7 +154,7 @@ describe(launchReaperAsync, () => {
 		});
 	});
 
-	it("should name no stderr when the reaper wrote none", async () => {
+	it("should name no stderr when the reaper wrote none", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { child, launching } = startLaunch();
@@ -161,7 +165,7 @@ describe(launchReaperAsync, () => {
 		);
 	});
 
-	it("should fail with reaper_unavailable when the process cannot start", async () => {
+	it("should fail with reaper_unavailable when the process cannot start", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { child, launching } = startLaunch();
@@ -170,7 +174,7 @@ describe(launchReaperAsync, () => {
 		await expect(launching).rejects.toMatchObject({ code: "reaper_unavailable" });
 	});
 
-	it("should ignore lines that are not events", async () => {
+	it("should ignore lines that are not events", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { child, launching, say } = startLaunch();
@@ -182,7 +186,7 @@ describe(launchReaperAsync, () => {
 });
 
 describe("reaper requests", () => {
-	it("should write go, stop, and terminate in order", async () => {
+	it("should write go, stop, and terminate in order", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { reaper, requests } = await launchedAsync();
@@ -198,7 +202,9 @@ describe("reaper requests", () => {
 		]);
 	});
 
-	it("should resolve a spawn with its pid and start time, and its exit with the report", async () => {
+	it("should resolve a spawn with its pid and start time, and its exit with the report", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { reaper, requests, say } = await launchedAsync();
@@ -223,7 +229,7 @@ describe("reaper requests", () => {
 		await expect(worker.exited).resolves.toStrictEqual(REPORT);
 	});
 
-	it("should reject a spawn the reaper rejects, naming the reason", async () => {
+	it("should reject a spawn the reaper rejects, naming the reason", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { reaper, say } = await launchedAsync();
@@ -237,7 +243,7 @@ describe("reaper requests", () => {
 		});
 	});
 
-	it("should reject a spawn that is pending when the reaper exits", async () => {
+	it("should reject a spawn that is pending when the reaper exits", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { child, reaper } = await launchedAsync();
@@ -252,7 +258,7 @@ describe("reaper requests", () => {
 		});
 	});
 
-	it("should reject a spawn at once after the reaper exited", async () => {
+	it("should reject a spawn at once after the reaper exited", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { child, reaper, requests } = await launchedAsync();
@@ -269,7 +275,9 @@ describe("reaper requests", () => {
 });
 
 describe("reaper end", () => {
-	it("should return the reaper's own reports after terminated, without escalating", async () => {
+	it("should return the reaper's own reports after terminated, without escalating", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { child, clock, reaper, say } = await launchedAsync();
@@ -287,7 +295,9 @@ describe("reaper end", () => {
 		expect(clock.pending()).toBe(0);
 	});
 
-	it("should kill every tree without grace at once when the shutdown is forced during the grace", async () => {
+	it("should kill every tree without grace at once when the shutdown is forced during the grace", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { child, reaper, requests } = await launchedAsync();
@@ -304,7 +314,9 @@ describe("reaper end", () => {
 		expect(child.stdin.writableEnded).toBeFalse();
 	});
 
-	it("should close stdin one margin after a forced shutdown when the reaper still runs", async () => {
+	it("should close stdin one margin after a forced shutdown when the reaper still runs", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { child, clock, reaper } = await launchedAsync();
@@ -323,7 +335,9 @@ describe("reaper end", () => {
 		expect(child.stdin.writableEnded).toBeTrue();
 	});
 
-	it("should end without escalating when the reaper exits after a forced shutdown", async () => {
+	it("should end without escalating when the reaper exits after a forced shutdown", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { child, reaper, say } = await launchedAsync();
@@ -338,7 +352,9 @@ describe("reaper end", () => {
 		await expect(ending).resolves.toStrictEqual({ reports: [], terminated: true });
 	});
 
-	it("should close stdin after the grace and margin, then clean up by force after one more margin", async () => {
+	it("should close stdin after the grace and margin, then clean up by force after one more margin", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const { child, clock, native, reaper } = await launchedAsync();
@@ -374,7 +390,9 @@ describe("reaper end", () => {
 		]);
 	});
 
-	it("should kill a reaper that still runs a moment after the forced cleanup", async () => {
+	it("should kill a reaper that still runs a moment after the forced cleanup", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { child, clock, reaper } = await launchedAsync();
@@ -400,7 +418,7 @@ describe("reaper end", () => {
 		});
 	});
 
-	it("should not kill a reaper that the forced cleanup ended", async () => {
+	it("should not kill a reaper that the forced cleanup ended", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { child, clock, native, reaper } = await launchedAsync();
@@ -419,7 +437,7 @@ describe("reaper end", () => {
 		expect(child.kills).toStrictEqual([]);
 	});
 
-	it("should kill the reaper when the forced cleanup fails", async () => {
+	it("should kill the reaper when the forced cleanup fails", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { child, clock, reaper } = await launchedAsync({ nativeThrows: true });
@@ -435,7 +453,7 @@ describe("reaper end", () => {
 		expect(child.kills).toStrictEqual(["SIGKILL"]);
 	});
 
-	it("should not kill a reaper that exits after its stdin closed", async () => {
+	it("should not kill a reaper that exits after its stdin closed", async ({ expect }) => {
 		expect.assertions(4);
 
 		const { child, clock, native, reaper } = await launchedAsync();
@@ -454,7 +472,9 @@ describe("reaper end", () => {
 		expect(pending).toBe(0);
 	});
 
-	it("should kill the tree of every worker a dead reaper left, through a verified pin", async () => {
+	it("should kill the tree of every worker a dead reaper left, through a verified pin", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { child, native, reaper, say } = await launchedAsync({
@@ -477,7 +497,7 @@ describe("reaper end", () => {
 		});
 	});
 
-	it("should report a left worker that outlives the kill as incomplete", async () => {
+	it("should report a left worker that outlives the kill as incomplete", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { child, reaper, say } = await launchedAsync({
@@ -495,7 +515,7 @@ describe("reaper end", () => {
 		});
 	});
 
-	it("should kill nothing when the PID now names another process", async () => {
+	it("should kill nothing when the PID now names another process", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { child, native, reaper, say } = await launchedAsync({
@@ -512,7 +532,7 @@ describe("reaper end", () => {
 		expect(native.processes.get(LEADER)).toMatchObject({ alive: true });
 	});
 
-	it("should treat a left worker that is already gone as done", async () => {
+	it("should treat a left worker that is already gone as done", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { child, reaper, say } = await launchedAsync();
@@ -526,7 +546,9 @@ describe("reaper end", () => {
 		});
 	});
 
-	it("should report a left worker as incomplete when the native addon fails", async () => {
+	it("should report a left worker as incomplete when the native addon fails", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { child, reaper, say } = await launchedAsync({ nativeThrows: true });
@@ -540,7 +562,7 @@ describe("reaper end", () => {
 		});
 	});
 
-	it("should keep reports of workers that exited before the reaper died", async () => {
+	it("should keep reports of workers that exited before the reaper died", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { child, reaper, say } = await launchedAsync();
@@ -578,7 +600,7 @@ describe(createReaperLauncher, () => {
 		return { launch, spawner };
 	}
 
-	it("should launch the binary it finds", async () => {
+	it("should launch the binary it finds", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { launch, spawner } = makeLauncher(() => "/native/forge-reaper");
@@ -591,7 +613,7 @@ describe(createReaperLauncher, () => {
 		expect(spawner.calls.map(({ file }) => file)).toStrictEqual(["/native/forge-reaper"]);
 	});
 
-	it("should start nothing when no binary is found", async () => {
+	it("should start nothing when no binary is found", async ({ expect }) => {
 		expect.assertions(2);
 
 		const error = new ForgeError("reaper_unavailable", "missing");

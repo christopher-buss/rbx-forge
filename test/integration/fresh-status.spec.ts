@@ -6,14 +6,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { IpcTarget } from "../../src/ipc/client.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import { realTransport } from "../helpers/native-testing.ts";
-import type { Project } from "./session-harness.ts";
 import { COMPILER_ONLY, launch, makeProjectAsync } from "./session-harness.ts";
 import { waitForSessionAsync } from "./session-reach.ts";
 
@@ -39,7 +38,7 @@ interface Watched {
  * @returns How to edit the file and ask the session.
  */
 async function startWatchedAsync(variables: Record<string, string>): Promise<Watched> {
-	const project: Project = await makeProjectAsync({ projectType: "rbxts" });
+	const project = await makeProjectAsync({ projectType: "rbxts" });
 	const watched = path.join(project.project, "src", "main.ts");
 	mkdirSync(path.dirname(watched), { recursive: true });
 	writeFileSync(watched, "export {};\n");
@@ -79,7 +78,7 @@ async function startWatchedAsync(variables: Record<string, string>): Promise<Wat
 }
 
 describe("freshStatus", () => {
-	it("should wait for the first build, then for the build of each edit", async () => {
+	it("should wait for the first build, then for the build of each edit", async ({ expect }) => {
 		expect.assertions(2);
 
 		const session = await startWatchedAsync({ FIXTURE_COMPILE_MS: "1000" });
@@ -91,7 +90,9 @@ describe("freshStatus", () => {
 		expect(second).toMatchObject({ building: false, lastBuild: { errors: 1 } });
 	});
 
-	it("should wait for the build of an edit that the watcher sees after the quiet window", async () => {
+	it("should wait for the build of an edit that the watcher sees after the quiet window", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const session = await startWatchedAsync({
@@ -107,7 +108,9 @@ describe("freshStatus", () => {
 		});
 	});
 
-	it("should fail with compile_timeout while a compile runs past the bound", async () => {
+	it("should fail with compile_timeout while a compile runs past the bound", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const session = await startWatchedAsync({ FIXTURE_COMPILE_MS: "60000" });
@@ -119,7 +122,9 @@ describe("freshStatus", () => {
 		});
 	});
 
-	it("should fail with service_failed when the compiler exits during the wait", async () => {
+	it("should fail with service_failed when the compiler exits during the wait", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const session = await startWatchedAsync({

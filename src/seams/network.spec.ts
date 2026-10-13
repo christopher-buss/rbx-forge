@@ -1,15 +1,17 @@
 import type { AddressInfo } from "node:net";
 import { createServer } from "node:net";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import { nodeNetwork } from "./network.ts";
 
 /**
  * Listen on a free port of `127.0.0.1` until the test ends.
  *
+ * @param onTestFinished - Register cleanup for this test.
  * @returns The port.
  */
-async function listenAsync(): Promise<number> {
+async function listenAsync(onTestFinished: TestContext["onTestFinished"]): Promise<number> {
 	const server = createServer();
 	await new Promise<void>((resolve) => {
 		server.listen({ host: "127.0.0.1", port: 0 }, resolve);
@@ -22,7 +24,7 @@ async function listenAsync(): Promise<number> {
 }
 
 describe(nodeNetwork.freePortAsync, () => {
-	it("should give a port that is free, and leave it free", async () => {
+	it("should give a port that is free, and leave it free", async ({ expect }) => {
 		expect.assertions(2);
 
 		const port = await nodeNetwork.freePortAsync();
@@ -33,15 +35,20 @@ describe(nodeNetwork.freePortAsync, () => {
 });
 
 describe(nodeNetwork.isPortFreeAsync, () => {
-	it("should report a port another server listens on as busy", async () => {
+	it("should report a port another server listens on as busy", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
-		const port = await listenAsync();
+		const port = await listenAsync(onTestFinished);
 
 		await expect(nodeNetwork.isPortFreeAsync(port)).resolves.toBeFalse();
 	});
 
-	it("should report a port as free once its server is gone, and leave it free", async () => {
+	it("should report a port as free once its server is gone, and leave it free", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const server = createServer();
@@ -62,7 +69,10 @@ describe(nodeNetwork.isPortFreeAsync, () => {
 });
 
 describe(nodeNetwork.isListeningAsync, () => {
-	it("should check 127.0.0.1 only, not every name of localhost", async () => {
+	it("should check 127.0.0.1 only, not every name of localhost", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const server = createServer();
@@ -79,7 +89,7 @@ describe(nodeNetwork.isListeningAsync, () => {
 		await expect(nodeNetwork.isListeningAsync(port)).resolves.toBeFalse();
 	});
 
-	it("should close its connection once it got through", async () => {
+	it("should close its connection once it got through", async ({ expect, onTestFinished }) => {
 		expect.assertions(1);
 
 		const closed = Promise.withResolvers<string>();
@@ -108,15 +118,18 @@ describe(nodeNetwork.isListeningAsync, () => {
 		await expect(closed.promise).resolves.toBe("closed");
 	});
 
-	it("should report a port a server listens on as listening", async () => {
+	it("should report a port a server listens on as listening", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
-		const port = await listenAsync();
+		const port = await listenAsync(onTestFinished);
 
 		await expect(nodeNetwork.isListeningAsync(port)).resolves.toBeTrue();
 	});
 
-	it("should report a port nothing listens on as not listening", async () => {
+	it("should report a port nothing listens on as not listening", async ({ expect }) => {
 		expect.assertions(1);
 
 		const server = createServer();

@@ -1,7 +1,7 @@
 import { encode } from "@msgpack/msgpack";
 
 import { getEventListeners } from "node:events";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createFakeNetworkBackend } from "../../test/helpers/network-backend.ts";
 import { createNodeNetwork } from "./network.ts";
@@ -14,7 +14,9 @@ const IDENTITY = {
 };
 
 describe("local HTTP network backend", () => {
-	it("should validate and decode the Rojo identity through its HTTP driver", async () => {
+	it("should validate and decode the Rojo identity through its HTTP driver", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const fake = createFakeNetworkBackend();
@@ -26,7 +28,7 @@ describe("local HTTP network backend", () => {
 		expect(fake.fetch.mock.calls[0]![0]).toBe("http://127.0.0.1:50000/api/rojo");
 	});
 
-	it("should include cancellation in the Rojo identity request", async () => {
+	it("should include cancellation in the Rojo identity request", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fake = createFakeNetworkBackend();
@@ -40,7 +42,7 @@ describe("local HTTP network backend", () => {
 		expect(signal!.reason).toBe(abort.signal.reason);
 	});
 
-	it("should reject a failed or incomplete Rojo API response", async () => {
+	it("should reject a failed or incomplete Rojo API response", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fake = createFakeNetworkBackend();
@@ -55,7 +57,7 @@ describe("local HTTP network backend", () => {
 		await expect(network.getRojoInfoAsync(50000)).rejects.toThrow("sessionId must be a string");
 	});
 
-	it("should accept the exact GET once and close all active requests", async () => {
+	it("should accept the exact GET once and close all active requests", async ({ expect }) => {
 		expect.assertions(5);
 
 		const fake = createFakeNetworkBackend();
@@ -91,7 +93,9 @@ describe("local HTTP network backend", () => {
 		]).toStrictEqual([[[]], [[]]]);
 	});
 
-	it("should cancel a published listener and remove its cancellation handler", async () => {
+	it("should cancel a published listener and remove its cancellation handler", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fake = createFakeNetworkBackend();
@@ -108,7 +112,7 @@ describe("local HTTP network backend", () => {
 		expect(fake.server.closeAllConnections).toHaveBeenCalledOnce();
 	});
 
-	it("should reject an already cancelled launch before binding", async () => {
+	it("should reject an already cancelled launch before binding", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fake = createFakeNetworkBackend();
@@ -122,7 +126,7 @@ describe("local HTTP network backend", () => {
 		expect(fake.server.listen).not.toHaveBeenCalled();
 	});
 
-	it("should close a launch cancelled during binding", async () => {
+	it("should close a launch cancelled during binding", async ({ expect }) => {
 		expect.assertions(3);
 
 		const fake = createFakeNetworkBackend();
@@ -140,7 +144,7 @@ describe("local HTTP network backend", () => {
 		expect(fake.server.closeAllConnections).toHaveBeenCalledOnce();
 	});
 
-	it("should dispose a failed binding", async () => {
+	it("should dispose a failed binding", async ({ expect }) => {
 		expect.assertions(3);
 
 		const fake = createFakeNetworkBackend();

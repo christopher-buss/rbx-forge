@@ -1,4 +1,5 @@
-import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
+import type { TestContext } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { createMemoryTransport, scriptedConnection } from "../../test/helpers/fake-ipc.ts";
 import { ForgeError } from "../errors.ts";
@@ -12,24 +13,29 @@ import type { IpcTransport } from "./transport.ts";
 const ENDPOINT = "session";
 const TARGET = { endpoint: ENDPOINT, token: "token" };
 
-async function startAsync(handlers: IpcServerOptions["handlers"], owner?: IpcOwner) {
+async function startAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
+	handlers: IpcServerOptions["handlers"],
+	owner?: IpcOwner,
+) {
 	const transport = createMemoryTransport();
 	const server = startIpcServer(await transport.listenAsync(ENDPOINT), {
 		handlers,
 		owner,
 		token: TARGET.token,
 	});
-	onTestFinished(async () => {
+	testContext.onTestFinished(async () => {
 		await server.closeAsync();
 	});
 	return { server, transport };
 }
 
 async function serveAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
 	handlers: IpcServerOptions["handlers"],
 	owner?: IpcOwner,
 ): Promise<IpcTransport> {
-	const { transport } = await startAsync(handlers, owner);
+	const { transport } = await startAsync(testContext, handlers, owner);
 	return transport;
 }
 
@@ -53,12 +59,15 @@ function never(): AbortSignal {
 }
 
 describe(callSessionAsync, () => {
-	it("should send the token and request and return the result", async () => {
+	it("should send the token and request and return the result", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const status = vi.fn<NonNullable<IpcServerOptions["handlers"]["status"]>>();
 		status.mockResolvedValue({ running: true });
-		const transport = await serveAsync({ status });
+		const transport = await serveAsync({ onTestFinished }, { status });
 
 		await expect(
 			callSessionAsync(transport, TARGET, "status", { params: { a: 1 } }),
@@ -66,7 +75,7 @@ describe(callSessionAsync, () => {
 		expect(status).toHaveBeenCalledExactlyOnceWith({ a: 1 });
 	});
 
-	it("should report no session when nothing listens", async () => {
+	it("should report no session when nothing listens", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(
@@ -78,10 +87,13 @@ describe(callSessionAsync, () => {
 		});
 	});
 
-	it("should report a session that closes without an answer, as on a wrong token", async () => {
+	it("should report a session that closes without an answer, as on a wrong token", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
-		const transport = await serveAsync({ status: async () => ({}) });
+		const transport = await serveAsync({ onTestFinished }, { status: async () => ({}) });
 
 		await expect(
 			callSessionAsync(transport, { ...TARGET, token: "wrong" }, "status"),
@@ -92,21 +104,26 @@ describe(callSessionAsync, () => {
 		});
 	});
 
-	it("should throw the session's failure with its code", async () => {
+	it("should throw the session's failure with its code", async ({ expect, onTestFinished }) => {
 		expect.assertions(1);
 
-		const transport = await serveAsync({
-			shutdown: async () => {
-				throw new ForgeError("session_replaced", "replaced");
+		const transport = await serveAsync(
+			{ onTestFinished },
+			{
+				shutdown: async () => {
+					throw new ForgeError("session_replaced", "replaced");
+				},
 			},
-		});
+		);
 
 		await expect(callSessionAsync(transport, TARGET, "shutdown")).rejects.toMatchObject({
 			code: "session_replaced",
 		});
 	});
 
-	it("should wait for the answer as long as asked, and close the connection", async () => {
+	it("should wait for the answer as long as asked, and close the connection", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const connection = scriptedConnection([]);
@@ -126,11 +143,14 @@ describe(callSessionAsync, () => {
 });
 
 describe(ownSessionAsync, () => {
-	it("should join, hold the session, and let go with a release once asked", async () => {
+	it("should join, hold the session, and let go with a release once asked", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(4);
 
 		const owner = makeOwner();
-		const transport = await serveAsync({}, owner);
+		const transport = await serveAsync({ onTestFinished }, {}, owner);
 		const owned = await ownSessionAsync(transport, TARGET, {
 			params: { parts: [] },
 			signal: never(),
@@ -149,11 +169,14 @@ describe(ownSessionAsync, () => {
 		expect([wasHeld, owner.leave.mock.calls]).toStrictEqual([0, [["release"]]]);
 	});
 
-	it("should end the hold with no answer once the session closes the connection", async () => {
+	it("should end the hold with no answer once the session closes the connection", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const owner = makeOwner();
-		const { server, transport } = await startAsync({}, owner);
+		const { server, transport } = await startAsync({ onTestFinished }, {}, owner);
 		const owned = await ownSessionAsync(transport, TARGET, { signal: never() });
 		const held = owned!.holdAsync(never(), 1000);
 		await server.closeAsync();
@@ -162,12 +185,15 @@ describe(ownSessionAsync, () => {
 		expect(owner.leave).not.toHaveBeenCalled();
 	});
 
-	it("should give up on a join once its signal aborts, and the session lets go", async () => {
+	it("should give up on a join once its signal aborts, and the session lets go", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const joined = Promise.withResolvers<Record<string, unknown>>();
 		const owner = makeOwner(async () => joined.promise);
-		const transport = await serveAsync({}, owner);
+		const transport = await serveAsync({ onTestFinished }, {}, owner);
 		const stop = new AbortController();
 		const owning = ownSessionAsync(transport, TARGET, { signal: stop.signal });
 		await vi.waitFor(() => {
@@ -185,10 +211,14 @@ describe(ownSessionAsync, () => {
 		expect(owner.leave.mock.calls).toStrictEqual([["gone"]]);
 	});
 
-	it("should throw the join's failure, and report no session when nothing listens", async () => {
+	it("should throw the join's failure, and report no session when nothing listens", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const transport = await serveAsync(
+			{ onTestFinished },
 			{},
 			makeOwner(async () => {
 				throw new ForgeError("session_running", "owned");
@@ -203,7 +233,7 @@ describe(ownSessionAsync, () => {
 		).rejects.toMatchObject({ code: "not_running" });
 	});
 
-	it("should report a release that gets no answer in time", async () => {
+	it("should report a release that gets no answer in time", async ({ expect }) => {
 		expect.assertions(3);
 
 		const connection = scriptedConnection(['{"ok":true,"result":{},"type":"response"}']);
@@ -226,19 +256,24 @@ describe(ownSessionAsync, () => {
 	it.for([
 		["closes", { type: "closed" }],
 		["sends a line that is too long", { type: "too_long" }],
-	] as const)("should end the hold with no answer once the session %s", async ([, end]) => {
-		expect.assertions(2);
+	] as const)(
+		"should end the hold with no answer once the session %s",
+		async ([, end], { expect }) => {
+			expect.assertions(2);
 
-		const connection = scriptedConnection([JOINED, end]);
-		const owned = await ownSessionAsync(scriptedTransport(connection), TARGET, {
-			signal: never(),
-		});
+			const connection = scriptedConnection([JOINED, end]);
+			const owned = await ownSessionAsync(scriptedTransport(connection), TARGET, {
+				signal: never(),
+			});
 
-		await expect(owned!.holdAsync(never(), 1000)).resolves.toBeUndefined();
-		expect(connection.isClosed()).toBeTrue();
-	});
+			await expect(owned!.holdAsync(never(), 1000)).resolves.toBeUndefined();
+			expect(connection.isClosed()).toBeTrue();
+		},
+	);
 
-	it("should close the connection when the join fails, or is given up once answered", async () => {
+	it("should close the connection when the join fails, or is given up once answered", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const failing = scriptedConnection([

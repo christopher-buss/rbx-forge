@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import type { FlagDefinition } from "./flags.ts";
@@ -21,7 +21,7 @@ function parse(argv: Array<string>): ReturnType<typeof parseArgs>["values"] {
 }
 
 describe(parserOptions, () => {
-	it("should map each kind to a parser type, with no defaults", () => {
+	it("should map each kind to a parser type, with no defaults", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parserOptions(FLAGS)).toStrictEqual({
@@ -35,13 +35,13 @@ describe(parserOptions, () => {
 		});
 	});
 
-	it("should leave every flag absent when none is passed", () => {
+	it("should leave every flag absent when none is passed", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(Object.keys(parse([]))).toStrictEqual([]);
 	});
 
-	it("should give the global flags their short aliases", () => {
+	it("should give the global flags their short aliases", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parserOptions(GLOBAL_FLAGS)).toStrictEqual({
@@ -53,7 +53,7 @@ describe(parserOptions, () => {
 });
 
 describe(configLayerFromFlags, () => {
-	it("should set the option of each passed flag, typed by its kind", () => {
+	it("should set the option of each passed flag, typed by its kind", ({ expect }) => {
 		expect.assertions(1);
 
 		const values = parse([
@@ -80,7 +80,9 @@ describe(configLayerFromFlags, () => {
 		});
 	});
 
-	it("should keep a string flag's value a string, even when it looks like a number", () => {
+	it("should keep a string flag's value a string, even when it looks like a number", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		expect(configLayerFromFlags(FLAGS, parse(["--output", "123"]))).toStrictEqual({
@@ -88,7 +90,7 @@ describe(configLayerFromFlags, () => {
 		});
 	});
 
-	it("should set nothing for flags that were not passed or map to no option", () => {
+	it("should set nothing for flags that were not passed or map to no option", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(configLayerFromFlags(FLAGS, parse(["--dry-run"]))).toStrictEqual({});
@@ -99,7 +101,7 @@ describe(configLayerFromFlags, () => {
 		[["--port", "1.5"], "--port: rojoPort"],
 		[["--port", "0"], "--port: rojoPort"],
 		[["--output", ""], "--output: buildOutputPath"],
-	] as const)("should reject %o as usage, naming the flag", ([argv, message]) => {
+	] as const)("should reject %o as usage, naming the flag", ([argv, message], { expect }) => {
 		expect.assertions(2);
 
 		const error = catchForgeError(() => configLayerFromFlags(FLAGS, parse([...argv])));
@@ -108,7 +110,7 @@ describe(configLayerFromFlags, () => {
 		expect(error.message).toStartWith(message);
 	});
 
-	it("should name every flag with a bad value", () => {
+	it("should name every flag with a bad value", ({ expect }) => {
 		expect.assertions(1);
 
 		const error = catchForgeError(() => {
@@ -120,7 +122,7 @@ describe(configLayerFromFlags, () => {
 		);
 	});
 
-	it("should point a bad flag value at the help page", () => {
+	it("should point a bad flag value at the help page", ({ expect }) => {
 		expect.assertions(1);
 
 		const error = catchForgeError(() => configLayerFromFlags(FLAGS, parse(["--port", "x"])));

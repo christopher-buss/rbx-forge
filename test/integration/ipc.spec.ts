@@ -7,7 +7,8 @@ import { statSync } from "node:fs";
 import { connect } from "node:net";
 import path from "node:path";
 import process from "node:process";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import { encodeLine } from "../../src/ipc/protocol.ts";
@@ -33,9 +34,13 @@ const LOCAL_PREFIX = 4;
  * Connect with `node:net` and report how the connect ended.
  *
  * @param endpoint - Where to connect.
+ * @param onTestFinished - Register cleanup for this test.
  * @returns `connected`, or the error code.
  */
-async function tryConnectAsync(endpoint: string): Promise<string> {
+async function tryConnectAsync(
+	endpoint: string,
+	onTestFinished: TestContext["onTestFinished"],
+): Promise<string> {
 	const socket = connect(endpoint);
 	onTestFinished(() => {
 		socket.destroy();
@@ -88,7 +93,7 @@ function trustees({ aces, owner, protected: isProtected }: NativeSecurity): obje
 }
 
 describe("control channel", () => {
-	it("should answer a client with the right token", async () => {
+	it("should answer a client with the right token", async ({ expect }) => {
 		expect.assertions(1);
 
 		const transport = realTransport();
@@ -99,7 +104,7 @@ describe("control channel", () => {
 		).resolves.toStrictEqual({ ok: 1 });
 	});
 
-	it("should close on a wrong token without an answer, and keep serving", async () => {
+	it("should close on a wrong token without an answer, and keep serving", async ({ expect }) => {
 		expect.assertions(3);
 
 		const transport = realTransport();
@@ -120,7 +125,7 @@ describe("control channel", () => {
 		).resolves.toStrictEqual({ ok: 1 });
 	});
 
-	it("should report no session where nothing listens", async () => {
+	it("should report no session where nothing listens", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(
@@ -130,7 +135,7 @@ describe("control channel", () => {
 
 	it.skipIf(IS_WINDOWS)(
 		"should keep the socket in an owner-only directory and remove it on close",
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(3);
 
 			const { endpoint, server } = await serveEndpointAsync(realTransport());
@@ -144,20 +149,23 @@ describe("control channel", () => {
 		},
 	);
 
-	it.skipIf(!IS_WINDOWS)("should refuse to open a pipe name another process holds", async () => {
-		expect.assertions(1);
+	it.skipIf(!IS_WINDOWS)(
+		"should refuse to open a pipe name another process holds",
+		async ({ expect }) => {
+			expect.assertions(1);
 
-		const transport = realTransport();
-		const { endpoint } = await serveEndpointAsync(transport);
+			const transport = realTransport();
+			const { endpoint } = await serveEndpointAsync(transport);
 
-		await expect(transport.listenAsync(endpoint)).rejects.toMatchObject({
-			code: "endpoint_in_use",
-		});
-	});
+			await expect(transport.listenAsync(endpoint)).rejects.toMatchObject({
+				code: "endpoint_in_use",
+			});
+		},
+	);
 
 	it.skipIf(!IS_WINDOWS)(
 		"should reject remote-style connects, which a remote-accepting pipe allows",
-		async () => {
+		async ({ expect, onTestFinished }) => {
 			expect.assertions(2);
 
 			const { endpoint } = await serveEndpointAsync(realTransport());
@@ -171,8 +179,10 @@ describe("control channel", () => {
 			const controls = [];
 			const forge = [];
 			for (const host of ["127.0.0.1", "localhost"]) {
-				controls.push(await tryConnectAsync(remotePath(`${endpoint}-control`, host)));
-				forge.push(await tryConnectAsync(remotePath(endpoint, host)));
+				controls.push(
+					await tryConnectAsync(remotePath(`${endpoint}-control`, host), onTestFinished),
+				);
+				forge.push(await tryConnectAsync(remotePath(endpoint, host), onTestFinished));
 			}
 
 			expect(controls).toStrictEqual(["connected", "connected"]);
@@ -180,24 +190,30 @@ describe("control channel", () => {
 		},
 	);
 
-	it.skipIf(!IS_WINDOWS)("should give the pipe and the token file an owner-only DACL", () => {
-		expect.assertions(2);
+	it.skipIf(!IS_WINDOWS)(
+		"should give the pipe and the token file an owner-only DACL",
+		({ expect, onTestFinished }) => {
+			expect.assertions(2);
 
-		const native = loadTestNative();
-		const user = native.currentUserSid!();
-		const server = native.createPipeServer!(`\\\\.\\pipe\\rbx-forge-dacl-${process.pid}`, true);
-		onTestFinished(() => {
-			server.close();
-		});
-		const token = path.join(makeTemporaryDirectory(), "token");
-		native.writePrivateFile!(token, "secret");
-		const expected = {
-			aces: [{ kind: "allow", sid: user }],
-			isProtected: true,
-			owner: user,
-		};
+			const native = loadTestNative();
+			const user = native.currentUserSid!();
+			const server = native.createPipeServer!(
+				`\\\\.\\pipe\\rbx-forge-dacl-${process.pid}`,
+				true,
+			);
+			onTestFinished(() => {
+				server.close();
+			});
+			const token = path.join(makeTemporaryDirectory(), "token");
+			native.writePrivateFile!(token, "secret");
+			const expected = {
+				aces: [{ kind: "allow", sid: user }],
+				isProtected: true,
+				owner: user,
+			};
 
-		expect(trustees(server.security())).toStrictEqual(expected);
-		expect(trustees(native.fileSecurity!(token))).toStrictEqual(expected);
-	});
+			expect(trustees(server.security())).toStrictEqual(expected);
+			expect(trustees(native.fileSecurity!(token))).toStrictEqual(expected);
+		},
+	);
 });

@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { failedError, noteWaited, notReadyError } from "./not-ready.ts";
 
 describe(failedError, () => {
-	it("should fail with service_failed and the failure of a Rojo forge stopped", () => {
+	it("should fail with service_failed and the failure of a Rojo forge stopped", ({ expect }) => {
 		expect.assertions(1);
 
 		const { services } = makeStatus();
@@ -17,7 +17,7 @@ describe(failedError, () => {
 		});
 	});
 
-	it("should name no part it did not wait for", () => {
+	it("should name no part it did not wait for", ({ expect }) => {
 		expect.assertions(1);
 
 		const { services } = makeStatus();
@@ -26,7 +26,7 @@ describe(failedError, () => {
 		expect(failedError(services, new Set(["compiler"]))).toBeUndefined();
 	});
 
-	it("should name no part it waited for that did not fail", () => {
+	it("should name no part it waited for that did not fail", ({ expect }) => {
 		expect.assertions(1);
 
 		const { services } = makeStatus();
@@ -37,7 +37,7 @@ describe(failedError, () => {
 });
 
 describe(noteWaited, () => {
-	it("should note only the parts that are starting", () => {
+	it("should note only the parts that are starting", ({ expect }) => {
 		expect.assertions(1);
 
 		const { services } = makeStatus();
@@ -50,7 +50,7 @@ describe(noteWaited, () => {
 });
 
 describe(notReadyError, () => {
-	it("should fail with studio_launch_failed for a Studio that is opening", () => {
+	it("should fail with studio_launch_failed for a Studio that is opening", ({ expect }) => {
 		expect.assertions(1);
 
 		const { services } = makeStatus();

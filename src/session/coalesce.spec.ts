@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createCoalescingRunner } from "./coalesce.ts";
 
@@ -39,7 +39,7 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(createCoalescingRunner, () => {
-	it("should run at once when nothing runs", async () => {
+	it("should run at once when nothing runs", async ({ expect }) => {
 		expect.assertions(1);
 
 		const task = controlledTask();
@@ -52,7 +52,7 @@ describe(createCoalescingRunner, () => {
 		expect(task.calls).toStrictEqual(["start 1", "end 1"]);
 	});
 
-	it("should fold every request during a run into one more run after it", async () => {
+	it("should fold every request during a run into one more run after it", async ({ expect }) => {
 		expect.assertions(1);
 
 		const task = controlledTask();
@@ -69,7 +69,7 @@ describe(createCoalescingRunner, () => {
 		expect(task.calls).toStrictEqual(["start 1", "end 1", "start 2", "end 2"]);
 	});
 
-	it("should start a new run for a request after the runs settled", async () => {
+	it("should start a new run for a request after the runs settled", async ({ expect }) => {
 		expect.assertions(1);
 
 		const task = controlledTask();
@@ -86,7 +86,7 @@ describe(createCoalescingRunner, () => {
 		expect(task.calls).toStrictEqual(["start 1", "end 1", "start 2", "end 2"]);
 	});
 
-	it("should settle only once the runs are done", async () => {
+	it("should settle only once the runs are done", async ({ expect }) => {
 		expect.assertions(2);
 
 		const task = controlledTask();
@@ -106,7 +106,7 @@ describe(createCoalescingRunner, () => {
 		await expect(settled).resolves.toBeTrue();
 	});
 
-	it("should resolve a request with the result of the run it started", async () => {
+	it("should resolve a request with the result of the run it started", async ({ expect }) => {
 		expect.assertions(1);
 
 		const task = controlledTask();
@@ -118,7 +118,7 @@ describe(createCoalescingRunner, () => {
 		await expect(result).resolves.toBe(1);
 	});
 
-	it("should resolve requests during a run with the one run after it", async () => {
+	it("should resolve requests during a run with the one run after it", async ({ expect }) => {
 		expect.assertions(1);
 
 		const task = controlledTask();
@@ -134,7 +134,7 @@ describe(createCoalescingRunner, () => {
 		await expect(Promise.all([first, second, third])).resolves.toStrictEqual([1, 2, 2]);
 	});
 
-	it("should settle at once when nothing ran", async () => {
+	it("should settle at once when nothing ran", async ({ expect }) => {
 		expect.assertions(1);
 
 		const runner = createCoalescingRunner(async () => {

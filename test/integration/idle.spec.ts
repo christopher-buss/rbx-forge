@@ -5,7 +5,8 @@
 import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { assert, describe, expect, it } from "vitest";
+import type { TestContext } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { ReporterEvent } from "../../src/seams/reporter.ts";
@@ -88,10 +89,15 @@ async function waitForStatusAsync(
  * Do something every second for longer than the timeout, then check that
  * the session still runs.
  *
+ * @param testContext - Assertions and cleanup for this test.
  * @param run - The supervisor.
  * @param act - One activity.
  */
-async function keepActiveAsync(run: Launched, act: () => Promise<void> | void): Promise<void> {
+async function keepActiveAsync(
+	testContext: Pick<TestContext, "expect">,
+	run: Launched,
+	act: () => Promise<void> | void,
+): Promise<void> {
 	let isSettled = false;
 	void run.settled.finally(() => {
 		isSettled = true;
@@ -102,7 +108,7 @@ async function keepActiveAsync(run: Launched, act: () => Promise<void> | void): 
 		await sleep(ACTIVITY_EVERY_MS);
 	}
 
-	expect(isSettled).toBeFalse();
+	testContext.expect(isSettled).toBeFalse();
 }
 
 /**
@@ -119,7 +125,7 @@ async function idleEndAsync(run: Launched): Promise<unknown> {
 }
 
 describe("idle timeout", () => {
-	it("should stop the compiler and end an up session with no activity", async () => {
+	it("should stop the compiler and end an up session with no activity", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { project, run } = await startUpAsync(SHORT_TIMEOUT);
@@ -134,26 +140,26 @@ describe("idle timeout", () => {
 		);
 	});
 
-	it("should start the time again on each client request", async () => {
+	it("should start the time again on each client request", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { project, run } = await startUpAsync(TIMEOUT);
 		const session = await waitForSessionAsync(project);
 		const target = { endpoint: session.identity.endpoint, token: session.token };
 		const transport = realTransport();
-		await keepActiveAsync(run, async () => {
+		await keepActiveAsync({ expect }, run, async () => {
 			await callSessionAsync(transport, target, "status");
 		});
 
 		await expect(idleEndAsync(run)).resolves.toBe("shutdown");
 	});
 
-	it("should start the time again on each compile start", async () => {
+	it("should start the time again on each compile start", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { run, watched } = await startUpAsync(TIMEOUT);
 		let edits = 0;
-		await keepActiveAsync(run, () => {
+		await keepActiveAsync({ expect }, run, () => {
 			edits += 1;
 			writeFileSync(watched, `export const edit = ${edits};\n`);
 		});
@@ -164,7 +170,7 @@ describe("idle timeout", () => {
 	it(
 		"should start the time again on each Studio save, then close Studio",
 		{ timeout: 40_000 },
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(4);
 
 			const project = await makeProjectAsync({
@@ -175,7 +181,7 @@ describe("idle timeout", () => {
 			const run = launchUnowned(project, START_STUDIO, studioEnvironment(project));
 			await waitForStatusAsync(project, ({ services }) => services.studio.status === "open");
 			const opened = Date.now();
-			await keepActiveAsync(run, () => {
+			await keepActiveAsync({ expect }, run, () => {
 				const now = new Date();
 				utimesSync(place, now, now);
 			});
@@ -187,7 +193,9 @@ describe("idle timeout", () => {
 		},
 	);
 
-	it("should stop the Rojo of a found Studio, let it go open, and end an up session", async () => {
+	it("should stop the Rojo of a found Studio, let it go open, and end an up session", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync({ session: { idleTimeout: SHORT_TIMEOUT } });
@@ -212,7 +220,7 @@ describe("idle timeout", () => {
 		}).toStrictEqual({ lock: true, running: true });
 	});
 
-	it("should never stop a part a start owns, nor end its session", async () => {
+	it("should never stop a part a start owns, nor end its session", async ({ expect }) => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync({

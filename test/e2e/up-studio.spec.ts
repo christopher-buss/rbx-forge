@@ -4,7 +4,7 @@
  * codes, files, and the process table are checked.
  */
 import { setTimeout as sleep } from "node:timers/promises";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { EXIT_FAILURE } from "../../src/exit-codes.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
@@ -79,7 +79,9 @@ async function waitForStatusAsync(
 }
 
 describe("forge up --studio", () => {
-	it("should attach Studio and Rojo to a running session, and not restart the compiler", async () => {
+	it("should attach Studio and Rojo to a running session, and not restart the compiler", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -113,7 +115,9 @@ describe("forge up --studio", () => {
 		});
 	});
 
-	it("should start a session with its compiler, then attach Studio and Rojo", async () => {
+	it("should start a session with its compiler, then attach Studio and Rojo", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -129,7 +133,9 @@ describe("forge up --studio", () => {
 		});
 	});
 
-	it("should attach the Studio that has the place open: no build, no second Studio", async () => {
+	it("should attach the Studio that has the place open: no build, no second Studio", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -145,7 +151,7 @@ describe("forge up --studio", () => {
 		]);
 	});
 
-	it("should serve each worktree with no rojoPort on its own port", async () => {
+	it("should serve each worktree with no rojoPort on its own port", async ({ expect }) => {
 		expect.assertions(3);
 
 		const first = await makeFixtureAsync(ANY_PORT, { studio: true });
@@ -158,7 +164,9 @@ describe("forge up --studio", () => {
 		expect(one.port).not.toBe(two.port);
 	});
 
-	it("should fail with port_in_use when the set rojoPort is busy, and open no Studio", async () => {
+	it("should fail with port_in_use when the set rojoPort is busy, and open no Studio", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -170,7 +178,9 @@ describe("forge up --studio", () => {
 		expect(processes(fixture).filter((line) => line !== "rbxtsc -w")).toStrictEqual([]);
 	});
 
-	it("should stop only Rojo when the attached Studio closes, and attach again on the same port", async () => {
+	it("should stop only Rojo when the attached Studio closes, and attach again on the same port", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(ANY_PORT, { studio: true });
@@ -192,7 +202,7 @@ describe("forge up --studio", () => {
 		expect(again).toMatchObject({ port: first.port, status: "ready" });
 	});
 
-	it("should start a failed Rojo again on the same port with up", async () => {
+	it("should start a failed Rojo again on the same port with up", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync(ANY_PORT, { studio: true });

@@ -1,7 +1,7 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { assert, describe, expect, it, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { createFakeNative } from "../../test/helpers/native.ts";
 import {
@@ -80,7 +80,7 @@ describe("session Studio visibility", () => {
 		{ platform: "darwin", visible: { appHidden: false } },
 	] as const)(
 		"start shows the same hidden Studio on $platform without saving and gives it back shown",
-		async ({ platform, visible }) => {
+		async ({ platform, visible }, { expect }) => {
 			expect.assertions(4);
 
 			const { memory, move, native, save, status } = fixture(platform, true);
@@ -127,7 +127,9 @@ describe("session Studio visibility", () => {
 		},
 	);
 
-	it("shows and activates a hidden macOS app, then hides it without activation", async () => {
+	it("shows and activates a hidden macOS app, then hides it without activation", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { move, native } = fixture("darwin", true);
@@ -161,7 +163,9 @@ describe("session Studio visibility", () => {
 		});
 	});
 
-	it("resets the idle timeout after a visibility request succeeds or fails", async () => {
+	it("resets the idle timeout after a visibility request succeeds or fails", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const { idle, move, seams, status } = fixture("win32");
@@ -177,7 +181,7 @@ describe("session Studio visibility", () => {
 		expect(idle.idleAt()).toBe(70_000);
 	});
 
-	it("cancels before checking whether a session Studio is open", async () => {
+	it("cancels before checking whether a session Studio is open", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { abort, move, status } = fixture("win32");
@@ -189,7 +193,7 @@ describe("session Studio visibility", () => {
 
 	it.for(["darwin", "win32"] as const)(
 		"hides and shows the same %s Studio without saving or replacing its parts",
-		async (platform) => {
+		async (platform, { expect }) => {
 			expect.assertions(5);
 
 			const { memory, move, save, status } = fixture(platform);
@@ -228,7 +232,7 @@ describe("session Studio visibility", () => {
 		{ desktop: "user", platform: "win32" },
 	] as const)(
 		"leaves an already requested $platform $desktop visibility unchanged",
-		async ({ desktop, platform }) => {
+		async ({ desktop, platform }, { expect }) => {
 			expect.assertions(3);
 
 			const { move, native } = fixture(platform, desktop === "hidden");
@@ -256,7 +260,7 @@ describe("session Studio visibility", () => {
 		},
 	);
 
-	it("starts the Windows re-hide watcher on hide and stops it on show", async () => {
+	it("starts the Windows re-hide watcher on hide and stops it on show", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { move, native } = fixture("win32");
@@ -269,7 +273,7 @@ describe("session Studio visibility", () => {
 		expect(native.processes.get(777)!.windowHiding).toBeFalse();
 	});
 
-	it("keeps already hidden Windows windows hidden with a watcher", async () => {
+	it("keeps already hidden Windows windows hidden with a watcher", async ({ expect }) => {
 		expect.assertions(4);
 
 		const { move, native } = fixture("win32", true);
@@ -289,7 +293,9 @@ describe("session Studio visibility", () => {
 		expect(native.processes.get(777)!.windowHiding).toBeTrue();
 	});
 
-	it("retries the Windows watcher after hiding succeeds but its watcher fails", async () => {
+	it("retries the Windows watcher after hiding succeeds but its watcher fails", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const { move, native } = fixture("win32");
@@ -317,7 +323,7 @@ describe("session Studio visibility", () => {
 
 	it.for(["darwin", "win32"] as const)(
 		"retains %s visibility when cancelled",
-		async (platform) => {
+		async (platform, { expect }) => {
 			expect.assertions(2);
 
 			const { abort, move, native } = fixture(platform);
@@ -333,7 +339,7 @@ describe("session Studio visibility", () => {
 
 	it.for(["darwin", "win32"] as const)(
 		"rejects a reused %s Studio identity",
-		async (platform) => {
+		async (platform, { expect }) => {
 			expect.assertions(1);
 
 			const { move, native } = fixture(platform);
@@ -346,7 +352,7 @@ describe("session Studio visibility", () => {
 		},
 	);
 
-	it.for(["stopped", "stopping"] as const)("rejects a %s session", async (phase) => {
+	it.for(["stopped", "stopping"] as const)("rejects a %s session", async (phase, { expect }) => {
 		expect.assertions(1);
 
 		const { move, status } = fixture("win32");
@@ -359,26 +365,29 @@ describe("session Studio visibility", () => {
 		});
 	});
 
-	it.for(["opening", "closed"] as const)("rejects a Studio that is %s", async (studioStatus) => {
-		expect.assertions(1);
+	it.for(["opening", "closed"] as const)(
+		"rejects a Studio that is %s",
+		async (studioStatus, { expect }) => {
+			expect.assertions(1);
 
-		const { move, status } = fixture("win32");
-		const snapshot = status.snapshot();
-		vi.spyOn(status, "snapshot").mockReturnValue({
-			...snapshot,
-			services: {
-				...snapshot.services,
-				studio: { ...snapshot.services.studio, status: studioStatus },
-			},
-		});
+			const { move, status } = fixture("win32");
+			const snapshot = status.snapshot();
+			vi.spyOn(status, "snapshot").mockReturnValue({
+				...snapshot,
+				services: {
+					...snapshot.services,
+					studio: { ...snapshot.services.studio, status: studioStatus },
+				},
+			});
 
-		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
-			code: "studio_not_open",
-			message: "No session Studio is open.",
-		});
-	});
+			await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
+				code: "studio_not_open",
+				message: "No session Studio is open.",
+			});
+		},
+	);
 
-	it("requires the session's place and PID", async () => {
+	it("requires the session's place and PID", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { move, status } = fixture("win32");
@@ -406,7 +415,7 @@ describe("session Studio visibility", () => {
 		});
 	});
 
-	it("rejects a session whose Studio has released the place", async () => {
+	it("rejects a session whose Studio has released the place", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { memory, move } = fixture("win32");
@@ -418,7 +427,7 @@ describe("session Studio visibility", () => {
 		});
 	});
 
-	it("accepts older status without a recorded start time", async () => {
+	it("accepts older status without a recorded start time", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { move, status } = fixture("win32");
@@ -438,7 +447,7 @@ describe("session Studio visibility", () => {
 
 	it.for(["missing", "reused", "cancelled"] as const)(
 		"rejects a pin %s after its place identity was checked",
-		async (change) => {
+		async (change, { expect }) => {
 			expect.assertions(1);
 
 			const { abort, move, native } = fixture("win32");
@@ -475,25 +484,28 @@ describe("session Studio visibility", () => {
 		},
 	);
 
-	it.for(["darwin", "win32"] as const)("rejects unavailable %s visibility", async (platform) => {
-		expect.assertions(1);
+	it.for(["darwin", "win32"] as const)(
+		"rejects unavailable %s visibility",
+		async (platform, { expect }) => {
+			expect.assertions(1);
 
-		const { move, native } = fixture(platform);
-		native.processes.get(777)!.appHidden = null;
-		native.processes.get(777)!.windowVisibility = null;
+			const { move, native } = fixture(platform);
+			native.processes.get(777)!.appHidden = null;
+			native.processes.get(777)!.windowVisibility = null;
 
-		await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
-			code: "studio_not_open",
-			message: {
-				darwin: "The Studio app is no longer open.",
-				win32: "The Studio windows are no longer open.",
-			}[platform],
-		});
-	});
+			await expect(move({ desktop: "hidden" })).rejects.toMatchObject({
+				code: "studio_not_open",
+				message: {
+					darwin: "The Studio app is no longer open.",
+					win32: "The Studio windows are no longer open.",
+				}[platform],
+			});
+		},
+	);
 
 	it.for(["darwin", "win32"] as const)(
 		"retains status when %s refuses a visibility change",
-		async (platform) => {
+		async (platform, { expect }) => {
 			expect.assertions(2);
 
 			const { move, native, status } = fixture(platform);
@@ -515,7 +527,7 @@ describe("session Studio visibility", () => {
 		},
 	);
 
-	it("reports a Windows re-hide watcher failure", async () => {
+	it("reports a Windows re-hide watcher failure", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { move, native } = fixture("win32");

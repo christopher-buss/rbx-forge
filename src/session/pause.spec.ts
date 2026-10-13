@@ -1,9 +1,8 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
-import type { Pause } from "./pause.ts";
 import { createFilePause, neverPauseAsync, parsePausePoints, PAUSE_POLL_MS } from "./pause.ts";
 
 /** A signal that never aborts. */
@@ -14,7 +13,7 @@ const PAUSED = path.join(DIRECTORY, "lock.paused");
 function makePause(points: ReadonlyArray<string>) {
 	const memory = createMemoryFileSystem();
 	const manual = createManualClock();
-	const pause: Pause = createFilePause({
+	const pause = createFilePause({
 		clock: manual.clock,
 		directory: DIRECTORY,
 		fileSystem: memory.fileSystem,
@@ -31,7 +30,7 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(createFilePause, () => {
-	it("should pass a point it does not list", async () => {
+	it("should pass a point it does not list", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { memory, pause } = makePause(["leased"]);
@@ -40,7 +39,9 @@ describe(createFilePause, () => {
 		expect(memory.files()).toStrictEqual({});
 	});
 
-	it("should write its PID to the pause file and wait until the file is gone", async () => {
+	it("should write its PID to the pause file and wait until the file is gone", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { manual, memory, pause } = makePause(["lock"]);
@@ -63,7 +64,7 @@ describe(createFilePause, () => {
 		expect(manual.pending()).toBe(0);
 	});
 
-	it("should stop waiting once the signal aborts", async () => {
+	it("should stop waiting once the signal aborts", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { manual, memory, pause } = makePause(["lock"]);
@@ -81,7 +82,7 @@ describe(createFilePause, () => {
 });
 
 describe(parsePausePoints, () => {
-	it("should read a comma list and nothing from an unset or empty variable", () => {
+	it("should read a comma list and nothing from an unset or empty variable", ({ expect }) => {
 		expect.assertions(3);
 
 		expect([...parsePausePoints("lock,,leased")]).toStrictEqual(["lock", "leased"]);
@@ -91,7 +92,7 @@ describe(parsePausePoints, () => {
 });
 
 describe(neverPauseAsync, () => {
-	it("should never wait", async () => {
+	it("should never wait", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(neverPauseAsync()).resolves.toBeUndefined();

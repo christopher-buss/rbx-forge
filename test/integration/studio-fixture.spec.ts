@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import type { TestContext } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { withVariables } from "../../src/process/environment.ts";
 import {
@@ -24,7 +25,11 @@ const AUTO_SAVE_FOLDERS =
 		? ["Roblox", "RobloxStudio", "AutoSaves"]
 		: ["Library", "Application Support", "Roblox", "RobloxStudio", "AutoSaves"];
 
-function startStudio(args: Array<string>, variables: Record<string, string> = {}) {
+function startStudio(
+	testContext: Pick<TestContext, "onTestFinished">,
+	args: Array<string>,
+	variables: Record<string, string> = {},
+) {
 	const executable = makeRunScriptStudioExecutable();
 	const child = spawn(executable, args, {
 		env: withVariables(
@@ -35,14 +40,18 @@ function startStudio(args: Array<string>, variables: Record<string, string> = {}
 		stdio: "ignore",
 		windowsHide: true,
 	});
-	onTestFinished(async () => {
+	testContext.onTestFinished(async () => {
 		child.kill("SIGKILL");
 		await waitForExitAsync(child);
 	});
 	return child;
 }
 
-async function makeReadyServerAsync(place: string, holdResponse = false) {
+async function makeReadyServerAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
+	place: string,
+	holdResponse = false,
+) {
 	const receivedAt: Array<number> = [];
 	const requests: Array<{
 		locked: boolean;
@@ -63,7 +72,7 @@ async function makeReadyServerAsync(place: string, holdResponse = false) {
 	await new Promise<void>((resolve) => {
 		server.listen({ host: "127.0.0.1", port: 0 }, resolve);
 	});
-	onTestFinished(async () => {
+	testContext.onTestFinished(async () => {
 		server.closeAllConnections();
 		await new Promise<void>((resolve) => {
 			server.close(() => {
@@ -79,6 +88,7 @@ async function makeReadyServerAsync(place: string, holdResponse = false) {
 }
 
 function startStudioWithReadyUrl(
+	testContext: Pick<TestContext, "onTestFinished">,
 	place: string,
 	url: string,
 	variables: Record<string, string> = {},
@@ -89,30 +99,39 @@ function startStudioWithReadyUrl(
 		`local m=Instance.new("Configuration");m:SetAttribute("ReadyUrl",${JSON.stringify(url)});m.Parent=game\n`,
 	);
 	return startStudio(
+		testContext,
 		["--task", "RunScript", "--localPlaceFile", place, "--runScriptFile", marker],
 		variables,
 	);
 }
 
 describe("native Studio fixture", () => {
-	it("should acknowledge the exact marker URL after opening the place", async () => {
+	it("should acknowledge the exact marker URL after opening the place", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
-		const { requests, target, url } = await makeReadyServerAsync(place);
-		startStudioWithReadyUrl(place, url);
+		const { requests, target, url } = await makeReadyServerAsync({ onTestFinished }, place);
+		startStudioWithReadyUrl({ onTestFinished }, place, url);
 
 		await expect
 			.poll(() => requests, { timeout: 5000 })
 			.toStrictEqual([{ locked: true, method: "GET", target }]);
 	});
 
-	it("should keep an opened place alive without acknowledging when configured", async () => {
+	it("should keep an opened place alive without acknowledging when configured", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
-		const { requests, url } = await makeReadyServerAsync(place);
-		const child = startStudioWithReadyUrl(place, url, { FIXTURE_STUDIO_ACK: "none" });
+		const { requests, url } = await makeReadyServerAsync({ onTestFinished }, place);
+		const child = startStudioWithReadyUrl({ onTestFinished }, place, url, {
+			FIXTURE_STUDIO_ACK: "none",
+		});
 		await waitForFileAsync(`${place}.lock`);
 		await sleep(250);
 		const pin = loadRealNative().pinProcess(pidOf(child));
@@ -122,24 +141,32 @@ describe("native Studio fixture", () => {
 		expect(pin.isAlive()).toBeTrue();
 	});
 
-	it("should send an invalid acknowledgement token when configured", async () => {
+	it("should send an invalid acknowledgement token when configured", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
-		const { requests, url } = await makeReadyServerAsync(place);
-		startStudioWithReadyUrl(place, url, { FIXTURE_STUDIO_ACK: "wrong" });
+		const { requests, url } = await makeReadyServerAsync({ onTestFinished }, place);
+		startStudioWithReadyUrl({ onTestFinished }, place, url, { FIXTURE_STUDIO_ACK: "wrong" });
 
 		await expect
 			.poll(() => requests[0]!.target, { timeout: 5000 })
 			.toStartWith("/ready/wrong-0123456789abcdef");
 	});
 
-	it("should delay acknowledgement after the place lock appears", async () => {
+	it("should delay acknowledgement after the place lock appears", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
 		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
-		const { receivedAt, requests, url } = await makeReadyServerAsync(place);
-		startStudioWithReadyUrl(place, url, { FIXTURE_STUDIO_ACK_DELAY_MS: "1000" });
+		const { receivedAt, requests, url } = await makeReadyServerAsync({ onTestFinished }, place);
+		startStudioWithReadyUrl({ onTestFinished }, place, url, {
+			FIXTURE_STUDIO_ACK_DELAY_MS: "1000",
+		});
 		await waitForFileAsync(`${place}.lock`);
 		const openedAt = statSync(`${place}.lock`).mtimeMs;
 
@@ -153,12 +180,15 @@ describe("native Studio fixture", () => {
 		expect(acknowledgedAt - openedAt).toBeGreaterThanOrEqual(900);
 	});
 
-	it("should accept native close while the callback response is stalled", async () => {
+	it("should accept native close while the callback response is stalled", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(4);
 
 		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
-		const { requests, url } = await makeReadyServerAsync(place, true);
-		const child = startStudioWithReadyUrl(place, url);
+		const { requests, url } = await makeReadyServerAsync({ onTestFinished }, place, true);
+		const child = startStudioWithReadyUrl({ onTestFinished }, place, url);
 
 		await expect.poll(() => requests, { timeout: 5000 }).toHaveLength(1);
 
@@ -173,12 +203,17 @@ describe("native Studio fixture", () => {
 		expect(child.exitCode).toBe(0);
 	});
 
-	it("should accept native close before a delayed acknowledgement is sent", async () => {
+	it("should accept native close before a delayed acknowledgement is sent", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
 		const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
-		const { requests, url } = await makeReadyServerAsync(place);
-		const child = startStudioWithReadyUrl(place, url, { FIXTURE_STUDIO_ACK_DELAY_MS: "1000" });
+		const { requests, url } = await makeReadyServerAsync({ onTestFinished }, place);
+		const child = startStudioWithReadyUrl({ onTestFinished }, place, url, {
+			FIXTURE_STUDIO_ACK_DELAY_MS: "1000",
+		});
 		await waitForFileAsync(`${place}.lock`);
 		const pin = loadRealNative().pinProcess(pidOf(child));
 		assert(pin !== null);
@@ -192,7 +227,10 @@ describe("native Studio fixture", () => {
 		expect(requests).toStrictEqual([]);
 	});
 
-	it("should open the RunScript place under its own pinned identity and close it", async () => {
+	it("should open the RunScript place under its own pinned identity and close it", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(5);
 
 		const directory = makeTemporaryDirectory({
@@ -209,7 +247,7 @@ describe("native Studio fixture", () => {
 			"--runScriptFile",
 			path.join(directory, "marker.luau"),
 		];
-		const child = startStudio(args, { FIXTURE_LOG: log });
+		const child = startStudio({ onTestFinished }, args, { FIXTURE_LOG: log });
 		await waitForFileAsync(`${place}.lock`);
 		const pin = loadRealNative().pinProcess(pidOf(child));
 		assert(pin !== null);
@@ -228,13 +266,16 @@ describe("native Studio fixture", () => {
 		expect(existsSync(`${place}.lock`)).toBeFalse();
 	});
 
-	it("should delay the place lock while Studio opens it", async () => {
+	it("should delay the place lock while Studio opens it", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 
 		const directory = makeTemporaryDirectory({ "game.rbxl": "place" });
 		const place = path.join(directory, "game.rbxl");
 		const log = path.join(directory, "workers.ndjson");
-		startStudio([place], { FIXTURE_LOG: log, FIXTURE_STUDIO_LOCK_DELAY_MS: "300" });
+		startStudio({ onTestFinished }, [place], {
+			FIXTURE_LOG: log,
+			FIXTURE_STUDIO_LOCK_DELAY_MS: "300",
+		});
 		await waitForFileAsync(log);
 
 		expect(existsSync(`${place}.lock`)).toBeFalse();
@@ -246,12 +287,15 @@ describe("native Studio fixture", () => {
 		expect(Date.now() - record.at).toBeGreaterThanOrEqual(300);
 	});
 
-	it("should write Studio auto-recovery into the scratch home", async () => {
+	it("should write Studio auto-recovery into the scratch home", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory({ "game.rbxl": "place" });
 		const place = path.join(directory, "game.rbxl");
-		startStudio([place], {
+		startStudio({ onTestFinished }, [place], {
 			FIXTURE_STUDIO_AUTOSAVE: "1",
 			HOME: directory,
 			LOCALAPPDATA: directory,
@@ -268,11 +312,11 @@ describe("native Studio fixture", () => {
 		{ blocked: false, close: "linger", locked: false },
 	])(
 		"should preserve $close behavior for native close requests",
-		async ({ blocked, close, locked }) => {
+		async ({ blocked, close, locked }, { expect, onTestFinished }) => {
 			expect.assertions(4);
 
 			const place = path.join(makeTemporaryDirectory({ "game.rbxl": "place" }), "game.rbxl");
-			const child = startStudio([place], { FIXTURE_STUDIO_CLOSE: close });
+			const child = startStudio({ onTestFinished }, [place], { FIXTURE_STUDIO_CLOSE: close });
 			await waitForFileAsync(`${place}.lock`);
 			const pin = loadRealNative().pinProcess(pidOf(child));
 			assert(pin !== null);

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createCommandContext, createTestSeams } from "../../test/helpers/seams.ts";
 import type { Prompter } from "../seams/prompter.ts";
@@ -16,7 +16,7 @@ const WITHOUT_DEFAULT: Question<boolean> = {
 };
 
 describe(askAsync, () => {
-	it("should ask at a terminal", async () => {
+	it("should ask at a terminal", async ({ expect }) => {
 		expect.assertions(1);
 
 		const prompter: Prompter = {
@@ -31,7 +31,7 @@ describe(askAsync, () => {
 		await expect(askAsync(context, WITH_DEFAULT)).resolves.toBeFalse();
 	});
 
-	it("should take the default answer without a terminal", async () => {
+	it("should take the default answer without a terminal", async ({ expect }) => {
 		expect.assertions(1);
 
 		// The default test prompter throws, so this also proves no prompt ran.
@@ -40,7 +40,9 @@ describe(askAsync, () => {
 		await expect(askAsync(context, WITH_DEFAULT)).resolves.toBeTrue();
 	});
 
-	it("should fail with needs_confirmation when there is no default answer", async () => {
+	it("should fail with needs_confirmation when there is no default answer", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const context = createCommandContext({ interactive: false });

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import { parseLines, parseResult } from "../helpers/output.ts";
@@ -14,7 +14,7 @@ function configFile(body: string): Record<string, string> {
 }
 
 describe("forge config", () => {
-	it("should print the file's values over the defaults as NDJSON", async () => {
+	it("should print the file's values over the defaults as NDJSON", async ({ expect }) => {
 		expect.assertions(2);
 
 		const project = makeProject(
@@ -58,7 +58,7 @@ describe("forge config", () => {
 		]);
 	});
 
-	it("should exit 1 with config_invalid for an unknown key", async () => {
+	it("should exit 1 with config_invalid for an unknown key", async ({ expect }) => {
 		expect.assertions(2);
 
 		const project = makeProject(configFile('{ projectType: "rbxts", serve: true }'));
@@ -80,7 +80,9 @@ describe("forge config", () => {
 		]);
 	});
 
-	it("should exit 1 with config_not_found in a project without a config file", async () => {
+	it("should exit 1 with config_not_found in a project without a config file", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { status, stdout } = await runBinAsync(["config"], makeProject());

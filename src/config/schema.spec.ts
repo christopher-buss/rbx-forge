@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import { ForgeError } from "../errors.ts";
@@ -40,13 +40,13 @@ const FULL_CONFIG: ForgeConfig = {
 const errorOf = catchForgeError;
 
 describe(validateConfigFile, () => {
-	it("should accept every option", () => {
+	it("should accept every option", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(validateConfigFile(FULL_CONFIG, FILE)).toStrictEqual(FULL_CONFIG);
 	});
 
-	it("should accept a config that sets only the project type", () => {
+	it("should accept a config that sets only the project type", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(validateConfigFile({ projectType: "rbxts" }, FILE)).toStrictEqual({
@@ -54,7 +54,7 @@ describe(validateConfigFile, () => {
 		});
 	});
 
-	it("should require the project type", () => {
+	it("should require the project type", ({ expect }) => {
 		expect.assertions(2);
 
 		const error = errorOf(() => validateConfigFile({}, FILE));
@@ -65,7 +65,7 @@ describe(validateConfigFile, () => {
 		);
 	});
 
-	it("should list every problem, one per line", () => {
+	it("should list every problem, one per line", ({ expect }) => {
 		expect.assertions(1);
 
 		const error = errorOf(() => validateConfigFile({ a: 1, projectType: "rbxts", z: 2 }, FILE));
@@ -84,7 +84,7 @@ describe(validateConfigFile, () => {
 			{ hooks: { build: { during: [] } }, projectType: "rbxts" },
 			"hooks.build.during must be removed",
 		],
-	] as const)("should reject the unknown key in %o", ([value, problem]) => {
+	] as const)("should reject the unknown key in %o", ([value, problem], { expect }) => {
 		expect.assertions(2);
 
 		const error = errorOf(() => validateConfigFile(value, FILE));
@@ -106,7 +106,7 @@ describe(validateConfigFile, () => {
 		[{ projectType: "rbxts", rbxts: { args: "--verbose" } }, "rbxts.args"],
 		[{ projectType: "rbxts", rbxts: { project: "" } }, "rbxts.project"],
 		[{ open: { buildFirst: "yes" }, projectType: "rbxts" }, "open.buildFirst"],
-	] as const)("should reject the bad value in %o", ([value, key]) => {
+	] as const)("should reject the bad value in %o", ([value, key], { expect }) => {
 		expect.assertions(2);
 
 		const error = errorOf(() => validateConfigFile(value, FILE));
@@ -115,13 +115,13 @@ describe(validateConfigFile, () => {
 		expect(error.message).toContain(`\n${key}`);
 	});
 
-	it("should reject a file that exports no object", () => {
+	it("should reject a file that exports no object", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(errorOf(() => validateConfigFile(undefined, FILE)).code).toBe("config_invalid");
 	});
 
-	it("should tell the user how to fix an invalid config", () => {
+	it("should tell the user how to fix an invalid config", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(errorOf(() => validateConfigFile({}, FILE)).hint).toBe(
@@ -131,7 +131,7 @@ describe(validateConfigFile, () => {
 });
 
 describe(validateConfigLayer, () => {
-	it("should accept a layer without the project type", () => {
+	it("should accept a layer without the project type", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -139,7 +139,7 @@ describe(validateConfigLayer, () => {
 		).toStrictEqual({ rojoPort: 4000 });
 	});
 
-	it("should throw the caller's error, made from each problem and its path", () => {
+	it("should throw the caller's error, made from each problem and its path", ({ expect }) => {
 		expect.assertions(2);
 
 		const error = errorOf(() => {

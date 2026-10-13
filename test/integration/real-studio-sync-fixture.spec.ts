@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { SCRIPTS, VERSION } from "../../src/studio/rojo-plugin.ts";
 import { loadRealNative } from "../helpers/real-native.ts";
@@ -10,7 +10,9 @@ import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 const native = loadRealNative();
 
 describe("real Studio sync plugin isolation", () => {
-	it("should gate the separate test plugin before loading Rojo and preserve the managed plugin", async () => {
+	it("should gate the separate test plugin before loading Rojo and preserve the managed plugin", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const directory = makeTemporaryDirectory();

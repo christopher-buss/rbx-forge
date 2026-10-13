@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { ForgeError } from "../errors.ts";
 import type { SyncbackAttempt } from "./session-sync.ts";
@@ -17,7 +17,7 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(createSessionSync, () => {
-	it("should answer with what syncback synced and its hooks", async () => {
+	it("should answer with what syncback synced and its hooks", async ({ expect }) => {
 		expect.assertions(1);
 
 		const sync = createSessionSync();
@@ -31,7 +31,9 @@ describe(createSessionSync, () => {
 		});
 	});
 
-	it("should wait for syncback to be ready when asked while the session starts", async () => {
+	it("should wait for syncback to be ready when asked while the session starts", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const sync = createSessionSync();
@@ -48,7 +50,7 @@ describe(createSessionSync, () => {
 		await expect(answer).resolves.toMatchObject({ input: "/project/game.rbxl" });
 	});
 
-	it("should reject with the run's error, its code and details kept", async () => {
+	it("should reject with the run's error, its code and details kept", async ({ expect }) => {
 		expect.assertions(1);
 
 		const sync = createSessionSync();
@@ -64,7 +66,9 @@ describe(createSessionSync, () => {
 		});
 	});
 
-	it("should reject a request waiting for syncback once the session is stopping", async () => {
+	it("should reject a request waiting for syncback once the session is stopping", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const sync = createSessionSync();
@@ -79,7 +83,9 @@ describe(createSessionSync, () => {
 		});
 	});
 
-	it("should reject a request after the close even when syncback was ready", async () => {
+	it("should reject a request after the close even when syncback was ready", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const sync = createSessionSync();

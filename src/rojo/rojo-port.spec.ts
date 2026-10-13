@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import type { Network } from "../seams/network.ts";
 import { chooseRojoPortAsync, createRojoPort, DEFAULT_ROJO_PORT } from "./rojo-port.ts";
@@ -19,13 +19,15 @@ function networkWith(...busy: Array<number>): Pick<Network, "freePortAsync" | "i
 }
 
 describe(chooseRojoPortAsync, () => {
-	it("should keep a configured port that is free", async () => {
+	it("should keep a configured port that is free", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(chooseRojoPortAsync(networkWith(DEFAULT_ROJO_PORT), 4000)).resolves.toBe(4000);
 	});
 
-	it("should fail with port_in_use when the configured port is busy, and take no other", async () => {
+	it("should fail with port_in_use when the configured port is busy, and take no other", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const network = networkWith(4000);
@@ -38,7 +40,9 @@ describe(chooseRojoPortAsync, () => {
 		expect(network.freePortAsync).not.toHaveBeenCalled();
 	});
 
-	it("should take the default port when none is configured and it is free", async () => {
+	it("should take the default port when none is configured and it is free", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		await expect(chooseRojoPortAsync(networkWith(), undefined)).resolves.toBe(
@@ -46,7 +50,9 @@ describe(chooseRojoPortAsync, () => {
 		);
 	});
 
-	it("should take a free port when none is configured and the default port is busy", async () => {
+	it("should take a free port when none is configured and the default port is busy", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		await expect(chooseRojoPortAsync(networkWith(DEFAULT_ROJO_PORT), undefined)).resolves.toBe(
@@ -56,13 +62,13 @@ describe(chooseRojoPortAsync, () => {
 });
 
 describe(createRojoPort, () => {
-	it("should have no port before the first choice", () => {
+	it("should have no port before the first choice", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(createRojoPort(networkWith(), undefined).value()).toBeUndefined();
 	});
 
-	it("should keep its first choice, even once that port is busy", async () => {
+	it("should keep its first choice, even once that port is busy", async ({ expect }) => {
 		expect.assertions(3);
 
 		const network = networkWith();
@@ -75,7 +81,7 @@ describe(createRojoPort, () => {
 		expect(network.isPortFreeAsync).toHaveBeenCalledOnce();
 	});
 
-	it("should choose again after a choice that failed", async () => {
+	it("should choose again after a choice that failed", async ({ expect }) => {
 		expect.assertions(2);
 
 		const network = networkWith(4000);

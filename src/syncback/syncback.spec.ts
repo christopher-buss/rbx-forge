@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import {
 	createCommandContext,
@@ -74,7 +74,7 @@ function makeSyncback({ file = {}, outcomes = {} }: SyncbackSetup = {}): Syncbac
 }
 
 describe(resolveSyncbackTarget, () => {
-	it("should read the build output with the Rojo project by default", () => {
+	it("should read the build output with the Rojo project by default", ({ expect }) => {
 		expect.assertions(1);
 
 		const config = resolveConfig(
@@ -88,7 +88,7 @@ describe(resolveSyncbackTarget, () => {
 		});
 	});
 
-	it("should prefer the syncback options", () => {
+	it("should prefer the syncback options", ({ expect }) => {
 		expect.assertions(1);
 
 		const config = resolveConfig(
@@ -107,7 +107,9 @@ describe(resolveSyncbackTarget, () => {
 });
 
 describe(syncbackAsync, () => {
-	it("should check for syncback support, then sync the place into the project", async () => {
+	it("should check for syncback support, then sync the place into the project", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { config, context, specs } = makeSyncback();
@@ -126,7 +128,7 @@ describe(syncbackAsync, () => {
 		]);
 	});
 
-	it("should run syncback hooks around Rojo and return their results", async () => {
+	it("should run syncback hooks around Rojo and return their results", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { config, context, order } = makeSyncback({
@@ -141,7 +143,7 @@ describe(syncbackAsync, () => {
 		]);
 	});
 
-	it("should fail before any hook when Rojo has no syncback", async () => {
+	it("should fail before any hook when Rojo has no syncback", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { config, context, order } = makeSyncback({
@@ -155,7 +157,9 @@ describe(syncbackAsync, () => {
 		expect(order()).toStrictEqual(["probe"]);
 	});
 
-	it("should fail with Rojo's message and skip post hooks when syncback fails", async () => {
+	it("should fail with Rojo's message and skip post hooks when syncback fails", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { config, context, order } = makeSyncback({
@@ -171,7 +175,7 @@ describe(syncbackAsync, () => {
 		expect(order()).toStrictEqual(["probe", "rojo"]);
 	});
 
-	it("should exit non-zero when syncback fails", async () => {
+	it("should exit non-zero when syncback fails", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { config, context } = makeSyncback({ outcomes: { rojo: exited(1) } });

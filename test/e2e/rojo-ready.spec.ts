@@ -2,7 +2,7 @@
  * A session is ready once Rojo listens on its port, not once its process
  * started, with fake Rojo on PATH, the Studio stand-in, and the real reaper.
  */
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import {
@@ -19,7 +19,7 @@ import { runForgeAsync } from "./up-fixture.ts";
 const LISTEN_DELAY_MS = 2000;
 
 describe("session readiness", () => {
-	it("should be ready only once Rojo listens on its port", async () => {
+	it("should be ready only once Rojo listens on its port", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });

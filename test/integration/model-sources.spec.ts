@@ -1,7 +1,7 @@
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { loadRealNative } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
@@ -19,7 +19,7 @@ function makeModel(): string {
 }
 
 describe("native model script sources", () => {
-	it("should read requested sources in order from a Rojo-built binary model", () => {
+	it("should read requested sources in order from a Rojo-built binary model", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(native.readModelScriptSources(makeModel(), [UNCHANGED, APP])).toStrictEqual([
@@ -28,7 +28,7 @@ describe("native model script sources", () => {
 		]);
 	});
 
-	it("should round-trip replacements and keep the other script", () => {
+	it("should round-trip replacements and keep the other script", ({ expect }) => {
 		expect.assertions(3);
 
 		const model = makeModel();
@@ -49,7 +49,9 @@ describe("native model script sources", () => {
 		expect(readFileSync(model)).toStrictEqual(original);
 	});
 
-	it("should report missing script paths and preserve the original on a failed write", () => {
+	it("should report missing script paths and preserve the original on a failed write", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const model = makeModel();
@@ -68,7 +70,7 @@ describe("native model script sources", () => {
 });
 
 describe("native model string values", () => {
-	it("should read the stock Rojo plugin version and refuse a script path", () => {
+	it("should read the stock Rojo plugin version and refuse a script path", ({ expect }) => {
 		expect.assertions(2);
 
 		const model = path.join(makeTemporaryDirectory(), "rojo.rbxm");

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { EndpointInput } from "./endpoint.ts";
 import { endpointFor, endpointKey, MAX_SOCKET_PATH } from "./endpoint.ts";
@@ -14,7 +14,7 @@ const POSIX: EndpointInput = {
 const KEY = "ca97b6e21788943f";
 
 describe(endpointKey, () => {
-	it("should hash the root and the build output, apart", () => {
+	it("should hash the root and the build output, apart", ({ expect }) => {
 		expect.assertions(3);
 
 		expect(endpointKey("/home/me/game", "game.rbxl")).toBe(KEY);
@@ -25,7 +25,7 @@ describe(endpointKey, () => {
 });
 
 describe(endpointFor, () => {
-	it("should name a pipe on Windows", () => {
+	it("should name a pipe on Windows", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(endpointFor({ ...POSIX, platform: "win32", userId: undefined })).toBe(
@@ -33,7 +33,7 @@ describe(endpointFor, () => {
 		);
 	});
 
-	it("should put the socket in a per-user directory of the runtime directory", () => {
+	it("should put the socket in a per-user directory of the runtime directory", ({ expect }) => {
 		expect.assertions(3);
 
 		expect(
@@ -45,7 +45,7 @@ describe(endpointFor, () => {
 		expect(endpointFor(POSIX)).toBe(`/tmp/rbx-forge-1000-${KEY}/ctl.sock`);
 	});
 
-	it("should fall back to /tmp when the socket path would be too long", () => {
+	it("should fall back to /tmp when the socket path would be too long", ({ expect }) => {
 		expect.assertions(2);
 
 		// `<runtime>/rbx-forge-1000-<key>/ctl.sock` adds 41 bytes.

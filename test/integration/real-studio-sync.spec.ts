@@ -10,7 +10,7 @@
  * separately.
  */
 import process from "node:process";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { readVariable } from "../../src/process/environment.ts";
 import { makeRealStudioSyncAsync } from "../helpers/real-studio-sync.ts";
@@ -23,7 +23,7 @@ describe.skipIf(!IS_ENABLED)("real Studio Rojo synchronization", () => {
 	it(
 		"should apply the marker's initial tree without confirmation",
 		{ timeout: 240_000 },
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(4);
 
 			const studio = await makeRealStudioSyncAsync(true);
@@ -43,7 +43,7 @@ describe.skipIf(!IS_ENABLED)("real Studio Rojo synchronization", () => {
 	it(
 		"should preserve another Studio's independent connection through launch and cleanup",
 		{ timeout: 240_000 },
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(5);
 
 			const spectator = await makeRealStudioSyncAsync(true);
@@ -77,25 +77,29 @@ describe.skipIf(!IS_ENABLED)("real Studio Rojo synchronization", () => {
 		},
 	);
 
-	it("should stay disconnected without a launch marker", { timeout: 240_000 }, async () => {
-		expect.assertions(5);
+	it(
+		"should stay disconnected without a launch marker",
+		{ timeout: 240_000 },
+		async ({ expect }) => {
+			expect.assertions(5);
 
-		const studio = await makeRealStudioSyncAsync(false);
-		const observations = await studio.observeForAsync(15_000);
+			const studio = await makeRealStudioSyncAsync(false);
+			const observations = await studio.observeForAsync(15_000);
 
-		expect(observations.length).toBeGreaterThan(10);
-		expect(observations.map(({ value }) => value)).toStrictEqual(
-			Array.from({ length: observations.length }).fill(""),
-		);
-		expect(observations.map(({ name }) => name)).not.toContain(studio.projectName);
-		expect(observations.every(({ connection }) => connection === "")).toBeTrue();
-		expect(studio.isBlocked()).toBeFalse();
-	});
+			expect(observations.length).toBeGreaterThan(10);
+			expect(observations.map(({ value }) => value)).toStrictEqual(
+				Array.from({ length: observations.length }).fill(""),
+			);
+			expect(observations.map(({ name }) => name)).not.toContain(studio.projectName);
+			expect(observations.every(({ connection }) => connection === "")).toBeTrue();
+			expect(studio.isBlocked()).toBeFalse();
+		},
+	);
 
 	it(
 		"should reconnect on the same port and apply edits made offline",
 		{ timeout: 240_000 },
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(3);
 
 			const studio = await makeRealStudioSyncAsync(true);
@@ -116,7 +120,7 @@ describe.skipIf(!IS_ENABLED)("real Studio Rojo synchronization", () => {
 	it(
 		"should refuse another wrapper on the same port without applying its tree",
 		{ timeout: 240_000 },
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(5);
 
 			const studio = await makeRealStudioSyncAsync(true);

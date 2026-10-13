@@ -30,7 +30,7 @@ import { createFakeFileWatch } from "./fake-file-watch.ts";
 import type { FakeFileWatch } from "./fake-file-watch.ts";
 
 /** The project directory of every in-memory test project. */
-export const PROJECT: string = path.resolve("/project");
+export const PROJECT = path.resolve("/project");
 
 /** The computer name of the test host. */
 export const TEST_HOSTNAME = "forge-test";

@@ -1,9 +1,12 @@
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, it } from "vitest";
 
 import { nodeNetwork } from "../../src/seams/network.ts";
 
 describe("studio sync acknowledgement", () => {
-	it("should accept only the launch token and expected Rojo identity, then close", async () => {
+	it("should accept only the launch token and expected Rojo identity, then close", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(5);
 
 		const listener = await nodeNetwork.listenForStudioReadyAsync({

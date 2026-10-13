@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import type { StopRequest } from "./stop-source.ts";
 import { createStopSource } from "./stop-source.ts";
@@ -7,7 +7,7 @@ const SIGINT: StopRequest = { signal: "SIGINT", type: "signal" };
 const OWNER_GONE: StopRequest = { type: "owner_gone" };
 
 describe(createStopSource, () => {
-	it("should start with no request and a live signal", () => {
+	it("should start with no request and a live signal", ({ expect }) => {
 		expect.assertions(2);
 
 		const stop = createStopSource();
@@ -16,7 +16,7 @@ describe(createStopSource, () => {
 		expect(stop.signal.aborted).toBeFalse();
 	});
 
-	it("should tell every listener and abort on the first request", () => {
+	it("should tell every listener and abort on the first request", ({ expect }) => {
 		expect.assertions(3);
 
 		const stop = createStopSource();
@@ -31,7 +31,7 @@ describe(createStopSource, () => {
 		expect(stop.signal.aborted).toBeTrue();
 	});
 
-	it("should keep the first request and ignore later ones", () => {
+	it("should keep the first request and ignore later ones", ({ expect }) => {
 		expect.assertions(2);
 
 		const stop = createStopSource();
@@ -44,7 +44,7 @@ describe(createStopSource, () => {
 		expect(listener).toHaveBeenCalledExactlyOnceWith(OWNER_GONE);
 	});
 
-	it("should tell a listener added after the request at once", () => {
+	it("should tell a listener added after the request at once", ({ expect }) => {
 		expect.assertions(1);
 
 		const stop = createStopSource();
@@ -56,7 +56,7 @@ describe(createStopSource, () => {
 		expect(listener).toHaveBeenCalledExactlyOnceWith(OWNER_GONE);
 	});
 
-	it("should not tell a removed listener", () => {
+	it("should not tell a removed listener", ({ expect }) => {
 		expect.assertions(1);
 
 		const stop = createStopSource();
@@ -67,7 +67,7 @@ describe(createStopSource, () => {
 		expect(listener).not.toHaveBeenCalled();
 	});
 
-	it("should hurry on a forced shutdown, also after an earlier request", () => {
+	it("should hurry on a forced shutdown, also after an earlier request", ({ expect }) => {
 		expect.assertions(3);
 
 		const stop = createStopSource();
@@ -81,7 +81,7 @@ describe(createStopSource, () => {
 		expect(stop.reason()).toStrictEqual(SIGINT);
 	});
 
-	it("should not hurry on a shutdown that is not forced", () => {
+	it("should not hurry on a shutdown that is not forced", ({ expect }) => {
 		expect.assertions(1);
 
 		const stop = createStopSource();

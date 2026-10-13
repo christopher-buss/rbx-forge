@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { MutationDependencies, Report, StrykerExit } from "./mutation.ts";
 import { classifyExit, countMutants, runMutation, shouldPublish } from "./mutation.ts";
@@ -54,21 +54,21 @@ function fake(exit: StrykerExit, initial: Record<string, string> = {}, written?:
 }
 
 describe(classifyExit, () => {
-	it("should count exit codes 0 and 1 as complete", () => {
+	it("should count exit codes 0 and 1 as complete", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(classifyExit({ code: 0 })).toBe("complete");
 		expect(classifyExit({ code: 1 })).toBe("complete");
 	});
 
-	it("should count a signal exit as partial", () => {
+	it("should count a signal exit as partial", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(classifyExit({ code: 130 })).toBe("partial");
 		expect(classifyExit({ code: null })).toBe("partial");
 	});
 
-	it("should count any other code as failed", () => {
+	it("should count any other code as failed", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(classifyExit({ code: 2 })).toBe("failed");
@@ -77,7 +77,7 @@ describe(classifyExit, () => {
 });
 
 describe(countMutants, () => {
-	it("should count the mutants of every file", () => {
+	it("should count the mutants of every file", ({ expect }) => {
 		expect.assertions(1);
 
 		const files = { a: { mutants: [{}, {}] }, b: { mutants: [{}] } };
@@ -87,38 +87,38 @@ describe(countMutants, () => {
 });
 
 describe(shouldPublish, () => {
-	it("should always publish a complete run", () => {
+	it("should always publish a complete run", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(shouldPublish("complete", reportOf(1), reportJson(5, true))).toBeTrue();
 	});
 
-	it("should never publish a failed run", () => {
+	it("should never publish a failed run", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(shouldPublish("failed", reportOf(1), undefined)).toBeFalse();
 	});
 
-	it("should publish a partial run when no shared report exists", () => {
+	it("should publish a partial run when no shared report exists", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(shouldPublish("partial", reportOf(1), undefined)).toBeTrue();
 	});
 
-	it("should publish a partial run over a malformed shared report", () => {
+	it("should publish a partial run over a malformed shared report", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(shouldPublish("partial", reportOf(1), "{")).toBeTrue();
 		expect(shouldPublish("partial", reportOf(1), "{}")).toBeTrue();
 	});
 
-	it("should keep a complete shared report over a partial run", () => {
+	it("should keep a complete shared report over a partial run", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(shouldPublish("partial", reportOf(9), reportJson(1, true))).toBeFalse();
 	});
 
-	it("should replace a smaller partial shared report with a partial run", () => {
+	it("should replace a smaller partial shared report with a partial run", ({ expect }) => {
 		expect.assertions(3);
 
 		expect(shouldPublish("partial", reportOf(3), reportJson(2, false))).toBeTrue();
@@ -128,7 +128,7 @@ describe(shouldPublish, () => {
 });
 
 describe(runMutation, () => {
-	it("should seed the local report from the shared one before Stryker runs", () => {
+	it("should seed the local report from the shared one before Stryker runs", ({ expect }) => {
 		expect.assertions(2);
 
 		const { dependencies, files, order } = fake({ code: 0 }, { [SHARED]: reportJson(4, true) });
@@ -142,7 +142,7 @@ describe(runMutation, () => {
 		expect(files.get(LOCAL)).toBe(reportJson(4, true));
 	});
 
-	it("should publish a complete run marked complete and return Stryker's code", () => {
+	it("should publish a complete run marked complete and return Stryker's code", ({ expect }) => {
 		expect.assertions(3);
 
 		const { dependencies, order, shared } = fake({ code: 1 }, {}, reportJson(2));
@@ -155,7 +155,7 @@ describe(runMutation, () => {
 		expect(order).toContain("mkdir /repo/.git/stryker");
 	});
 
-	it("should publish a partial run marked partial", () => {
+	it("should publish a partial run marked partial", ({ expect }) => {
 		expect.assertions(2);
 
 		const { dependencies, shared } = fake({ code: 130 }, {}, reportJson(2));
@@ -164,7 +164,7 @@ describe(runMutation, () => {
 		expect(shared()).toMatchObject({ complete: false });
 	});
 
-	it("should leave the shared report alone when Stryker fails", () => {
+	it("should leave the shared report alone when Stryker fails", ({ expect }) => {
 		expect.assertions(2);
 
 		const { dependencies, files } = fake(
@@ -177,7 +177,7 @@ describe(runMutation, () => {
 		expect(files.get(SHARED)).toBe(reportJson(1, true));
 	});
 
-	it("should publish nothing when the local report is malformed", () => {
+	it("should publish nothing when the local report is malformed", ({ expect }) => {
 		expect.assertions(1);
 
 		const { dependencies, files } = fake({ code: 0 }, {}, "{");
@@ -186,7 +186,7 @@ describe(runMutation, () => {
 		expect(files.has(SHARED)).toBeFalse();
 	});
 
-	it("should publish nothing when Stryker wrote no report", () => {
+	it("should publish nothing when Stryker wrote no report", ({ expect }) => {
 		expect.assertions(2);
 
 		const { dependencies, files } = fake({ code: null });
@@ -195,7 +195,9 @@ describe(runMutation, () => {
 		expect(files.has(SHARED)).toBeFalse();
 	});
 
-	it("should leave the shared report alone when a crash leaves the seed in place", () => {
+	it("should leave the shared report alone when a crash leaves the seed in place", ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { dependencies, files } = fake({ code: 1 }, { [SHARED]: reportJson(3, false) });
@@ -204,7 +206,9 @@ describe(runMutation, () => {
 		expect(files.get(SHARED)).toBe(reportJson(3, false));
 	});
 
-	it("should publish nothing when an interrupted run leaves a stale local report", () => {
+	it("should publish nothing when an interrupted run leaves a stale local report", ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { dependencies, files } = fake({ code: 130 }, { [LOCAL]: reportJson(2) });

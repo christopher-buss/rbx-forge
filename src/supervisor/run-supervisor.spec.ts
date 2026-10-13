@@ -1,7 +1,8 @@
 import { fromAny } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
+import type { TestContext } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import previousPlugin from "../../test/fixtures/rojo-plugin-v2.json" with { type: "json" };
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
@@ -194,7 +195,7 @@ function holdStudioPoll(original: Clock["sleep"], until: Promise<void>): Clock["
 	};
 }
 
-function pendingHiddenStudio() {
+function pendingHiddenStudio(testContext: Pick<TestContext, "onTestFinished">) {
 	const pending = pendingStudio({ flags: NO_COMPILER });
 	const { run } = pending;
 	run.native.processes.get(1)!.appHidden = true;
@@ -202,7 +203,7 @@ function pendingHiddenStudio() {
 		await launch.beforeLaunch?.();
 		return { studio: { desktop: "hidden", pid: 1, startTime: "0" }, type: "launched" };
 	});
-	onTestFinished(async () => {
+	testContext.onTestFinished(async () => {
 		run.signals.fire("SIGINT");
 		await run.result;
 	});
@@ -210,10 +211,13 @@ function pendingHiddenStudio() {
 }
 
 describe("managed Rojo plugin lifecycle", () => {
-	it("should show a taken hidden Studio only after its initial synchronization", async () => {
+	it("should show a taken hidden Studio only after its initial synchronization", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(4);
 
-		const { ready, run } = pendingHiddenStudio();
+		const { ready, run } = pendingHiddenStudio({ onTestFinished });
 		await flushAsync();
 		run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
 		await passAsync(run, FILE_POLL_MS);
@@ -243,10 +247,10 @@ describe("managed Rojo plugin lifecycle", () => {
 
 	it.for(["timeout", "closed", "unacknowledged"] as const)(
 		"should give back a taken hidden Studio when its readiness is %s",
-		async (failure) => {
+		async (failure, { expect, onTestFinished }) => {
 			expect.assertions(3);
 
-			const { ready, run } = pendingHiddenStudio();
+			const { ready, run } = pendingHiddenStudio({ onTestFinished });
 			await flushAsync();
 			run.memory.fileSystem.writeFileSync(LOCK, `1\nRobloxStudio\n${TEST_HOSTNAME}\n`);
 			await passAsync(run, FILE_POLL_MS);
@@ -284,10 +288,13 @@ describe("managed Rojo plugin lifecycle", () => {
 		},
 	);
 
-	it("should end a pending hidden Studio join when the session shuts down", async () => {
+	it("should end a pending hidden Studio join when the session shuts down", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { run } = pendingHiddenStudio();
+		const { run } = pendingHiddenStudio({ onTestFinished });
 		await flushAsync();
 		const staying = new AbortController();
 		const joining = ownSessionAsync(run.ipc, CONTROL_TARGET, {
@@ -303,7 +310,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
 	});
 
-	it("should wait for a manual launch's lock observation before closing it", async () => {
+	it("should wait for a manual launch's lock observation before closing it", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { run } = pendingStudio({ platform: "linux" });
@@ -325,7 +334,10 @@ describe("managed Rojo plugin lifecycle", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
 	});
 
-	it("should finish the Studio follow before returning from cancelled startup", async () => {
+	it("should finish the Studio follow before returning from cancelled startup", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
 		const gate = Promise.withResolvers<void>();
@@ -360,7 +372,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		{ name: "owned Studio", owned: true, request: { keepStudio: true, scope: "down" } },
 	])(
 		"should preserve pending synchronization for a refused $name stop",
-		async ({ owned, request }) => {
+		async ({ owned, request }, { expect }) => {
 			expect.assertions(4);
 
 			const { close, onReady, ready, run } = pendingStudio({ owned });
@@ -383,7 +395,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		},
 	);
 
-	it("should close a managed locked Studio immediately when a permitted down interrupts synchronization", async () => {
+	it("should close a managed locked Studio immediately when a permitted down interrupts synchronization", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { close, run } = pendingStudio();
@@ -405,7 +419,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
 	});
 
-	it("should cancel synchronization when forced down leaves an owned Studio open", async () => {
+	it("should cancel synchronization when forced down leaves an owned Studio open", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { close, run } = pendingStudio({ owned: true });
@@ -427,7 +443,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
 	});
 
-	it("should report a callback that closes without acknowledging initial sync", async () => {
+	it("should report a callback that closes without acknowledging initial sync", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const close = vi.fn<() => void>();
@@ -460,7 +478,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		});
 	});
 
-	it("should bound missing sync acknowledgements and ignore a late callback", async () => {
+	it("should bound missing sync acknowledgements and ignore a late callback", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const ready = Promise.withResolvers<boolean>();
@@ -502,7 +522,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
 	});
 
-	it("should close the callback listener when Studio closes before acknowledging sync", async () => {
+	it("should close the callback listener when Studio closes before acknowledging sync", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const ready = Promise.withResolvers<boolean>();
@@ -542,7 +564,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
 	});
 
-	it("should let down interrupt an up that is waiting for sync acknowledgement", async () => {
+	it("should let down interrupt an up that is waiting for sync acknowledgement", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const ready = Promise.withResolvers<boolean>();
@@ -583,7 +607,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
 	});
 
-	it("should keep Studio opening after its lock arrives until sync is acknowledged", async () => {
+	it("should keep Studio opening after its lock arrives until sync is acknowledged", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const ready = Promise.withResolvers<boolean>();
@@ -635,7 +661,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reports: [] } });
 	});
 
-	it("should patch both stock scripts before launching a new Studio", async () => {
+	it("should patch both stock scripts before launching a new Studio", async ({ expect }) => {
 		expect.assertions(2);
 
 		const sources = [
@@ -663,7 +689,7 @@ describe("managed Rojo plugin lifecycle", () => {
 	it.for([
 		{ name: "older forge sources", version: 0 },
 		{ name: "a partial previous patch", version: 1 },
-	])("should repair $name coherently", async ({ version }) => {
+	])("should repair $name coherently", async ({ version }, { expect }) => {
 		expect.assertions(2);
 
 		const sources = stockPluginSources();
@@ -679,7 +705,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		);
 	});
 
-	it("should upgrade the genuine preceding plugin sources coherently", async () => {
+	it("should upgrade the genuine preceding plugin sources coherently", async ({ expect }) => {
 		expect.assertions(2);
 
 		const sources = [
@@ -694,7 +720,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		expect(sources[1]).toContain("-- rbx-forge patch 3 stock");
 	});
 
-	it("should preserve a coherent current pair without rewriting the model", async () => {
+	it("should preserve a coherent current pair without rewriting the model", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const sources = stockPluginSources();
@@ -727,7 +755,7 @@ describe("managed Rojo plugin lifecycle", () => {
 			reason: "stock bodies with a preceding patch header",
 			source: `-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`,
 		},
-	])("should preserve $reason and explain manual connection", async ({ source }) => {
+	])("should preserve $reason and explain manual connection", async ({ source }, { expect }) => {
 		expect.assertions(3);
 
 		const sources = stockPluginSources();
@@ -744,7 +772,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
 
-	it("should preserve newer forge sources and ask to update forge", async () => {
+	it("should preserve newer forge sources and ask to update forge", async ({ expect }) => {
 		expect.assertions(3);
 
 		const sources = stockPluginSources();
@@ -790,7 +818,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		},
 	])(
 		"should explain $reason on unrecognized sources without writing",
-		async ({ message, version }) => {
+		async ({ message, version }, { expect }) => {
 			expect.assertions(3);
 
 			const sources = stockPluginSources();
@@ -805,7 +833,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		},
 	);
 
-	it("should read the plugin version only for unrecognized sources", async () => {
+	it("should read the plugin version only for unrecognized sources", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startPluginSession(stockPluginSources(), { pluginVersion: "7.6.0" });
@@ -815,7 +843,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		expect(read).not.toHaveBeenCalled();
 	});
 
-	it("should preserve upstream launch-marker support", async () => {
+	it("should preserve upstream launch-marker support", async ({ expect }) => {
 		expect.assertions(3);
 
 		const sources = [
@@ -836,7 +864,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		});
 	});
 
-	it("should resolve the Windows managed path with case-insensitive environment names", async () => {
+	it("should resolve the Windows managed path with case-insensitive environment names", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const sources = stockPluginSources();
@@ -858,7 +888,7 @@ describe("managed Rojo plugin lifecycle", () => {
 
 	it.for(["", undefined])(
 		"should avoid plugin I/O when the home is unavailable (%s)",
-		async (home) => {
+		async (home, { expect }) => {
 			expect.assertions(1);
 
 			const run = startPluginSession(stockPluginSources(), { env: { HOME: home } });
@@ -869,7 +899,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		},
 	);
 
-	it("should avoid patching when cancellation occurs during source reading", async () => {
+	it("should avoid patching when cancellation occurs during source reading", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const sources = stockPluginSources();
@@ -885,7 +917,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		expect(sources).toStrictEqual(previous);
 	});
 
-	it("should preserve plugins on an unsupported platform", async () => {
+	it("should preserve plugins on an unsupported platform", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startPluginSession(stockPluginSources(), { platform: "linux" });
@@ -895,7 +927,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		expect(read).not.toHaveBeenCalled();
 	});
 
-	it("should avoid reading or patching after cancellation during plugin installation", async () => {
+	it("should avoid reading or patching after cancellation during plugin installation", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run: StartRun = startPluginSession(stockPluginSources(), {
@@ -921,7 +955,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		},
 	])(
 		"should preserve partial or manually changed marker support as manual",
-		async ({ app, session }) => {
+		async ({ app, session }, { expect }) => {
 			expect.assertions(1);
 
 			const run = startPluginSession([app, session, "protocolVersion = 5,"], {
@@ -936,7 +970,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		},
 	);
 
-	it("should install a missing plugin with the project's Rojo before patching", async () => {
+	it("should install a missing plugin with the project's Rojo before patching", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const sources = stockPluginSources();
@@ -957,7 +993,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		expect(sources[0]).toStartWith("-- rbx-forge patch 3");
 	});
 
-	it("should fail on a protocol mismatch before changing the plugin or launching", async () => {
+	it("should fail on a protocol mismatch before changing the plugin or launching", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const sources = stockPluginSources();
@@ -975,7 +1013,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		expect(run.fake.spawned.map(({ args }) => args)).not.toContainEqual(["plugin", "install"]);
 	});
 
-	it("should report a distinct error when the atomic plugin write fails", async () => {
+	it("should report a distinct error when the atomic plugin write fails", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startPluginSession(stockPluginSources());
@@ -992,7 +1030,9 @@ describe("managed Rojo plugin lifecycle", () => {
 		});
 	});
 
-	it("should preserve an unreadable plugin and continue with manual connection", async () => {
+	it("should preserve an unreadable plugin and continue with manual connection", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startPluginSession(stockPluginSources());
@@ -1011,7 +1051,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		});
 	});
 
-	it("should preserve a plugin with an unrecognized protocol declaration", async () => {
+	it("should preserve a plugin with an unrecognized protocol declaration", async ({ expect }) => {
 		expect.assertions(2);
 
 		const sources = stockPluginSources();
@@ -1036,7 +1076,7 @@ describe("managed Rojo plugin lifecycle", () => {
 			name: "a cancelled place build",
 			setup: { oneShot: oneShotsWith({ "start-1": "hold" }) },
 		},
-	])("should preserve the plugin for $name", async ({ setup }) => {
+	])("should preserve the plugin for $name", async ({ setup }, { expect }) => {
 		expect.assertions(1);
 
 		const sources = stockPluginSources();
@@ -1357,7 +1397,9 @@ function spawnedIds(fake: FakeReaper): Array<string> {
 }
 
 describe(runSupervisorAsync, () => {
-	it("should release a stopped Rojo's cancellation listener before the session ends", async () => {
+	it("should release a stopped Rojo's cancellation listener before the session ends", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand();
@@ -1374,7 +1416,9 @@ describe(runSupervisorAsync, () => {
 		expect(close).toHaveBeenCalledOnce();
 	});
 
-	it("should start no project watch when the session ends while Rojo starts", async () => {
+	it("should start no project watch when the session ends while Rojo starts", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run: StartRun = startCommand({
@@ -1390,13 +1434,13 @@ describe(runSupervisorAsync, () => {
 		expect(watch).not.toHaveBeenCalled();
 	});
 
-	it("should keep Rojo ready with a warning when its project watch cannot start", async () => {
+	it("should keep Rojo ready with a warning when its project watch cannot start", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand();
-		vi.spyOn(run.memory.fileSystem, "watch").mockImplementation(() => {
-			throw new Error("watch denied");
-		});
+		vi.spyOn(run.memory.fileSystem, "watch").mockThrow(new Error("watch denied"));
 		await flushAsync();
 		const state = stateOf(run);
 		run.signals.fire("SIGINT");
@@ -1409,16 +1453,16 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should warn on a wrapper write failure and reload on a later project edit", async () => {
+	it("should warn on a wrapper write failure and reload on a later project edit", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand();
 		await flushAsync();
 		const wrapper = path.join(SESSION, "rojo.project.json");
 		const write = vi.spyOn(run.memory.fileSystem, "writeFileSync");
-		write.mockImplementationOnce(() => {
-			throw new Error("write denied");
-		});
+		write.mockThrowOnce(new Error("write denied"));
 
 		expect(() => {
 			run.memory.watch.change(PROJECT, "default.project.json");
@@ -1437,7 +1481,9 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should warn and keep the session alive when the project watch fails", async () => {
+	it("should warn and keep the session alive when the project watch fails", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand();
@@ -1503,7 +1549,7 @@ describe(runSupervisorAsync, () => {
 		},
 	])(
 		"should respect $platform project filename casing for $filename",
-		async ({ filename, platform, projectPath, reloads }) => {
+		async ({ filename, platform, projectPath, reloads }, { expect }) => {
 			expect.assertions(1);
 
 			const run = startCommand({
@@ -1528,7 +1574,9 @@ describe(runSupervisorAsync, () => {
 		},
 	);
 
-	it("should reload after atomic project replacement and filename-less events, ignoring unrelated files", async () => {
+	it("should reload after atomic project replacement and filename-less events, ignoring unrelated files", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand();
@@ -1558,7 +1606,9 @@ describe(runSupervisorAsync, () => {
 		expect(unnamed).toBeGreaterThan(1);
 	});
 
-	it("should stop watching the project when Rojo exits and watch again after it restarts", async () => {
+	it("should stop watching the project when Rojo exits and watch again after it restarts", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand(ATTACHED);
@@ -1583,7 +1633,7 @@ describe(runSupervisorAsync, () => {
 		expect(run.memory.watch.activeDirectories()).toStrictEqual([]);
 	});
 
-	it("should close the project watch as soon as the session ends", async () => {
+	it("should close the project watch as soon as the session ends", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand();
@@ -1595,7 +1645,9 @@ describe(runSupervisorAsync, () => {
 		expect(active).toStrictEqual([]);
 	});
 
-	it("should reload the served tree on project edits without replacing the wrapper's root fields", async () => {
+	it("should reload the served tree on project edits without replacing the wrapper's root fields", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand();
@@ -1617,7 +1669,9 @@ describe(runSupervisorAsync, () => {
 		expect(current).toBe(original);
 	});
 
-	it("should preserve cancellation when a pending Rojo identity request fails", async () => {
+	it("should preserve cancellation when a pending Rojo identity request fails", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const identity = Promise.withResolvers<Awaited<ReturnType<Network["getRojoInfoAsync"]>>>();
@@ -1630,7 +1684,7 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
 
-	it("should report a Rojo identity failure without opening Studio", async () => {
+	it("should report a Rojo identity failure without opening Studio", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -1646,7 +1700,9 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
 
-	it("should escape Rojo identity strings for Lua without adding marker attributes", async () => {
+	it("should escape Rojo identity strings for Lua without adding marker attributes", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const name = 'A "quoted" project\\name\\u1234\u0001雪';
@@ -1674,7 +1730,9 @@ describe(runSupervisorAsync, () => {
 		);
 	});
 
-	it("should avoid launching Studio if the session ends while reading Rojo identity", async () => {
+	it("should avoid launching Studio if the session ends while reading Rojo identity", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const identity = Promise.withResolvers<Awaited<ReturnType<Network["getRojoInfoAsync"]>>>();
@@ -1696,7 +1754,7 @@ describe(runSupervisorAsync, () => {
 		);
 	});
 
-	it("should refuse to launch Studio against a different Rojo project", async () => {
+	it("should refuse to launch Studio against a different Rojo project", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = startCommand({
@@ -1720,7 +1778,7 @@ describe(runSupervisorAsync, () => {
 
 	it.for(["default.project.json", "default.project.jsonc"])(
 		"should serve a commented %s project with trailing commas",
-		async (projectPath) => {
+		async (projectPath, { expect }) => {
 			expect.assertions(1);
 
 			const run = startCommand({
@@ -1765,7 +1823,7 @@ describe(runSupervisorAsync, () => {
 		{ name: "", expectedName: "", projectPath: "nested/default.project.jsonc" },
 	])(
 		"should infer the Rojo name for $projectPath",
-		async ({ name, expectedName, projectPath }) => {
+		async ({ name, expectedName, projectPath }, { expect }) => {
 			expect.assertions(1);
 
 			const run = startCommand({
@@ -1795,7 +1853,9 @@ describe(runSupervisorAsync, () => {
 		},
 	);
 
-	it("should serve a wrapper that identifies the worktree without adding an instance", async () => {
+	it("should serve a wrapper that identifies the worktree without adding an instance", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -1823,7 +1883,9 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should copy only root serve fields explicitly set in the user's project", async () => {
+	it("should copy only root serve fields explicitly set in the user's project", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -1860,7 +1922,9 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should compile and build, then serve Rojo and watch before opening Studio", async () => {
+	it("should compile and build, then serve Rojo and watch before opening Studio", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({ flags: {}, projectType: "rbxts" });
@@ -1889,7 +1953,9 @@ describe(runSupervisorAsync, () => {
 		);
 	});
 
-	it("should give every worker the project, the environment, and an output file", async () => {
+	it("should give every worker the project, the environment, and an output file", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync({ flags: {}, projectType: "rbxts" });
@@ -1916,7 +1982,9 @@ describe(runSupervisorAsync, () => {
 		);
 	});
 
-	it("should serve only Rojo with no compiler and the Studio that has the place open", async () => {
+	it("should serve only Rojo with no compiler and the Studio that has the place open", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const getRojoInfo = vi.fn<Network["getRojoInfoAsync"]>();
@@ -1947,7 +2015,7 @@ describe(runSupervisorAsync, () => {
 		expect(getRojoInfo).not.toHaveBeenCalled();
 	});
 
-	it("should run no part with --no-open --no-compiler", async () => {
+	it("should run no part with --no-open --no-compiler", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = await stoppedAsync({
@@ -1963,7 +2031,7 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
 
-	it("should report ready once Rojo runs, naming the port", async () => {
+	it("should report ready once Rojo runs, naming the port", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync();
@@ -1975,7 +2043,7 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should tell an owning start to press Ctrl+C once ready", async () => {
+	it("should tell an owning start to press Ctrl+C once ready", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync({ owned: true });
@@ -1987,7 +2055,9 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should not report ready after a stop signal while the services start", async () => {
+	it("should not report ready after a stop signal while the services start", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run: StartRun = startCommand({
@@ -2021,7 +2091,7 @@ describe(runSupervisorAsync, () => {
 		[false, "start-1"],
 	])(
 		"should never open Studio after a stop during the build (compiler: %s)",
-		async ([compiler, build]) => {
+		async ([compiler, build], { expect }) => {
 			expect.assertions(2);
 
 			const run: StartRun = startCommand({
@@ -2039,7 +2109,7 @@ describe(runSupervisorAsync, () => {
 		},
 	);
 
-	it("should leave no timer behind once the session ended", async () => {
+	it("should leave no timer behind once the session ended", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync({ flags: { syncback: true } });
@@ -2048,7 +2118,7 @@ describe(runSupervisorAsync, () => {
 		expect(run.clock.pending()).toBe(0);
 	});
 
-	it("should report each step and a ready line", async () => {
+	it("should report each step and a ready line", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync({ flags: {}, projectType: "rbxts" });
@@ -2078,7 +2148,7 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should let open build the place when the session has no compiler", async () => {
+	it("should let open build the place when the session has no compiler", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = await stoppedAsync({ flags: { compiler: false }, projectType: "rbxts" });
@@ -2091,7 +2161,9 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
 
-	it("should let open build its own place when it differs from the build output", async () => {
+	it("should let open build its own place when it differs from the build output", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync({
@@ -2107,7 +2179,7 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should let open build from its own project", async () => {
+	it("should let open build from its own project", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync({
@@ -2123,7 +2195,7 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should run the Luau watch command as the compiler service", async () => {
+	it("should run the Luau watch command as the compiler service", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync({
@@ -2140,7 +2212,9 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should stop nothing once the Studio its owner opened closes the place", async () => {
+	it("should stop nothing once the Studio its owner opened closes the place", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({ flags: { compiler: false }, owned: true });
@@ -2175,7 +2249,9 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should stop only Rojo once the Studio it opened with no owner closes the place", async () => {
+	it("should stop only Rojo once the Studio it opened with no owner closes the place", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: { compiler: false } });
@@ -2197,7 +2273,9 @@ describe(runSupervisorAsync, () => {
 		expect(run.fake.calls).toContain("stop rojo 3000");
 	});
 
-	it("should attach the Studio that has the place open: no build, no launch", async () => {
+	it("should attach the Studio that has the place open: no build, no launch", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({
@@ -2224,7 +2302,7 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should say it uses the Studio that has the place open", async () => {
+	it("should say it uses the Studio that has the place open", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = await stoppedAsync({
@@ -2245,7 +2323,9 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should still build the session's place when the attached Studio has another one open", async () => {
+	it("should still build the session's place when the attached Studio has another one open", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = await stoppedAsync({
@@ -2263,7 +2343,7 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
 
-	it("should build and launch Studio when the lock file names no Studio", async () => {
+	it("should build and launch Studio when the lock file names no Studio", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = await stoppedAsync({
@@ -2280,7 +2360,9 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
 
-	it("should launch Studio when the Studio the lock file names has exited", async () => {
+	it("should launch Studio when the Studio the lock file names has exited", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync({
@@ -2292,7 +2374,9 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
 
-	it("should wait for the Studio it launched, not the one an old lock file names", async () => {
+	it("should wait for the Studio it launched, not the one an old lock file names", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -2315,7 +2399,9 @@ describe(runSupervisorAsync, () => {
 		expect(open).toMatchObject({ services: { studio: { pid: 900, status: "open" } } });
 	});
 
-	it("should mark only Rojo failed when it exits, with its exit code and output tail", async () => {
+	it("should mark only Rojo failed when it exits, with its exit code and output tail", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({ flags: {}, projectType: "rbxts" });
@@ -2350,7 +2436,7 @@ describe(runSupervisorAsync, () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 	});
 
-	it("should keep only the last lines of a failed service's output", async () => {
+	it("should keep only the last lines of a failed service's output", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand();
@@ -2371,7 +2457,9 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should keep Rojo starting until its port listens, then report it ready", async () => {
+	it("should keep Rojo starting until its port listens, then report it ready", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const answers = [false, false, true];
@@ -2398,7 +2486,9 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
 
-	it("should not report Rojo ready when a stop signal came while it checked the port", async () => {
+	it("should not report Rojo ready when a stop signal came while it checked the port", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run: StartRun = startCommand({
@@ -2412,7 +2502,9 @@ describe(runSupervisorAsync, () => {
 		expect(run.reporter.events).not.toContainEqual(expect.objectContaining({ type: "info" }));
 	});
 
-	it("should show a stopping session while Rojo's port check is still going", async () => {
+	it("should show a stopping session while Rojo's port check is still going", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const listening = Promise.withResolvers<boolean>();
@@ -2427,7 +2519,7 @@ describe(runSupervisorAsync, () => {
 		expect(during).toMatchObject({ phase: "stopping", running: true });
 	});
 
-	it("should show a planned compiler as starting before anything runs", async () => {
+	it("should show a planned compiler as starting before anything runs", async ({ expect }) => {
 		expect.assertions(1);
 
 		const states: Array<Promise<unknown>> = [];
@@ -2448,7 +2540,9 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should stop Rojo as failed when it never listens within the bound, and go on", async () => {
+	it("should stop Rojo as failed when it never listens within the bound, and go on", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const run = startCommand({ isListening: async () => false });
@@ -2483,7 +2577,9 @@ describe(runSupervisorAsync, () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 	});
 
-	it("should stop waiting for Rojo to listen once it exits, and announce the compiler alone", async () => {
+	it("should stop waiting for Rojo to listen once it exits, and announce the compiler alone", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -2507,7 +2603,9 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should not report Rojo ready when it exited while its port was checked", async () => {
+	it("should not report Rojo ready when it exited while its port was checked", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const listening = Promise.withResolvers<boolean>();
@@ -2529,7 +2627,9 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should mark only the compiler failed when it exits, and keep Rojo serving", async () => {
+	it("should mark only the compiler failed when it exits, and keep Rojo serving", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: {}, projectType: "rbxts" });
@@ -2553,7 +2653,7 @@ describe(runSupervisorAsync, () => {
 	it.for([
 		[{ exitCode: null, signal: 9 }, "rojo exited (signal 9)"],
 		[{ exitCode: null, signal: null }, "rojo exited (killed)"],
-	] as const)("should describe an exit of %o", async ([exit, why]) => {
+	] as const)("should describe an exit of %o", async ([exit, why], { expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand();
@@ -2569,7 +2669,9 @@ describe(runSupervisorAsync, () => {
 		});
 	});
 
-	it("should stop the session and start no service when the compile fails", async () => {
+	it("should stop the session and start no service when the compile fails", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -2582,7 +2684,7 @@ describe(runSupervisorAsync, () => {
 		expect(run.fake.calls).toStrictEqual(["go", "spawn start-1", "terminate 3000"]);
 	});
 
-	it("should start nothing after a stop signal during the compile", async () => {
+	it("should start nothing after a stop signal during the compile", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = startCommand({
@@ -2598,7 +2700,9 @@ describe(runSupervisorAsync, () => {
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
 
-	it("should start no step after a stop signal, even when the running step succeeds", async () => {
+	it("should start no step after a stop signal, even when the running step succeeds", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run: StartRun = startCommand({
@@ -2615,7 +2719,7 @@ describe(runSupervisorAsync, () => {
 		expect(run.fake.calls).toStrictEqual(["go", "spawn start-1", "terminate 3000"]);
 	});
 
-	it("should start no compiler after a stop signal while Rojo starts", async () => {
+	it("should start no compiler after a stop signal while Rojo starts", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run: StartRun = startCommand({
@@ -2638,7 +2742,9 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should write each service's output to its rotated log, without colors", async () => {
+	it("should write each service's output to its rotated log, without colors", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -2664,7 +2770,7 @@ describe(runSupervisorAsync, () => {
 		);
 	});
 
-	it("should report each watch-mode compile with its diagnostics", async () => {
+	it("should report each watch-mode compile with its diagnostics", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
@@ -2695,7 +2801,7 @@ describe(runSupervisorAsync, () => {
 		]);
 	});
 
-	it("should read the Luau watch command's output only into its log", async () => {
+	it("should read the Luau watch command's output only into its log", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -2715,7 +2821,9 @@ describe(runSupervisorAsync, () => {
 		expect(run.reporter.events.filter(({ type }) => type === "compiled")).toStrictEqual([]);
 	});
 
-	it("should remove the session directory and keep the logs when the session ends", async () => {
+	it("should remove the session directory and keep the logs when the session ends", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = await stoppedAsync({ flags: {}, projectType: "rbxts" });
@@ -2726,7 +2834,9 @@ describe(runSupervisorAsync, () => {
 		expect(files.filter((file) => file.includes("sessions/"))).toStrictEqual([]);
 	});
 
-	it("should fail with port_in_use when the fixed port is busy, starting nothing", async () => {
+	it("should fail with port_in_use when the fixed port is busy, starting nothing", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ isPortFree: false });
@@ -2739,7 +2849,9 @@ describe(runSupervisorAsync, () => {
 		expect(run.fake.launches).toStrictEqual([]);
 	});
 
-	it("should serve Rojo on a free port when none is set and the default port is busy", async () => {
+	it("should serve Rojo on a free port when none is set and the default port is busy", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = await stoppedAsync({ ...ATTACHED, isPortFree: false, rojoPort: "unset" });
@@ -2753,18 +2865,21 @@ describe(runSupervisorAsync, () => {
 	it.for([
 		["rojo_missing", { "tools/rbxtsc": "" }],
 		["compiler_missing", { "tools/rojo": "" }],
-	] as const)("should fail with %s before it creates any session file", async ([code, files]) => {
-		expect.assertions(2);
+	] as const)(
+		"should fail with %s before it creates any session file",
+		async ([code, files], { expect }) => {
+			expect.assertions(2);
 
-		const run = startCommand({ files, flags: {}, projectType: "rbxts" });
+			const run = startCommand({ files, flags: {}, projectType: "rbxts" });
 
-		await expect(run.result).rejects.toMatchObject({ code });
-		expect(
-			Object.keys(run.memory.files()).filter((file) => file.startsWith(".forge")),
-		).toStrictEqual([]);
-	});
+			await expect(run.result).rejects.toMatchObject({ code });
+			expect(
+				Object.keys(run.memory.files()).filter((file) => file.startsWith(".forge")),
+			).toStrictEqual([]);
+		},
+	);
 
-	it("should stop without escalating when every worker stops in time", async () => {
+	it("should stop without escalating when every worker stops in time", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = await stoppedAsync();
@@ -2791,7 +2906,7 @@ describe(runSupervisorAsync, () => {
 		],
 	] as const)(
 		"should warn and report when the reaper's end escalated to %s",
-		async ([escalation, message]) => {
+		async ([escalation, message], { expect }) => {
 			expect.assertions(2);
 
 			const end: ReaperEnd = { escalation, reports: [], terminated: false };
@@ -2802,7 +2917,9 @@ describe(runSupervisorAsync, () => {
 		},
 	);
 
-	it("should fail with cleanup_in_progress when a worker outlived the wait", async () => {
+	it("should fail with cleanup_in_progress when a worker outlived the wait", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const reports = [
@@ -2847,7 +2964,7 @@ describe("forge start hooks and syncback", () => {
 		return run;
 	}
 
-	it("should not run syncback on a save without --syncback", async () => {
+	it("should not run syncback on a save without --syncback", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await savedAsync({ ...SYNCBACK, ...ATTACHED, flags: NO_COMPILER });
@@ -2859,7 +2976,7 @@ describe("forge start hooks and syncback", () => {
 		]);
 	});
 
-	it("should check Rojo's syncback support before any other step", async () => {
+	it("should check Rojo's syncback support before any other step", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -2872,7 +2989,9 @@ describe("forge start hooks and syncback", () => {
 		expect(spawnedIds(run.fake)).toStrictEqual(["start-1: syncback --help"]);
 	});
 
-	it("should run syncback and its post hook as workers when Studio saves the place", async () => {
+	it("should run syncback and its post hook as workers when Studio saves the place", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = await savedAsync();
@@ -2890,7 +3009,9 @@ describe("forge start hooks and syncback", () => {
 		});
 	});
 
-	it("should give a hook the hook stack, so a forge run inside it skips it", async () => {
+	it("should give a hook the hook stack, so a forge run inside it skips it", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = await savedAsync();
@@ -2902,7 +3023,7 @@ describe("forge start hooks and syncback", () => {
 		});
 	});
 
-	it("should fold saves during a syncback into one more run", async () => {
+	it("should fold saves during a syncback into one more run", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await savedAsync({
@@ -2922,7 +3043,7 @@ describe("forge start hooks and syncback", () => {
 		expect(spawnedIds(run.fake).filter((id) => id.includes("--input"))).toHaveLength(2);
 	});
 
-	it("should report a failed syncback and keep the session running", async () => {
+	it("should report a failed syncback and keep the session running", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = await savedAsync({
@@ -2941,7 +3062,7 @@ describe("forge start hooks and syncback", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 	});
 
-	it("should keep each syncback run and its hooks in the status", async () => {
+	it("should keep each syncback run and its hooks in the status", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await savedAsync();
@@ -2973,7 +3094,7 @@ describe("forge start hooks and syncback", () => {
 		["Rojo", "syncback-1", "process_failed", 0],
 	] as const)(
 		"should keep a syncback run that %s failed, with its error and hooks",
-		async ([, worker, code, hooks]) => {
+		async ([, worker, code, hooks], { expect }) => {
 			expect.assertions(2);
 
 			const run = await savedAsync({
@@ -2992,7 +3113,7 @@ describe("forge start hooks and syncback", () => {
 		},
 	);
 
-	it("should report a running syncback as running", async () => {
+	it("should report a running syncback as running", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await savedAsync({
@@ -3006,23 +3127,26 @@ describe("forge start hooks and syncback", () => {
 	it.for([
 		["succeeded", OK, true],
 		["failed", EXITED, false],
-	] as const)("should keep how long a syncback run that %s took", async ([, report, isOk]) => {
-		expect.assertions(1);
+	] as const)(
+		"should keep how long a syncback run that %s took",
+		async ([, report, isOk], { expect }) => {
+			expect.assertions(1);
 
-		const run = await savedAsync({
-			...SYNCBACK,
-			oneShot: oneShotsWith({ "syncback-1": "hold" }),
-		});
-		await passAsync(run, 1000);
-		run.fake.exit("syncback-1", report);
-		await passAsync(run, OUTPUT_POLL_MS);
+			const run = await savedAsync({
+				...SYNCBACK,
+				oneShot: oneShotsWith({ "syncback-1": "hold" }),
+			});
+			await passAsync(run, 1000);
+			run.fake.exit("syncback-1", report);
+			await passAsync(run, OUTPUT_POLL_MS);
 
-		expect(stateOf(run)).toMatchObject({
-			services: { syncback: { lastRun: { durationMs: 1250, ok: isOk } } },
-		});
-	});
+			expect(stateOf(run)).toMatchObject({
+				services: { syncback: { lastRun: { durationMs: 1250, ok: isOk } } },
+			});
+		},
+	);
 
-	it("should not report a syncback the session's end cut short", async () => {
+	it("should not report a syncback the session's end cut short", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await savedAsync({
@@ -3035,7 +3159,7 @@ describe("forge start hooks and syncback", () => {
 		expect(run.reporter.events.filter(({ type }) => type === "warning")).toStrictEqual([]);
 	});
 
-	it("should run build hooks as workers of the session", async () => {
+	it("should run build hooks as workers of the session", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync({
@@ -3054,7 +3178,9 @@ describe("forge start hooks and syncback", () => {
 });
 
 describe("forge start session files", () => {
-	it("should write the identity record, token, and current hint before the reaper starts", async () => {
+	it("should write the identity record, token, and current hint before the reaper starts", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		let files: Record<string, null | string> = {};
@@ -3087,7 +3213,9 @@ describe("forge start session files", () => {
 		});
 	});
 
-	it("should hold the singleton lock for the whole run and release it at the end", async () => {
+	it("should hold the singleton lock for the whole run and release it at the end", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		let held: Array<string> | undefined;
@@ -3106,7 +3234,7 @@ describe("forge start session files", () => {
 		expect(run.native.locks.size).toBe(0);
 	});
 
-	it("should delete the current hint with the session directory", async () => {
+	it("should delete the current hint with the session directory", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync(ATTACHED);
@@ -3117,7 +3245,9 @@ describe("forge start session files", () => {
 		).toIncludeSameMembers([".forge/logs/rojo.log", ".forge/sessions"]);
 	});
 
-	it("should refuse with session_running while another supervisor holds the lock, starting nothing", async () => {
+	it("should refuse with session_running while another supervisor holds the lock, starting nothing", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand();
@@ -3131,7 +3261,7 @@ describe("forge start session files", () => {
 		expect(Object.keys(run.memory.files())).not.toContain(".forge/current");
 	});
 
-	it("should end with owner_gone when the owner pipe closes", async () => {
+	it("should end with owner_gone when the owner pipe closes", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand();
@@ -3146,7 +3276,7 @@ describe("forge start session files", () => {
 
 	it.for(["created", "lock"] as const)(
 		"should take no lock and start nothing when stopped while paused at %s",
-		async (point) => {
+		async (point, { expect }) => {
 			expect.assertions(3);
 
 			const run = startCommand({ pause: (stop) => stopAt(point, stop) });
@@ -3163,7 +3293,9 @@ describe("forge start session files", () => {
 		},
 	);
 
-	it("should pause at control with the session's files written and no endpoint yet, and start nothing once stopped there", async () => {
+	it("should pause at control with the session's files written and no endpoint yet, and start nothing once stopped there", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const seen: Array<unknown> = [];
@@ -3181,7 +3313,9 @@ describe("forge start session files", () => {
 		expect([seen, run.fake.calls]).toStrictEqual([["session-1\n", 0], ["terminate 3000"]]);
 	});
 
-	it("should name owner_gone when the owner went before the session started", async () => {
+	it("should name owner_gone when the owner went before the session started", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -3196,7 +3330,9 @@ describe("forge start session files", () => {
 		});
 	});
 
-	it("should delete older sessions whose lease is free before it creates its own", async () => {
+	it("should delete older sessions whose lease is free before it creates its own", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({ files: WITH_OLD });
@@ -3209,7 +3345,9 @@ describe("forge start session files", () => {
 		).toStrictEqual([]);
 	});
 
-	it("should fail with previous_generation_alive while an older session's lease is held", async () => {
+	it("should fail with previous_generation_alive while an older session's lease is held", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ files: WITH_OLD });
@@ -3225,7 +3363,9 @@ describe("forge start session files", () => {
 		expect(run.fake.launches).toStrictEqual([]);
 	});
 
-	it("should kill an older session that outlives the wait with --force, then start", async () => {
+	it("should kill an older session that outlives the wait with --force, then start", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({ files: WITH_OLD, flags: { ...NO_COMPILER, force: true } });
@@ -3245,7 +3385,9 @@ describe("forge start session files", () => {
 		expect(run.fake.launches).toHaveLength(1);
 	});
 
-	it("should leave cleanups out of the result when no older session needed one", async () => {
+	it("should leave cleanups out of the result when no older session needed one", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = await stoppedAsync({ files: WITH_OLD, flags: { ...NO_COMPILER, force: true } });
@@ -3254,7 +3396,9 @@ describe("forge start session files", () => {
 		expect(Object.keys(data)).not.toContain("cleanups");
 	});
 
-	it("should create no session when stopped while it waits for an older session", async () => {
+	it("should create no session when stopped while it waits for an older session", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ files: WITH_OLD });
@@ -3268,7 +3412,9 @@ describe("forge start session files", () => {
 		expect(run.fake.launches).toStrictEqual([]);
 	});
 
-	it("should fail with cleanup_in_progress and keep the session while its lease stays held", async () => {
+	it("should fail with cleanup_in_progress and keep the session while its lease stays held", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand();
@@ -3285,7 +3431,7 @@ describe("forge start session files", () => {
 		expect(run.memory.files()[".forge/current"]).toBe("session-1\n");
 	});
 
-	it("should name the surviving PIDs when the final barrier times out", async () => {
+	it("should name the surviving PIDs when the final barrier times out", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand();
@@ -3303,7 +3449,7 @@ describe("forge start session files", () => {
 		});
 	});
 
-	it("should delete the session files when the reaper does not start", async () => {
+	it("should delete the session files when the reaper does not start", async ({ expect }) => {
 		expect.assertions(2);
 
 		const error = new ForgeError("reaper_unavailable", "no reaper");
@@ -3328,7 +3474,7 @@ const CONTROL_TARGET = {
 };
 
 describe("forge up control channel", () => {
-	it("should save its found Studio through the session control channel", async () => {
+	it("should save its found Studio through the session control channel", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -3363,7 +3509,9 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should serve its status on the control endpoint while it runs, then close it", async () => {
+	it("should serve its status on the control endpoint while it runs, then close it", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand(ATTACHED);
@@ -3398,7 +3546,7 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should stop with reason shutdown when asked on the control channel", async () => {
+	it("should stop with reason shutdown when asked on the control channel", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand();
@@ -3414,7 +3562,7 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should end the workers' grace on a forced shutdown", async () => {
+	it("should end the workers' grace on a forced shutdown", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand();
@@ -3427,7 +3575,7 @@ describe("forge up control channel", () => {
 		expect(run.fake.calls.at(-1)).toBe("terminate 3000 hurried");
 	});
 
-	it("should call onReady once, when the session is first ready", async () => {
+	it("should call onReady once, when the session is first ready", async ({ expect }) => {
 		expect.assertions(2);
 
 		const onReady = vi.fn<() => void>();
@@ -3446,7 +3594,9 @@ describe("forge up control channel", () => {
 		expect(onReady).toHaveBeenCalledOnce();
 	});
 
-	it("should never call onReady for a session stopped while its services start", async () => {
+	it("should never call onReady for a session stopped while its services start", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const onReady = vi.fn<() => void>();
@@ -3463,7 +3613,9 @@ describe("forge up control channel", () => {
 		expect(onReady).not.toHaveBeenCalled();
 	});
 
-	it("should keep the compiler's last build with its diagnostics in state.json", async () => {
+	it("should keep the compiler's last build with its diagnostics in state.json", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
@@ -3491,7 +3643,7 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should show in state.json while a compile runs", async () => {
+	it("should show in state.json while a compile runs", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
@@ -3508,7 +3660,9 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should answer freshStatus at once for a Luau watch command, which reports no builds", async () => {
+	it("should answer freshStatus at once for a Luau watch command, which reports no builds", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -3528,7 +3682,9 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should wait in freshStatus for the first build of a roblox-ts compiler", async () => {
+	it("should wait in freshStatus for the first build of a roblox-ts compiler", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
@@ -3542,7 +3698,7 @@ describe("forge up control channel", () => {
 		await expect(waiting).rejects.toMatchObject({ code: "compile_timeout" });
 	});
 
-	it("should fail freshStatus naming an edit that no compile started for", async () => {
+	it("should fail freshStatus naming an edit that no compile started for", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -3574,7 +3730,9 @@ describe("forge up control channel", () => {
 		);
 	});
 
-	it("should fail a freshStatus wait with service_failed when the compiler exits", async () => {
+	it("should fail a freshStatus wait with service_failed when the compiler exits", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
@@ -3595,7 +3753,9 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should fail a freshStatus wait with not_running once the session stops", async () => {
+	it("should fail a freshStatus wait with not_running once the session stops", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: { open: false }, projectType: "rbxts" });
@@ -3615,7 +3775,7 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should be ready once a Luau watch command runs, with no compile", async () => {
+	it("should be ready once a Luau watch command runs, with no compile", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -3631,7 +3791,9 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should show a stopping session, with Studio still open, while its workers go", async () => {
+	it("should show a stopping session, with Studio still open, while its workers go", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: { compiler: false } });
@@ -3656,7 +3818,7 @@ describe("forge up control channel", () => {
 		});
 	});
 
-	it("should write the token through the addon, owner-only, on Windows", async () => {
+	it("should write the token through the addon, owner-only, on Windows", async ({ expect }) => {
 		expect.assertions(2);
 
 		const writePrivateFile = vi.fn<(file: string, text: string) => void>();
@@ -3677,7 +3839,9 @@ describe("forge up control channel", () => {
 		expect(files[".forge/sessions/session-1/token"]).toBeUndefined();
 	});
 
-	it("should delete the session files and start nothing when the endpoint cannot open", async () => {
+	it("should delete the session files and start nothing when the endpoint cannot open", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const error = new ForgeError("endpoint_in_use", "held");
@@ -3735,7 +3899,9 @@ async function freshWithinAsync(run: StartRun): Promise<unknown> {
 }
 
 describe("forge up parts", () => {
-	it("should start only the compiler for up: no compile or build step, no Rojo, no port", async () => {
+	it("should start only the compiler for up: no compile or build step, no Rojo, no port", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({ flags: UP, projectType: "rbxts" });
@@ -3757,7 +3923,9 @@ describe("forge up parts", () => {
 		expect(result.data).not.toHaveProperty("port");
 	});
 
-	it("should be ready at once with no part in a Luau project with no watch command", async () => {
+	it("should be ready at once with no part in a Luau project with no watch command", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const onReady = vi.fn<() => void>();
@@ -3776,7 +3944,9 @@ describe("forge up parts", () => {
 		expect(onReady).toHaveBeenCalledOnce();
 	});
 
-	it("should start the compiler again once it failed, and wait for its new first build", async () => {
+	it("should start the compiler again once it failed, and wait for its new first build", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({ flags: UP, projectType: "rbxts" });
@@ -3799,7 +3969,7 @@ describe("forge up parts", () => {
 		expect(fresh).toMatchObject({ code: "compile_timeout" });
 	});
 
-	it("should read only the output of the compiler that runs now", async () => {
+	it("should read only the output of the compiler that runs now", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: UP, projectType: "rbxts" });
@@ -3830,7 +4000,9 @@ describe("forge up parts", () => {
 		});
 	});
 
-	it("should wait for the first build while the compile step runs, before the compiler", async () => {
+	it("should wait for the first build while the compile step runs, before the compiler", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -3846,7 +4018,7 @@ describe("forge up parts", () => {
 		expect(fresh).toMatchObject({ code: "compile_timeout" });
 	});
 
-	it("should add nothing while every part it asks for runs", async () => {
+	it("should add nothing while every part it asks for runs", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: UP, projectType: "rbxts" });
@@ -3859,7 +4031,7 @@ describe("forge up parts", () => {
 		expect(spawnedIds(run.fake)).toStrictEqual(["compiler: -w"]);
 	});
 
-	it("should add the compiler to a session that started without it", async () => {
+	it("should add the compiler to a session that started without it", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...ATTACHED, projectType: "rbxts" });
@@ -3881,7 +4053,7 @@ describe("forge up parts", () => {
 		]);
 	});
 
-	it("should add a Luau watch command, which is ready once it runs", async () => {
+	it("should add a Luau watch command, which is ready once it runs", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -3902,7 +4074,7 @@ describe("forge up parts", () => {
 		});
 	});
 
-	it("should add no compiler to a project that has none", async () => {
+	it("should add no compiler to a project that has none", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: UP });
@@ -3915,7 +4087,9 @@ describe("forge up parts", () => {
 		expect(spawnedIds(run.fake)).toStrictEqual([]);
 	});
 
-	it("should fail with compiler_missing when the compiler is gone since the session started", async () => {
+	it("should fail with compiler_missing when the compiler is gone since the session started", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: UP, projectType: "rbxts" });
@@ -3930,7 +4104,9 @@ describe("forge up parts", () => {
 		expect(answer).toMatchObject({ code: "compiler_missing" });
 	});
 
-	it("should answer not_running when the session stops before its parts started", async () => {
+	it("should answer not_running when the session stops before its parts started", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -4015,7 +4191,7 @@ async function attachFoundAsync(run: StartRun): Promise<unknown> {
 }
 
 describe("forge up --studio", () => {
-	it("should stop the Rojo it starts when Studio cannot launch", async () => {
+	it("should stop the Rojo it starts when Studio cannot launch", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = startCommand({ flags: UP });
@@ -4036,7 +4212,9 @@ describe("forge up --studio", () => {
 		});
 	});
 
-	it("should wait for the initial Studio launch when an attach arrives while Rojo starts", async () => {
+	it("should wait for the initial Studio launch when an attach arrives while Rojo starts", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const listening = Promise.withResolvers<boolean>();
@@ -4057,7 +4235,9 @@ describe("forge up --studio", () => {
 		await expect(answer).resolves.toStrictEqual({ added: [] });
 	});
 
-	it("should report a Rojo failure without launching Studio when Rojo never listens", async () => {
+	it("should report a Rojo failure without launching Studio when Rojo never listens", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ flags: UP, isListening: async () => false });
@@ -4083,7 +4263,7 @@ describe("forge up --studio", () => {
 		);
 	});
 
-	it("should launch Studio only after its Rojo listens", async () => {
+	it("should launch Studio only after its Rojo listens", async ({ expect }) => {
 		expect.assertions(3);
 
 		const listening = Promise.withResolvers<boolean>();
@@ -4108,7 +4288,9 @@ describe("forge up --studio", () => {
 		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
 	});
 
-	it("should fail the attach at once, and close Studio, when the launched Studio exits while opening", async () => {
+	it("should fail the attach at once, and close Studio, when the launched Studio exits while opening", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: UP });
@@ -4135,7 +4317,9 @@ describe("forge up --studio", () => {
 		expect(closed).toMatchObject({ services: { studio: { status: "closed" } } });
 	});
 
-	it("should serve Rojo before building and opening Studio, then answer once both are ready", async () => {
+	it("should serve Rojo before building and opening Studio, then answer once both are ready", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({ flags: UP });
@@ -4162,7 +4346,9 @@ describe("forge up --studio", () => {
 		});
 	});
 
-	it("should attach the Studio that has the place open: no build, no launch", async () => {
+	it("should attach the Studio that has the place open: no build, no launch", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({
@@ -4183,7 +4369,9 @@ describe("forge up --studio", () => {
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
 
-	it("should wait for the compiler's fresh build before it builds the place", async () => {
+	it("should wait for the compiler's fresh build before it builds the place", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: UP, projectType: "rbxts" });
@@ -4205,7 +4393,9 @@ describe("forge up --studio", () => {
 		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
 	});
 
-	it("should fail with port_in_use before Studio opens when the set port is busy", async () => {
+	it("should fail with port_in_use before Studio opens when the set port is busy", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ flags: UP, isPortFree: false });
@@ -4220,7 +4410,9 @@ describe("forge up --studio", () => {
 		expect(state).toMatchObject({ services: { studio: { status: "off" } } });
 	});
 
-	it("should take a free port when none is set, and keep it when Rojo starts again", async () => {
+	it("should take a free port when none is set, and keep it when Rojo starts again", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ flags: UP, isPortFree: false, rojoPort: "unset" });
@@ -4240,7 +4432,7 @@ describe("forge up --studio", () => {
 		expect(result.data).toMatchObject({ port: FREE_PORT });
 	});
 
-	it("should refresh root serve fields only when Rojo starts again", async () => {
+	it("should refresh root serve fields only when Rojo starts again", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...ATTACHED });
@@ -4269,7 +4461,7 @@ describe("forge up --studio", () => {
 		expect(repair).toStrictEqual({ added: ["rojo"] });
 	});
 
-	it("should add nothing while Studio and its Rojo run", async () => {
+	it("should add nothing while Studio and its Rojo run", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: UP });
@@ -4283,7 +4475,9 @@ describe("forge up --studio", () => {
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
 
-	it("should stop only Rojo when the attached Studio closes, and attach again later", async () => {
+	it("should stop only Rojo when the attached Studio closes, and attach again later", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({
@@ -4315,7 +4509,7 @@ describe("forge up --studio", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 	});
 
-	it("should say that the attached Studio has the place open", async () => {
+	it("should say that the attached Studio has the place open", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: UP });
@@ -4330,7 +4524,9 @@ describe("forge up --studio", () => {
 		});
 	});
 
-	it("should warn that an existing Studio attached to a running supervisor needs manual synchronization", async () => {
+	it("should warn that an existing Studio attached to a running supervisor needs manual synchronization", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...ATTACHED, flags: UP });
@@ -4348,7 +4544,9 @@ describe("forge up --studio", () => {
 		});
 	});
 
-	it("should attach Studio to a session whose Rojo runs, and start no second Rojo", async () => {
+	it("should attach Studio to a session whose Rojo runs, and start no second Rojo", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ owned: true });
@@ -4365,7 +4563,9 @@ describe("forge up --studio", () => {
 		expect(spawnedIds(run.fake).filter((id) => id.startsWith("rojo"))).toHaveLength(1);
 	});
 
-	it("should fail with studio_launch_failed when Studio does not open the place in time", async () => {
+	it("should fail with studio_launch_failed when Studio does not open the place in time", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: UP });
@@ -4386,7 +4586,7 @@ describe("forge up --studio", () => {
 		});
 	});
 
-	it("should open no second Studio for a session that opened its own", async () => {
+	it("should open no second Studio for a session that opened its own", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: { compiler: false } });
@@ -4399,7 +4599,7 @@ describe("forge up --studio", () => {
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
 	});
 
-	it("should attach Studio while a failed compiler stays failed", async () => {
+	it("should attach Studio while a failed compiler stays failed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: UP, projectType: "rbxts" });
@@ -4413,7 +4613,9 @@ describe("forge up --studio", () => {
 		expect(answer).toStrictEqual({ added: ["studio", "rojo"] });
 	});
 
-	it("should start an up session with no Rojo installed, and fail with rojo_missing on attach", async () => {
+	it("should start an up session with no Rojo installed, and fail with rojo_missing on attach", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -4430,7 +4632,7 @@ describe("forge up --studio", () => {
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
 
-	it("should answer at once when the session stops while Studio opens", async () => {
+	it("should answer at once when the session stops while Studio opens", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: UP });
@@ -4448,7 +4650,7 @@ describe("forge up --studio", () => {
 		expect(isAnswered).toBeTrue();
 	});
 
-	it("should leave the attached Studio open when the session stops", async () => {
+	it("should leave the attached Studio open when the session stops", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: UP });
@@ -4466,7 +4668,9 @@ describe("forge up --studio", () => {
 		});
 	});
 
-	it("should open no Studio and start no Rojo once the session stops during the build", async () => {
+	it("should open no Studio and start no Rojo once the session stops during the build", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run: StartRun = startCommand({
@@ -4512,7 +4716,9 @@ async function syncAsync(run: StartRun): Promise<unknown> {
 }
 
 describe("forge sync control channel", () => {
-	it("should run syncback with its hooks in a session without the save watch", async () => {
+	it("should run syncback with its hooks in a session without the save watch", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand(LINT_HOOK);
@@ -4540,7 +4746,7 @@ describe("forge sync control channel", () => {
 		});
 	});
 
-	it("should answer a failed run with its error code and its hooks", async () => {
+	it("should answer a failed run with its error code and its hooks", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -4558,7 +4764,9 @@ describe("forge sync control channel", () => {
 		});
 	});
 
-	it("should check Rojo's syncback support once, and again only after a failed check", async () => {
+	it("should check Rojo's syncback support once, and again only after a failed check", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -4579,7 +4787,7 @@ describe("forge sync control channel", () => {
 		]);
 	});
 
-	it("should run after the save watch's run, never alongside it", async () => {
+	it("should run after the save watch's run, never alongside it", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -4603,7 +4811,7 @@ describe("forge sync control channel", () => {
 		expect(spawnedIds(run.fake).filter((id) => id.includes("--input"))).toHaveLength(2);
 	});
 
-	it("should answer not_running once a stop request came", async () => {
+	it("should answer not_running once a stop request came", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand(LINT_HOOK);
@@ -4623,7 +4831,9 @@ describe("forge sync control channel", () => {
 		});
 	});
 
-	it("should answer not_running when the session stops before syncback can run", async () => {
+	it("should answer not_running when the session stops before syncback can run", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -4718,7 +4928,9 @@ async function letGoAsync(
 }
 
 describe("forge down control channel", () => {
-	it("should close the session's Studio, stop Rojo, and end once syncback settled", async () => {
+	it("should close the session's Studio, stop Rojo, and end once syncback settled", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run: StartRun = startCommand({
@@ -4758,7 +4970,7 @@ describe("forge down control channel", () => {
 });
 
 describe("forge down and a found Studio", () => {
-	it("should let a found Studio go, open, stop its Rojo, and end", async () => {
+	it("should let a found Studio go, open, stop its Rojo, and end", async ({ expect }) => {
 		expect.assertions(4);
 
 		const run = startCommand({ ...ATTACHED, flags: UP });
@@ -4789,7 +5001,7 @@ describe("forge down and a found Studio", () => {
 		expect(run.native.processes.get(STUDIO_PID)).toMatchObject({ alive: true });
 	});
 
-	it("should report a Studio the session opened as its own", async () => {
+	it("should report a Studio the session opened as its own", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ flags: UP });
@@ -4806,7 +5018,9 @@ describe("forge down and a found Studio", () => {
 });
 
 describe("forge down and syncback", () => {
-	it("should sync back a save Studio made just before a down closed it, then end", async () => {
+	it("should sync back a save Studio made just before a down closed it, then end", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run: StartRun = startCommand({
@@ -4865,7 +5079,9 @@ describe("forge down and syncback", () => {
 });
 
 describe("forge start owners", () => {
-	it("should give its owner every part it starts with, and end as before once it goes", async () => {
+	it("should give its owner every part it starts with, and end as before once it goes", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...ATTACHED, owned: true });
@@ -4884,7 +5100,9 @@ describe("forge start owners", () => {
 		expect(run.onReleased).not.toHaveBeenCalled();
 	});
 
-	it("should stop the whole session when its owner goes before the parts started", async () => {
+	it("should stop the whole session when its owner goes before the parts started", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({
@@ -4900,7 +5118,7 @@ describe("forge start owners", () => {
 		expect(run.fake.calls).toStrictEqual(["go", "spawn start-1", "terminate 3000"]);
 	});
 
-	it("should start nothing when its owner goes before the session opened", async () => {
+	it("should start nothing when its owner goes before the session opened", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({
@@ -4914,7 +5132,9 @@ describe("forge start owners", () => {
 		});
 	});
 
-	it("should stop what its owner started and run on with a part up added, once it goes", async () => {
+	it("should stop what its owner started and run on with a part up added, once it goes", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({
@@ -4953,7 +5173,9 @@ describe("forge start owners", () => {
 		expect(run.fake.calls).toContain("stop rojo 3000");
 	});
 
-	it("should give no owner to a part that up started again after it failed", async () => {
+	it("should give no owner to a part that up started again after it failed", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ ...WATCH, flags: {}, owned: true });
@@ -4977,7 +5199,7 @@ describe("forge start owners", () => {
 		});
 	});
 
-	it("should refuse a start that joins while its own start owns it", async () => {
+	it("should refuse a start that joins while its own start owns it", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ owned: true });
@@ -4993,7 +5215,9 @@ describe("forge start owners", () => {
 		});
 	});
 
-	it("should let a start join and take the running parts, and give them back once it lets go", async () => {
+	it("should let a start join and take the running parts, and give them back once it lets go", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({ ...WATCH, flags: UP });
@@ -5025,7 +5249,9 @@ describe("forge start owners", () => {
 		});
 	});
 
-	it("should stop what a joined start added once its connection ends, and end a session left with no part", async () => {
+	it("should stop what a joined start added once its connection ends, and end a session left with no part", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = startCommand({ ...WATCH, flags: { ...UP, compiler: false } });
@@ -5036,7 +5262,9 @@ describe("forge start owners", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "owner_gone" } });
 	});
 
-	it("should leave open the Studio a joined start opened, and stop the Rojo it started", async () => {
+	it("should leave open the Studio a joined start opened, and stop the Rojo it started", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const run = startCommand({ ...WATCH, flags: UP });
@@ -5092,7 +5320,7 @@ describe("forge start owners", () => {
 		expect(closed).toStrictEqual(left);
 	});
 
-	it("should keep a found Studio found once a joined start gives it back", async () => {
+	it("should keep a found Studio found once a joined start gives it back", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...ATTACHED, flags: UP });
@@ -5118,7 +5346,9 @@ describe("forge start owners", () => {
 		});
 	});
 
-	it("should give back what a join took when its add fails, and let the next start join", async () => {
+	it("should give back what a join took when its add fails, and let the next start join", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...WATCH, flags: UP, isPortFree: false });
@@ -5175,7 +5405,7 @@ describe("idle timeout", () => {
 		{ owned: false, studioStatus: "closed" },
 	])(
 		"should apply ownership when idle Studio readiness is still pending (%j)",
-		async ({ owned, studioStatus }) => {
+		async ({ owned, studioStatus }, { expect, onTestFinished }) => {
 			expect.assertions(2);
 
 			const { run } = pendingStudio({
@@ -5204,7 +5434,9 @@ describe("idle timeout", () => {
 		},
 	);
 
-	it("should preserve opening readiness while a save waits past the idle timeout", async () => {
+	it("should preserve opening readiness while a save waits past the idle timeout", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { ready, run } = pendingStudio({
@@ -5256,7 +5488,9 @@ describe("idle timeout", () => {
 		expect(savedBeforeEnd).toMatchObject({ mtime: "1970-01-01T00:00:02.000Z", pid: 1 });
 	});
 
-	it("should keep a session active after a save outlasts its idle timeout", async () => {
+	it("should keep a session active after a save outlasts its idle timeout", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const released = Promise.withResolvers<void>();
@@ -5303,7 +5537,9 @@ describe("idle timeout", () => {
 		});
 	});
 
-	it("should stop the compiler with no owner and end the up session after the timeout", async () => {
+	it("should stop the compiler with no owner and end the up session after the timeout", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...IDLE_UP, projectType: "rbxts" });
@@ -5323,7 +5559,7 @@ describe("idle timeout", () => {
 		});
 	});
 
-	it("should end an up session with no part after the timeout", async () => {
+	it("should end an up session with no part after the timeout", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand(IDLE_UP);
@@ -5333,7 +5569,7 @@ describe("idle timeout", () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "shutdown" } });
 	});
 
-	it("should never stop the parts a start owns, nor end its session", async () => {
+	it("should never stop the parts a start owns, nor end its session", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({ ...IDLE_UP, owned: true, projectType: "rbxts" });
@@ -5349,7 +5585,7 @@ describe("idle timeout", () => {
 		expect(run.fake.calls).not.toContain("stop compiler 3000");
 	});
 
-	it("should wait 30 minutes by default", async () => {
+	it("should wait 30 minutes by default", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({ flags: UP });
@@ -5364,7 +5600,7 @@ describe("idle timeout", () => {
 		expect(isEnded()).toBeTrue();
 	});
 
-	it("should never stop with an idle timeout of 0", async () => {
+	it("should never stop with an idle timeout of 0", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ file: { session: { idleTimeout: 0 } }, flags: UP });
@@ -5378,7 +5614,7 @@ describe("idle timeout", () => {
 		expect(wasEnded).toBeFalse();
 	});
 
-	it("should start the time again on each client request", async () => {
+	it("should start the time again on each client request", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand(IDLE_UP);
@@ -5395,7 +5631,7 @@ describe("idle timeout", () => {
 		expect(isEnded()).toBeTrue();
 	});
 
-	it("should start the time again on each compile start", async () => {
+	it("should start the time again on each compile start", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = startCommand({ ...IDLE_UP, projectType: "rbxts" });
@@ -5417,7 +5653,9 @@ describe("idle timeout", () => {
 		expect(after).toContain("stop compiler 3000");
 	});
 
-	it("should count no compile end as activity, such as the compiler's exit mid-compile", async () => {
+	it("should count no compile end as activity, such as the compiler's exit mid-compile", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = startCommand({ ...IDLE_UP, projectType: "rbxts" });
@@ -5436,7 +5674,7 @@ describe("idle timeout", () => {
 		expect(isEnded()).toBeTrue();
 	});
 
-	it("should count no write of the place once its Studio closed", async () => {
+	it("should count no write of the place once its Studio closed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = startCommand({ ...IDLE_UP, files: { ...TOOL_FILES, "game.rbxl": "v1" } });
@@ -5453,7 +5691,9 @@ describe("idle timeout", () => {
 		expect(isEnded()).toBeTrue();
 	});
 
-	it("should let a found Studio go, open, stop its Rojo, and end the up session", async () => {
+	it("should let a found Studio go, open, stop its Rojo, and end the up session", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...IDLE_UP, ...ATTACHED });
@@ -5475,7 +5715,7 @@ describe("idle timeout", () => {
 		});
 	});
 
-	it("should start the time again on each Studio save, then close Studio", async () => {
+	it("should start the time again on each Studio save, then close Studio", async ({ expect }) => {
 		expect.assertions(2);
 
 		const studio: FakeProcess = {
@@ -5564,7 +5804,9 @@ function restartLauncher(run: StartRun): void {
 }
 
 describe("forge restart control channel", () => {
-	it("should stop the compiler until its tree is gone, then start it again", async () => {
+	it("should stop the compiler until its tree is gone, then start it again", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...WATCH, flags: UP });
@@ -5587,7 +5829,9 @@ describe("forge restart control channel", () => {
 		});
 	});
 
-	it("should keep a found Studio, and restart the compiler, then Rojo on its port", async () => {
+	it("should keep a found Studio, and restart the compiler, then Rojo on its port", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...ATTACHED, flags: UP, projectType: "rbxts" });
@@ -5630,7 +5874,7 @@ describe("forge restart control channel", () => {
 
 	it.for(["hidden", "user"] as const)(
 		"should force-restart a found Studio on its previous %s desktop",
-		async (desktop) => {
+		async (desktop, { expect }) => {
 			expect.assertions(3);
 
 			const found: FakeProcess = {
@@ -5691,7 +5935,7 @@ describe("forge restart control channel", () => {
 		},
 	);
 
-	it("should start nothing again when the compiler's tree left processes", async () => {
+	it("should start nothing again when the compiler's tree left processes", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = startCommand({ ...WATCH, flags: UP });
@@ -5710,7 +5954,9 @@ describe("forge restart control channel", () => {
 		expect(state).toMatchObject({ services: { compiler: { status: "off" } } });
 	});
 
-	it("should leave the parts a start owns, and restart them with force, each with its owner", async () => {
+	it("should leave the parts a start owns, and restart them with force, each with its owner", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = startCommand({ ...WATCH, flags: UP, owned: true });
@@ -5739,7 +5985,9 @@ describe("forge restart control channel", () => {
 		});
 	});
 
-	it("should close Studio, then start the compiler, and build, open, and serve only after its first build", async () => {
+	it("should close Studio, then start the compiler, and build, open, and serve only after its first build", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run: StartRun = startCommand({
@@ -5816,7 +6064,11 @@ function moveTarget() {
 	};
 }
 
-function movableStudio(desktop: "hidden" | "user" = "hidden", setup: StartSetup = {}) {
+function movableStudio(
+	testContext: Pick<TestContext, "onTestFinished">,
+	desktop: "hidden" | "user" = "hidden",
+	setup: StartSetup = {},
+) {
 	const run = startCommand({
 		files: { "game.rbxl": "original", "game.rbxl.lock": STUDIO_LOCK, "tools/rojo.exe": "" },
 		platform: "win32",
@@ -5836,7 +6088,7 @@ function movableStudio(desktop: "hidden" | "user" = "hidden", setup: StartSetup 
 		writePrivateFile: () => {},
 		...setup,
 	});
-	onTestFinished(() => {
+	testContext.onTestFinished(() => {
 		run.signals.fire("SIGINT");
 	});
 	return run;
@@ -5864,10 +6116,13 @@ async function finishMoveAsync(run: StartRun, request: Record<string, unknown>) 
 }
 
 describe("serialized Studio visibility changes", () => {
-	it("shows and hides the same Studio without saving, launching, or restarting Rojo", async () => {
+	it("shows and hides the same Studio without saving, launching, or restarting Rojo", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(5);
 
-		const run = movableStudio();
+		const run = movableStudio({ onTestFinished });
 		await passAsync(run, FILE_POLL_MS);
 
 		await expect(finishMoveAsync(run, { desktop: "user" })).resolves.toMatchObject({

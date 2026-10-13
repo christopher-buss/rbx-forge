@@ -5,7 +5,7 @@
  */
 import { readdirSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_FAILURE } from "../../src/exit-codes.ts";
 import { openStudioStandInAsync, pidOf, waitForFileAsync } from "../helpers/real-native.ts";
@@ -49,7 +49,7 @@ async function upFoundAsync(variables: Record<string, string> = {}): Promise<Fou
 }
 
 describe("a found Studio", () => {
-	it("should report its origin, and stay open on down while Rojo stops", async () => {
+	it("should report its origin, and stay open on down while Rojo stops", async ({ expect }) => {
 		expect.assertions(4);
 
 		const { fixture, studio, up } = await upFoundAsync();
@@ -68,7 +68,9 @@ describe("a found Studio", () => {
 		await expect(waitForDeathAsync(rojo, REAP_MS)).resolves.toStrictEqual([]);
 	});
 
-	it("should keep it on restart, and restart the compiler and Rojo on its port", async () => {
+	it("should keep it on restart, and restart the compiler and Rojo on its port", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { fixture, studio } = await upFoundAsync();
@@ -88,7 +90,7 @@ describe("a found Studio", () => {
 		expect(pidsOf(fixture, "studio")).toStrictEqual([]);
 	});
 
-	it("should fail stop with studio_found, and close it on stop --force", async () => {
+	it("should fail stop with studio_found, and close it on stop --force", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { fixture, studio } = await upFoundAsync();
@@ -107,7 +109,7 @@ describe("a found Studio", () => {
 		});
 	});
 
-	it("should close it on restart --force, and open the place again", async () => {
+	it("should close it on restart --force, and open the place again", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { fixture, studio } = await upFoundAsync();
@@ -124,7 +126,7 @@ describe("a found Studio", () => {
 
 	it.skipIf(!IS_WINDOWS && !IS_MACOS)(
 		"should leave its auto-recovery files on down",
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(1);
 
 			const home = makeTemporaryDirectory();

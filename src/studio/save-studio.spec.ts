@@ -1,5 +1,5 @@
 import path from "node:path";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import type { FakeProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -118,7 +118,9 @@ function priming(
 }
 
 describe(saveStudioAsync, () => {
-	it("should activate a never-active Studio once, then hide it and refocus the front app before saving", async () => {
+	it("should activate a never-active Studio once, then hide it and refocus the front app before saving", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const run = priming();
@@ -130,7 +132,9 @@ describe(saveStudioAsync, () => {
 		expect(run.entry.saveMenuPolls).toBe(3);
 	});
 
-	it("should leave a visible Studio visible after priming and still refocus the front app", async () => {
+	it("should leave a visible Studio visible after priming and still refocus the front app", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = priming({ appHidden: false });
@@ -140,7 +144,9 @@ describe(saveStudioAsync, () => {
 		expect(run.editor.appActive).toBeTrue();
 	});
 
-	it("should activate Studio again when something hides it while it primes", async () => {
+	it("should activate Studio again when something hides it while it primes", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = priming({}, { hidesAtSleep: 1 });
@@ -149,7 +155,9 @@ describe(saveStudioAsync, () => {
 		expect(run.entry.activations).toBe(2);
 	});
 
-	it("should report menu_disabled and restore hidden state and focus at the priming limit", async () => {
+	it("should report menu_disabled and restore hidden state and focus at the priming limit", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const run = priming({ saveMenuEnablesAtPoll: Infinity }, { timeoutMs: 30_000 });
@@ -163,7 +171,9 @@ describe(saveStudioAsync, () => {
 		expect(run.editor.appActive).toBeTrue();
 	});
 
-	it("should report a timeout when the save deadline passes before the priming limit", async () => {
+	it("should report a timeout when the save deadline passes before the priming limit", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = priming({ saveMenuEnablesAtPoll: Infinity }, { timeoutMs: PRIME_LIMIT_MS / 2 });
@@ -176,7 +186,9 @@ describe(saveStudioAsync, () => {
 		expect(run.editor.appActive).toBeTrue();
 	});
 
-	it("should report a timeout when Save to File enables only at the save deadline", async () => {
+	it("should report a timeout when Save to File enables only at the save deadline", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = priming({ saveMenuEnablesAtPoll: 1 }, { menuReadMs: 1000 });
@@ -189,7 +201,9 @@ describe(saveStudioAsync, () => {
 		expect(run.saveRequests).toStrictEqual([1000]);
 	});
 
-	it("should restore hidden state and focus when the session ends while Studio primes", async () => {
+	it("should restore hidden state and focus when the session ends while Studio primes", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = priming({ saveMenuEnablesAtPoll: Infinity }, { abortsAtSleep: 2 });
@@ -199,7 +213,7 @@ describe(saveStudioAsync, () => {
 		expect(run.editor.appActive).toBeTrue();
 	});
 
-	it("should not activate Studio again when it was already the front app", async () => {
+	it("should not activate Studio again when it was already the front app", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = priming({ appActive: true, appHidden: false });
@@ -210,7 +224,7 @@ describe(saveStudioAsync, () => {
 		expect(run.entry.appHidden).toBeFalse();
 	});
 
-	it("should hide Studio again when no app was frontmost", async () => {
+	it("should hide Studio again when no app was frontmost", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = priming();
@@ -221,7 +235,7 @@ describe(saveStudioAsync, () => {
 		expect(run.editor.appActive).toBeFalse();
 	});
 
-	it("should save without priming when Save to File is enabled", async () => {
+	it("should save without priming when Save to File is enabled", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = priming({ saveMenuDisabled: false });

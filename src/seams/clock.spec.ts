@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import { nodeClock, settlesWithinAsync } from "./clock.ts";
 
 describe("node clock", () => {
-	it("should read the wall clock", () => {
+	it("should read the wall clock", ({ expect }) => {
 		expect.assertions(2);
 
 		const before = Date.now();
@@ -14,13 +14,13 @@ describe("node clock", () => {
 		expect(now).toBeLessThanOrEqual(Date.now());
 	});
 
-	it("should resolve after the wait", async () => {
+	it("should resolve after the wait", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(nodeClock.sleep(1)).resolves.toBeUndefined();
 	});
 
-	it("should reject when the signal aborts", async () => {
+	it("should reject when the signal aborts", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(nodeClock.sleep(60_000, AbortSignal.abort())).rejects.toMatchObject({
@@ -30,7 +30,7 @@ describe("node clock", () => {
 });
 
 describe(settlesWithinAsync, () => {
-	it("should be true when the promise settles first, leaving no timer", async () => {
+	it("should be true when the promise settles first, leaving no timer", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { clock, pending } = createManualClock();
@@ -39,7 +39,7 @@ describe(settlesWithinAsync, () => {
 		expect(pending()).toBe(0);
 	});
 
-	it("should be false when the limit passes first", async () => {
+	it("should be false when the limit passes first", async ({ expect }) => {
 		expect.assertions(1);
 
 		const manual = createManualClock();
@@ -49,7 +49,7 @@ describe(settlesWithinAsync, () => {
 		await expect(waiting).resolves.toBeFalse();
 	});
 
-	it("should be false at once when hurried", async () => {
+	it("should be false at once when hurried", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { clock } = createManualClock();

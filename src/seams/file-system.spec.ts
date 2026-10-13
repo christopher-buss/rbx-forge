@@ -1,10 +1,13 @@
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createMemoryFileSystem } from "../../test/helpers/seams.ts";
 import { createNodeFileSystem } from "./file-system.ts";
 
 describe("canonical directory watches", () => {
-	it("should watch the expanded directory through its injected backend", () => {
+	it("should watch the expanded directory through its injected backend", ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const memory = createMemoryFileSystem();
