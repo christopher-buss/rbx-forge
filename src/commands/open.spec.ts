@@ -95,9 +95,7 @@ function makeOpen({
 		return outcome;
 	});
 	const launcher = vi.fn<StudioLauncher>(async ({ beforeLaunch }) => {
-		if (direct) {
-			await beforeLaunch?.();
-		}
+		await (direct ? beforeLaunch?.() : undefined);
 
 		order.push("studio");
 		return launch;

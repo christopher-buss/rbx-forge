@@ -294,15 +294,16 @@ function installedPlugin(): string {
 function studioLogLines(place: string): Array<string> {
 	const logs = path.join(env["RBX_FORGE_TEST_REAL_LOCALAPPDATA"] ?? "", "Roblox", "logs");
 	const needle = place.replaceAll("\\", "/");
-	const names = readdirSync(logs).filter((file) => file.includes("_Studio_"));
-	for (const name of names) {
-		const lines = readFileSync(path.join(logs, name), "utf8").split(/\r?\n/u);
-		if (lines.slice(0, 20).some((line) => line.replaceAll("\\", "/").includes(needle))) {
-			return lines;
-		}
-	}
-
-	return [];
+	return (
+		readdirSync(logs)
+			.filter((file) => file.includes("_Studio_"))
+			.map((name) => readFileSync(path.join(logs, name), "utf8").split(/\r?\n/u))
+			.find((lines) => {
+				return lines
+					.slice(0, 20)
+					.some((line) => line.replaceAll("\\", "/").includes(needle));
+			}) ?? []
+	);
 }
 
 function hasRunForgePlugin(place: string): boolean {
