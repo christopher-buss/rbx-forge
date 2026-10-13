@@ -2,7 +2,7 @@ import type { PartialStrykerOptions } from "@stryker-mutator/api/core";
 
 export default {
 	checkers: ["typescript"],
-	concurrency: "75%",
+	concurrency: "30%",
 	coverageAnalysis: "perTest",
 	disableTypeChecks: false,
 	htmlReporter: { fileName: "reports/mutation/index.html" },
