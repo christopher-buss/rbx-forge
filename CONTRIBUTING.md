@@ -23,7 +23,7 @@ copy the `.worktreeinclude` files, then run `pnpm build:all` in the background.
 
 | Script                        | What it runs                                    |
 | ----------------------------- | ----------------------------------------------- |
-| `pnpm build`                  | tsdown bundle of the CLI into `dist/`           |
+| `pnpm build`                  | `build:plugin`, then the tsdown CLI bundle      |
 | `pnpm build:all`              | `build:native`, `build:reaper`, then `build`    |
 | `pnpm typecheck`              | `tsc --build` with TypeScript 7                 |
 | `pnpm lint` / `pnpm lint:fix` | oxlint, then ESLint (`isentinel-lint`)          |
@@ -33,6 +33,8 @@ copy the `.worktreeinclude` files, then run `pnpm build:all` in the background.
 | `pnpm test:e2e`               | the built CLI as a subprocess (run `build:all`) |
 | `pnpm build:native`           | the Rust crate in `reaper/` through napi-rs     |
 | `pnpm build:reaper`           | the `forge-reaper` binary, next to the addon    |
+| `pnpm build:plugin`           | the forge Studio plugin (rbxtsc, then rojo)     |
+| `pnpm test:plugin`            | plugin specs in a Studio jest-roblox starts     |
 | `pnpm mutation`               | Stryker mutation testing                        |
 | `pnpm release`                | pick a version, run the gate, then tag          |
 
@@ -40,9 +42,9 @@ copy the `.worktreeinclude` files, then run `pnpm build:all` in the background.
 
 The pre-commit hook runs lint and typecheck. With the agent profile, it also
 builds and runs the unit, integration, and e2e suites for changes under `src/`,
-`test/`, or `scripts/`, or to the package manifest, dependency lockfile and
-workspace config, TypeScript configs, tsdown config, or Vitest configs. Changes
-under `reaper/` run the native build.
+`test/`, `scripts/`, or `plugin/`, or to the package manifest, dependency
+lockfile and workspace config, TypeScript configs, tsdown config, or Vitest
+configs. Changes under `reaper/` run the native build.
 
 The agent pre-push hook runs mutation tests only when `src/` differs from the
 merge-base with `origin/main`, including pushes to a remote URL. Keep
