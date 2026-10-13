@@ -215,6 +215,7 @@ export async function syncCollectorAsync(
  */
 export function createSyncContext(directory: string): CommandContext {
 	const seams = createNodeSeams({
+		forgePlugin: path.join(directory, "unused-ForgePlugin.rbxm"),
 		input: process.stdin,
 		nativeDirectory: NATIVE_DIRECTORY,
 		noInstalledStudio: false,

@@ -126,6 +126,11 @@ To add a Studio, with its Rojo, to a running session as parts. A Studio that
 already has the place open is attached as it is, never opened a second time.\
 _Avoid_: connect, join
 
+**Forge plugin**:\
+The Studio plugin forge ships (`ForgePlugin.rbxm`) and installs before a direct
+Studio launch. It is inert in a Studio without a forge capture URL.\
+_Avoid_: capture plugin, helper plugin
+
 **Found Studio**:\
 A Studio that already had the place open when the session attached it. Its
 origin remains found until forge replaces it.\

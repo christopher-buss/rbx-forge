@@ -44,6 +44,7 @@ local checkedFiles = List(
     "src/**",
     "test/**",
     "scripts/**",
+    "plugin/**",
     "package.json",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
@@ -140,6 +141,14 @@ hooks {
                     ["RBX_FORGE_TEST_REAL_STUDIO"] = "1"
                 }
                 depends = List("build-real-studio")
+                exclusive = true
+            }
+            // jest-roblox's studio-cli backend runs the specs in its own Studio.
+            ["plugin"] {
+                glob = List("plugin/**")
+                check = new Script {
+                    windows = "pnpm test:plugin"
+                }
                 exclusive = true
             }
         }

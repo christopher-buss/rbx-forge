@@ -11,6 +11,8 @@ export default isentinel(
 			"reports/**",
 			".agents/**",
 			".claude/**",
+			// roblox-ts, checked by rbxtsc and its jest-roblox specs.
+			"plugin/**",
 		],
 		namedConfigs: true,
 		naming: true,

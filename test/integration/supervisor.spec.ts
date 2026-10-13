@@ -87,6 +87,10 @@ async function makeSessionProjectAsync(): Promise<Project> {
 			FIXTURE_LOG: log,
 			PATH: path.join(project, "fixture-bin"),
 			RBX_FORGE_NATIVE_DIR: NATIVE_DIRECTORY,
+			RBX_FORGE_PLUGIN_MODEL: path.join(
+				import.meta.dirname,
+				"../fixtures/models/forge-plugin.rbxm",
+			),
 		},
 		forge: path.join(project, ".forge"),
 		log,

@@ -24,6 +24,11 @@ process.exitCode = await runCliAsync(process.argv.slice(2), {
 		},
 	},
 	seams: createNodeSeams({
+		// Runs from source name a model (`RBX_FORGE_PLUGIN_MODEL`); builds ship
+		// one.
+		forgePlugin:
+			process.env["RBX_FORGE_PLUGIN_MODEL"] ??
+			fileURLToPath(new URL("forge-plugin/ForgePlugin.rbxm", import.meta.url)),
 		input: process.stdin,
 		nativeDirectory: process.env["RBX_FORGE_NATIVE_DIR"],
 		noInstalledStudio: process.env["RBX_FORGE_TEST_NO_INSTALLED_STUDIO"] === "1",

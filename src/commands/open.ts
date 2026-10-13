@@ -10,6 +10,7 @@ import type { HookResult } from "../hooks/run-hooks.ts";
 import { runWithHooksAsync } from "../hooks/run-hooks.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
+import { installForgePlugin } from "../studio/forge-plugin.ts";
 import type { StudioLaunchOutcome, StudioProcess } from "../studio/launcher.ts";
 import { pruneSnapshots, snapshotName } from "../studio/snapshots.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
@@ -269,8 +270,26 @@ function reportLaunch(
 	};
 }
 
+/**
+ * Prepare both plugins at the launcher's direct-spawn boundary: the
+ * caller's first, so a cancelled session writes nothing.
+ *
+ * @param context - The environment and seams.
+ * @param beforeLaunch - The caller's preparation.
+ * @returns The launcher's preparation.
+ */
+function withForgePlugin(
+	context: CommandContext,
+	beforeLaunch: OpenOptions["beforeLaunch"],
+): () => Promise<void> {
+	return async () => {
+		await beforeLaunch?.();
+		installForgePlugin(context);
+	};
+}
+
 async function launchAsync(
-	{ cwd, env, reporter, seams }: CommandContext,
+	context: CommandContext,
 	place: string,
 	{
 		beforeLaunch,
@@ -283,6 +302,7 @@ async function launchAsync(
 		"beforeLaunch" | "desktop" | "runScript" | "studioPath" | "watchHiddenLighting"
 	>,
 ): Promise<Pick<OpenedPlace, "desktop" | "studio">> {
+	const { cwd, env, reporter, seams } = context;
 	reporter.emit({ name: STEP, status: "started", type: "step" });
 	const outcome = await seams.studioLauncher({
 		cwd,
@@ -292,7 +312,7 @@ async function launchAsync(
 		...(desktop === undefined ? {} : { desktop }),
 		...(watchHiddenLighting === undefined ? {} : { watchHiddenLighting }),
 		...(runScript === undefined ? {} : { runScript }),
-		...(beforeLaunch === undefined ? {} : { beforeLaunch }),
+		beforeLaunch: withForgePlugin(context, beforeLaunch),
 	});
 	reporter.emit({
 		name: STEP,

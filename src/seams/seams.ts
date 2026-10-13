@@ -38,6 +38,8 @@ export interface Seams {
 	/** Starts the detached supervisor of a `forge up` session. */
 	detachedSupervisor: DetachedLauncher;
 	fileSystem: FileSystem;
+	/** Reads the forge Studio plugin model that ships with forge. */
+	forgePlugin: () => Uint8Array;
 	host: Host;
 	/** Finds the Studio the Roblox installer put on this computer. */
 	installedStudio: InstalledStudio;

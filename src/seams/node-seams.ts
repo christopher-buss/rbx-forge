@@ -34,6 +34,8 @@ import { createSignals } from "./signals.ts";
 
 /** What the real seams are built from. */
 export interface NodeSeamsOptions {
+	/** The bundled `forge-plugin/ForgePlugin.rbxm` next to the CLI. */
+	forgePlugin: string;
 	/** Prompt input: the process stdin. */
 	input: NodeJS.ReadableStream;
 	/**
@@ -58,11 +60,12 @@ const PROCESS_BACKEND = { childProcess: nodeChildProcessRunner, clock: nodeClock
 /**
  * The real seams. Only the CLI entry calls this.
  *
- * @param options - Prompt streams, the native addon directory, and the
- *   supervisor entry.
+ * @param options - Prompt streams, the native addon directory, the
+ *   supervisor entry, and the bundled forge plugin.
  * @returns Seams backed by Node, c12, the native addon, and the terminal.
  */
 export function createNodeSeams({
+	forgePlugin,
 	input,
 	nativeDirectory,
 	noInstalledStudio,
@@ -70,11 +73,7 @@ export function createNodeSeams({
 	supervisorEntry,
 }: NodeSeamsOptions): Seams {
 	const requireModule = createRequire(import.meta.url);
-	const native = createNativeLoader({
-		directory: nativeDirectory,
-		readHost: () => readHost(process),
-		requireModule,
-	});
+	const native = createNodeNative(nativeDirectory, requireModule);
 	return {
 		childProcess: nodeChildProcessRunner,
 		clock: nodeClock,
@@ -84,6 +83,7 @@ export function createNodeSeams({
 			supervisorEntry,
 		),
 		fileSystem: nodeFileSystem,
+		forgePlugin: () => nodeFs.readFileSync(forgePlugin),
 		host: nodeHost,
 		installedStudio: installedStudioLookup(noInstalledStudio),
 		ipc: createNodeIpcTransport(native),
@@ -97,6 +97,13 @@ export function createNodeSeams({
 		studioLauncher: createNodeStudioLauncher(native, noInstalledStudio, supervisorEntry),
 		supervisor: createSupervisorLauncher(PROCESS_BACKEND, supervisorEntry),
 	};
+}
+
+function createNodeNative(
+	directory: string | undefined,
+	requireModule: NodeJS.Require,
+): NativeLoader {
+	return createNativeLoader({ directory, readHost: () => readHost(process), requireModule });
 }
 
 function createNodeIpcTransport(native: NativeLoader): IpcTransport {

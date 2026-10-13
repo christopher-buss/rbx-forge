@@ -1,3 +1,5 @@
+import { fromAny } from "@total-typescript/shoehorn";
+
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
@@ -26,10 +28,17 @@ const SNAPSHOTS = path.join(PROJECT, ".forge", "snapshots");
 const SNAPSHOT_NAME = "2026-01-01T00-00-00-000_game.rbxl";
 const SNAPSHOT = path.join(SNAPSHOTS, SNAPSHOT_NAME);
 const SNAPSHOT_OUTPUT = path.join(".forge", "snapshots", SNAPSHOT_NAME);
+const WINDOWS_PLUGIN = "AppData/Local/Roblox/Plugins/ForgePlugin.rbxm";
+const MAC_PLUGIN = "Documents/Roblox/Plugins/ForgePlugin.rbxm";
+const PLUGIN_MODEL = "forge plugin model";
 
 interface OpenSetup {
 	/** The answer to "build it now?", for an interactive run. */
 	answer?: boolean;
+	/** The launcher starts Studio directly, so it prepares plugins first. */
+	direct?: boolean;
+	/** The environment besides `PATH`. */
+	environment?: Record<string, string>;
 	/** The config file's content besides `projectType`. */
 	file?: object;
 	/** Extra files besides the Rojo executable. */
@@ -62,6 +71,8 @@ function labelOf(spec: ProcessSpec): string {
 
 function makeOpen({
 	answer,
+	direct = false,
+	environment = {},
 	file = {},
 	files = { "tools/rojo": "" },
 	launch = { type: "launched" },
@@ -83,7 +94,11 @@ function makeOpen({
 
 		return outcome;
 	});
-	const launcher = vi.fn<StudioLauncher>(async () => {
+	const launcher = vi.fn<StudioLauncher>(async ({ beforeLaunch }) => {
+		if (direct) {
+			await beforeLaunch?.();
+		}
+
 		order.push("studio");
 		return launch;
 	});
@@ -97,7 +112,7 @@ function makeOpen({
 	return {
 		confirm,
 		context: createCommandContext({
-			env: { PATH: TOOLS },
+			env: { PATH: TOOLS, ...environment },
 			interactive: answer !== undefined,
 			reporter,
 			seams: createTestSeams({
@@ -307,6 +322,7 @@ describe(runOpenAsync, () => {
 			launches: [
 				[
 					{
+						beforeLaunch: fromAny(expect.any(Function)),
 						cwd: PROJECT,
 						desktop: "user",
 						env: { PATH: TOOLS },
@@ -537,7 +553,15 @@ describe(openPlaceAsync, () => {
 		]);
 		expect({ launches: launcher.mock.calls, order }).toStrictEqual({
 			launches: [
-				[{ cwd: PROJECT, env: { PATH: TOOLS }, place: GAME, studioPath: undefined }],
+				[
+					{
+						beforeLaunch: fromAny(expect.any(Function)),
+						cwd: PROJECT,
+						env: { PATH: TOOLS },
+						place: GAME,
+						studioPath: undefined,
+					},
+				],
 			],
 			order: ["rojo", "studio"],
 		});
@@ -622,5 +646,135 @@ describe(openPlaceAsync, () => {
 			message: `${GAME} does not exist, and it was not built.`,
 		});
 		expect(order).toStrictEqual([]);
+	});
+});
+
+describe("forge Studio plugin", () => {
+	function pluginFiles(memory: MemoryFileSystem): Array<string> {
+		return Object.keys(memory.files()).filter((file) => file.includes("Roblox"));
+	}
+
+	it("should install the plugin in the Windows Plugins folder before a direct snapshot launch", async () => {
+		expect.assertions(2);
+
+		const run = makeOpen({
+			direct: true,
+			environment: { USERPROFILE: PROJECT },
+			files: { "tools/rojo.exe": "" },
+			platform: "win32",
+		});
+		await runOpenAsync(run.context, input());
+
+		expect(run.order).toStrictEqual(["rojo", "studio"]);
+		expect(run.memory.files()).toMatchObject({ [WINDOWS_PLUGIN]: PLUGIN_MODEL });
+	});
+
+	it("should install the plugin in the macOS Plugins folder before a direct session launch", async () => {
+		expect.assertions(1);
+
+		const run = makeOpen({ direct: true, environment: { HOME: PROJECT }, platform: "darwin" });
+		await openStepAsync(run.context);
+
+		expect(run.memory.files()[MAC_PLUGIN]).toBe(PLUGIN_MODEL);
+	});
+
+	it("should replace an outdated plugin and leave no temporary file", async () => {
+		expect.assertions(2);
+
+		const run = makeOpen({
+			direct: true,
+			environment: { HOME: PROJECT },
+			files: { [MAC_PLUGIN]: "old model", "tools/rojo": "" },
+			platform: "darwin",
+		});
+		await runOpenAsync(run.context, input());
+
+		expect(run.memory.files()[MAC_PLUGIN]).toBe(PLUGIN_MODEL);
+		expect(pluginFiles(run.memory)).toStrictEqual([MAC_PLUGIN]);
+	});
+
+	it("should leave a current plugin unwritten", async () => {
+		expect.assertions(1);
+
+		const run = makeOpen({
+			direct: true,
+			environment: { HOME: PROJECT },
+			files: { [MAC_PLUGIN]: PLUGIN_MODEL, "tools/rojo": "" },
+			platform: "darwin",
+		});
+		run.memory.setModifiedTime(MAC_PLUGIN, 1000);
+		await runOpenAsync(run.context, input());
+
+		expect(run.memory.fileSystem.statSync(path.join(PROJECT, MAC_PLUGIN)).mtimeMs).toBe(1000);
+	});
+
+	it.for([
+		["Linux", "linux", { HOME: PROJECT }],
+		["no home", "win32", {}],
+		["an empty home", "darwin", { HOME: "" }],
+	] as const)(
+		"should open Studio without the plugin on %s",
+		async ([, platform, environment]) => {
+			expect.assertions(2);
+
+			const run = makeOpen({
+				direct: true,
+				environment,
+				files: { "tools/rojo": "", "tools/rojo.exe": "" },
+				platform,
+			});
+
+			await expect(runOpenAsync(run.context, input())).resolves.toMatchObject({
+				data: { place: SNAPSHOT },
+			});
+			expect(pluginFiles(run.memory)).toStrictEqual([]);
+		},
+	);
+
+	it("should not install the plugin when Studio opens through the platform launcher", async () => {
+		expect.assertions(1);
+
+		const run = makeOpen({ environment: { HOME: PROJECT }, platform: "darwin" });
+		await runOpenAsync(run.context, input());
+
+		expect(pluginFiles(run.memory)).toStrictEqual([]);
+	});
+
+	it("should fail with forge_plugin_write_failed and not start Studio when the write fails", async () => {
+		expect.assertions(3);
+
+		const run = makeOpen({
+			direct: true,
+			environment: { HOME: PROJECT },
+			files: { "Documents/Roblox/Plugins": "a file", "tools/rojo": "" },
+			platform: "darwin",
+		});
+
+		await expect(runOpenAsync(run.context, input())).rejects.toMatchObject({
+			code: "forge_plugin_write_failed",
+			exitCode: 8,
+			hint: `Check permissions on ${path.join(PROJECT, MAC_PLUGIN)} and retry.`,
+		});
+		expect(run.order).toStrictEqual(["rojo"]);
+		expect(pluginFiles(run.memory)).toStrictEqual(["Documents/Roblox/Plugins"]);
+	});
+
+	it("should remove its temporary file when the rename fails", async () => {
+		expect.assertions(2);
+
+		const run = makeOpen({ direct: true, environment: { HOME: PROJECT }, platform: "darwin" });
+		const { fileSystem } = run.context.seams;
+		run.context.seams.fileSystem = {
+			...fileSystem,
+			renameSync: () => {
+				throw new Error("EPERM: operation not permitted");
+			},
+		};
+
+		await expect(runOpenAsync(run.context, input())).rejects.toMatchObject({
+			code: "forge_plugin_write_failed",
+			message: "Could not install the forge Studio plugin: EPERM: operation not permitted",
+		});
+		expect(pluginFiles(run.memory)).toStrictEqual(["Documents/Roblox/Plugins"]);
 	});
 });

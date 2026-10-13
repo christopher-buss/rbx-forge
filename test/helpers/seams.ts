@@ -1,6 +1,7 @@
 import { fromAny } from "@total-typescript/shoehorn";
 
 import { memfs } from "memfs";
+import { Buffer } from "node:buffer";
 import path from "node:path";
 import { vi } from "vitest";
 
@@ -31,6 +32,9 @@ import type { FakeFileWatch } from "./fake-file-watch.ts";
 
 /** The project directory of every in-memory test project. */
 export const PROJECT: string = path.resolve("/project");
+
+/** The bundled forge Studio plugin of every test seam record. */
+const FORGE_PLUGIN: Uint8Array = Buffer.from("forge plugin model");
 
 /** The computer name of the test host. */
 export const TEST_HOSTNAME = "forge-test";
@@ -98,6 +102,7 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 		configLoader: vi.fn<ConfigLoader>(unreachable("config loader")),
 		detachedSupervisor: vi.fn<DetachedLauncher>(unreachable("detached supervisor")),
 		fileSystem: createMemoryFileSystem().fileSystem,
+		forgePlugin: () => FORGE_PLUGIN,
 		host: createTestHost(),
 		installedStudio: noInstalledStudio,
 		ipc: unreachableIpc(),

@@ -12,6 +12,7 @@ minimumReleaseAgeExclude:
 minimumReleaseAgeExcludePrune: true
 
 publicHoistPattern:
+  - "@rbxts-js/*"
   - "@typescript/*"
 
 saveExact: true
@@ -22,6 +23,9 @@ trustPolicyIgnoreAfter: 10080 # 7 days
 updateConfig:
   ignoreDependencies:
     - typescript
+
+packages:
+  - plugin
 
 overrides:
   "@typescript-eslint/eslint-plugin": 8.70.1
@@ -60,6 +64,13 @@ catalogs:
     "@stryker-mutator/vitest-runner": 10.0.0
   native:
     "@napi-rs/cli": 3.10.8
+  plugin:
+    "@isentinel/jest-roblox": 0.4.6
+    "@rbxts/compiler-types": 3.0.0-types.0
+    "@rbxts/jest": 3.16.0-ts.2
+    "@rbxts/jest-globals": 3.16.0-ts.2
+    "@rbxts/types": 1.0.957
+    roblox-ts: 3.0.0
   release:
     bumpp: 12.3.0
   runtime:
