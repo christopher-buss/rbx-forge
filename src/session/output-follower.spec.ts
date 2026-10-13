@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
 import type { FileSystem } from "../seams/file-system.ts";
@@ -31,7 +31,7 @@ function follow(files: Record<string, string> = {}): Followed {
 }
 
 describe(followOutput, () => {
-	it("should read nothing while the file does not exist", () => {
+	it("should read nothing while the file does not exist", ({ expect }) => {
 		expect.assertions(1);
 
 		const { follower, lines } = follow();
@@ -41,7 +41,7 @@ describe(followOutput, () => {
 		expect(lines).toStrictEqual([]);
 	});
 
-	it("should hand over each whole line once, and keep a partial line for later", () => {
+	it("should hand over each whole line once, and keep a partial line for later", ({ expect }) => {
 		expect.assertions(2);
 
 		const { append, follower, lines } = follow({ "out.log": "one\r\ntw" });
@@ -56,7 +56,7 @@ describe(followOutput, () => {
 		expect(lines).toStrictEqual(["one", "two", "three"]);
 	});
 
-	it("should hand over a last line with no newline when it finishes", () => {
+	it("should hand over a last line with no newline when it finishes", ({ expect }) => {
 		expect.assertions(1);
 
 		const { follower, lines } = follow({ "out.log": "one\nlast" });
@@ -65,7 +65,7 @@ describe(followOutput, () => {
 		expect(lines).toStrictEqual(["one", "last"]);
 	});
 
-	it("should keep a character whose bytes arrive in two reads whole", () => {
+	it("should keep a character whose bytes arrive in two reads whole", ({ expect }) => {
 		expect.assertions(1);
 
 		const { append, follower, lines } = follow();
@@ -78,7 +78,9 @@ describe(followOutput, () => {
 		expect(lines).toStrictEqual(["é"]);
 	});
 
-	it("should hand over a character cut off at the end as a replacement character", () => {
+	it("should hand over a character cut off at the end as a replacement character", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { append, follower, lines } = follow();
@@ -88,7 +90,7 @@ describe(followOutput, () => {
 		expect(lines).toStrictEqual(["\uFFFD"]);
 	});
 
-	it("should close the file after each read", () => {
+	it("should close the file after each read", ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({ "out.log": "one\n" });
@@ -102,7 +104,7 @@ describe(followOutput, () => {
 		expect(closeSync).toHaveBeenCalledOnce();
 	});
 
-	it("should read output larger than one chunk", () => {
+	it("should read output larger than one chunk", ({ expect }) => {
 		expect.assertions(1);
 
 		const long = "x".repeat(100_000);

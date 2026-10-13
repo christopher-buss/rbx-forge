@@ -4,7 +4,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import { readWorkerLog } from "../helpers/worker-log.ts";
@@ -25,7 +25,7 @@ async function watchedFixtureAsync(): Promise<{ fixture: Fixture; watched: strin
 }
 
 describe("forge compile with a running session", () => {
-	it("should report the session's build of an edit and start no compiler", async () => {
+	it("should report the session's build of an edit and start no compiler", async ({ expect }) => {
 		expect.assertions(5);
 
 		const { fixture, watched } = await watchedFixtureAsync();
@@ -52,7 +52,7 @@ describe("forge compile with a running session", () => {
 		expect(compilerRuns(fixture)).toBe(runs);
 	});
 
-	it("should fail with compiler_off when the session runs no compiler", async () => {
+	it("should fail with compiler_off when the session runs no compiler", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { fixture } = await watchedFixtureAsync();

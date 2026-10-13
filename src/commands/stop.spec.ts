@@ -1,5 +1,6 @@
 import path from "node:path";
-import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
+import type { TestContext } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { makeStatus } from "../../test/helpers/fake-session.ts";
@@ -175,12 +176,14 @@ function makeProject({
  * `status` reports this Studio, and whose `stopParts` runs the session's
  * stopper on the project's seams.
  *
+ * @param testContext - Assertions and cleanup for this test.
  * @param project - The stop test project.
  * @param studio - What the session reports about Studio, now.
  * @param owner - Who owns the Studio.
  * @returns Every `stopParts` request's params.
  */
 async function serveSessionAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
 	project: StopProject,
 	studio: () => Pick<
 		SessionStatus["services"]["studio"],
@@ -242,7 +245,7 @@ async function serveSessionAsync(
 		},
 		token: "token",
 	});
-	onTestFinished(async () => {
+	testContext.onTestFinished(async () => {
 		await server.closeAsync();
 	});
 	return requests;
@@ -325,10 +328,15 @@ function failOn({ context }: StopProject, member: "readFileSync" | "statSync", c
  * Run session `s1` of the project with an endpoint whose `stopParts`
  * answers as `answer` says.
  *
+ * @param testContext - Assertions and cleanup for this test.
  * @param project - The stop test project.
  * @param answer - Answers `stopParts`.
  */
-async function serveAnswerAsync(project: StopProject, answer: IpcHandler): Promise<void> {
+async function serveAnswerAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
+	project: StopProject,
+	answer: IpcHandler,
+): Promise<void> {
 	const { fileSystem, ipc } = project.context.seams;
 	for (const [file, content] of Object.entries(SESSION_FILES)) {
 		const full = path.join(PROJECT, file);
@@ -340,7 +348,7 @@ async function serveAnswerAsync(project: StopProject, answer: IpcHandler): Promi
 		handlers: { status: () => ({ ...makeStatus() }), stopParts: answer },
 		token: "token",
 	});
-	onTestFinished(async () => {
+	testContext.onTestFinished(async () => {
 		await server.closeAsync();
 	});
 }
@@ -349,17 +357,22 @@ async function stopAsync({ context }: StopProject): Promise<CommandResult> {
 	return runStopAsync(context, { config: {}, flags: {} });
 }
 
-async function catchStopErrorAsync(project: StopProject): Promise<ForgeError> {
+async function catchStopErrorAsync(
+	testContext: Pick<TestContext, "expect">,
+	project: StopProject,
+): Promise<ForgeError> {
 	const error: unknown = await stopAsync(project).catch((err: unknown) => err);
 
-	expect(error).toBeInstanceOf(ForgeError);
+	testContext.expect(error).toBeInstanceOf(ForgeError);
 
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- checked on the line above
 	return error as ForgeError;
 }
 
 describe(runStopAsync, () => {
-	it("should close a verified Studio with a close request and remove its lock file", async () => {
+	it("should close a verified Studio with a close request and remove its lock file", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const project = makeProject({
@@ -385,7 +398,7 @@ describe(runStopAsync, () => {
 		expect(project.files()).not.toHaveProperty(LOCK);
 	});
 
-	it("should give Studio a bounded time to close on the close request", async () => {
+	it("should give Studio a bounded time to close on the close request", async ({ expect }) => {
 		expect.assertions(2);
 
 		const project = makeProject({
@@ -400,7 +413,9 @@ describe(runStopAsync, () => {
 		expect(STUDIO_CLOSE_MS).toBe(15_000);
 	});
 
-	it("should give Studio a short time to close on macOS, where it ignores the close request", async () => {
+	it("should give Studio a short time to close on macOS, where it ignores the close request", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject({
@@ -439,7 +454,7 @@ describe(runStopAsync, () => {
 		],
 	] as const)(
 		"should let Studio on macOS end %s within its short time, without forcing it",
-		async ([end, close]) => {
+		async ([end, close], { expect }) => {
 			expect.assertions(1);
 
 			const project = makeProject({
@@ -467,7 +482,7 @@ describe(runStopAsync, () => {
 		},
 	);
 
-	it("should end Studio at once when a dialog blocks it", async () => {
+	it("should end Studio at once when a dialog blocks it", async ({ expect }) => {
 		expect.assertions(3);
 
 		const project = makeProject({
@@ -494,7 +509,9 @@ describe(runStopAsync, () => {
 		expect(project.files()).not.toHaveProperty(LOCK);
 	});
 
-	it("should end Studio at once once it closed the place, without waiting for its exit", async () => {
+	it("should end Studio at once once it closed the place, without waiting for its exit", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject({
@@ -511,7 +528,7 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
 	});
 
-	it("should wait for the lock file or a dialog, looking every 50 ms", async () => {
+	it("should wait for the lock file or a dialog, looking every 50 ms", async ({ expect }) => {
 		expect.assertions(3);
 
 		const project = makeProject({
@@ -531,7 +548,7 @@ describe(runStopAsync, () => {
 		expect(STUDIO_CLOSE_POLL_MS).toBe(50);
 	});
 
-	it("should count a failed dialog query as no dialog", async () => {
+	it("should count a failed dialog query as no dialog", async ({ expect }) => {
 		expect.assertions(1);
 
 		const project = makeProject({
@@ -549,7 +566,7 @@ describe(runStopAsync, () => {
 		await expect(stopAsync(project)).resolves.toMatchObject({ data: { end: "timeout" } });
 	});
 
-	it("should handle the auto-recovery files as --recovery says", async () => {
+	it("should handle the auto-recovery files as --recovery says", async ({ expect }) => {
 		expect.assertions(1);
 
 		const project = makeProject({
@@ -567,7 +584,9 @@ describe(runStopAsync, () => {
 		).resolves.toMatchObject({ data: { recovery: KEPT } });
 	});
 
-	it("should move the ended Studio's auto-recovery file out of the AutoSaves folder", async () => {
+	it("should move the ended Studio's auto-recovery file out of the AutoSaves folder", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const saves = path.join(PROJECT, "home", "Documents", "ROBLOX", "AutoSaves");
@@ -595,7 +614,9 @@ describe(runStopAsync, () => {
 		expect(fileSystem.existsSync(file)).toBeFalse();
 	});
 
-	it("should leave the auto-recovery files of a Studio that exited by itself", async () => {
+	it("should leave the auto-recovery files of a Studio that exited by itself", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const saves = path.join(PROJECT, "home", "Documents", "ROBLOX", "AutoSaves");
@@ -622,14 +643,14 @@ describe(runStopAsync, () => {
 		expect(fileSystem.existsSync(file)).toBeTrue();
 	});
 
-	it("should close the session's Studio through its pin", async () => {
+	it("should close the session's Studio through its pin", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		await serveSessionAsync(project, () => {
+		await serveSessionAsync({ onTestFinished }, project, () => {
 			return {
 				pid: STUDIO_PID,
 				place: path.join(PROJECT, "session.rbxl"),
@@ -644,7 +665,7 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
 	});
 
-	it("should wait while the session's Studio is opening", async () => {
+	it("should wait while the session's Studio is opening", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 
 		let status: Pick<
@@ -660,30 +681,36 @@ describe(runStopAsync, () => {
 			],
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		await serveSessionAsync(project, () => status);
+		await serveSessionAsync({ onTestFinished }, project, () => status);
 
 		await expect(stopAsync(project)).resolves.toMatchObject({ data: { stopped: true } });
 		expect(project.elapsed()).toBe(1000);
 	});
 
-	it("should stop waiting for a session's Studio that stays opening", async () => {
+	it("should stop waiting for a session's Studio that stays opening", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject();
-		await serveSessionAsync(project, () => ({ status: "opening" }));
+		await serveSessionAsync({ onTestFinished }, project, () => ({ status: "opening" }));
 
 		await expect(stopAsync(project)).resolves.toMatchObject({ data: { stopped: false } });
 		expect(project.elapsed()).toBe(STUDIO_OPEN_WAIT_MS);
 	});
 
-	it("should fall back to the lock file when the session's Studio is gone or closed", async () => {
+	it("should fall back to the lock file when the session's Studio is gone or closed", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		await serveSessionAsync(project, () => {
+		await serveSessionAsync({ onTestFinished }, project, () => {
 			return { pid: 9, place: PLACE, startTime: "9", status: "open" };
 		});
 
@@ -692,25 +719,33 @@ describe(runStopAsync, () => {
 		});
 
 		const closed = makeProject();
-		await serveSessionAsync(closed, () => ({ place: PLACE, status: "closed" }));
+		await serveSessionAsync({ onTestFinished }, closed, () => {
+			return { place: PLACE, status: "closed" };
+		});
 
 		await expect(stopAsync(closed)).resolves.toMatchObject({ data: { stopped: false } });
 	});
 
-	it("should close a session's Studio that reused no PID, also with no lock file yet", async () => {
+	it("should close a session's Studio that reused no PID, also with no lock file yet", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject({
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO, startTime: "1" } },
 		});
-		await serveSessionAsync(project, () => {
+		await serveSessionAsync({ onTestFinished }, project, () => {
 			return { pid: STUDIO_PID, place: PLACE, startTime: "2", status: "open" };
 		});
 
 		await expect(stopAsync(project)).resolves.toMatchObject({ data: { stopped: false } });
 	});
 
-	it("should report recovery it cannot do on an OS with no start times", async () => {
+	it("should report recovery it cannot do on an OS with no start times", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject({
@@ -719,7 +754,7 @@ describe(runStopAsync, () => {
 				[STUDIO_PID]: { alive: true, executablePath: STUDIO, onCloseRequest: "dialog" },
 			},
 		});
-		await serveSessionAsync(project, () => {
+		await serveSessionAsync({ onTestFinished }, project, () => {
 			return {
 				pid: STUDIO_PID,
 				place: PLACE,
@@ -740,7 +775,10 @@ describe(runStopAsync, () => {
 		});
 	});
 
-	it("should kill nothing when the lock file names another Studio than the session's", async () => {
+	it("should kill nothing when the lock file names another Studio than the session's", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
 		const project = makeProject({
@@ -750,10 +788,10 @@ describe(runStopAsync, () => {
 				[STUDIO_PID]: { alive: true, executablePath: STUDIO },
 			},
 		});
-		await serveSessionAsync(project, () => {
+		await serveSessionAsync({ onTestFinished }, project, () => {
 			return { pid: 7, place: PLACE, startTime: "7", status: "open" };
 		});
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect(error.message).toBe(
 			`${path.join(PROJECT, LOCK)} names PID ${STUDIO_PID}, not the Roblox Studio forge started (PID 7). Nothing was killed.`,
@@ -761,14 +799,17 @@ describe(runStopAsync, () => {
 		expect(error.hint).toBe("Close the other Roblox Studio that has the place open by hand.");
 	});
 
-	it("should close the session's Studio when the lock file names it too", async () => {
+	it("should close the session's Studio when the lock file names it too", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		await serveSessionAsync(project, () => {
+		await serveSessionAsync({ onTestFinished }, project, () => {
 			return { pid: STUDIO_PID, place: PLACE, startTime: String(STUDIO_PID), status: "open" };
 		});
 
@@ -777,14 +818,19 @@ describe(runStopAsync, () => {
 		});
 	});
 
-	it("should report the session's parts it stopped, and ask with the recovery mode", async () => {
+	it("should report the session's parts it stopped, and ask with the recovery mode", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		const requests = await serveSessionAsync(project, () => ({ place: PLACE, status: "open" }));
+		const requests = await serveSessionAsync({ onTestFinished }, project, () => {
+			return { place: PLACE, status: "open" };
+		});
 
 		await expect(stopAsync(project)).resolves.toMatchObject({
 			data: { parts: { kept: [], stopped: ["studio"] }, pid: STUDIO_PID, stopped: true },
@@ -800,7 +846,10 @@ describe(runStopAsync, () => {
 		]);
 	});
 
-	it("should fail with studio_owned for a Studio a forge start terminal owns, and touch it not", async () => {
+	it("should fail with studio_owned for a Studio a forge start terminal owns, and touch it not", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject({
@@ -808,6 +857,7 @@ describe(runStopAsync, () => {
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
 		await serveSessionAsync(
+			{ onTestFinished },
 			project,
 			() => {
 				return {
@@ -829,13 +879,16 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should name no PID for an owned Studio forge did not start", async () => {
+	it("should name no PID for an owned Studio forge did not start", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject();
-		await serveSessionAsync(project, () => ({ status: "open" }), "start");
+		await serveSessionAsync({ onTestFinished }, project, () => ({ status: "open" }), "start");
 
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect({ code: error.code, details: error.details, message: error.message }).toStrictEqual({
 			code: "studio_owned",
@@ -844,14 +897,17 @@ describe(runStopAsync, () => {
 		});
 	});
 
-	it("should fail with studio_found for a found Studio, and touch it not", async () => {
+	it("should fail with studio_found for a found Studio, and touch it not", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		await serveSessionAsync(project, () => {
+		await serveSessionAsync({ onTestFinished }, project, () => {
 			return {
 				origin: "found",
 				pid: STUDIO_PID,
@@ -870,14 +926,14 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should close a found Studio with --force", async () => {
+	it("should close a found Studio with --force", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		await serveSessionAsync(project, () => {
+		await serveSessionAsync({ onTestFinished }, project, () => {
 			return { origin: "found", place: PLACE, status: "open" };
 		});
 
@@ -887,7 +943,7 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
 	});
 
-	it("should close an owned Studio with --force", async () => {
+	it("should close an owned Studio with --force", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 
 		const project = makeProject({
@@ -895,6 +951,7 @@ describe(runStopAsync, () => {
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
 		const requests = await serveSessionAsync(
+			{ onTestFinished },
 			project,
 			() => ({ place: PLACE, status: "open" }),
 			"start",
@@ -906,7 +963,10 @@ describe(runStopAsync, () => {
 		expect(requests).toMatchObject([{ force: true }]);
 	});
 
-	it("should close only the Studio of the place --place names, outside the session", async () => {
+	it("should close only the Studio of the place --place names, outside the session", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
 		const other = path.join(SNAPSHOTS, SNAPSHOT_A);
@@ -924,7 +984,9 @@ describe(runStopAsync, () => {
 				[STUDIO_PID]: { alive: true, executablePath: STUDIO },
 			},
 		});
-		const requests = await serveSessionAsync(project, () => ({ place: PLACE, status: "open" }));
+		const requests = await serveSessionAsync({ onTestFinished }, project, () => {
+			return { place: PLACE, status: "open" };
+		});
 
 		await expect(
 			runStopAsync(project.context, {
@@ -947,7 +1009,9 @@ describe(runStopAsync, () => {
 		]);
 	});
 
-	it("should close every snapshot Studio, then the Studio of the project's place", async () => {
+	it("should close every snapshot Studio, then the Studio of the project's place", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const first = path.join(SNAPSHOTS, SNAPSHOT_A);
@@ -994,7 +1058,10 @@ describe(runStopAsync, () => {
 		]);
 	});
 
-	it("should close the snapshot Studios before it fails with studio_owned", async () => {
+	it("should close the snapshot Studios before it fails with studio_owned", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject({
@@ -1004,7 +1071,12 @@ describe(runStopAsync, () => {
 			},
 			processes: { 7: snapshotStudio(() => project, path.join(SNAPSHOTS, SNAPSHOT_A)) },
 		});
-		await serveSessionAsync(project, () => ({ place: PLACE, status: "open" }), "start");
+		await serveSessionAsync(
+			{ onTestFinished },
+			project,
+			() => ({ place: PLACE, status: "open" }),
+			"start",
+		);
 
 		await expect(stopAsync(project)).rejects.toMatchObject({ code: "studio_owned" });
 		expect(project.processes.get(7)!.alive).toBeFalse();
@@ -1015,7 +1087,7 @@ describe(runStopAsync, () => {
 		["supervisor_unresponsive", new ForgeError("supervisor_unresponsive", "No answer.")],
 	] as const)(
 		"should fail with %s and close no Studio when the session answers no stop",
-		async ([code, failure]) => {
+		async ([code, failure], { expect, onTestFinished }) => {
 			expect.assertions(2);
 
 			const project = makeProject({
@@ -1049,11 +1121,14 @@ describe(runStopAsync, () => {
 		},
 	);
 
-	it("should tell a stopping session's stop to come again once it is gone", async () => {
+	it("should tell a stopping session's stop to come again once it is gone", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject();
-		await serveAnswerAsync(project, () => {
+		await serveAnswerAsync({ onTestFinished }, project, () => {
 			throw new ForgeError("not_running", "The session is stopping.");
 		});
 
@@ -1065,7 +1140,9 @@ describe(runStopAsync, () => {
 		});
 	});
 
-	it("should close the lock file's Studio when the named session does not answer", async () => {
+	it("should close the lock file's Studio when the named session does not answer", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject({
@@ -1083,7 +1160,10 @@ describe(runStopAsync, () => {
 		});
 	});
 
-	it("should fail with internal_error when the session answers its status with something else", async () => {
+	it("should fail with internal_error when the session answers its status with something else", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject();
@@ -1104,7 +1184,10 @@ describe(runStopAsync, () => {
 		await expect(stopAsync(project)).rejects.toMatchObject({ code: "internal_error" });
 	});
 
-	it("should fail with internal_error when the session answers with something else", async () => {
+	it("should fail with internal_error when the session answers with something else", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject();
@@ -1132,11 +1215,14 @@ describe(runStopAsync, () => {
 		});
 	});
 
-	it("should close the lock file's Studio when the session kept only other parts", async () => {
+	it("should close the lock file's Studio when the session kept only other parts", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject();
-		await serveAnswerAsync(project, () => {
+		await serveAnswerAsync({ onTestFinished }, project, () => {
 			return {
 				ending: false,
 				kept: [{ owner: "start", part: "compiler" }],
@@ -1152,7 +1238,10 @@ describe(runStopAsync, () => {
 		});
 	});
 
-	it("should give the session its Studio time and the services' grace to answer", async () => {
+	it("should give the session its Studio time and the services' grace to answer", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject({ config: { gracefulTimeoutMs: 1234 } });
@@ -1171,7 +1260,7 @@ describe(runStopAsync, () => {
 			return connection;
 		};
 
-		await serveAnswerAsync(project, () => {
+		await serveAnswerAsync({ onTestFinished }, project, () => {
 			return { ending: false, kept: [], stopped: [] };
 		});
 		await stopAsync(project);
@@ -1179,7 +1268,9 @@ describe(runStopAsync, () => {
 		expect(waits[1]).toBe(STOP_PARTS_WAIT_MS + 1234);
 	});
 
-	it("should end a Studio that stays open after the close request, without a save", async () => {
+	it("should end a Studio that stays open after the close request, without a save", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const waits: Array<number> = [];
@@ -1216,7 +1307,7 @@ describe(runStopAsync, () => {
 
 	it.for(["no_window", "throw"] as const)(
 		"should end Studio at once when the close request does not go out (%s)",
-		async (onCloseRequest) => {
+		async (onCloseRequest, { expect }) => {
 			expect.assertions(3);
 
 			const waits: Array<number> = [];
@@ -1234,7 +1325,7 @@ describe(runStopAsync, () => {
 		},
 	);
 
-	it("should not end a Studio that exits just before the close request", async () => {
+	it("should not end a Studio that exits just before the close request", async ({ expect }) => {
 		expect.assertions(2);
 
 		const waits: Array<number> = [];
@@ -1255,7 +1346,7 @@ describe(runStopAsync, () => {
 		expect(waits).toStrictEqual([]);
 	});
 
-	it("should stop the Studio of the place forge open opens", async () => {
+	it("should stop the Studio of the place forge open opens", async ({ expect }) => {
 		expect.assertions(2);
 
 		const project = makeProject({
@@ -1272,7 +1363,9 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
 	});
 
-	it("should report success without a kill when the place has no lock file", async () => {
+	it("should report success without a kill when the place has no lock file", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		await expect(stopAsync(makeProject())).resolves.toStrictEqual({
@@ -1281,7 +1374,9 @@ describe(runStopAsync, () => {
 		});
 	});
 
-	it("should kill nothing when the lock names a PID that a non-Studio process reused", async () => {
+	it("should kill nothing when the lock names a PID that a non-Studio process reused", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const node = String.raw`C:\Program Files\nodejs\node.exe`;
@@ -1289,7 +1384,7 @@ describe(runStopAsync, () => {
 			files: { [LOCK]: studioLock(STUDIO_PID) },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: node } },
 		});
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect(error.code).toBe("identity_mismatch");
 		expect(error.message).toBe(
@@ -1301,19 +1396,19 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should keep the lock file when it kills nothing", async () => {
+	it("should keep the lock file when it kills nothing", async ({ expect }) => {
 		expect.assertions(2);
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID) },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: "/usr/bin/sleep" } },
 		});
-		await catchStopErrorAsync(project);
+		await catchStopErrorAsync({ expect }, project);
 
 		expect(project.files()[LOCK]).toBe(studioLock(STUDIO_PID));
 	});
 
-	it("should report success without a kill when the PID has exited", async () => {
+	it("should report success without a kill when the PID has exited", async ({ expect }) => {
 		expect.assertions(2);
 
 		const project = makeProject({ files: { [LOCK]: studioLock(STUDIO_PID) } });
@@ -1325,7 +1420,9 @@ describe(runStopAsync, () => {
 		expect(project.files()[LOCK]).toBe(studioLock(STUDIO_PID));
 	});
 
-	it("should report success without a kill when the process exits while it is checked", async () => {
+	it("should report success without a kill when the process exits while it is checked", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject({
@@ -1340,10 +1437,13 @@ describe(runStopAsync, () => {
 		});
 	});
 
-	it("should fail with identity_mismatch when the lock file names no PID", async () => {
+	it("should fail with identity_mismatch when the lock file names no PID", async ({ expect }) => {
 		expect.assertions(3);
 
-		const error = await catchStopErrorAsync(makeProject({ files: { [LOCK]: "garbage\n" } }));
+		const error = await catchStopErrorAsync(
+			{ expect },
+			makeProject({ files: { [LOCK]: "garbage\n" } }),
+		);
 
 		expect(error.code).toBe("identity_mismatch");
 		expect(error.message).toBe(
@@ -1351,7 +1451,9 @@ describe(runStopAsync, () => {
 		);
 	});
 
-	it("should fail with identity_mismatch when the OS will not let forge check the process", async () => {
+	it("should fail with identity_mismatch when the OS will not let forge check the process", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const project = makeProject({
@@ -1364,7 +1466,7 @@ describe(runStopAsync, () => {
 				},
 			},
 		});
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect(error.code).toBe("identity_mismatch");
 		expect(error.message).toBe(
@@ -1373,14 +1475,16 @@ describe(runStopAsync, () => {
 		expect(error.cause).toStrictEqual(new Error("Access is denied."));
 	});
 
-	it("should kill nothing when the lock file was written on another computer", async () => {
+	it("should kill nothing when the lock file was written on another computer", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const project = makeProject({
 			files: { [LOCK]: studioLock(STUDIO_PID, "OTHER-PC") },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect(error.code).toBe("identity_mismatch");
 		expect(error.message).toBe(
@@ -1390,14 +1494,14 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should kill nothing when the lock file names no computer", async () => {
+	it("should kill nothing when the lock file names no computer", async ({ expect }) => {
 		expect.assertions(4);
 
 		const project = makeProject({
 			files: { [LOCK]: `${STUDIO_PID}\n` },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect(error.code).toBe("identity_mismatch");
 		expect(error.message).toBe(
@@ -1406,7 +1510,9 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should kill a Studio that started up to the slack after the lock file was written", async () => {
+	it("should kill a Studio that started up to the slack after the lock file was written", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeProject({
@@ -1424,7 +1530,9 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeFalse();
 	});
 
-	it("should kill nothing when the Studio started after the lock file was written", async () => {
+	it("should kill nothing when the Studio started after the lock file was written", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const project = makeProject({
@@ -1437,7 +1545,7 @@ describe(runStopAsync, () => {
 				},
 			},
 		});
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect(error.code).toBe("identity_mismatch");
 		expect(error.message).toBe(
@@ -1449,7 +1557,7 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should read the start time for the host OS", async () => {
+	it("should read the start time for the host OS", async ({ expect }) => {
 		expect.assertions(3);
 
 		// 2026-01-01T00:00:05Z as a Windows FILETIME: five seconds after the
@@ -1465,13 +1573,13 @@ describe(runStopAsync, () => {
 				},
 			},
 		});
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect(error.message).toContain("started after the lock file was written");
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should kill nothing when forge cannot read start times on the OS", async () => {
+	it("should kill nothing when forge cannot read start times on the OS", async ({ expect }) => {
 		expect.assertions(4);
 
 		const project = makeProject({
@@ -1479,7 +1587,7 @@ describe(runStopAsync, () => {
 			host: { platform: "freebsd" },
 			processes: { [STUDIO_PID]: { alive: true, executablePath: STUDIO } },
 		});
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect(error.code).toBe("identity_mismatch");
 		expect(error.message).toBe(
@@ -1488,7 +1596,7 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should fail with native_missing when the addon does not load", async () => {
+	it("should fail with native_missing when the addon does not load", async ({ expect }) => {
 		expect.assertions(2);
 
 		const project = makeProject({ files: { [LOCK]: studioLock(STUDIO_PID) } });
@@ -1496,12 +1604,12 @@ describe(runStopAsync, () => {
 			throw new ForgeError("native_missing", "no addon");
 		};
 
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect(error.code).toBe("native_missing");
 	});
 
-	it("should fail with process_failed when Studio does not exit in time", async () => {
+	it("should fail with process_failed when Studio does not exit in time", async ({ expect }) => {
 		expect.assertions(4);
 
 		const project = makeProject({
@@ -1515,7 +1623,7 @@ describe(runStopAsync, () => {
 				},
 			},
 		});
-		const error = await catchStopErrorAsync(project);
+		const error = await catchStopErrorAsync({ expect }, project);
 
 		expect(error.code).toBe("process_failed");
 		expect(error.message).toBe(
@@ -1524,7 +1632,9 @@ describe(runStopAsync, () => {
 		expect(project.files()[LOCK]).toBe(studioLock(STUDIO_PID));
 	});
 
-	it("should report success without a kill when Studio deletes its lock file before forge reads it", async () => {
+	it("should report success without a kill when Studio deletes its lock file before forge reads it", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject({
@@ -1540,7 +1650,9 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should kill nothing when Studio deletes its lock file while forge checks it", async () => {
+	it("should kill nothing when Studio deletes its lock file while forge checks it", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject({
@@ -1556,7 +1668,9 @@ describe(runStopAsync, () => {
 		expect(project.processes.get(STUDIO_PID)!.alive).toBeTrue();
 	});
 
-	it("should report the stop when the closed Studio deleted its lock file itself", async () => {
+	it("should report the stop when the closed Studio deleted its lock file itself", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject({
@@ -1572,7 +1686,7 @@ describe(runStopAsync, () => {
 
 	it.for(["readFileSync", "statSync"] as const)(
 		"should fail and kill nothing when %s fails for another reason than a missing file",
-		async (member) => {
+		async (member, { expect }) => {
 			expect.assertions(2);
 
 			const project = makeProject({
@@ -1586,7 +1700,7 @@ describe(runStopAsync, () => {
 		},
 	);
 
-	it("should fail when a thrown value is not an error", async () => {
+	it("should fail when a thrown value is not an error", async ({ expect }) => {
 		expect.assertions(1);
 
 		const project = makeProject({ files: { [LOCK]: studioLock(STUDIO_PID) } });

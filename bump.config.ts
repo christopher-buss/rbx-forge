@@ -6,9 +6,10 @@ export default defineConfig({
 	commit: "chore: release v%s",
 	/**
 	 * After the gate, before the commit and tag: a tag releases stable only.
+	 * @param context - The release state.
 	 */
-	execute: ({ state }) => {
-		assertStable(state.newVersion);
+	execute: (context) => {
+		assertStable(context.state.newVersion);
 	},
 	push: true,
 	tag: "v%s",

@@ -7,12 +7,12 @@
  */
 import { spawnSync } from "node:child_process";
 import process from "node:process";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { studioLaunchInvocation } from "../../src/studio/launcher.ts";
 
 describe.skipIf(process.platform !== "win32")("studio launch command line", () => {
-	it("should hand start a place whose path holds %TEMP% unchanged", () => {
+	it("should hand start a place whose path holds %TEMP% unchanged", ({ expect }) => {
 		expect.assertions(1);
 
 		const place = String.raw`C:\Users\me\My %TEMP% Places\100% & more\game.rbxl`;

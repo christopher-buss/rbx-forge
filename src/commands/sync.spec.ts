@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createMemoryTransport, scriptedConnection } from "../../test/helpers/fake-ipc.ts";
 import { serveFakeSessionAsync, SYNCED } from "../../test/helpers/fake-session.ts";
@@ -37,7 +37,7 @@ function makeContext(ipc: IpcTransport = createMemoryTransport()): {
 }
 
 describe(runSyncAsync, () => {
-	it("should return what the session synced, with its hooks", async () => {
+	it("should return what the session synced, with its hooks", async ({ expect }) => {
 		expect.assertions(1);
 
 		const ipc = createMemoryTransport();
@@ -50,7 +50,9 @@ describe(runSyncAsync, () => {
 		});
 	});
 
-	it("should fail with not_running when no session runs or its endpoint is silent", async () => {
+	it("should fail with not_running when no session runs or its endpoint is silent", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const ipc = createMemoryTransport();
@@ -68,7 +70,7 @@ describe(runSyncAsync, () => {
 		await expect(runSyncAsync(context)).rejects.toMatchObject({ code: "not_running" });
 	});
 
-	it("should fail with the run's own error, its hook results kept", async () => {
+	it("should fail with the run's own error, its hook results kept", async ({ expect }) => {
 		expect.assertions(1);
 
 		const ipc = createMemoryTransport();
@@ -85,7 +87,9 @@ describe(runSyncAsync, () => {
 		});
 	});
 
-	it("should fail with internal_error when the answer is not a sync result", async () => {
+	it("should fail with internal_error when the answer is not a sync result", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const ipc = createMemoryTransport();
@@ -100,7 +104,7 @@ describe(runSyncAsync, () => {
 		});
 	});
 
-	it("should keep only the hook results it can read", async () => {
+	it("should keep only the hook results it can read", async ({ expect }) => {
 		expect.assertions(1);
 
 		const ipc = createMemoryTransport();
@@ -111,7 +115,7 @@ describe(runSyncAsync, () => {
 		await expect(runSyncAsync(context)).resolves.toMatchObject({ data: { hooks: [] } });
 	});
 
-	it("should wait long enough for a syncback and its hooks", async () => {
+	it("should wait long enough for a syncback and its hooks", async ({ expect }) => {
 		expect.assertions(1);
 
 		const memoryIpc = createMemoryTransport();

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import type { OwnerRelease, ReleasePlan } from "./ownership.ts";
@@ -80,7 +80,7 @@ describe(planRelease, () => {
 			[],
 			{ clear: [], isKept: false, release: [], stop: [] },
 		],
-	])("should plan an owner's end that %s", ([, services, added, plan]) => {
+	])("should plan an owner's end that %s", ([, services, added, plan], { expect }) => {
 		expect.assertions(1);
 
 		expect(planRelease(services, new Set(added))).toStrictEqual(plan);
@@ -105,7 +105,7 @@ describe(releasedResult, () => {
 			{ ...S1, ending: false, released: [], stopped: [], studioLeft: false },
 			"Let go of session s1: it owned no part.",
 		],
-	])("should say what the end did: %s", ([release, summary]) => {
+	])("should say what the end did: %s", ([release, summary], { expect }) => {
 		expect.assertions(1);
 
 		expect(releasedResult(release)).toStrictEqual({ data: release, summary });
@@ -148,7 +148,9 @@ function makeHandlers(add: PartAdder = async () => [], move: StudioMover = vi.fn
 }
 
 describe(createOwnerHandlers, () => {
-	it("should take an already visible Studio without requesting a visibility change", async () => {
+	it("should take an already visible Studio without requesting a visibility change", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const move = vi.fn<StudioMover>();
@@ -174,7 +176,7 @@ describe(createOwnerHandlers, () => {
 		{ defaultDesktop: "user", parts: ["compiler"] },
 	] as const)(
 		"should preserve hidden Studio visibility for $parts with $desktop and $defaultDesktop",
-		async (request) => {
+		async (request, { expect }) => {
 			expect.assertions(1);
 
 			const move = vi.fn<StudioMover>();
@@ -187,7 +189,7 @@ describe(createOwnerHandlers, () => {
 		},
 	);
 
-	it("should give back the parts it took when showing Studio fails", async () => {
+	it("should give back the parts it took when showing Studio fails", async ({ expect }) => {
 		expect.assertions(3);
 
 		const move = vi.fn<StudioMover>().mockRejectedValue(new Error("show failed"));
@@ -204,7 +206,9 @@ describe(createOwnerHandlers, () => {
 		expect(ownership.isOwned).toBeFalse();
 	});
 
-	it("should show the hidden Studio it takes and leave it shown when its owner ends", async () => {
+	it("should show the hidden Studio it takes and leave it shown when its owner ends", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const move = vi
@@ -225,7 +229,7 @@ describe(createOwnerHandlers, () => {
 		expect(move).toHaveBeenCalledOnce();
 	});
 
-	it("should let go of nothing while no owner holds the session", async () => {
+	it("should let go of nothing while no owner holds the session", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { end, handlers, status } = makeHandlers();
@@ -241,7 +245,9 @@ describe(createOwnerHandlers, () => {
 		expect(end).not.toHaveBeenCalled();
 	});
 
-	it("should end the session with the owner's reason once it leaves no part", async () => {
+	it("should end the session with the owner's reason once it leaves no part", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { end, handlers, status } = makeHandlers();
@@ -255,7 +261,7 @@ describe(createOwnerHandlers, () => {
 		expect(status.snapshot().phase).toBe("stopping");
 	});
 
-	it("should take only the compiler when the join asks for no Studio", async () => {
+	it("should take only the compiler when the join asks for no Studio", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { handlers, status } = makeHandlers();
@@ -273,7 +279,7 @@ describe(createOwnerHandlers, () => {
 		});
 	});
 
-	it("should take Studio and its Rojo when the join asks for Studio", async () => {
+	it("should take Studio and its Rojo when the join asks for Studio", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { handlers, status } = makeHandlers();
@@ -286,7 +292,9 @@ describe(createOwnerHandlers, () => {
 		});
 	});
 
-	it("should give back what it took when the add fails, and throw the failure", async () => {
+	it("should give back what it took when the add fails, and throw the failure", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { handlers, ownership, status } = makeHandlers(async () => {
@@ -298,7 +306,9 @@ describe(createOwnerHandlers, () => {
 		expect(ownership.isOwned).toBeFalse();
 	});
 
-	it("should give back a Studio it took, open, and forget what an earlier owner added", async () => {
+	it("should give back a Studio it took, open, and forget what an earlier owner added", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const add = vi.fn<PartAdder>().mockResolvedValueOnce(["compiler"]).mockResolvedValue([]);

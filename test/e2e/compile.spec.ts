@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { FixtureProject } from "../helpers/fixture-project.ts";
@@ -25,7 +25,7 @@ function roles(log: string): Array<string> {
 }
 
 describe("forge compile", () => {
-	it("should compile once and write the full output to the compile log", async () => {
+	it("should compile once and write the full output to the compile log", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge, project } = makeFixture();
@@ -42,7 +42,7 @@ describe("forge compile", () => {
 		expect(readFileSync(log, "utf8")).toContain("compiling as game..\n");
 	});
 
-	it("should fail with structured diagnostics and the error count", async () => {
+	it("should fail with structured diagnostics and the error count", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge } = makeFixture();
@@ -74,7 +74,7 @@ describe("forge compile", () => {
 		expect(error!.message).toStartWith("rbxtsc failed with 3 errors (exit code 1):\n");
 	});
 
-	it("should fail with the diagnostics of a one-shot sloptor result", async () => {
+	it("should fail with the diagnostics of a one-shot sloptor result", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge, log, project } = makeFixture({
@@ -124,7 +124,9 @@ describe("forge compile", () => {
 		]);
 	});
 
-	it("should keep the compiler's output out of NDJSON and colors out of the log", async () => {
+	it("should keep the compiler's output out of NDJSON and colors out of the log", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { forge, project } = makeFixture();
@@ -143,7 +145,7 @@ describe("forge compile", () => {
 		).not.toContain(ESCAPE);
 	});
 
-	it("should be unavailable for a Luau project", async () => {
+	it("should be unavailable for a Luau project", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge, log } = makeFixture({ projectType: "luau" });
@@ -158,7 +160,9 @@ describe("forge compile", () => {
 		expect(roles(log)).toStrictEqual([]);
 	});
 
-	it("should fail with compiler_missing when the compiler is not installed", async () => {
+	it("should fail with compiler_missing when the compiler is not installed", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { forge } = makeFixtureProject({
@@ -171,7 +175,7 @@ describe("forge compile", () => {
 		expect(parseResult(stdout).error!.code).toBe("compiler_missing");
 	});
 
-	it("should run compile hooks around the compiler", async () => {
+	it("should run compile hooks around the compiler", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { forge, log } = makeFixture({

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import type { SessionStatus, StatusStart, StatusStore } from "./status.ts";
 import { createStatusStore, isReady, parseStatus } from "./status.ts";
@@ -32,7 +32,7 @@ function makeStore(start: StatusStart = START) {
 const NO_PARTS: StatusStart = { ...START, compiler: false, open: false };
 
 describe(createStatusStore, () => {
-	it("should report the user desktop for a platform launch", () => {
+	it("should report the user desktop for a platform launch", ({ expect }) => {
 		expect.assertions(1);
 
 		const { store } = makeStore();
@@ -41,7 +41,7 @@ describe(createStatusStore, () => {
 		expect(store.snapshot().services.studio.desktop).toBe("user");
 	});
 
-	it("should retain Studio's hidden desktop while opening and closing", () => {
+	it("should retain Studio's hidden desktop while opening and closing", ({ expect }) => {
 		expect.assertions(3);
 
 		const { store } = makeStore();
@@ -59,7 +59,7 @@ describe(createStatusStore, () => {
 		expect(store.snapshot().services.studio.desktop).toBe("hidden");
 	});
 
-	it("should start with every planned service starting and the rest off", () => {
+	it("should start with every planned service starting and the rest off", ({ expect }) => {
 		expect.assertions(2);
 
 		const { store } = makeStore();
@@ -91,7 +91,7 @@ describe(createStatusStore, () => {
 		});
 	});
 
-	it("should give the planned parts the session's owner, and none to the rest", () => {
+	it("should give the planned parts the session's owner, and none to the rest", ({ expect }) => {
 		expect.assertions(2);
 
 		const { store } = makeStore({ ...START, owner: "start" });
@@ -105,7 +105,9 @@ describe(createStatusStore, () => {
 		expect(bare.snapshot().services.compiler.owner).toBeNull();
 	});
 
-	it("should give a part an owner and take it back, keeping it through later changes", () => {
+	it("should give a part an owner and take it back, keeping it through later changes", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { onChange, store } = makeStore();
@@ -121,7 +123,7 @@ describe(createStatusStore, () => {
 		expect(onChange).toHaveBeenCalledTimes(5);
 	});
 
-	it("should keep the origin of the session's Studio until it is given again", () => {
+	it("should keep the origin of the session's Studio until it is given again", ({ expect }) => {
 		expect.assertions(1);
 
 		const { store } = makeStore(START);
@@ -136,7 +138,9 @@ describe(createStatusStore, () => {
 		]);
 	});
 
-	it("should show a Studio the session let go of as off, with no owner or place", () => {
+	it("should show a Studio the session let go of as off, with no owner or place", ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { onChange, store } = makeStore({ ...START, owner: "start" });
@@ -147,7 +151,9 @@ describe(createStatusStore, () => {
 		expect(onChange).toHaveBeenCalledTimes(2);
 	});
 
-	it("should stay starting until the session started its parts, then be ready with none", () => {
+	it("should stay starting until the session started its parts, then be ready with none", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { onChange, store } = makeStoreBeforeStart(NO_PARTS);
@@ -160,7 +166,9 @@ describe(createStatusStore, () => {
 		expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "ready" }));
 	});
 
-	it("should be ready once Rojo serves and the compiler finished its first compile", () => {
+	it("should be ready once Rojo serves and the compiler finished its first compile", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { onChange, store } = makeStore();
@@ -178,7 +186,9 @@ describe(createStatusStore, () => {
 		expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "ready" }));
 	});
 
-	it("should tell while a compile runs, and whether one still runs after a build", () => {
+	it("should tell while a compile runs, and whether one still runs after a build", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { onChange, store } = makeStore();
@@ -198,7 +208,7 @@ describe(createStatusStore, () => {
 		});
 	});
 
-	it("should be ready with Rojo alone when there is no compiler", () => {
+	it("should be ready with Rojo alone when there is no compiler", ({ expect }) => {
 		expect.assertions(1);
 
 		const { store } = makeStore({ ...START, compiler: false });
@@ -207,7 +217,7 @@ describe(createStatusStore, () => {
 		expect(isReady(store.snapshot())).toBeTrue();
 	});
 
-	it("should keep the phase it is told once the session ends", () => {
+	it("should keep the phase it is told once the session ends", ({ expect }) => {
 		expect.assertions(3);
 
 		const { store } = makeStore({ ...START, compiler: false });
@@ -221,7 +231,7 @@ describe(createStatusStore, () => {
 		expect(store.snapshot()).toMatchObject({ phase: "stopped", running: false });
 	});
 
-	it("should tell every phase change", () => {
+	it("should tell every phase change", ({ expect }) => {
 		expect.assertions(1);
 
 		const { onChange, store } = makeStore();
@@ -232,7 +242,7 @@ describe(createStatusStore, () => {
 		);
 	});
 
-	it("should not be ready while Rojo starts, even after a compile", () => {
+	it("should not be ready while Rojo starts, even after a compile", ({ expect }) => {
 		expect.assertions(1);
 
 		const { store } = makeStore();
@@ -254,17 +264,20 @@ describe(createStatusStore, () => {
 				store.serviceFailed("rojo", { exitCode: 1, outputTail: [] });
 			},
 		],
-	] as const)("should be ready with the compiler done and Rojo %s", ([, stopRojo]) => {
-		expect.assertions(1);
+	] as const)(
+		"should be ready with the compiler done and Rojo %s",
+		([, stopRojo], { expect }) => {
+			expect.assertions(1);
 
-		const { store } = makeStore();
-		store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, false);
-		stopRojo(store);
+			const { store } = makeStore();
+			store.compiled({ at: AT, diagnostics: [], errors: 0, startedAt: AT }, false);
+			stopRojo(store);
 
-		expect(store.snapshot().phase).toBe("ready");
-	});
+			expect(store.snapshot().phase).toBe("ready");
+		},
+	);
 
-	it("should be ready once a compiler that never built has failed", () => {
+	it("should be ready once a compiler that never built has failed", ({ expect }) => {
 		expect.assertions(1);
 
 		const { store } = makeStore();
@@ -274,7 +287,9 @@ describe(createStatusStore, () => {
 		expect(isReady(store.snapshot())).toBeTrue();
 	});
 
-	it("should show a failed part with its exit code and output tail, and drop them once it runs again", () => {
+	it("should show a failed part with its exit code and output tail, and drop them once it runs again", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { store } = makeStore();
@@ -297,7 +312,7 @@ describe(createStatusStore, () => {
 		});
 	});
 
-	it("should record syncback runs and Studio", () => {
+	it("should record syncback runs and Studio", ({ expect }) => {
 		expect.assertions(3);
 
 		const { store } = makeStore();
@@ -319,7 +334,7 @@ describe(createStatusStore, () => {
 		});
 	});
 
-	it("should record the Studio forge started", () => {
+	it("should record the Studio forge started", ({ expect }) => {
 		expect.assertions(1);
 
 		const { store } = makeStore();
@@ -335,7 +350,9 @@ describe(createStatusStore, () => {
 		});
 	});
 
-	it("should keep syncback off after a forge sync run in a session without the save watch", () => {
+	it("should keep syncback off after a forge sync run in a session without the save watch", ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { store } = makeStore({ ...START, syncback: false });
@@ -350,7 +367,7 @@ describe(createStatusStore, () => {
 		});
 	});
 
-	it("should have no Rojo port until the session chose one, then keep it", () => {
+	it("should have no Rojo port until the session chose one, then keep it", ({ expect }) => {
 		expect.assertions(3);
 
 		const { onChange, store } = makeStore({ ...NO_PARTS, port: undefined });
@@ -367,7 +384,7 @@ describe(createStatusStore, () => {
 		expect(onChange).toHaveBeenCalledTimes(2);
 	});
 
-	it("should hand out copies", () => {
+	it("should hand out copies", ({ expect }) => {
 		expect.assertions(2);
 
 		const { onChange, store } = makeStore();
@@ -381,7 +398,7 @@ describe(createStatusStore, () => {
 });
 
 describe(parseStatus, () => {
-	it("should read a status back, and nothing else", () => {
+	it("should read a status back, and nothing else", ({ expect }) => {
 		expect.assertions(3);
 
 		const { store } = makeStore();

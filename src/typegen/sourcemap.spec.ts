@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import { parseSourcemap } from "./sourcemap.ts";
@@ -13,13 +13,13 @@ const PLACE = [
 ].join("");
 
 describe(parseSourcemap, () => {
-	it("should read the instance tree and keep keys it does not use", () => {
+	it("should read the instance tree and keep keys it does not use", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseSourcemap(PLACE, FILE)).toStrictEqual(JSON.parse(PLACE));
 	});
 
-	it("should read a place with no children", () => {
+	it("should read a place with no children", ({ expect }) => {
 		expect.assertions(1);
 
 		const text = '{"name":"game","className":"DataModel"}';
@@ -27,7 +27,7 @@ describe(parseSourcemap, () => {
 		expect(parseSourcemap(text, FILE)).toStrictEqual(JSON.parse(text));
 	});
 
-	it("should fail with sourcemap_invalid for text that is not JSON", () => {
+	it("should fail with sourcemap_invalid for text that is not JSON", ({ expect }) => {
 		expect.assertions(3);
 
 		const error = catchForgeError(() => parseSourcemap("{", FILE));
@@ -37,7 +37,7 @@ describe(parseSourcemap, () => {
 		expect(error.hint).toBe("Check that rojoAlias runs Rojo, not another tool.");
 	});
 
-	it("should name each value that breaks the shape", () => {
+	it("should name each value that breaks the shape", ({ expect }) => {
 		expect.assertions(2);
 
 		const text = [
@@ -56,7 +56,7 @@ describe(parseSourcemap, () => {
 		);
 	});
 
-	it("should refuse the sourcemap of a model project", () => {
+	it("should refuse the sourcemap of a model project", ({ expect }) => {
 		expect.assertions(2);
 
 		const error = catchForgeError(() => {

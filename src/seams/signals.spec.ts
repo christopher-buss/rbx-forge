@@ -1,12 +1,12 @@
 import { fromAny } from "@total-typescript/shoehorn";
 
 import { EventEmitter } from "node:events";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createSignals, STOP_SIGNALS } from "./signals.ts";
 
 describe(createSignals, () => {
-	it("should call the listener for every stop signal until it is removed", () => {
+	it("should call the listener for every stop signal until it is removed", ({ expect }) => {
 		expect.assertions(2);
 
 		const source = new EventEmitter();

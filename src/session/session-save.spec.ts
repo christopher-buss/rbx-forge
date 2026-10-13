@@ -1,6 +1,6 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
@@ -9,7 +9,7 @@ import { createIdleTracker } from "./idle.ts";
 import { saveSessionStudioAsync } from "./session-save.ts";
 
 describe(saveSessionStudioAsync, () => {
-	it("rejects an ended session before looking for Studio", async () => {
+	it("rejects an ended session before looking for Studio", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(
@@ -25,28 +25,31 @@ describe(saveSessionStudioAsync, () => {
 		).rejects.toMatchObject({ name: "AbortError" });
 	});
 
-	it.for(["stopped", "stopping"] as const)("rejects saving a %s session", async (phase) => {
-		expect.assertions(1);
+	it.for(["stopped", "stopping"] as const)(
+		"rejects saving a %s session",
+		async (phase, { expect }) => {
+			expect.assertions(1);
 
-		await expect(
-			saveSessionStudioAsync(
-				{
-					context: createCommandContext(),
-					idle: createIdleTracker(1, 0),
-					status: fromPartial({ snapshot: () => makeStatus({ phase }) }),
-				},
-				{ signal: AbortSignal.any([]) },
-				1000,
-			),
-		).rejects.toMatchObject({
-			code: "not_running",
-			message: "The session is stopping.",
-		});
-	});
+			await expect(
+				saveSessionStudioAsync(
+					{
+						context: createCommandContext(),
+						idle: createIdleTracker(1, 0),
+						status: fromPartial({ snapshot: () => makeStatus({ phase }) }),
+					},
+					{ signal: AbortSignal.any([]) },
+					1000,
+				),
+			).rejects.toMatchObject({
+				code: "not_running",
+				message: "The session is stopping.",
+			});
+		},
+	);
 
 	it.for(["off", "closed", "open"] as const)(
 		"rejects an unavailable %s Studio",
-		async (status) => {
+		async (status, { expect }) => {
 			expect.assertions(1);
 
 			const session = makeStatus();
@@ -75,7 +78,9 @@ describe(saveSessionStudioAsync, () => {
 		},
 	);
 
-	it("counts opening time against the save deadline and resets idle activity on failure", async () => {
+	it("counts opening time against the save deadline and resets idle activity on failure", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const manual = createManualClock(5000);
@@ -107,7 +112,7 @@ describe(saveSessionStudioAsync, () => {
 
 	it.for(["request", "session"] as const)(
 		"cancels an opening wait when its %s ends",
-		async (kind) => {
+		async (kind, { expect }) => {
 			expect.assertions(1);
 
 			const manual = createManualClock();

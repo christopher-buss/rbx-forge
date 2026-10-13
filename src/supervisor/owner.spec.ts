@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createStopSource } from "../session/stop-source.ts";
 import { encodeStop } from "./channel.ts";
@@ -19,7 +19,7 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(watchOwner, () => {
-	it("should pass on a stop line's signal and ignore other lines", async () => {
+	it("should pass on a stop line's signal and ignore other lines", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { input, stop } = watched();
@@ -34,7 +34,7 @@ describe(watchOwner, () => {
 		expect(stop.reason()).toStrictEqual({ signal: "SIGINT", type: "signal" });
 	});
 
-	it("should stop with owner_gone at EOF", async () => {
+	it("should stop with owner_gone at EOF", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { input, stop } = watched();
@@ -44,7 +44,7 @@ describe(watchOwner, () => {
 		expect(stop.reason()).toStrictEqual({ type: "owner_gone" });
 	});
 
-	it("should stop with owner_gone when the pipe fails", async () => {
+	it("should stop with owner_gone when the pipe fails", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { input, stop } = watched();

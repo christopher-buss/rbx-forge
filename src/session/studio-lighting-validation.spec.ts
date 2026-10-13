@@ -1,7 +1,8 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
@@ -16,25 +17,28 @@ import {
 import { watchHiddenLightingAsync } from "../studio/lighting-dialog.ts";
 import { followSessionStudio } from "./studio-part.ts";
 
-function followingLightingStudio({
-	aborted = false,
-	desktop = "hidden",
-	dismissFailsOnce = false,
-	hasDialog = true,
-	hasLock = true,
-	hiddenWindows = false,
-	identity,
-	kind,
-}: {
-	aborted?: boolean;
-	desktop?: "hidden" | "user";
-	dismissFailsOnce?: boolean;
-	hasDialog?: boolean;
-	hasLock?: boolean;
-	hiddenWindows?: boolean;
-	identity?: { pid: number; startTime: string };
-	kind?: "gone" | "reused";
-} = {}) {
+function followingLightingStudio(
+	onTestFinished: TestContext["onTestFinished"],
+	{
+		aborted = false,
+		desktop = "hidden",
+		dismissFailsOnce = false,
+		hasDialog = true,
+		hasLock = true,
+		hiddenWindows = false,
+		identity,
+		kind,
+	}: {
+		aborted?: boolean;
+		desktop?: "hidden" | "user";
+		dismissFailsOnce?: boolean;
+		hasDialog?: boolean;
+		hasLock?: boolean;
+		hiddenWindows?: boolean;
+		identity?: { pid: number; startTime: string };
+		kind?: "gone" | "reused";
+	} = {},
+) {
 	const memory = createMemoryFileSystem({
 		"game.rbxl": "place",
 		"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
@@ -128,7 +132,10 @@ function followingLightingStudio({
 }
 
 describe("startup Lighting identity checks", () => {
-	it("ends observation if its polling timer fails while the session remains active", async () => {
+	it("ends observation if its polling timer fails while the session remains active", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({
@@ -158,10 +165,16 @@ describe("startup Lighting identity checks", () => {
 		await expect(watched).resolves.toBeUndefined();
 	});
 
-	it("dismisses the hidden session migration prompt on the user's desktop", async () => {
+	it("dismisses the hidden session migration prompt on the user's desktop", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const run = followingLightingStudio({ desktop: "user", hiddenWindows: true });
+		const run = followingLightingStudio(onTestFinished, {
+			desktop: "user",
+			hiddenWindows: true,
+		});
 		for (let tick = 0; tick < 20; tick++) {
 			await Promise.resolve();
 		}
@@ -170,10 +183,15 @@ describe("startup Lighting identity checks", () => {
 		expect(run.studio.blocked).toBeFalse();
 	});
 
-	it("retries a temporary accessibility failure while Studio finishes opening", async () => {
+	it("retries a temporary accessibility failure while Studio finishes opening", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { manual, studio } = followingLightingStudio({ dismissFailsOnce: true });
+		const { manual, studio } = followingLightingStudio(onTestFinished, {
+			dismissFailsOnce: true,
+		});
 		for (let tick = 0; tick < 20; tick++) {
 			await Promise.resolve();
 		}
@@ -191,21 +209,27 @@ describe("startup Lighting identity checks", () => {
 	it.for([
 		{ pid: 43, startTime: "42" },
 		{ pid: 42, startTime: "old" },
-	])("leaves another recorded Studio identity %j untouched", async (identity) => {
-		expect.assertions(1);
+	])(
+		"leaves another recorded Studio identity %j untouched",
+		async (identity, { expect, onTestFinished }) => {
+			expect.assertions(1);
 
-		const { studio } = followingLightingStudio({ identity });
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+			const { studio } = followingLightingStudio(onTestFinished, { identity });
+			for (let tick = 0; tick < 20; tick++) {
+				await Promise.resolve();
+			}
 
-		expect(studio.blocked).toBeTrue();
-	});
+			expect(studio.blocked).toBeTrue();
+		},
+	);
 
-	it("ends migration handling on the user desktop even if Studio moves to hidden later", async () => {
+	it("ends migration handling on the user desktop even if Studio moves to hidden later", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { manual, studio } = followingLightingStudio({ desktop: "user" });
+		const { manual, studio } = followingLightingStudio(onTestFinished, { desktop: "user" });
 		for (let tick = 0; tick < 20; tick++) {
 			await Promise.resolve();
 		}
@@ -221,10 +245,13 @@ describe("startup Lighting identity checks", () => {
 		expect(studio.blocked).toBeTrue();
 	});
 
-	it("leaves a migration prompt untouched after the Studio follow has ended", async () => {
+	it("leaves a migration prompt untouched after the Studio follow has ended", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
-		const { studio } = followingLightingStudio({ aborted: true });
+		const { studio } = followingLightingStudio(onTestFinished, { aborted: true });
 		for (let tick = 0; tick < 20; tick++) {
 			await Promise.resolve();
 		}
@@ -232,10 +259,13 @@ describe("startup Lighting identity checks", () => {
 		expect(studio.blocked).toBeTrue();
 	});
 
-	it("ends migration handling once thirty seconds have passed since observing the lock", async () => {
+	it("ends migration handling once thirty seconds have passed since observing the lock", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
-		const { manual, studio } = followingLightingStudio({ hasDialog: false });
+		const { manual, studio } = followingLightingStudio(onTestFinished, { hasDialog: false });
 		for (let tick = 0; tick < 20; tick++) {
 			await Promise.resolve();
 		}
@@ -250,10 +280,13 @@ describe("startup Lighting identity checks", () => {
 		expect(studio.blocked).toBeTrue();
 	});
 
-	it("keeps one deadline after observing the lock rather than restarting it on every poll", async () => {
+	it("keeps one deadline after observing the lock rather than restarting it on every poll", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
-		const { manual, studio } = followingLightingStudio({ hasDialog: false });
+		const { manual, studio } = followingLightingStudio(onTestFinished, { hasDialog: false });
 		for (let tick = 0; tick < 20; tick++) {
 			await Promise.resolve();
 		}
@@ -273,10 +306,13 @@ describe("startup Lighting identity checks", () => {
 		expect(studio.blocked).toBeTrue();
 	});
 
-	it("stops after dismissing the startup migration rather than pressing a later prompt", async () => {
+	it("stops after dismissing the startup migration rather than pressing a later prompt", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { manual, studio } = followingLightingStudio();
+		const { manual, studio } = followingLightingStudio(onTestFinished);
 		for (let tick = 0; tick < 20; tick++) {
 			await Promise.resolve();
 		}
@@ -293,10 +329,15 @@ describe("startup Lighting identity checks", () => {
 		expect(studio.blocked).toBeTrue();
 	});
 
-	it("does not handle a prompt when the place opens at its expired opening deadline", async () => {
+	it("does not handle a prompt when the place opens at its expired opening deadline", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
-		const { manual, memory, studio } = followingLightingStudio({ hasLock: false });
+		const { manual, memory, studio } = followingLightingStudio(onTestFinished, {
+			hasLock: false,
+		});
 		for (let tick = 0; tick < 20; tick++) {
 			await Promise.resolve();
 		}
@@ -315,10 +356,10 @@ describe("startup Lighting identity checks", () => {
 
 	it.for(["gone", "reused"] as const)(
 		"leaves the dialog untouched when Studio is %s after verifying its lock",
-		async (kind) => {
+		async (kind, { expect, onTestFinished }) => {
 			expect.assertions(2);
 
-			const { studio } = followingLightingStudio({ kind });
+			const { studio } = followingLightingStudio(onTestFinished, { kind });
 			for (let tick = 0; tick < 20; tick++) {
 				await Promise.resolve();
 			}

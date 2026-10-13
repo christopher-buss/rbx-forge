@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_CODE_HELP } from "../exit-codes.ts";
 import { COMMANDS } from "./commands.ts";
@@ -16,25 +16,28 @@ const COMMAND_FLAGS = COMMANDS.flatMap((command) => {
 });
 
 describe(renderHelp, () => {
-	it.for(COMMANDS)("should list the $name command with its summary", ({ name, summary }) => {
-		expect.assertions(1);
+	it.for(COMMANDS)(
+		"should list the $name command with its summary",
+		({ name, summary }, { expect }) => {
+			expect.assertions(1);
 
-		expect(GLOBAL_PAGE_LINES).toContain(`  ${name.padEnd(NAME_WIDTH)}  ${summary}`);
-	});
+			expect(GLOBAL_PAGE_LINES).toContain(`  ${name.padEnd(NAME_WIDTH)}  ${summary}`);
+		},
+	);
 
-	it.for(GLOBAL_FLAGS)("should list the global flag --$name", ({ name }) => {
+	it.for(GLOBAL_FLAGS)("should list the global flag --$name", ({ name }, { expect }) => {
 		expect.assertions(1);
 
 		expect(GLOBAL_PAGE_LINES.some((line) => line.includes(`--${name}`))).toBeTrue();
 	});
 
-	it.for(EXIT_CODE_HELP)("should list exit code %i", ([code, text]) => {
+	it.for(EXIT_CODE_HELP)("should list exit code %i", ([code, text], { expect }) => {
 		expect.assertions(1);
 
 		expect(GLOBAL_PAGE_LINES).toContain(`  ${String(code).padEnd(3)}  ${text}`);
 	});
 
-	it("should lay out the page with aligned columns", () => {
+	it("should lay out the page with aligned columns", ({ expect }) => {
 		expect.assertions(1);
 
 		const commands: ReadonlyArray<CommandDefinition> = [
@@ -74,7 +77,7 @@ describe(renderHelp, () => {
 		);
 	});
 
-	it("should end by pointing at the command pages", () => {
+	it("should end by pointing at the command pages", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(renderHelp(COMMANDS)).toEndWith(
@@ -86,14 +89,14 @@ describe(renderHelp, () => {
 describe(renderCommandHelp, () => {
 	it.for(COMMAND_FLAGS)(
 		"should list --$flag.name on the $command.name page",
-		({ command, flag }) => {
+		({ command, flag }, { expect }) => {
 			expect.assertions(1);
 
 			expect(renderCommandHelp(command)).toContain(`--${flag.name}`);
 		},
 	);
 
-	it("should show value placeholders, config overrides, and repeatable flags", () => {
+	it("should show value placeholders, config overrides, and repeatable flags", ({ expect }) => {
 		expect.assertions(1);
 
 		const page = renderCommandHelp({
@@ -132,7 +135,7 @@ describe(renderCommandHelp, () => {
 		);
 	});
 
-	it("should show the argument of a command that reads one", () => {
+	it("should show the argument of a command that reads one", ({ expect }) => {
 		expect.assertions(2);
 
 		const page = renderCommandHelp({
@@ -147,7 +150,7 @@ describe(renderCommandHelp, () => {
 		expect(page).toContain("\nArguments\n  <name>  The name.\n");
 	});
 
-	it("should leave out the options block for a command without flags", () => {
+	it("should leave out the options block for a command without flags", ({ expect }) => {
 		expect.assertions(1);
 
 		const page = renderCommandHelp({
@@ -164,14 +167,14 @@ describe(renderCommandHelp, () => {
 describe("flag tables", () => {
 	it.for(ALL_FLAGS)(
 		"should give --$name a value placeholder only when it takes a value",
-		(flag) => {
+		(flag, { expect }) => {
 			expect.assertions(1);
 
 			expect(flag.value === undefined).toBe(flag.kind === "boolean");
 		},
 	);
 
-	it.for(COMMANDS)("should use each flag name once on $name", ({ flags }) => {
+	it.for(COMMANDS)("should use each flag name once on $name", ({ flags }, { expect }) => {
 		expect.assertions(1);
 
 		const names = [...GLOBAL_FLAGS, ...flags].map(({ name }) => name);

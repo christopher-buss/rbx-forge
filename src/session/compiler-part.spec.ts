@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import { createCommandContext, createTestSeams } from "../../test/helpers/seams.ts";
@@ -36,7 +36,7 @@ function makeAdder(started: Awaited<ReturnType<ServiceParts["startAsync"]>>) {
 }
 
 describe(createPartAdder, () => {
-	it("should start nothing when no part is asked for", async () => {
+	it("should start nothing when no part is asked for", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { add, startAsync } = makeAdder({ stopped: Promise.resolve() });
@@ -45,7 +45,9 @@ describe(createPartAdder, () => {
 		expect(startAsync).not.toHaveBeenCalled();
 	});
 
-	it("should name no part when the session ends while the compiler starts", async () => {
+	it("should name no part when the session ends while the compiler starts", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { add, restart } = makeAdder(undefined);
@@ -54,7 +56,9 @@ describe(createPartAdder, () => {
 		expect(restart).toHaveBeenCalledOnce();
 	});
 
-	it("should add Studio and Rojo once the compiler started, and name them after it", async () => {
+	it("should add Studio and Rojo once the compiler started, and name them after it", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { add, addStudio, startAsync } = makeAdder({ stopped: Promise.resolve() });
@@ -134,7 +138,7 @@ async function waitForStuckAsync(isWaitFirst: boolean): Promise<unknown> {
 }
 
 describe(startCompilerAsync, () => {
-	it("should fail a compiler whose first build does not end in time", async () => {
+	it("should fail a compiler whose first build does not end in time", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { manual, scope, setup, startAsync, stop } = startStuck();
@@ -145,7 +149,7 @@ describe(startCompilerAsync, () => {
 		expect(stop).toHaveBeenCalledExactlyOnceWith("compiler", FIRST_BUILD_LATE);
 	});
 
-	it("should track the wait for its first build", async () => {
+	it("should track the wait for its first build", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { scope, setup, startAsync, stop } = startStuck();
@@ -163,7 +167,7 @@ describe(startCompilerAsync, () => {
 		],
 	] as const)(
 		"should fail a wait for its build with compile_timeout when %s",
-		async ([, isWaitFirst, message]) => {
+		async ([, isWaitFirst, message], { expect }) => {
 			expect.assertions(3);
 
 			const error = await waitForStuckAsync(isWaitFirst);
@@ -176,7 +180,7 @@ describe(startCompilerAsync, () => {
 		},
 	);
 
-	it("should keep a compiler whose first build ended", async () => {
+	it("should keep a compiler whose first build ended", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { manual, read, scope, setup, startAsync, stop } = startStuck();

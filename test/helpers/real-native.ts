@@ -16,7 +16,7 @@ import { makeTemporaryDirectory } from "./temporary-directory.ts";
  * Where `pnpm build:native` puts the addon. Integration and e2e tests load it
  * from here; run that script before them.
  */
-export const NATIVE_DIRECTORY: string = path.join(
+export const NATIVE_DIRECTORY = path.join(
 	import.meta.dirname,
 	"..",
 	"..",
@@ -28,7 +28,7 @@ export const NATIVE_DIRECTORY: string = path.join(
 /**
  * Where `pnpm build:reaper` puts the reaper binary, next to the addon.
  */
-export const REAPER_PATH: string = path.join(
+export const REAPER_PATH = path.join(
 	NATIVE_DIRECTORY,
 	process.platform === "win32" ? "forge-reaper.exe" : "forge-reaper",
 );

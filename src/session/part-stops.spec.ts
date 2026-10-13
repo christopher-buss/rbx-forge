@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, expect as matchers, vi } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import type { FakeNative, FakeProcess } from "../../test/helpers/native.ts";
@@ -44,7 +44,7 @@ const PLACE = path.join(PROJECT, "game.rbxl");
 const LOCK = `${PLACE}.lock`;
 const STUDIO = String.raw`C:\Roblox\Versions\version-1\RobloxStudioBeta.exe`;
 const STUDIO_PID = 4242;
-const ANY_TEXT: unknown = expect.any(String);
+const ANY_TEXT: unknown = matchers.any(String);
 const DOWN: StopPartsRequest = { force: false, keepStudio: false, scope: "down" };
 const STOP: StopPartsRequest = { force: false, keepStudio: false, scope: "stop" };
 
@@ -212,7 +212,7 @@ describe(planStops, () => {
 			DOWN,
 			{ kept: [], stop: ["studio"] },
 		],
-	])("should stop %s", ([, services, request, plan]) => {
+	])("should stop %s", ([, services, request, plan], { expect }) => {
 		expect.assertions(1);
 
 		expect(planStops(services, request)).toStrictEqual(plan);
@@ -220,7 +220,7 @@ describe(planStops, () => {
 });
 
 describe(sessionStudioTarget, () => {
-	it("should target the Studio forge started, open or opening", () => {
+	it("should target the Studio forge started, open or opening", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(
@@ -237,7 +237,7 @@ describe(sessionStudioTarget, () => {
 		);
 	});
 
-	it("should target nothing for a closed or unknown place", () => {
+	it("should target nothing for a closed or unknown place", ({ expect }) => {
 		expect.assertions(3);
 
 		expect(
@@ -247,7 +247,7 @@ describe(sessionStudioTarget, () => {
 		expect(sessionStudioTarget({ owner: null, status: "opening" })).toBeUndefined();
 	});
 
-	it("should need both the PID and the start time to pin", () => {
+	it("should need both the PID and the start time to pin", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -401,32 +401,37 @@ describe(createPartStopper, () => {
 	it.for<{ name: string; studio: Partial<SessionStudio> }>([
 		{ name: "attached", studio: {} },
 		{ name: "launched", studio: { pid: STUDIO_PID } },
-	])("should close a $name Studio while initial sync is pending", async ({ studio }) => {
-		expect.assertions(2);
+	])(
+		"should close a $name Studio while initial sync is pending",
+		async ({ studio }, { expect }) => {
+			expect.assertions(2);
 
-		const world = makeWorld(
-			servicesWith({
-				compiler: READY,
-				studio: {
-					...studio,
-					place: PLACE,
-					startTime: String(STUDIO_PID),
-					status: "opening",
-				},
-			}),
-			["compiler"],
-		);
-		world.stopper.state.waitsForSync = true;
-		openStudio(world);
+			const world = makeWorld(
+				servicesWith({
+					compiler: READY,
+					studio: {
+						...studio,
+						place: PLACE,
+						startTime: String(STUDIO_PID),
+						status: "opening",
+					},
+				}),
+				["compiler"],
+			);
+			world.stopper.state.waitsForSync = true;
+			openStudio(world);
 
-		await expect(stopAsync(world, STOP)).resolves.toMatchObject({
-			stopped: ["studio"],
-			studio: { stop: { status: "stopped" } },
-		});
-		expect(world.now()).toBe(0);
-	});
+			await expect(stopAsync(world, STOP)).resolves.toMatchObject({
+				stopped: ["studio"],
+				studio: { stop: { status: "stopped" } },
+			});
+			expect(world.now()).toBe(0);
+		},
+	);
 
-	it("should wait for its own Studio lock while synchronization is pending", async () => {
+	it("should wait for its own Studio lock while synchronization is pending", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld(
@@ -454,7 +459,7 @@ describe(createPartStopper, () => {
 
 	it.for([DOWN, STOP])(
 		"closes a verified hidden Studio on the user desktop for $scope",
-		async (request) => {
+		async (request, { expect }) => {
 			expect.assertions(2);
 
 			const world = makeWorld(
@@ -477,7 +482,9 @@ describe(createPartStopper, () => {
 		},
 	);
 
-	it("should close Studio, stop Rojo and the compiler, then end the session for down", async () => {
+	it("should close Studio, stop Rojo and the compiler, then end the session for down", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const world = makeWorld(servicesWith({ compiler: READY, rojo: READY, studio: OPEN }), [
@@ -504,7 +511,7 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should never end a session a start holds, even with no part left", async () => {
+	it("should never end a session a start holds, even with no part left", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ compiler: READY }));
@@ -518,7 +525,7 @@ describe(createPartStopper, () => {
 		expect(world.ended).toStrictEqual([]);
 	});
 
-	it("should end an up session with no part for down, and stop nothing", async () => {
+	it("should end an up session with no part for down, and stop nothing", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith());
@@ -534,7 +541,7 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should keep owned parts, and the session with them", async () => {
+	it("should keep owned parts, and the session with them", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(
@@ -561,7 +568,9 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should keep owned parts for the idle stop, close the Studio with no owner, and go on", async () => {
+	it("should keep owned parts for the idle stop, close the Studio with no owner, and go on", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld(
@@ -582,7 +591,9 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should let a found Studio go for down, open, stop its Rojo, and end the session", async () => {
+	it("should let a found Studio go for down, open, stop its Rojo, and end the session", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const world = makeWorld(servicesWith({ compiler: READY, rojo: READY, studio: FOUND }), [
@@ -605,7 +616,9 @@ describe(createPartStopper, () => {
 		}).toStrictEqual({ isAttached: false, left: 1, recorded: [] });
 	});
 
-	it("should let a found Studio go for the idle stop, and go on for an owned compiler", async () => {
+	it("should let a found Studio go for the idle stop, and go on for an owned compiler", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld(
@@ -623,7 +636,9 @@ describe(createPartStopper, () => {
 		expect(world.studioLeft).toHaveBeenCalledOnce();
 	});
 
-	it("should keep a found Studio attached for restart, and stop the services", async () => {
+	it("should keep a found Studio attached for restart, and stop the services", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const world = makeWorld(servicesWith({ compiler: READY, rojo: READY, studio: FOUND }), [
@@ -645,7 +660,7 @@ describe(createPartStopper, () => {
 		}).toStrictEqual({ isAttached: true, left: 0 });
 	});
 
-	it("should keep a session whose only part is an owned Studio", async () => {
+	it("should keep a session whose only part is an owned Studio", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ studio: { ...OPEN, ...OWNED } }));
@@ -658,7 +673,9 @@ describe(createPartStopper, () => {
 		expect(world.stopper.state.isAttached).toBeTrue();
 	});
 
-	it("should keep the Studio of another place attached, also with keepStudio", async () => {
+	it("should keep the Studio of another place attached, also with keepStudio", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ studio: OPEN }));
@@ -670,7 +687,7 @@ describe(createPartStopper, () => {
 		expect(world.stopper.state.isAttached).toBeTrue();
 	});
 
-	it("should close an owned Studio with force", async () => {
+	it("should close an owned Studio with force", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ rojo: READY, studio: { ...OPEN, ...OWNED } }), [
@@ -686,7 +703,9 @@ describe(createPartStopper, () => {
 		expect(studio.alive).toBeFalse();
 	});
 
-	it("should close Studio and stop its Rojo for stop, and keep the session for its compiler", async () => {
+	it("should close Studio and stop its Rojo for stop, and keep the session for its compiler", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ compiler: READY, rojo: READY, studio: OPEN }), [
@@ -708,7 +727,9 @@ describe(createPartStopper, () => {
 		}).toStrictEqual({ attached: false, ended: [], running: ["compiler"] });
 	});
 
-	it("should end the follow of the Studio it closed, so its late close stops nothing", async () => {
+	it("should end the follow of the Studio it closed, so its late close stops nothing", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ rojo: READY, studio: OPEN }), ["rojo"]);
@@ -721,7 +742,7 @@ describe(createPartStopper, () => {
 		expect(world.stopper.state).toStrictEqual({ isAttached: false, letGo: undefined });
 	});
 
-	it("should keep following a Studio it could not close", async () => {
+	it("should keep following a Studio it could not close", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ rojo: READY, studio: OPEN }), ["rojo"]);
@@ -734,7 +755,7 @@ describe(createPartStopper, () => {
 		expect(world.stopper.state).toStrictEqual({ isAttached: true, letGo });
 	});
 
-	it("should leave the session alone for stop when it has no Studio", async () => {
+	it("should leave the session alone for stop when it has no Studio", async ({ expect }) => {
 		expect.assertions(1);
 
 		const world = makeWorld(servicesWith());
@@ -746,7 +767,7 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should never end the session for restart", async () => {
+	it("should never end the session for restart", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ compiler: READY }), ["compiler"]);
@@ -759,7 +780,9 @@ describe(createPartStopper, () => {
 		expect(world.ended).toStrictEqual([]);
 	});
 
-	it("should report a Studio it cannot verify, keep it and its Rojo for stop", async () => {
+	it("should report a Studio it cannot verify, keep it and its Rojo for stop", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ rojo: READY, studio: OPEN }), ["rojo"]);
@@ -785,7 +808,7 @@ describe(createPartStopper, () => {
 		}).toStrictEqual({ alive: true, attached: true, running: ["rojo"] });
 	});
 
-	it("should stop no service for restart when it cannot close Studio", async () => {
+	it("should stop no service for restart when it cannot close Studio", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ compiler: READY, rojo: READY, studio: OPEN }), [
@@ -803,7 +826,7 @@ describe(createPartStopper, () => {
 		expect([...world.running]).toStrictEqual(["rojo", "compiler"]);
 	});
 
-	it("should pass on a failure with no hint", async () => {
+	it("should pass on a failure with no hint", async ({ expect }) => {
 		expect.assertions(1);
 
 		const world = makeWorld(servicesWith({ studio: OPEN }));
@@ -823,7 +846,7 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should pass on the details of a failure", async () => {
+	it("should pass on the details of a failure", async ({ expect }) => {
 		expect.assertions(1);
 
 		const world = makeWorld(servicesWith({ studio: OPEN }));
@@ -851,7 +874,9 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should let go of a Studio it cannot verify for down, and still end the session", async () => {
+	it("should let go of a Studio it cannot verify for down, and still end the session", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ rojo: READY, studio: OPEN }), ["rojo"]);
@@ -868,7 +893,7 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should leave Studio open with keepStudio, and let the session go", async () => {
+	it("should leave Studio open with keepStudio, and let the session go", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ rojo: READY, studio: OPEN }), ["rojo"]);
@@ -882,7 +907,7 @@ describe(createPartStopper, () => {
 		expect(studio.alive).toBeTrue();
 	});
 
-	it("should wait while Studio is opening, then close it", async () => {
+	it("should wait while Studio is opening, then close it", async ({ expect }) => {
 		expect.assertions(2);
 
 		// The compiler keeps the session: no syncback wait.
@@ -905,7 +930,9 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should close the Studio forge started through its pin, once the wait ends", async () => {
+	it("should close the Studio forge started through its pin, once the wait ends", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld(
@@ -938,7 +965,7 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should touch no Studio that has no place yet", async () => {
+	it("should touch no Studio that has no place yet", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ studio: { status: "opening" } }));
@@ -952,7 +979,9 @@ describe(createPartStopper, () => {
 		expect(world.now()).toBe(STUDIO_OPEN_WAIT_MS);
 	});
 
-	it("should end Studio without a save after its close time, keeping its files as asked", async () => {
+	it("should end Studio without a save after its close time, keeping its files as asked", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ studio: OPEN }));
@@ -971,7 +1000,9 @@ describe(createPartStopper, () => {
 		expect(world.now()).toBeGreaterThanOrEqual(STUDIO_CLOSE_MS);
 	});
 
-	it("should keep the auto-recovery files as the config says when the request says nothing", async () => {
+	it("should keep the auto-recovery files as the config says when the request says nothing", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const world = makeWorld(servicesWith({ studio: OPEN }));
@@ -982,7 +1013,7 @@ describe(createPartStopper, () => {
 		});
 	});
 
-	it("should end the session once a syncback flush outlives its bound", async () => {
+	it("should end the session once a syncback flush outlives its bound", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld(servicesWith({ studio: OPEN }));

@@ -4,7 +4,7 @@
  * Studio (#50).
  */
 import nodeFs from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { findSession } from "../../src/client/session.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
@@ -30,7 +30,9 @@ function rolesOf(fixture: Fixture): Array<string> {
 }
 
 describe("attach an open Studio", () => {
-	it("should attach the Studio that has the place open on start, and close it on stop --force", async () => {
+	it("should attach the Studio that has the place open on start, and close it on stop --force", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(BUILD_FIRST, { studio: true });
@@ -48,7 +50,7 @@ describe("attach an open Studio", () => {
 		expect(rolesOf(fixture).filter((role) => !role.startsWith("rojo serve"))).toStrictEqual([]);
 	});
 
-	it("should attach the Studio a start left open, when start runs again", async () => {
+	it("should attach the Studio a start left open, when start runs again", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync(BUILD_FIRST, { studio: true });

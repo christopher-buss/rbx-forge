@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createMemoryFileSystem, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
 import type { Environment } from "../seams/seams.ts";
@@ -41,7 +41,7 @@ function projectWith(
 }
 
 describe(resolveTool, () => {
-	it("should run a dependency's bin entry with Node", () => {
+	it("should run a dependency's bin entry with Node", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -54,7 +54,7 @@ describe(resolveTool, () => {
 		});
 	});
 
-	it("should take a single bin named after the package", () => {
+	it("should take a single bin named after the package", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -64,7 +64,7 @@ describe(resolveTool, () => {
 		expect(resolveTool("rojo", lookup)).toMatchObject({ type: "node" });
 	});
 
-	it("should take a single bin named after the unscoped package", () => {
+	it("should take a single bin named after the unscoped package", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -81,7 +81,7 @@ describe(resolveTool, () => {
 		["no bin", { name: "rojo" }],
 		["a bin whose file is missing", { bin: { rojo: "bin/missing.js" } }],
 		["a manifest that breaks the schema", { bin: 5 }],
-	] as const)("should skip a dependency with %s", ([, manifest]) => {
+	] as const)("should skip a dependency with %s", ([, manifest], { expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -89,7 +89,7 @@ describe(resolveTool, () => {
 		).toBeUndefined();
 	});
 
-	it("should read dependencies of every kind", () => {
+	it("should read dependencies of every kind", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -125,7 +125,7 @@ describe(resolveTool, () => {
 			"a dependency that is not installed",
 			{ "package.json": '{ "devDependencies": { "x": "1" } }' },
 		],
-	] as const)("should fall back to PATH with %s", ([, files]) => {
+	] as const)("should fall back to PATH with %s", ([, files], { expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -139,7 +139,7 @@ describe(resolveTool, () => {
 		});
 	});
 
-	it("should take the first PATH directory that has the command", () => {
+	it("should take the first PATH directory that has the command", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -153,7 +153,7 @@ describe(resolveTool, () => {
 		});
 	});
 
-	it("should resolve a command given as a path against the project", () => {
+	it("should resolve a command given as a path against the project", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({ files: { "tools/rojo": "" } });
@@ -164,13 +164,13 @@ describe(resolveTool, () => {
 		});
 	});
 
-	it("should find nothing without a PATH", () => {
+	it("should find nothing without a PATH", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(resolveTool("rojo", makeLookup())).toBeUndefined();
 	});
 
-	it("should try the Windows .exe under WSL", () => {
+	it("should try the Windows .exe under WSL", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -184,7 +184,7 @@ describe(resolveTool, () => {
 		});
 	});
 
-	it("should not try a .exe on macOS, even with a WSL variable", () => {
+	it("should not try a .exe on macOS, even with a WSL variable", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -196,7 +196,7 @@ describe(resolveTool, () => {
 		expect(resolveTool("rojo", lookup)).toBeUndefined();
 	});
 
-	it("should not search the project root for an empty PATH entry", () => {
+	it("should not search the project root for an empty PATH entry", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({ environment: { PATH: `:${TOOLS}` }, files: { rojo: "" } });
@@ -204,7 +204,7 @@ describe(resolveTool, () => {
 		expect(resolveTool("rojo", lookup)).toBeUndefined();
 	});
 
-	it("should not try a .exe outside WSL", () => {
+	it("should not try a .exe outside WSL", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -220,7 +220,7 @@ describe(resolveTool, () => {
 		["rojo.com", "executable"],
 		["rojo.cmd", "batch"],
 		["rojo.bat", "batch"],
-	] as const)("should find %s on a Windows PATH as %s", ([file, kind]) => {
+	] as const)("should find %s on a Windows PATH as %s", ([file, kind], { expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -235,7 +235,7 @@ describe(resolveTool, () => {
 		});
 	});
 
-	it("should follow PATHEXT order and ignore empty entries", () => {
+	it("should follow PATHEXT order and ignore empty entries", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -250,7 +250,7 @@ describe(resolveTool, () => {
 		});
 	});
 
-	it("should keep an extension a Windows command already has", () => {
+	it("should keep an extension a Windows command already has", ({ expect }) => {
 		expect.assertions(1);
 
 		const lookup = makeLookup({
@@ -269,7 +269,7 @@ describe(resolveTool, () => {
 describe(toolInvocation, () => {
 	const host = { ...createTestSeams().host, execPath: "/usr/bin/node" };
 
-	it("should run a Node tool's entry with the current Node", () => {
+	it("should run a Node tool's entry with the current Node", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -277,7 +277,7 @@ describe(toolInvocation, () => {
 		).toStrictEqual({ args: ["/p/cli.js", "-w"], file: "/usr/bin/node" });
 	});
 
-	it("should run an executable directly", () => {
+	it("should run an executable directly", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -285,7 +285,7 @@ describe(toolInvocation, () => {
 		).toStrictEqual({ args: ["build"], file: "/bin/rojo" });
 	});
 
-	it("should run a batch file through cmd.exe", () => {
+	it("should run a batch file through cmd.exe", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(

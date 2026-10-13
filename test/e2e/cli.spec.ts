@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { EXIT_SUCCESS, EXIT_USAGE } from "../../src/exit-codes.ts";
@@ -6,7 +6,7 @@ import { parseLines } from "../helpers/output.ts";
 import { runBinAsync } from "./run-bin.ts";
 
 describe("forge bin", () => {
-	it("should exit 0 printing the package version", async () => {
+	it("should exit 0 printing the package version", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(runBinAsync(["--version"])).resolves.toMatchObject({
@@ -16,7 +16,7 @@ describe("forge bin", () => {
 		});
 	});
 
-	it("should exit 0 printing the help page", async () => {
+	it("should exit 0 printing the help page", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { status, stderr, stdout } = await runBinAsync(["--help"]);
@@ -26,7 +26,7 @@ describe("forge bin", () => {
 		expect(stdout).toContain("--version");
 	});
 
-	it("should exit 2 with an NDJSON usage error for an unknown command", async () => {
+	it("should exit 2 with an NDJSON usage error for an unknown command", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { status, stdout } = await runBinAsync(["serve"]);

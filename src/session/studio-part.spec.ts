@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { configureModelSources } from "../../test/helpers/model-sources.ts";
@@ -130,7 +130,7 @@ function fixture(
 }
 
 describe("session Studio plugin capabilities", () => {
-	it("should install the forge plugin beside the managed Rojo plugin", async () => {
+	it("should install the forge plugin beside the managed Rojo plugin", async ({ expect }) => {
 		expect.assertions(1);
 
 		const sources = SCRIPTS.map(
@@ -145,7 +145,7 @@ ${source}`,
 		);
 	});
 
-	it("should recognize the current patched bodies without rewriting them", async () => {
+	it("should recognize the current patched bodies without rewriting them", async ({ expect }) => {
 		expect.assertions(2);
 
 		const sources = SCRIPTS.map(
@@ -159,7 +159,9 @@ ${source}`,
 		expect(run.write).not.toHaveBeenCalled();
 	});
 
-	it("should repair a pair containing one current patch and one stock body", async () => {
+	it("should repair a pair containing one current patch and one stock body", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const app = SCRIPTS[0]!;
@@ -175,7 +177,7 @@ ${source}`,
 
 	it.for([stock.App, "return 'manually changed'"])(
 		"should preserve an unsupported body marked as current",
-		async (source) => {
+		async (source, { expect }) => {
 			expect.assertions(2);
 
 			const run = fixture([
@@ -189,7 +191,7 @@ ${source}`,
 		},
 	);
 
-	it("should cancel after reading identity before binding a callback", async () => {
+	it("should cancel after reading identity before binding a callback", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = fixture([stock.App, stock.ServeSession, "return { protocolVersion = 5 }"]);
@@ -206,7 +208,9 @@ ${source}`,
 		expect(listen).not.toHaveBeenCalled();
 	});
 
-	it("should dispose a callback cancelled during binding before writing the marker", async () => {
+	it("should dispose a callback cancelled during binding before writing the marker", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = fixture([stock.App, stock.ServeSession, "return { protocolVersion = 5 }"]);
@@ -224,7 +228,9 @@ ${source}`,
 		expect(run.close).toHaveBeenCalledOnce();
 	});
 
-	it("should report a direct launcher that bypasses preparation as manual", async () => {
+	it("should report a direct launcher that bypasses preparation as manual", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = fixture([stock.App, stock.ServeSession, "protocolVersion = 5,"], false, false);
@@ -235,7 +241,9 @@ ${source}`,
 		expect(run.close).toHaveBeenCalledOnce();
 	});
 
-	it("should cancel before plugin preparation without installing or writing", async () => {
+	it("should cancel before plugin preparation without installing or writing", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const run = fixture([stock.App, stock.ServeSession, "protocolVersion = 5,"], false, true, {
@@ -255,7 +263,9 @@ ${source}`,
 		expect(run.memory.files()["Documents/Roblox/Plugins/ForgePlugin.rbxm"]).toBeUndefined();
 	});
 
-	it("should cancel after reading a current plugin before Studio launches", async () => {
+	it("should cancel after reading a current plugin before Studio launches", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const sources = SCRIPTS.map(
@@ -276,7 +286,9 @@ ${source}`,
 		expect(run.close).toHaveBeenCalledOnce();
 	});
 
-	it("should promise automatic connection and acknowledgement for the managed patch", async () => {
+	it("should promise automatic connection and acknowledgement for the managed patch", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = fixture([stock.App, stock.ServeSession, "protocolVersion = 5,"]);
@@ -286,7 +298,9 @@ ${source}`,
 		});
 	});
 
-	it("should preserve upstream marker support without promising automatic sync", async () => {
+	it("should preserve upstream marker support without promising automatic sync", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = fixture(["ROJO_OPEN_", "expectedSessionId", "protocolVersion = 5,"]);
@@ -296,7 +310,7 @@ ${source}`,
 		});
 	});
 
-	it("should identify an unknown plugin as manual", async () => {
+	it("should identify an unknown plugin as manual", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = fixture(["unknown", "unknown", "protocolVersion = 5,"]);
@@ -306,7 +320,9 @@ ${source}`,
 		});
 	});
 
-	it("should reset managed capabilities when a direct launch falls back after preparation", async () => {
+	it("should reset managed capabilities when a direct launch falls back after preparation", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = fixture([stock.App, stock.ServeSession, "protocolVersion = 5,"], true);
@@ -317,7 +333,9 @@ ${source}`,
 		});
 	});
 
-	it("should preserve the plugin when the platform launcher bypasses preparation", async () => {
+	it("should preserve the plugin when the platform launcher bypasses preparation", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = fixture([stock.App, stock.ServeSession, "protocolVersion = 5,"], true, false);
@@ -348,7 +366,7 @@ describe("session Studio desktop", () => {
 		{ expected: "user", file: "hidden", platform: "linux" },
 	] as const)(
 		"should resolve $platform default=$default file=$file flag=$flag as $expected",
-		async (desktop) => {
+		async (desktop, { expect }) => {
 			expect.assertions(1);
 
 			const run = fixture(

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
 import type { IdentityRecord } from "./session-files.ts";
@@ -22,7 +22,7 @@ const IDENTITY: IdentityRecord = {
 };
 
 describe(forgeFiles, () => {
-	it("should keep every file under the project's .forge directory", () => {
+	it("should keep every file under the project's .forge directory", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(forgeFiles(PROJECT)).toStrictEqual({
@@ -36,7 +36,7 @@ describe(forgeFiles, () => {
 });
 
 describe(sessionFiles, () => {
-	it("should keep a session's files in its own directory", () => {
+	it("should keep a session's files in its own directory", ({ expect }) => {
 		expect.assertions(1);
 
 		const directory = path.join(PROJECT, ".forge", "sessions", "s-1");
@@ -57,7 +57,7 @@ describe(sessionFiles, () => {
 const SECRET = { value: "secret" };
 
 describe(createSession, () => {
-	it("should write the identity record, the token, and the current hint", () => {
+	it("should write the identity record, the token, and the current hint", ({ expect }) => {
 		expect.assertions(2);
 
 		const memory = createMemoryFileSystem({ ".forge/current": "old\n" });
@@ -72,7 +72,7 @@ describe(createSession, () => {
 		});
 	});
 
-	it("should never replace an identity record", () => {
+	it("should never replace an identity record", ({ expect }) => {
 		expect.assertions(2);
 
 		const memory = createMemoryFileSystem({ ".forge/sessions/s-1/supervisor.id": "first" });
@@ -81,7 +81,7 @@ describe(createSession, () => {
 		expect(memory.files()[".forge/sessions/s-1/supervisor.id"]).toBe("first");
 	});
 
-	it("should never replace a token", () => {
+	it("should never replace a token", ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({ ".forge/sessions/s-1/token": "first" });
@@ -89,7 +89,7 @@ describe(createSession, () => {
 		expect(() => createSession(memory.fileSystem, FORGE, IDENTITY, SECRET)).toThrow(/EEXIST/);
 	});
 
-	it("should make the token readable by its owner only", () => {
+	it("should make the token readable by its owner only", ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
@@ -99,7 +99,7 @@ describe(createSession, () => {
 		expect(memory.fileSystem.statSync(token).mode & 0o777).toBe(0o600);
 	});
 
-	it("should write the token through the writer it is given", () => {
+	it("should write the token through the writer it is given", ({ expect }) => {
 		expect.assertions(2);
 
 		const memory = createMemoryFileSystem();
@@ -117,7 +117,7 @@ describe(createSession, () => {
 });
 
 describe(listSessions, () => {
-	it("should list every session directory", () => {
+	it("should list every session directory", ({ expect }) => {
 		expect.assertions(2);
 
 		const memory = createMemoryFileSystem({
@@ -131,7 +131,7 @@ describe(listSessions, () => {
 });
 
 describe(removeSession, () => {
-	it("should delete the session's directory and the hint that names it", () => {
+	it("should delete the session's directory and the hint that names it", ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({
@@ -144,7 +144,7 @@ describe(removeSession, () => {
 		expect(memory.files()).toStrictEqual({ ".forge/sessions/s-2/supervisor.id": "" });
 	});
 
-	it("should keep a hint that names another session", () => {
+	it("should keep a hint that names another session", ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({
@@ -159,7 +159,7 @@ describe(removeSession, () => {
 		});
 	});
 
-	it("should do nothing more when neither exists", () => {
+	it("should do nothing more when neither exists", ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();

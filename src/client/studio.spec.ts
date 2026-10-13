@@ -1,12 +1,12 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { PROJECT } from "../../test/helpers/seams.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import { recoveryOptions } from "./studio.ts";
 
 describe(recoveryOptions, () => {
-	it("should move files to .forge/recovery, in the mode the config sets", () => {
+	it("should move files to .forge/recovery, in the mode the config sets", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(

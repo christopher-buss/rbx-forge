@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import { REAPER_PATH } from "../../test/helpers/real-native.ts";
@@ -31,7 +31,7 @@ function makeSeams(
 }
 
 describe(createNodeSeams, () => {
-	it("should read the bundled forge plugin from disk", () => {
+	it("should read the bundled forge plugin from disk", ({ expect }) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory();
@@ -43,7 +43,7 @@ describe(createNodeSeams, () => {
 		expect(decoder.decode(makeSeams(undefined, false, model).readForgePlugin())).toBe("model");
 	});
 
-	it("should read and write the real disk", () => {
+	it("should read and write the real disk", ({ expect }) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory();
@@ -54,7 +54,7 @@ describe(createNodeSeams, () => {
 		expect(fileSystem.readFileSync(file, "utf8")).toBe("hello");
 	});
 
-	it("should load config files with the c12 loader", async () => {
+	it("should load config files with the c12 loader", async ({ expect }) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory({
@@ -66,14 +66,14 @@ describe(createNodeSeams, () => {
 		});
 	});
 
-	it("should spawn through node:child_process", () => {
+	it("should spawn through node:child_process", ({ expect }) => {
 		expect.assertions(1);
 
 		// Only the function identity: unit tests never start a process.
 		expect(makeSeams().childProcess.spawn.name).toBe("spawn");
 	});
 
-	it("should describe this Node process and OS", () => {
+	it("should describe this Node process and OS", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(makeSeams().host).toMatchObject({
@@ -83,7 +83,7 @@ describe(createNodeSeams, () => {
 		});
 	});
 
-	it("should report when the OS booted", () => {
+	it("should report when the OS booted", ({ expect }) => {
 		expect.assertions(2);
 
 		const bootTimeMs = makeSeams().host.bootTimeMs();
@@ -92,7 +92,7 @@ describe(createNodeSeams, () => {
 		expect(Math.abs(bootTimeMs - (Date.now() - os.uptime() * 1000))).toBeLessThan(1000);
 	});
 
-	it("should name this process and its user", () => {
+	it("should name this process and its user", ({ expect }) => {
 		expect.assertions(2);
 
 		const { host } = makeSeams();
@@ -101,7 +101,7 @@ describe(createNodeSeams, () => {
 		expect(host.userId).toBe(USER_ID);
 	});
 
-	it("should signal processes through process.kill", () => {
+	it("should signal processes through process.kill", ({ expect }) => {
 		expect.assertions(1);
 
 		// No process has this pid, so the real call fails without a target.
@@ -110,7 +110,7 @@ describe(createNodeSeams, () => {
 		}).toThrow(expect.objectContaining({ code: "ESRCH" }));
 	});
 
-	it("should load the native addon for this host from the given directory", () => {
+	it("should load the native addon for this host from the given directory", ({ expect }) => {
 		expect.assertions(2);
 
 		// An empty directory: the loader looks there and finds no build.
@@ -123,7 +123,9 @@ describe(createNodeSeams, () => {
 		);
 	});
 
-	it("should look for the reaper next to the addon in the given directory", async () => {
+	it("should look for the reaper next to the addon in the given directory", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory();
@@ -140,7 +142,9 @@ describe(createNodeSeams, () => {
 		});
 	});
 
-	it("should look for the reaper in the platform package without a directory", async () => {
+	it("should look for the reaper in the platform package without a directory", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		// No platform package is installed in this repository.
@@ -150,14 +154,14 @@ describe(createNodeSeams, () => {
 		await expect(launch).rejects.toThrow(/^Could not find @rbx-forge\/native-/);
 	});
 
-	it("should find the installed Studio unless told there is none", () => {
+	it("should find the installed Studio unless told there is none", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(makeSeams().installedStudio).toBe(findInstalledStudio);
 		expect(makeSeams(undefined, true).installedStudio).toBe(noInstalledStudio);
 	});
 
-	it("should make random session ids", () => {
+	it("should make random session ids", ({ expect }) => {
 		expect.assertions(2);
 
 		const { randomId } = makeSeams();
@@ -166,7 +170,7 @@ describe(createNodeSeams, () => {
 		expect(randomId()).not.toBe(randomId());
 	});
 
-	it("should probe ports and listen for signals on this process", () => {
+	it("should probe ports and listen for signals on this process", ({ expect }) => {
 		expect.assertions(2);
 
 		const { network, signals } = makeSeams();
@@ -181,13 +185,13 @@ describe(createNodeSeams, () => {
 		expect([during - before, process.listenerCount("SIGINT")]).toStrictEqual([1, before]);
 	});
 
-	it("should tell the time", () => {
+	it("should tell the time", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(makeSeams().clock.now()).toBeGreaterThan(0);
 	});
 
-	it("should prompt on the given streams", async () => {
+	it("should prompt on the given streams", async ({ expect }) => {
 		expect.assertions(1);
 
 		const input = new PassThrough();

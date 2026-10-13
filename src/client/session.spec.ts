@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { LET_GO, makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -26,7 +26,7 @@ const IDENTITY = {
 };
 
 describe(readIdentity, () => {
-	it("should read a record, and nothing else", () => {
+	it("should read a record, and nothing else", ({ expect }) => {
 		expect.assertions(3);
 
 		const memory = createMemoryFileSystem({
@@ -43,7 +43,7 @@ describe(readIdentity, () => {
 });
 
 describe(findSession, () => {
-	it("should find the session current names, with its token", () => {
+	it("should find the session current names, with its token", ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({
@@ -70,7 +70,7 @@ describe(findSession, () => {
 				".forge/sessions/s1/supervisor.id": JSON.stringify(IDENTITY),
 			},
 		],
-	] as const)("should find none with %s", ([, files]) => {
+	] as const)("should find none with %s", ([, files], { expect }) => {
 		expect.assertions(1);
 
 		expect(findSession(createMemoryFileSystem(files).fileSystem, FORGE)).toBeUndefined();
@@ -78,7 +78,7 @@ describe(findSession, () => {
 });
 
 describe(fetchStatusAsync, () => {
-	it("should reject an answer that is not a status as internal_error", async () => {
+	it("should reject an answer that is not a status as internal_error", async ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
@@ -97,7 +97,7 @@ describe(fetchStatusAsync, () => {
 });
 
 describe(addPartsAsync, () => {
-	it("should ask for the parts and return those the session started", async () => {
+	it("should ask for the parts and return those the session started", async ({ expect }) => {
 		expect.assertions(2);
 
 		const memory = createMemoryFileSystem();
@@ -123,7 +123,9 @@ describe(addPartsAsync, () => {
 		]);
 	});
 
-	it("should reject an answer that is not a list of parts as internal_error", async () => {
+	it("should reject an answer that is not a list of parts as internal_error", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
@@ -146,7 +148,9 @@ describe(addPartsAsync, () => {
 });
 
 describe(restartPartsAsync, () => {
-	it("should ask for the restart with the session's id and return what it did", async () => {
+	it("should ask for the restart with the session's id and return what it did", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const memory = createMemoryFileSystem();
@@ -175,7 +179,7 @@ describe(restartPartsAsync, () => {
 		expect(asked).toStrictEqual([{ force: true, sessionId: "s1", studioPath: "/opt/S" }]);
 	});
 
-	it("should reject an answer that is not a restart as internal_error", async () => {
+	it("should reject an answer that is not a restart as internal_error", async ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
@@ -233,7 +237,9 @@ describe(joinSessionAsync, () => {
 		return release.signal;
 	}
 
-	it("should join with the parts it asks for, and read what letting go did", async () => {
+	it("should join with the parts it asks for, and read what letting go did", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { asked, joined } = await joinAsync({
@@ -263,7 +269,9 @@ describe(joinSessionAsync, () => {
 		expect(asked).toStrictEqual([[{ parts: ["compiler"] }]]);
 	});
 
-	it("should hold until the session ends, and give up when its signal aborts first", async () => {
+	it("should hold until the session ends, and give up when its signal aborts first", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const ended = await joinAsync({});
@@ -283,7 +291,7 @@ describe(joinSessionAsync, () => {
 		["release", { leave: { stopped: ["studio"] } }],
 	] as const)(
 		"should reject an answer to %s that it cannot read as internal_error",
-		async ([method, answers]) => {
+		async ([method, answers], { expect }) => {
 			expect.assertions(1);
 
 			const { joined } = await joinAsync(answers);
@@ -299,7 +307,7 @@ describe(joinSessionAsync, () => {
 });
 
 describe(probeSessionAsync, () => {
-	it("should return the session and its status when it answers", async () => {
+	it("should return the session and its status when it answers", async ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
@@ -314,7 +322,7 @@ describe(probeSessionAsync, () => {
 		});
 	});
 
-	it("should return nothing when no session is named or none answers", async () => {
+	it("should return nothing when no session is named or none answers", async ({ expect }) => {
 		expect.assertions(2);
 
 		const memory = createMemoryFileSystem();
@@ -331,7 +339,7 @@ describe(probeSessionAsync, () => {
 		).resolves.toBeUndefined();
 	});
 
-	it("should pass on an answer that is not a status", async () => {
+	it("should pass on an answer that is not a status", async ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();

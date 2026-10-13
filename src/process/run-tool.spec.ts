@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import {
 	createCommandContext,
@@ -56,7 +56,9 @@ function exited(exitCode: null | number, outputTail: Array<string> = []): Proces
 }
 
 describe(runToolAsync, () => {
-	it("should run the resolved tool in the project with the run's environment", async () => {
+	it("should run the resolved tool in the project with the run's environment", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, processRunner } = makeToolRun(exited(0, ["done"]));
@@ -73,7 +75,7 @@ describe(runToolAsync, () => {
 		});
 	});
 
-	it("should report the run as a step", async () => {
+	it("should report the run as a step", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, reporter } = makeToolRun(exited(0));
@@ -85,7 +87,7 @@ describe(runToolAsync, () => {
 		]);
 	});
 
-	it("should fail with the missing code when the tool is not installed", async () => {
+	it("should fail with the missing code when the tool is not installed", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, processRunner } = makeToolRun(exited(0), {});
@@ -99,7 +101,9 @@ describe(runToolAsync, () => {
 		expect(processRunner).not.toHaveBeenCalled();
 	});
 
-	it("should fail with the missing code when the file vanished before the spawn", async () => {
+	it("should fail with the missing code when the file vanished before the spawn", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context } = makeToolRun({
@@ -113,7 +117,9 @@ describe(runToolAsync, () => {
 		});
 	});
 
-	it("should fail as process_failed when the tool cannot start for another reason", async () => {
+	it("should fail as process_failed when the tool cannot start for another reason", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context } = makeToolRun({
@@ -128,7 +134,7 @@ describe(runToolAsync, () => {
 		});
 	});
 
-	it("should fail with the exit code and the last output lines", async () => {
+	it("should fail with the exit code and the last output lines", async ({ expect }) => {
 		expect.assertions(2);
 
 		const output = Array.from({ length: 25 }, (_, index) => `line ${index}`);
@@ -149,7 +155,7 @@ describe(runToolAsync, () => {
 		});
 	});
 
-	it("should fail a tool that a signal ended", async () => {
+	it("should fail a tool that a signal ended", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeToolRun(exited(null));
@@ -159,7 +165,7 @@ describe(runToolAsync, () => {
 		});
 	});
 
-	it("should fail a tool that timed out", async () => {
+	it("should fail a tool that timed out", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeToolRun({ durationMs: 10, outputTail: [], type: "timed_out" });
@@ -171,7 +177,7 @@ describe(runToolAsync, () => {
 });
 
 describe(probeToolAsync, () => {
-	it("should run the tool quietly and pass when it exits with code 0", async () => {
+	it("should run the tool quietly and pass when it exits with code 0", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { context, processRunner, reporter } = makeToolRun(exited(0));
@@ -191,7 +197,7 @@ describe(probeToolAsync, () => {
 		["a timeout", { durationMs: 10, outputTail: [], type: "timed_out" }],
 	] satisfies Array<[string, ProcessOutcome]>)(
 		"should fail the probe on %s",
-		async ([, outcome]) => {
+		async ([, outcome], { expect }) => {
 			expect.assertions(1);
 
 			const { context } = makeToolRun(outcome);
@@ -200,7 +206,7 @@ describe(probeToolAsync, () => {
 		},
 	);
 
-	it("should fail with the missing code when the tool is not installed", async () => {
+	it("should fail with the missing code when the tool is not installed", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, processRunner } = makeToolRun(exited(0), {});
@@ -212,7 +218,9 @@ describe(probeToolAsync, () => {
 		expect(processRunner).not.toHaveBeenCalled();
 	});
 
-	it("should fail with the missing code when the file vanished before the spawn", async () => {
+	it("should fail with the missing code when the file vanished before the spawn", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context } = makeToolRun({
@@ -226,7 +234,9 @@ describe(probeToolAsync, () => {
 		});
 	});
 
-	it("should fail as process_failed when the tool cannot start for another reason", async () => {
+	it("should fail as process_failed when the tool cannot start for another reason", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context } = makeToolRun({
@@ -243,7 +253,7 @@ describe(probeToolAsync, () => {
 });
 
 describe(spawnToolAsync, () => {
-	it("should return how a failing tool ended instead of throwing", async () => {
+	it("should return how a failing tool ended instead of throwing", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, reporter } = makeToolRun(exited(1, ["error"]));
@@ -256,7 +266,7 @@ describe(spawnToolAsync, () => {
 		});
 	});
 
-	it("should hand the tool's output lines to onLine", async () => {
+	it("should hand the tool's output lines to onLine", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, processRunner } = makeToolRun(exited(0));

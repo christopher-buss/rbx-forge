@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -29,7 +29,7 @@ function hiddenSessionLauncher() {
 describe("studio desktop reporting", () => {
 	it.for([undefined, false])(
 		"opens hidden session Studio when the snapshot watcher is disabled (%s)",
-		async (watchHiddenLighting) => {
+		async (watchHiddenLighting, { expect }) => {
 			expect.assertions(1);
 
 			const launch = hiddenSessionLauncher();
@@ -50,7 +50,9 @@ describe("studio desktop reporting", () => {
 		},
 	);
 
-	it("leaves a failed snapshot launch as a failure without starting a watcher", async () => {
+	it("leaves a failed snapshot launch as a failure without starting a watcher", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const seams = createTestSeams();
@@ -70,7 +72,9 @@ describe("studio desktop reporting", () => {
 		).resolves.toMatchObject({ type: "failed" });
 	});
 
-	it("falls back with actual user-desktop metadata when hidden desktop setup is unavailable", async () => {
+	it("falls back with actual user-desktop metadata when hidden desktop setup is unavailable", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({ "RobloxStudioBeta.exe": "" });
@@ -103,7 +107,9 @@ describe("studio desktop reporting", () => {
 		});
 	});
 
-	it("preserves a native launch error without attempting another Studio launch", async () => {
+	it("preserves a native launch error without attempting another Studio launch", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({ "RobloxStudioBeta.exe": "" });
@@ -134,7 +140,7 @@ describe("studio desktop reporting", () => {
 
 	it.for(["hidden", "user"] as const)(
 		"reports the actual user desktop when the platform launcher receives a %s request",
-		async (desktop) => {
+		async (desktop, { expect }) => {
 			expect.assertions(1);
 
 			const seams = createTestSeams({ childProcess: createFakeSpawner().runner });
@@ -146,7 +152,9 @@ describe("studio desktop reporting", () => {
 		},
 	);
 
-	it("keeps an unspecified platform-launch desktop out of the optional result metadata", async () => {
+	it("keeps an unspecified platform-launch desktop out of the optional result metadata", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const seams = createTestSeams({ childProcess: createFakeSpawner().runner });
@@ -157,7 +165,9 @@ describe("studio desktop reporting", () => {
 		).resolves.toStrictEqual({ type: "launched" });
 	});
 
-	it("reports a direct Linux launch on the user desktop when hidden desktops are unavailable", async () => {
+	it("reports a direct Linux launch on the user desktop when hidden desktops are unavailable", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const studioPath = path.join(PROJECT, "Studio");

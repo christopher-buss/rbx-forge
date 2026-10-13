@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_NOT_RUNNING } from "../../src/exit-codes.ts";
 import { parseResult } from "../helpers/output.ts";
@@ -8,7 +8,9 @@ import { makeProject, runBinAsync } from "./run-bin.ts";
 import { makeFixtureAsync, START_STUDIO, startReadyAsync } from "./session-fixture.ts";
 
 describe("forge save", () => {
-	it("returns studio_not_open for a snapshot without a Studio, with no session", async () => {
+	it("returns studio_not_open for a snapshot without a Studio, with no session", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const snapshot = ".forge/snapshots/example.rbxl";
@@ -28,7 +30,7 @@ describe("forge save", () => {
 		});
 	});
 
-	it("returns the stable JSON error when no session Studio is open", async () => {
+	it("returns the stable JSON error when no session Studio is open", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { status, stdout } = await runBinAsync(["save", "--json"], makeProject());
@@ -42,7 +44,10 @@ describe("forge save", () => {
 		});
 	});
 
-	it("refuses a read-only place before sending the stand-in Studio a save", async () => {
+	it("refuses a read-only place before sending the stand-in Studio a save", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });

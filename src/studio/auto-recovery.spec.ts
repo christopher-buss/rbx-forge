@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import type { MemoryFileSystem } from "../../test/helpers/seams.ts";
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
@@ -90,7 +90,7 @@ function failCalls(
 }
 
 describe(autoSaveDirectories, () => {
-	it("should give both Windows folders", () => {
+	it("should give both Windows folders", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -104,7 +104,7 @@ describe(autoSaveDirectories, () => {
 		]);
 	});
 
-	it("should give both macOS folders", () => {
+	it("should give both macOS folders", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(autoSaveDirectories({ HOME: "/Users/me" }, "darwin")).toStrictEqual([
@@ -113,7 +113,9 @@ describe(autoSaveDirectories, () => {
 		]);
 	});
 
-	it("should leave out a folder whose variable is unset or empty, and give none on Linux", () => {
+	it("should leave out a folder whose variable is unset or empty, and give none on Linux", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		expect(
@@ -125,7 +127,9 @@ describe(autoSaveDirectories, () => {
 });
 
 describe(handleAutoRecoveryAsync, () => {
-	it("should move the place's files from this Studio run, in any case, from both folders", async () => {
+	it("should move the place's files from this Studio run, in any case, from both folders", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
@@ -162,7 +166,7 @@ describe(handleAutoRecoveryAsync, () => {
 		});
 	});
 
-	it("should leave older files, other places, and other files alone", async () => {
+	it("should leave older files, other places, and other files alone", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
@@ -186,7 +190,7 @@ describe(handleAutoRecoveryAsync, () => {
 		expect(kept.every((file) => world.memory.fileSystem.existsSync(file))).toBeTrue();
 	});
 
-	it("should keep a .gitignore the recovery folder already has", async () => {
+	it("should keep a .gitignore the recovery folder already has", async ({ expect }) => {
 		expect.assertions(1);
 
 		const world = makeWorld();
@@ -197,7 +201,7 @@ describe(handleAutoRecoveryAsync, () => {
 		expect(world.memory.files()[".forge/recovery/.gitignore"]).toBe(".gitignore");
 	});
 
-	it("should delete the files in delete mode", async () => {
+	it("should delete the files in delete mode", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
@@ -210,7 +214,7 @@ describe(handleAutoRecoveryAsync, () => {
 		expect(world.memory.files()).toStrictEqual({ AutoSaves: null });
 	});
 
-	it("should touch nothing in keep mode", async () => {
+	it("should touch nothing in keep mode", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
@@ -223,7 +227,7 @@ describe(handleAutoRecoveryAsync, () => {
 		expect(world.memory.fileSystem.existsSync(file)).toBeTrue();
 	});
 
-	it(`should keep only the ${RECOVERY_KEEP_COUNT} newest moved files`, async () => {
+	it(`should keep only the ${RECOVERY_KEEP_COUNT} newest moved files`, async ({ expect }) => {
 		expect.assertions(1);
 
 		const world = makeWorld();
@@ -254,7 +258,7 @@ describe(handleAutoRecoveryAsync, () => {
 		]);
 	});
 
-	it("should prune nothing when it moved nothing", async () => {
+	it("should prune nothing when it moved nothing", async ({ expect }) => {
 		expect.assertions(1);
 
 		const world = makeWorld();
@@ -271,7 +275,7 @@ describe(handleAutoRecoveryAsync, () => {
 		expect(Object.keys(world.memory.files())).toHaveLength(RECOVERY_KEEP_COUNT + 1);
 	});
 
-	it("should try a busy file again until it moves", async () => {
+	it("should try a busy file again until it moves", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
@@ -289,7 +293,7 @@ describe(handleAutoRecoveryAsync, () => {
 		]);
 	});
 
-	it("should warn, and go on, when a file stays busy", async () => {
+	it("should warn, and go on, when a file stays busy", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
@@ -312,7 +316,7 @@ describe(handleAutoRecoveryAsync, () => {
 		expect(world.sleeps).toHaveLength(RECOVERY_RETRIES);
 	});
 
-	it("should warn at once on an error that is not a busy file", async () => {
+	it("should warn at once on an error that is not a busy file", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
@@ -327,7 +331,7 @@ describe(handleAutoRecoveryAsync, () => {
 		expect(world.sleeps).toStrictEqual([]);
 	});
 
-	it("should warn with a thrown value that is not an error", async () => {
+	it("should warn with a thrown value that is not an error", async ({ expect }) => {
 		expect.assertions(1);
 
 		const world = makeWorld();
@@ -349,7 +353,7 @@ describe(handleAutoRecoveryAsync, () => {
 		});
 	});
 
-	it("should copy and delete a file on another drive", async () => {
+	it("should copy and delete a file on another drive", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
@@ -368,7 +372,9 @@ describe(handleAutoRecoveryAsync, () => {
 		});
 	});
 
-	it("should warn about a folder or file it cannot read, and not about a missing folder", async () => {
+	it("should warn about a folder or file it cannot read, and not about a missing folder", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const world = makeWorld();
@@ -391,7 +397,7 @@ describe(handleAutoRecoveryAsync, () => {
 		});
 	});
 
-	it("should warn when it cannot prune an old moved file", async () => {
+	it("should warn when it cannot prune an old moved file", async ({ expect }) => {
 		expect.assertions(1);
 
 		const world = makeWorld();

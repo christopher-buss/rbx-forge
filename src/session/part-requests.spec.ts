@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { ForgeError } from "../errors.ts";
 import type { OwnerHandlers } from "./ownership.ts";
@@ -9,12 +9,6 @@ import type { PartStopper, StopPartsRequest } from "./part-stops.ts";
 
 const COMPILER = { parts: ["compiler"] } satisfies PartRequest;
 const DOWN: StopPartsRequest = { force: false, keepStudio: false, scope: "down" };
-const noStop = vi.fn<PartStopper>();
-const noRestart = vi.fn<PartRestarter>();
-const NO_OWNER: OwnerHandlers = {
-	own: vi.fn<OwnerHandlers["own"]>(),
-	release: vi.fn<OwnerHandlers["release"]>(),
-};
 const RELEASED = {
 	ending: false,
 	released: [],
@@ -23,6 +17,13 @@ const RELEASED = {
 	studioLeft: false,
 };
 
+function createOwnerHandlers(): OwnerHandlers {
+	return {
+		own: vi.fn<OwnerHandlers["own"]>(),
+		release: vi.fn<OwnerHandlers["release"]>(),
+	};
+}
+
 async function flushAsync(): Promise<void> {
 	await new Promise((resolve) => {
 		setImmediate(resolve);
@@ -30,18 +31,23 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(createPartRequests, () => {
-	it("should reject a move when its attached session has no Studio mover", async () => {
+	it("should reject a move when its attached session has no Studio mover", async ({ expect }) => {
 		expect.assertions(1);
 
 		const requests = createPartRequests();
-		requests.attach({ add: vi.fn<PartAdder>(), restart: noRestart, stop: noStop, ...NO_OWNER });
+		requests.attach({
+			add: vi.fn<PartAdder>(),
+			restart: vi.fn<PartRestarter>(),
+			stop: vi.fn<PartStopper>(),
+			...createOwnerHandlers(),
+		});
 
 		await expect(requests.moveAsync({ desktop: "user" })).rejects.toMatchObject({
 			code: "studio_not_open",
 		});
 	});
 
-	it("should reject a stop after close without invoking its preflight", async () => {
+	it("should reject a stop after close without invoking its preflight", async ({ expect }) => {
 		expect.assertions(2);
 
 		const requests = createPartRequests();
@@ -49,9 +55,9 @@ describe(createPartRequests, () => {
 		requests.attach({
 			add: vi.fn<PartAdder>(),
 			beforeStop,
-			restart: noRestart,
-			stop: noStop,
-			...NO_OWNER,
+			restart: vi.fn<PartRestarter>(),
+			stop: vi.fn<PartStopper>(),
+			...createOwnerHandlers(),
 		});
 		requests.close();
 
@@ -59,7 +65,7 @@ describe(createPartRequests, () => {
 		expect(beforeStop).not.toHaveBeenCalled();
 	});
 
-	it("should wait for the body's adder, then add through it", async () => {
+	it("should wait for the body's adder, then add through it", async ({ expect }) => {
 		expect.assertions(3);
 
 		const requests = createPartRequests();
@@ -67,14 +73,19 @@ describe(createPartRequests, () => {
 		const added = requests.addAsync(COMPILER);
 		await flushAsync();
 		const calledEarly = add.mock.calls.length;
-		requests.attach({ add, restart: noRestart, stop: noStop, ...NO_OWNER });
+		requests.attach({
+			add,
+			restart: vi.fn<PartRestarter>(),
+			stop: vi.fn<PartStopper>(),
+			...createOwnerHandlers(),
+		});
 
 		await expect(added).resolves.toStrictEqual(["compiler"]);
 		expect(calledEarly).toBe(0);
 		expect(add).toHaveBeenCalledExactlyOnceWith(COMPILER);
 	});
 
-	it("should run one request at a time, also after a failed one", async () => {
+	it("should run one request at a time, also after a failed one", async ({ expect }) => {
 		expect.assertions(3);
 
 		const requests = createPartRequests();
@@ -84,7 +95,12 @@ describe(createPartRequests, () => {
 			.mockReturnValueOnce(first.promise)
 			.mockRejectedValueOnce(new ForgeError("compiler_missing", "gone"))
 			.mockResolvedValue([]);
-		requests.attach({ add, restart: noRestart, stop: noStop, ...NO_OWNER });
+		requests.attach({
+			add,
+			restart: vi.fn<PartRestarter>(),
+			stop: vi.fn<PartStopper>(),
+			...createOwnerHandlers(),
+		});
 		const one = requests.addAsync(COMPILER);
 		const two = requests.addAsync(COMPILER);
 		const three = requests.addAsync({ parts: [] });
@@ -101,13 +117,20 @@ describe(createPartRequests, () => {
 		expect(add).toHaveBeenCalledTimes(3);
 	});
 
-	it("should fail a waiting request and a late one with not_running once closed", async () => {
+	it("should fail a waiting request and a late one with not_running once closed", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const requests = createPartRequests();
 		const waiting = requests.addAsync(COMPILER);
 		requests.close();
-		requests.attach({ add: vi.fn<PartAdder>(), restart: noRestart, stop: noStop, ...NO_OWNER });
+		requests.attach({
+			add: vi.fn<PartAdder>(),
+			restart: vi.fn<PartRestarter>(),
+			stop: vi.fn<PartStopper>(),
+			...createOwnerHandlers(),
+		});
 
 		await expect(waiting).rejects.toMatchObject({
 			code: "not_running",
@@ -119,12 +142,17 @@ describe(createPartRequests, () => {
 		});
 	});
 
-	it("should fail with not_running once closed after the adder came", async () => {
+	it("should fail with not_running once closed after the adder came", async ({ expect }) => {
 		expect.assertions(1);
 
 		const requests = createPartRequests();
 		const add = vi.fn<PartAdder>();
-		requests.attach({ add, restart: noRestart, stop: noStop, ...NO_OWNER });
+		requests.attach({
+			add,
+			restart: vi.fn<PartRestarter>(),
+			stop: vi.fn<PartStopper>(),
+			...createOwnerHandlers(),
+		});
 		requests.close();
 
 		await expect(requests.addAsync(COMPILER)).rejects.toMatchObject({
@@ -134,7 +162,9 @@ describe(createPartRequests, () => {
 });
 
 describe("createPartRequests stops", () => {
-	it("should wait for the body's stopper while the session starts, then stop through it", async () => {
+	it("should wait for the body's stopper while the session starts, then stop through it", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const requests = createPartRequests();
@@ -144,13 +174,18 @@ describe("createPartRequests stops", () => {
 		const stopped = requests.stopAsync(DOWN);
 		await flushAsync();
 		const calledEarly = stop.mock.calls.length;
-		requests.attach({ add: vi.fn<PartAdder>(), restart: noRestart, stop, ...NO_OWNER });
+		requests.attach({
+			add: vi.fn<PartAdder>(),
+			restart: vi.fn<PartRestarter>(),
+			stop,
+			...createOwnerHandlers(),
+		});
 
 		await expect(stopped).resolves.toStrictEqual({ ending: false, kept: [], stopped: [] });
 		expect([calledEarly, stop.mock.calls]).toStrictEqual([0, [[DOWN]]]);
 	});
 
-	it("should stop through the body's stopper, after the add that runs", async () => {
+	it("should stop through the body's stopper, after the add that runs", async ({ expect }) => {
 		expect.assertions(2);
 
 		const requests = createPartRequests();
@@ -165,7 +200,7 @@ describe("createPartRequests stops", () => {
 			order.push("stop");
 			return { ending: true, kept: [], stopped: ["compiler"] };
 		});
-		requests.attach({ add, restart: noRestart, stop, ...NO_OWNER });
+		requests.attach({ add, restart: vi.fn<PartRestarter>(), stop, ...createOwnerHandlers() });
 		const added = requests.addAsync(COMPILER);
 		const stopped = requests.stopAsync(DOWN);
 		await flushAsync();
@@ -178,11 +213,16 @@ describe("createPartRequests stops", () => {
 		expect(order).toStrictEqual(["add", "stop"]);
 	});
 
-	it("should fail a stop with not_running once closed", async () => {
+	it("should fail a stop with not_running once closed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const requests = createPartRequests();
-		requests.attach({ add: vi.fn<PartAdder>(), restart: noRestart, stop: noStop, ...NO_OWNER });
+		requests.attach({
+			add: vi.fn<PartAdder>(),
+			restart: vi.fn<PartRestarter>(),
+			stop: vi.fn<PartStopper>(),
+			...createOwnerHandlers(),
+		});
 		requests.close();
 
 		await expect(requests.stopAsync(DOWN)).rejects.toMatchObject({
@@ -193,7 +233,7 @@ describe("createPartRequests stops", () => {
 });
 
 describe("createPartRequests restarts", () => {
-	it("should wait for the body's restarter, then restart through it", async () => {
+	it("should wait for the body's restarter, then restart through it", async ({ expect }) => {
 		expect.assertions(3);
 
 		const requests = createPartRequests();
@@ -202,14 +242,19 @@ describe("createPartRequests restarts", () => {
 		const restarted = requests.restartAsync({ force: true });
 		await flushAsync();
 		const calledEarly = restart.mock.calls.length;
-		requests.attach({ add: vi.fn<PartAdder>(), restart, stop: noStop, ...NO_OWNER });
+		requests.attach({
+			add: vi.fn<PartAdder>(),
+			restart,
+			stop: vi.fn<PartStopper>(),
+			...createOwnerHandlers(),
+		});
 
 		await expect(restarted).resolves.toStrictEqual(restarts);
 		expect(calledEarly).toBe(0);
 		expect(restart).toHaveBeenCalledExactlyOnceWith({ force: true });
 	});
 
-	it("should fail a restart with not_running once closed", async () => {
+	it("should fail a restart with not_running once closed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const requests = createPartRequests();
@@ -222,7 +267,9 @@ describe("createPartRequests restarts", () => {
 });
 
 describe("createPartRequests owners", () => {
-	it("should wait for the body's handlers to join, and release only once they came", async () => {
+	it("should wait for the body's handlers to join, and release only once they came", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const requests = createPartRequests();
@@ -236,8 +283,8 @@ describe("createPartRequests owners", () => {
 			add: vi.fn<PartAdder>(),
 			own,
 			release,
-			restart: noRestart,
-			stop: noStop,
+			restart: vi.fn<PartRestarter>(),
+			stop: vi.fn<PartStopper>(),
 		});
 
 		await expect(early).resolves.toMatchObject({
@@ -256,11 +303,16 @@ describe("createPartRequests owners", () => {
 		]);
 	});
 
-	it("should fail a join and a release with not_running once closed", async () => {
+	it("should fail a join and a release with not_running once closed", async ({ expect }) => {
 		expect.assertions(2);
 
 		const requests = createPartRequests();
-		requests.attach({ add: vi.fn<PartAdder>(), restart: noRestart, stop: noStop, ...NO_OWNER });
+		requests.attach({
+			add: vi.fn<PartAdder>(),
+			restart: vi.fn<PartRestarter>(),
+			stop: vi.fn<PartStopper>(),
+			...createOwnerHandlers(),
+		});
 		requests.close();
 
 		await expect(requests.ownAsync(COMPILER)).rejects.toMatchObject({ code: "not_running" });
@@ -271,7 +323,7 @@ describe("createPartRequests owners", () => {
 });
 
 describe(parsePartRequest, () => {
-	it("should read a list of parts, and a Studio path", () => {
+	it("should read a list of parts, and a Studio path", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(parsePartRequest({ parts: ["compiler", "studio"] })).toStrictEqual({

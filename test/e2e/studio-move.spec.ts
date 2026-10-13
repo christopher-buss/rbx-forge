@@ -1,7 +1,7 @@
 import { fromAny } from "@total-typescript/shoehorn";
 
 import { chmodSync } from "node:fs";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { EXIT_NOT_RUNNING } from "../../src/exit-codes.ts";
 import { parseResult } from "../helpers/output.ts";
@@ -12,7 +12,7 @@ import { runForgeAsync } from "./up-fixture.ts";
 describe("forge show and hide", () => {
 	it.for(["show", "hide"])(
 		"returns studio_not_open for %s without a session",
-		async (command) => {
+		async (command, { expect }) => {
 			expect.assertions(2);
 
 			const { status, stdout } = await runBinAsync([command, "--json"], makeProject());
@@ -28,7 +28,7 @@ describe("forge show and hide", () => {
 
 	it.skipIf(!IS_WINDOWS).for(["show", "hide"])(
 		"changes %s visibility in place without saving its read-only place",
-		async (command) => {
+		async (command, { expect, onTestFinished }) => {
 			expect.assertions(5);
 
 			const fixture = await makeFixtureAsync(

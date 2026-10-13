@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import { loadProjectConfigAsync } from "./load.ts";
@@ -11,7 +11,9 @@ function loaderFor(value: unknown): ConfigLoader {
 }
 
 describe(loadProjectConfigAsync, () => {
-	it("should resolve the file's config over the defaults, under the flags", async () => {
+	it("should resolve the file's config over the defaults, under the flags", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const loaded = await loadProjectConfigAsync(
@@ -31,7 +33,7 @@ describe(loadProjectConfigAsync, () => {
 		});
 	});
 
-	it("should look for the config file in the project directory", async () => {
+	it("should look for the config file in the project directory", async ({ expect }) => {
 		expect.assertions(1);
 
 		const loader = loaderFor({ projectType: "rbxts" });
@@ -40,7 +42,9 @@ describe(loadProjectConfigAsync, () => {
 		expect(loader).toHaveBeenCalledExactlyOnceWith(CWD);
 	});
 
-	it("should fail with config_not_found and point at init when there is no file", async () => {
+	it("should fail with config_not_found and point at init when there is no file", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		await expect(
@@ -52,7 +56,9 @@ describe(loadProjectConfigAsync, () => {
 		});
 	});
 
-	it("should fail with config_load_failed when the file cannot be evaluated", async () => {
+	it("should fail with config_load_failed when the file cannot be evaluated", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const cause = new SyntaxError("Unexpected token");
@@ -66,7 +72,7 @@ describe(loadProjectConfigAsync, () => {
 		});
 	});
 
-	it("should describe a thrown value that is not an Error", async () => {
+	it("should describe a thrown value that is not an Error", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(
@@ -74,7 +80,7 @@ describe(loadProjectConfigAsync, () => {
 		).rejects.toMatchObject({ message: "Could not load the config file: boom" });
 	});
 
-	it("should fail with config_invalid for an unknown key", async () => {
+	it("should fail with config_invalid for an unknown key", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import {
@@ -48,7 +48,7 @@ function exited(exitCode: number): ProcessOutcome {
 }
 
 describe(rojoBuildArgs, () => {
-	it("should build the project to an output file", () => {
+	it("should build the project to an output file", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -56,7 +56,7 @@ describe(rojoBuildArgs, () => {
 		).toStrictEqual(["build", "default.project.json", "--output", "out/game.rbxl"]);
 	});
 
-	it("should build the project into the plugins folder", () => {
+	it("should build the project into the plugins folder", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -66,7 +66,7 @@ describe(rojoBuildArgs, () => {
 });
 
 describe(rojoSyncbackArgs, () => {
-	it("should sync the place back into the project without a prompt", () => {
+	it("should sync the place back into the project without a prompt", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(rojoSyncbackArgs("sync.project.json", "out/game.rbxl")).toStrictEqual([
@@ -80,7 +80,7 @@ describe(rojoSyncbackArgs, () => {
 });
 
 describe(requireSyncbackAsync, () => {
-	it("should ask the configured Rojo for its syncback help", async () => {
+	it("should ask the configured Rojo for its syncback help", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, processRunner } = makeProbe(exited(0));
@@ -96,7 +96,7 @@ describe(requireSyncbackAsync, () => {
 		});
 	});
 
-	it("should fail with syncback_unsupported when Rojo has no syncback", async () => {
+	it("should fail with syncback_unsupported when Rojo has no syncback", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeProbe(exited(2));
@@ -111,7 +111,7 @@ describe(requireSyncbackAsync, () => {
 		} satisfies Partial<ForgeError>);
 	});
 
-	it("should fail as process_failed naming Rojo when it cannot start", async () => {
+	it("should fail as process_failed naming Rojo when it cannot start", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeProbe({
@@ -128,7 +128,7 @@ describe(requireSyncbackAsync, () => {
 		});
 	});
 
-	it("should fail with rojo_missing when Rojo is not installed", async () => {
+	it("should fail with rojo_missing when Rojo is not installed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeProbe(exited(0), {});
@@ -140,7 +140,7 @@ describe(requireSyncbackAsync, () => {
 });
 
 describe(rojoServeArgs, () => {
-	it("should serve the project on the given port", () => {
+	it("should serve the project on the given port", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(rojoServeArgs("default.project.json", 34_872)).toStrictEqual([
@@ -153,7 +153,7 @@ describe(rojoServeArgs, () => {
 });
 
 describe(rojoInvocation, () => {
-	it("should start the configured Rojo command found on PATH", () => {
+	it("should start the configured Rojo command found on PATH", ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeProbe(exited(0));
@@ -169,7 +169,7 @@ describe(rojoInvocation, () => {
 		});
 	});
 
-	it("should fail with rojo_missing when the command is not installed", () => {
+	it("should fail with rojo_missing when the command is not installed", ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeProbe(exited(0), {});

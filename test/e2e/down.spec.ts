@@ -5,7 +5,7 @@
  */
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_CLEANUP_PENDING, EXIT_NOT_RUNNING, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import { parseStatus } from "../../src/session/status.ts";
@@ -84,7 +84,9 @@ async function upWithStudioAsync(variables: Record<string, string> = {}): Promis
 }
 
 describe("forge down", () => {
-	it("should close the session's Studio first, then stop the session, and touch no other Studio", async () => {
+	it("should close the session's Studio first, then stop the session, and touch no other Studio", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const { fixture, other, recorded, sessionId, studio } = await upWithStudioAsync();
@@ -112,7 +114,7 @@ describe("forge down", () => {
 		}).toStrictEqual({ isOtherAlive: true, isOtherOpen: true });
 	});
 
-	it("should end a Studio behind a dialog, without a save", async () => {
+	it("should end a Studio behind a dialog, without a save", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { fixture, studio } = await upWithStudioAsync({ FIXTURE_STUDIO_CLOSE: "dialog" });
@@ -134,7 +136,9 @@ describe("forge down", () => {
 		}).toStrictEqual({ alive: [], isOpen: false });
 	});
 
-	it("should end a Studio at once once it closed the place, without its slow exit", async () => {
+	it("should end a Studio at once once it closed the place, without its slow exit", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { fixture, studio } = await upWithStudioAsync({ FIXTURE_STUDIO_CLOSE: "linger" });
@@ -146,7 +150,9 @@ describe("forge down", () => {
 		await expect(waitForDeathAsync([studio], REAP_MS)).resolves.toStrictEqual([]);
 	});
 
-	it("should keep the parts of a start session, its opening Studio too, and end nothing", async () => {
+	it("should keep the parts of a start session, its opening Studio too, and end nothing", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
@@ -171,7 +177,7 @@ describe("forge down", () => {
 
 	it.skipIf(!IS_WINDOWS && !IS_MACOS)(
 		"should move the auto-recovery file of a Studio it ended into .forge/recovery",
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(2);
 
 			const home = makeTemporaryDirectory();
@@ -200,7 +206,7 @@ describe("forge down", () => {
 		},
 	);
 
-	it("should leave the session's Studio open with --keep-studio", async () => {
+	it("should leave the session's Studio open with --keep-studio", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { fixture, studio } = await upWithStudioAsync();
@@ -217,7 +223,9 @@ describe("forge down", () => {
 		}).toStrictEqual({ isAlive: true, isOpen: true });
 	});
 
-	it("should stop a detached session and report stopped only once every process is gone", async () => {
+	it("should stop a detached session and report stopped only once every process is gone", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(WATCH_COMMAND);
@@ -249,7 +257,7 @@ describe("forge down", () => {
 		});
 	});
 
-	it("should succeed and say so when the session has no part to stop", async () => {
+	it("should succeed and say so when the session has no part to stop", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync();
@@ -268,7 +276,9 @@ describe("forge down", () => {
 		expect(filesLeft(fixture.project)).toStrictEqual([]);
 	});
 
-	it("should report a hung supervisor as unresponsive, then kill it with --force", async () => {
+	it("should report a hung supervisor as unresponsive, then kill it with --force", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(WATCH_COMMAND);
@@ -299,7 +309,7 @@ describe("forge down", () => {
 		await expect(waitForDeathAsync([pid, ...workers])).resolves.toStrictEqual([]);
 	});
 
-	it("should report not_running where no session ran", async () => {
+	it("should report not_running where no session ran", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync();

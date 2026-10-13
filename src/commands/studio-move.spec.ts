@@ -1,4 +1,4 @@
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -34,7 +34,10 @@ async function commandSessionAsync(platform: NodeJS.Platform = "win32") {
 }
 
 describe("session Studio moves", () => {
-	it("waits for a move queued behind a save taking longer than two seconds", async () => {
+	it("waits for a move queued behind a save taking longer than two seconds", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const { context, move } = await commandSessionAsync();
@@ -56,7 +59,7 @@ describe("session Studio moves", () => {
 		});
 	});
 
-	it("should report a hidden macOS app without saving", async () => {
+	it("should report a hidden macOS app without saving", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, move, reporter } = await commandSessionAsync("darwin");
@@ -74,7 +77,7 @@ describe("session Studio moves", () => {
 		expect(reporter.events).toStrictEqual([]);
 	});
 
-	it("should show a macOS app without warning about lost undo history", async () => {
+	it("should show a macOS app without warning about lost undo history", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, move, reporter } = await commandSessionAsync("darwin");
@@ -94,7 +97,7 @@ describe("session Studio moves", () => {
 
 	it.for([runShowAsync, runHideAsync])(
 		"should report studio_not_open when no session runs",
-		async (run) => {
+		async (run, { expect }) => {
 			expect.assertions(1);
 
 			await expect(
@@ -103,7 +106,7 @@ describe("session Studio moves", () => {
 		},
 	);
 
-	it("requests only the target visibility and reports the unchanged PID", async () => {
+	it("requests only the target visibility and reports the unchanged PID", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, move } = await commandSessionAsync();
@@ -117,7 +120,7 @@ describe("session Studio moves", () => {
 		});
 	});
 
-	it("should preserve the error reported by the session", async () => {
+	it("should preserve the error reported by the session", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, move } = await commandSessionAsync();
@@ -128,7 +131,7 @@ describe("session Studio moves", () => {
 		});
 	});
 
-	it("should reject an invalid session move result", async () => {
+	it("should reject an invalid session move result", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, move } = await commandSessionAsync();
@@ -139,7 +142,7 @@ describe("session Studio moves", () => {
 		});
 	});
 
-	it("should reject moving between desktops on another platform", async () => {
+	it("should reject moving between desktops on another platform", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = await commandSessionAsync("linux");

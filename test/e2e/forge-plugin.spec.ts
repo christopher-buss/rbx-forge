@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "no
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
@@ -31,7 +31,7 @@ async function waitForStudiosAsync(log: string, count: number): Promise<void> {
 		await sleep(100);
 	}
 
-	expect(started(), "the stand-in Studios started").toBe(count);
+	assert.strictEqual(started(), count, "the stand-in Studios started");
 }
 
 function makePluginFixture(): PluginFixture {
@@ -63,8 +63,10 @@ function makePluginFixture(): PluginFixture {
 describe.skipIf(process.platform !== "win32" && process.platform !== "darwin")(
 	"cli forge plugin install",
 	() => {
-		it("should install the bundled plugin before a direct snapshot launch", async () => {
-			expect.assertions(4);
+		it("should install the bundled plugin before a direct snapshot launch", async ({
+			expect,
+		}) => {
+			expect.assertions(3);
 
 			const { open, plugin } = makePluginFixture();
 			const run = await open();
@@ -74,8 +76,10 @@ describe.skipIf(process.platform !== "win32" && process.platform !== "darwin")(
 			expect(readFileSync(plugin)).toStrictEqual(readFileSync(BUNDLED));
 		});
 
-		it("should replace an outdated plugin and leave a current one unwritten", async () => {
-			expect.assertions(5);
+		it("should replace an outdated plugin and leave a current one unwritten", async ({
+			expect,
+		}) => {
+			expect.assertions(3);
 
 			const { open, plugin } = makePluginFixture();
 			mkdirSync(path.dirname(plugin), { recursive: true });

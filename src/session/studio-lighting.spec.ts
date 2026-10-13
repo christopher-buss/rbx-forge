@@ -1,7 +1,7 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
@@ -24,7 +24,7 @@ async function settleAsync() {
 describe("hidden Studio startup dialogs", () => {
 	it.for([0, 45_000])(
 		"dismisses migration after readiness when the lock takes %i ms",
-		async (lockDelay) => {
+		async (lockDelay, { expect, onTestFinished }) => {
 			expect.assertions(2);
 
 			const memory = createMemoryFileSystem({

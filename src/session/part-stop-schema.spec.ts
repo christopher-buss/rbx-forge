@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { PROJECT } from "../../test/helpers/seams.ts";
 import { parseStopRequest, parseStopResult } from "./part-stop-schema.ts";
@@ -9,7 +9,9 @@ const PLACE = path.join(PROJECT, "game.rbxl");
 const DOWN: StopPartsRequest = { force: false, keepStudio: false, scope: "down" };
 
 describe(parseStopRequest, () => {
-	it("should default force and keepStudio to false, and keep only what it reads", () => {
+	it("should default force and keepStudio to false, and keep only what it reads", ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		expect(parseStopRequest({ scope: "down", sessionId: "s1" })).toStrictEqual(DOWN);
@@ -32,7 +34,7 @@ describe(parseStopRequest, () => {
 });
 
 describe(parseStopResult, () => {
-	it("should read what a session stopped, with how its Studio went", () => {
+	it("should read what a session stopped, with how its Studio went", ({ expect }) => {
 		expect.assertions(3);
 
 		const closed: PartStops = {

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { makeTemporaryDirectory } from "../../test/helpers/temporary-directory.ts";
 import { loadConfigFileAsync } from "./config-loader.ts";
@@ -7,13 +7,13 @@ import { loadConfigFileAsync } from "./config-loader.ts";
 // Real c12 against temp files that do not import the package, so jiti never
 // evaluates `src` and coverage stays clean.
 describe(loadConfigFileAsync, () => {
-	it("should resolve undefined when the project has no config file", async () => {
+	it("should resolve undefined when the project has no config file", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(loadConfigFileAsync(makeTemporaryDirectory())).resolves.toBeUndefined();
 	});
 
-	it("should load a TypeScript config file's default export", async () => {
+	it("should load a TypeScript config file's default export", async ({ expect }) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory({
@@ -26,7 +26,7 @@ describe(loadConfigFileAsync, () => {
 		});
 	});
 
-	it("should keep arrays exactly as the file wrote them", async () => {
+	it("should keep arrays exactly as the file wrote them", async ({ expect }) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory({
@@ -38,7 +38,7 @@ describe(loadConfigFileAsync, () => {
 		});
 	});
 
-	it("should drop $-prefixed keys such as $schema", async () => {
+	it("should drop $-prefixed keys such as $schema", async ({ expect }) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory({
@@ -51,7 +51,7 @@ describe(loadConfigFileAsync, () => {
 		});
 	});
 
-	it("should ignore rc files and package.json keys", async () => {
+	it("should ignore rc files and package.json keys", async ({ expect }) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory({
@@ -62,7 +62,7 @@ describe(loadConfigFileAsync, () => {
 		await expect(loadConfigFileAsync(directory)).resolves.toBeUndefined();
 	});
 
-	it("should reject when the config file throws", async () => {
+	it("should reject when the config file throws", async ({ expect }) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory({

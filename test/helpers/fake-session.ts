@@ -1,6 +1,6 @@
 import { onTestFinished, vi } from "vitest";
 
-import type { IpcHandler, IpcOwner, IpcServer, IpcServerOptions } from "../../src/ipc/server.ts";
+import type { IpcHandler, IpcOwner, IpcServerOptions } from "../../src/ipc/server.ts";
 import { startIpcServer } from "../../src/ipc/server.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import type { IdentityRecord } from "../../src/supervisor/session-files.ts";
@@ -114,7 +114,7 @@ export async function serveFakeSessionAsync(
 		sync: () => ({ ...SYNCED }),
 	};
 	const listener = await transport.listenAsync(identity.endpoint);
-	const server: IpcServer = startIpcServer(listener, serverOptions(session));
+	const server = startIpcServer(listener, serverOptions(session));
 	onTestFinished(async () => {
 		await server.closeAsync();
 	});

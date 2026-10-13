@@ -1,7 +1,7 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -97,7 +97,7 @@ function saveProject() {
 }
 
 describe("save validation", () => {
-	it("shares the save deadline with hidden dialog inspection", async () => {
+	it("shares the save deadline with hidden dialog inspection", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { native, seams } = saveProject();
@@ -124,7 +124,9 @@ describe("save validation", () => {
 		expect(seams.clock.now()).toBe(6000);
 	});
 
-	it("refuses another recorded PID even when its start time matches the place Studio", async () => {
+	it("refuses another recorded PID even when its start time matches the place Studio", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { seams } = saveProject();
@@ -137,7 +139,9 @@ describe("save validation", () => {
 		});
 	});
 
-	it("gives the native save only the time remaining in the requested deadline", async () => {
+	it("gives the native save only the time remaining in the requested deadline", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { native, seams } = saveProject();
@@ -161,7 +165,9 @@ describe("save validation", () => {
 		expect(seams.clock.now()).toBe(6000);
 	});
 
-	it("allows time for a session to report its save deadline rather than treating it as unresponsive", async () => {
+	it("allows time for a session to report its save deadline rather than treating it as unresponsive", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
@@ -182,7 +188,9 @@ describe("save validation", () => {
 		});
 	});
 
-	it("saves a visible Studio even when hidden dialog automation is unavailable", async () => {
+	it("saves a visible Studio even when hidden dialog automation is unavailable", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { native, seams } = saveProject();
@@ -205,7 +213,7 @@ describe("save validation", () => {
 		});
 	});
 
-	it("can save repeatedly with a single available file descriptor", async () => {
+	it("can save repeatedly with a single available file descriptor", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { memory, native, seams } = saveProject();
@@ -228,7 +236,9 @@ describe("save validation", () => {
 		});
 	});
 
-	it("stops polling at a fractional deadline while a written place is still settling", async () => {
+	it("stops polling at a fractional deadline while a written place is still settling", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { seams } = saveProject();
@@ -241,7 +251,9 @@ describe("save validation", () => {
 		expect(seams.clock.now()).toBe(5240);
 	});
 
-	it("refuses a reused PID between checking the lock and pinning the save", async () => {
+	it("refuses a reused PID between checking the lock and pinning the save", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { native, seams } = saveProject();
@@ -260,7 +272,7 @@ describe("save validation", () => {
 		});
 	});
 
-	it("does not save when Studio exits after its lock was checked", async () => {
+	it("does not save when Studio exits after its lock was checked", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { native, seams } = saveProject();
@@ -279,7 +291,7 @@ describe("save validation", () => {
 		});
 	});
 
-	it("leaves no extra save time after Studio finishes opening", async () => {
+	it("leaves no extra save time after Studio finishes opening", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { native, seams } = saveProject();
@@ -316,7 +328,9 @@ describe("save validation", () => {
 		expect(idle.idleAt()).toBe(66_000);
 	});
 
-	it("reports the invalid command timeout and guidance for a missing session", async () => {
+	it("reports the invalid command timeout and guidance for a missing session", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		await expect(
@@ -334,7 +348,7 @@ describe("save validation", () => {
 		});
 	});
 
-	it("uses seconds for a command deadline and reports the saved Studio", async () => {
+	it("uses seconds for a command deadline and reports the saved Studio", async ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
@@ -371,7 +385,7 @@ describe("save validation", () => {
 		});
 	});
 
-	it("reports malformed save metadata with its stable error message", async () => {
+	it("reports malformed save metadata with its stable error message", async ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
@@ -392,7 +406,7 @@ describe("save validation", () => {
 		});
 	});
 
-	it("saves an open session Studio with no recorded process identity", async () => {
+	it("saves an open session Studio with no recorded process identity", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { seams } = saveProject();
@@ -414,7 +428,7 @@ describe("save validation", () => {
 		expect(idle.idleAt()).toBe(65_300);
 	});
 
-	it("refuses the same Studio PID when its recorded start time differs", async () => {
+	it("refuses the same Studio PID when its recorded start time differs", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { seams } = saveProject();
@@ -427,7 +441,7 @@ describe("save validation", () => {
 		});
 	});
 
-	it("refuses a Studio that disappears before the save can pin it", async () => {
+	it("refuses a Studio that disappears before the save can pin it", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { native, seams } = saveProject();
@@ -444,7 +458,7 @@ describe("save validation", () => {
 		});
 	});
 
-	it("reports a read-only place even when its writable open succeeds", async () => {
+	it("reports a read-only place even when its writable open succeeds", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { memory, seams } = saveProject();
@@ -459,7 +473,7 @@ describe("save validation", () => {
 		});
 	});
 
-	it("reports a modal dialog with its stable message", async () => {
+	it("reports a modal dialog with its stable message", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { native, seams } = saveProject();

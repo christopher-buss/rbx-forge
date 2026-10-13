@@ -1,7 +1,8 @@
 import type { AddressInfo } from "node:net";
 import { connect, createServer } from "node:net";
 import { Duplex, duplexPair, PassThrough } from "node:stream";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import type { TestContext } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import type { NativePipeConnection, NativePipeServer } from "../native/addon.ts";
 import {
@@ -38,7 +39,7 @@ function fakeNativeConnection(): NativePipeConnection {
 }
 
 describe(streamConnection, () => {
-	it("should read lines split across chunks and keep the rest", async () => {
+	it("should read lines split across chunks and keep the rest", async ({ expect }) => {
 		expect.assertions(2);
 
 		const [near, far] = duplexPair();
@@ -56,7 +57,7 @@ describe(streamConnection, () => {
 		});
 	});
 
-	it("should wait for a line that comes later", async () => {
+	it("should wait for a line that comes later", async ({ expect }) => {
 		expect.assertions(1);
 
 		const [near, far] = duplexPair();
@@ -69,7 +70,7 @@ describe(streamConnection, () => {
 		await expect(read).resolves.toStrictEqual({ line: "late", type: "line" });
 	});
 
-	it("should time out when no line comes", async () => {
+	it("should time out when no line comes", async ({ expect }) => {
 		expect.assertions(1);
 
 		const [near, far] = duplexPair();
@@ -80,7 +81,7 @@ describe(streamConnection, () => {
 		});
 	});
 
-	it("should report a close before a whole line", async () => {
+	it("should report a close before a whole line", async ({ expect }) => {
 		expect.assertions(1);
 
 		const [near, far] = duplexPair();
@@ -90,7 +91,7 @@ describe(streamConnection, () => {
 		await expect(connection.readLineAsync(1000)).resolves.toStrictEqual({ type: "closed" });
 	});
 
-	it("should report a stream closed on this side", async () => {
+	it("should report a stream closed on this side", async ({ expect }) => {
 		expect.assertions(1);
 
 		const [near] = duplexPair();
@@ -101,7 +102,7 @@ describe(streamConnection, () => {
 		await expect(read).resolves.toStrictEqual({ type: "closed" });
 	});
 
-	it("should let an earlier read's timeout never cut a later read short", async () => {
+	it("should let an earlier read's timeout never cut a later read short", async ({ expect }) => {
 		expect.assertions(2);
 
 		const [near, far] = duplexPair();
@@ -120,7 +121,7 @@ describe(streamConnection, () => {
 		await expect(second).resolves.toStrictEqual({ line: "two", type: "line" });
 	});
 
-	it("should leave no timer behind after a write", async () => {
+	it("should leave no timer behind after a write", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 
 		vi.useFakeTimers();
@@ -134,7 +135,7 @@ describe(streamConnection, () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it("should stop reading past the line limit", async () => {
+	it("should stop reading past the line limit", async ({ expect }) => {
 		expect.assertions(2);
 
 		const [near, far] = duplexPair();
@@ -147,7 +148,7 @@ describe(streamConnection, () => {
 		await expect(connection.readLineAsync(1000)).resolves.toStrictEqual({ type: "too_long" });
 	});
 
-	it("should write to the other end, and end it on close", async () => {
+	it("should write to the other end, and end it on close", async ({ expect }) => {
 		expect.assertions(3);
 
 		const [near, far] = duplexPair();
@@ -165,7 +166,10 @@ describe(streamConnection, () => {
 		await expect(other.readLineAsync(1000)).resolves.toStrictEqual({ type: "closed" });
 	});
 
-	it("should let go of the stream once its end is written, leaving no timer", async () => {
+	it("should let go of the stream once its end is written, leaving no timer", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		vi.useFakeTimers();
@@ -182,7 +186,10 @@ describe(streamConnection, () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it("should let go of a stream whose end is never written after the wait bound", async () => {
+	it("should let go of a stream whose end is never written after the wait bound", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		vi.useFakeTimers();
@@ -200,7 +207,7 @@ describe(streamConnection, () => {
 		expect(near.destroyed).toBeTrue();
 	});
 
-	it("should report a write that cannot finish in time or at all", async () => {
+	it("should report a write that cannot finish in time or at all", async ({ expect }) => {
 		expect.assertions(2);
 
 		const [near] = duplexPair();
@@ -211,7 +218,7 @@ describe(streamConnection, () => {
 		await expect(closed.writeAsync("x", 1000)).resolves.toBeFalse();
 	});
 
-	it("should report a write that failed", async () => {
+	it("should report a write that failed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const failing = new Duplex({
@@ -228,7 +235,7 @@ describe(streamConnection, () => {
 });
 
 describe(nativeConnection, () => {
-	it("should pass reads, writes, and close to the native connection", async () => {
+	it("should pass reads, writes, and close to the native connection", async ({ expect }) => {
 		expect.assertions(5);
 
 		const native = fakeNativeConnection();
@@ -251,7 +258,7 @@ describe(nativeConnection, () => {
 		expect(native.close).toHaveBeenCalledOnce();
 	});
 
-	it("should read a line with no text as empty", async () => {
+	it("should read a line with no text as empty", async ({ expect }) => {
 		expect.assertions(1);
 
 		const native = fakeNativeConnection();
@@ -265,7 +272,7 @@ describe(nativeConnection, () => {
 });
 
 describe(nativeListener, () => {
-	it("should wrap each client and end once the server is closed", async () => {
+	it("should wrap each client and end once the server is closed", async ({ expect }) => {
 		expect.assertions(3);
 
 		const client = fakeNativeConnection();
@@ -295,8 +302,9 @@ describe(nativeListener, () => {
  * A TCP server on a free port of `127.0.0.1`, closed when the test ends.
  *
  * @returns The listener over it and its port.
+ * @param testContext - Assertions and cleanup for this test.
  */
-async function listenAsync(): Promise<{
+async function listenAsync(testContext: Pick<TestContext, "onTestFinished">): Promise<{
 	listener: ReturnType<typeof socketListener>;
 	port: number;
 }> {
@@ -305,7 +313,7 @@ async function listenAsync(): Promise<{
 	await new Promise<void>((resolve) => {
 		server.listen({ host: "127.0.0.1", port: 0 }, resolve);
 	});
-	onTestFinished(() => {
+	testContext.onTestFinished(() => {
 		listener.close();
 	});
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a TCP server's address is an object
@@ -315,12 +323,16 @@ async function listenAsync(): Promise<{
 /**
  * Connect to a TCP port and report how the connect failed.
  *
+ * @param testContext - Assertions and cleanup for this test.
  * @param port - A port of `127.0.0.1`.
  * @returns The error code, or `connected`.
  */
-async function refusedAsync(port: number): Promise<string> {
+async function refusedAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
+	port: number,
+): Promise<string> {
 	const socket = connect({ host: "127.0.0.1", port });
-	onTestFinished(() => {
+	testContext.onTestFinished(() => {
 		socket.destroy();
 	});
 	return new Promise((resolve) => {
@@ -333,9 +345,13 @@ async function refusedAsync(port: number): Promise<string> {
 	});
 }
 
-async function sendAsync(port: number, text: string): Promise<void> {
+async function sendAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
+	port: number,
+	text: string,
+): Promise<void> {
 	const socket = connect({ host: "127.0.0.1", port });
-	onTestFinished(() => {
+	testContext.onTestFinished(() => {
 		socket.destroy();
 	});
 	await new Promise<void>((resolve) => {
@@ -345,14 +361,17 @@ async function sendAsync(port: number, text: string): Promise<void> {
 }
 
 describe(socketListener, () => {
-	it("should hand out clients that came before and after the accept", async () => {
+	it("should hand out clients that came before and after the accept", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { listener, port } = await listenAsync();
-		await sendAsync(port, "early\n");
+		const { listener, port } = await listenAsync({ onTestFinished });
+		await sendAsync({ onTestFinished }, port, "early\n");
 		const early = await listener.acceptAsync();
 		const late = listener.acceptAsync();
-		await sendAsync(port, "late\n");
+		await sendAsync({ onTestFinished }, port, "late\n");
 
 		await expect(early!.readLineAsync(1000)).resolves.toStrictEqual({
 			line: "early",
@@ -364,22 +383,25 @@ describe(socketListener, () => {
 		});
 	});
 
-	it("should end a pending accept and every later one on close", async () => {
+	it("should end a pending accept and every later one on close", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
-		const { listener, port } = await listenAsync();
+		const { listener, port } = await listenAsync({ onTestFinished });
 		const pending = listener.acceptAsync();
 		listener.close();
 
 		await expect(pending).resolves.toBeUndefined();
 		await expect(listener.acceptAsync()).resolves.toBeUndefined();
-		await expect(refusedAsync(port)).resolves.toBe("ECONNREFUSED");
+		await expect(refusedAsync({ onTestFinished }, port)).resolves.toBe("ECONNREFUSED");
 	});
 
-	it("should drop clients nobody accepted on close", async () => {
+	it("should drop clients nobody accepted on close", async ({ expect, onTestFinished }) => {
 		expect.assertions(1);
 
-		const { listener, port } = await listenAsync();
+		const { listener, port } = await listenAsync({ onTestFinished });
 		const socket = connect({ host: "127.0.0.1", port });
 		const closed = new Promise<void>((resolve) => {
 			socket.once("close", () => {
@@ -403,7 +425,7 @@ describe(socketListener, () => {
 });
 
 describe(Handoff, () => {
-	it("should hand an item to a waiting take without also queueing it", async () => {
+	it("should hand an item to a waiting take without also queueing it", async ({ expect }) => {
 		expect.assertions(2);
 
 		const handoff = new Handoff<number>();

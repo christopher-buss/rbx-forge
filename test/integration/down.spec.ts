@@ -8,7 +8,8 @@ import nodeFs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import type { DownOptions, DownReport } from "../../src/client/down.ts";
 import { stopSessionAsync } from "../../src/client/down.ts";
@@ -238,8 +239,12 @@ function otherStartTime(): string {
  * ends.
  *
  * @param project - The fixture project, with its paths.
+ * @param onTestFinished - Register cleanup for this test.
  */
-async function holdSingletonAsync(project: Project): Promise<void> {
+async function holdSingletonAsync(
+	project: Project,
+	onTestFinished: TestContext["onTestFinished"],
+): Promise<void> {
 	mkdirSync(project.forge, { recursive: true });
 	const child = spawn(
 		process.execPath,
@@ -265,7 +270,9 @@ function pidsOf(project: Project, sessionId: string): Array<number> {
 }
 
 describe("forge down", () => {
-	it("should wait through the workers' grace and report stopped only once all are gone", async () => {
+	it("should wait through the workers' grace and report stopped only once all are gone", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const project = await makeProjectAsync({ gracefulTimeoutMs: 2000 });
@@ -300,7 +307,9 @@ describe("forge down", () => {
 		expect({ alive, files: filesLeft(project) }).toStrictEqual({ alive: [], files: [] });
 	}, 60_000);
 
-	it("should leave a session running when a stop reaches none of its parts", async () => {
+	it("should leave a session running when a stop reaches none of its parts", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const project = await makeProjectAsync();
@@ -323,7 +332,9 @@ describe("forge down", () => {
 		});
 	}, 60_000);
 
-	it("should never report stopped while a worker lives, and clean it up with --force", async () => {
+	it("should never report stopped while a worker lives, and clean it up with --force", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync();
@@ -352,7 +363,9 @@ describe("forge down", () => {
 		}).toStrictEqual({ files: [], survivors: [] });
 	}, 60_000);
 
-	it("should leave a replacement session that starts during down untouched", async () => {
+	it("should leave a replacement session that starts during down untouched", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const project = await makeProjectAsync();
@@ -373,7 +386,9 @@ describe("forge down", () => {
 		}).toStrictEqual({ alive: true, files: ["current", b.sessionId].toSorted() });
 	}, 60_000);
 
-	it("should kill a blocked supervisor through its pin with --force, and never delete a new session's files", async () => {
+	it("should kill a blocked supervisor through its pin with --force, and never delete a new session's files", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync();
@@ -408,7 +423,9 @@ describe("forge down", () => {
 		).resolves.toStrictEqual([]);
 	}, 90_000);
 
-	it("should wait for a start session's parts while it starts, and keep them", async () => {
+	it("should wait for a start session's parts while it starts, and keep them", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const project = await makeProjectAsync();
@@ -430,7 +447,9 @@ describe("forge down", () => {
 		expect(isProcessAlive(pid)).toBeTrue();
 	}, 60_000);
 
-	it("should never report stopped for a stalled startup, and kill it before any worker with --force", async () => {
+	it("should never report stopped for a stalled startup, and kill it before any worker with --force", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync();
@@ -453,7 +472,7 @@ describe("forge down", () => {
 		expect(workersOf(project, sessionId)).toStrictEqual([]);
 	}, 90_000);
 
-	it("should probe the barrier without creating a file in the session", async () => {
+	it("should probe the barrier without creating a file in the session", async ({ expect }) => {
 		expect.assertions(1);
 
 		const project = await makeProjectAsync();
@@ -468,7 +487,7 @@ describe("forge down", () => {
 		expect(atDelete.existed).toStrictEqual([false]);
 	});
 
-	it("should kill nothing for a record whose PID another process reused", async () => {
+	it("should kill nothing for a record whose PID another process reused", async ({ expect }) => {
 		expect.assertions(1);
 
 		const project = await makeProjectAsync();
@@ -479,11 +498,14 @@ describe("forge down", () => {
 		});
 	});
 
-	it("should kill nothing for a start time mismatch while the lock is held", async () => {
+	it("should kill nothing for a start time mismatch while the lock is held", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = await makeProjectAsync();
-		await holdSingletonAsync(project);
+		await holdSingletonAsync(project, onTestFinished);
 
 		await expect(downOnBystanderAsync(project, otherStartTime)).resolves.toMatchObject({
 			isAlive: true,
@@ -491,7 +513,9 @@ describe("forge down", () => {
 		});
 	});
 
-	it("should kill nothing for a record with a live start time while the lock is free, and never report it stopped", async () => {
+	it("should kill nothing for a record with a live start time while the lock is free, and never report it stopped", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const project = await makeProjectAsync();

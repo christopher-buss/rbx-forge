@@ -8,7 +8,7 @@ import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "no
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { EXIT_NOT_RUNNING, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
@@ -82,7 +82,9 @@ async function waitForAsync(isDone: () => boolean): Promise<void> {
 }
 
 describe("forge up", () => {
-	it("should start the compiler alone, and start nothing on a second up while it runs", async () => {
+	it("should start the compiler alone, and start nothing on a second up while it runs", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(WATCH_COMMAND);
@@ -118,7 +120,9 @@ describe("forge up", () => {
 		expect(processes(fixture.log)).toStrictEqual(["rbxtsc -w"]);
 	});
 
-	it("should keep the session up once the compiler exits, and start it again on a second up", async () => {
+	it("should keep the session up once the compiler exits, and start it again on a second up", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(WATCH_COMMAND);
@@ -149,7 +153,9 @@ describe("forge up", () => {
 		expect(compilers(fixture.log)).toBe(2);
 	});
 
-	it("should name no part in added when the compiler fails before its first build", async () => {
+	it("should name no part in added when the compiler fails before its first build", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
@@ -171,7 +177,9 @@ describe("forge up", () => {
 		});
 	});
 
-	it("should start a session with no part in a project with no watch command", async () => {
+	it("should start a session with no part in a project with no watch command", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync();
@@ -184,7 +192,7 @@ describe("forge up", () => {
 		expect(processes(fixture.log)).toStrictEqual([]);
 	});
 
-	it("should outlive up, and stop every worker on shutdown", async () => {
+	it("should outlive up, and stop every worker on shutdown", async ({ expect }) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(WATCH_COMMAND);
@@ -201,7 +209,7 @@ describe("forge up", () => {
 		await expect(waitForDeathAsync([pid, ...workers])).resolves.toStrictEqual([]);
 	});
 
-	it("should start one session when three ups run at once", async () => {
+	it("should start one session when three ups run at once", async ({ expect }) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(WATCH_COMMAND);
@@ -221,7 +229,7 @@ describe("forge up", () => {
 		}).toStrictEqual({ compilers: 1, started: 1 });
 	});
 
-	it("should join a session that is starting", async () => {
+	it("should join a session that is starting", async ({ expect }) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(WATCH_COMMAND);
@@ -246,7 +254,7 @@ describe("forge up", () => {
 		expect(two.result.data!["sessionId"]).toBe(one.result.data!["sessionId"]);
 	});
 
-	it("should report the session's startup failure", async () => {
+	it("should report the session's startup failure", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ rojoPort: "not a port" });
@@ -258,7 +266,7 @@ describe("forge up", () => {
 
 	it.skipIf(!IS_WINDOWS)(
 		"should fail with detach_unsupported inside a job that forbids breakaway",
-		async () => {
+		async ({ expect, onTestFinished }) => {
 			expect.assertions(3);
 
 			const fixture = await makeFixtureAsync(WATCH_COMMAND);
@@ -293,7 +301,7 @@ describe("forge up", () => {
 });
 
 describe("forge status", () => {
-	it("should fail with not_running when no session runs", async () => {
+	it("should fail with not_running when no session runs", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync();
@@ -305,7 +313,7 @@ describe("forge status", () => {
 });
 
 describe("forge logs", () => {
-	it("should print a service's log, and follow new lines", async () => {
+	it("should print a service's log, and follow new lines", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync(WATCH_COMMAND);

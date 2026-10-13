@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -53,7 +53,7 @@ function delayedMove(responseAfterMs: number): IpcConnection {
 }
 
 describe("move command validation", () => {
-	it("reports visibility without a warning", async () => {
+	it("reports visibility without a warning", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, reporter } = await movingSessionAsync();
@@ -65,7 +65,7 @@ describe("move command validation", () => {
 		expect(reporter.events).toStrictEqual([]);
 	});
 
-	it("uses the normal IPC response deadline", async () => {
+	it("uses the normal IPC response deadline", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = await movingSessionAsync();
@@ -77,7 +77,7 @@ describe("move command validation", () => {
 		});
 	});
 
-	it("explains when there is no session Studio to move", async () => {
+	it("explains when there is no session Studio to move", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(
@@ -88,7 +88,7 @@ describe("move command validation", () => {
 		});
 	});
 
-	it("explains unsupported platforms", async () => {
+	it("explains unsupported platforms", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = await movingSessionAsync("linux");
@@ -99,7 +99,7 @@ describe("move command validation", () => {
 		});
 	});
 
-	it("explains a malformed move response", async () => {
+	it("explains a malformed move response", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, session } = await movingSessionAsync();

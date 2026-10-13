@@ -1,13 +1,13 @@
 import path from "node:path";
 import { PassThrough } from "node:stream";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, it } from "vitest";
 
 import { createNodeSeams } from "../../src/seams/node-seams.ts";
 import { waitUntilWatchingAsync } from "../helpers/real-file-watch.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 
 describe("real directory watch", () => {
-	it("should observe real directory edits", async () => {
+	it("should observe real directory edits", async ({ expect, onTestFinished }) => {
 		expect.assertions(1);
 
 		const directory = makeTemporaryDirectory();

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createFakeReaper } from "../../test/helpers/fake-reaper.ts";
 import type { FakeReaper } from "../../test/helpers/fake-reaper.ts";
@@ -91,7 +91,7 @@ async function makePartsAsync(isEnding = false): Promise<PartsRun> {
 }
 
 describe(createServiceParts, () => {
-	it("should mark a part stopped on request off, not failed", async () => {
+	it("should mark a part stopped on request off, not failed", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = await makePartsAsync();
@@ -112,7 +112,7 @@ describe(createServiceParts, () => {
 		);
 	});
 
-	it("should mark a part stopped with a failure failed, and record why", async () => {
+	it("should mark a part stopped with a failure failed, and record why", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await makePartsAsync();
@@ -127,7 +127,9 @@ describe(createServiceParts, () => {
 		});
 	});
 
-	it("should have the session track each part until its status tells how it ended", async () => {
+	it("should have the session track each part until its status tells how it ended", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = await makePartsAsync();
@@ -141,7 +143,7 @@ describe(createServiceParts, () => {
 		expect(run.status.snapshot().services.rojo.status).toBe("failed");
 	});
 
-	it("should mark the parts off when the session ends", async () => {
+	it("should mark the parts off when the session ends", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await makePartsAsync();
@@ -153,7 +155,7 @@ describe(createServiceParts, () => {
 		expect(run.status.snapshot().services.rojo.status).toBe("off");
 	});
 
-	it("should do nothing to stop a part that does not run", async () => {
+	it("should do nothing to stop a part that does not run", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await makePartsAsync();
@@ -166,7 +168,7 @@ describe(createServiceParts, () => {
 		expect(run.fake.calls).toStrictEqual(["spawn rojo"]);
 	});
 
-	it("should stop a part on request and wait until its tree is gone", async () => {
+	it("should stop a part on request and wait until its tree is gone", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = await makePartsAsync();
@@ -184,7 +186,7 @@ describe(createServiceParts, () => {
 		expect(run.status.snapshot().services.rojo.status).toBe("off");
 	});
 
-	it("should stop a part that does not run at once", async () => {
+	it("should stop a part that does not run at once", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = await makePartsAsync();
@@ -193,7 +195,9 @@ describe(createServiceParts, () => {
 		expect(run.fake.calls).toStrictEqual([]);
 	});
 
-	it("should note a tree that left processes, until the part's next tree is gone", async () => {
+	it("should note a tree that left processes, until the part's next tree is gone", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = await makePartsAsync();
@@ -213,7 +217,7 @@ describe(createServiceParts, () => {
 		expect(run.parts.hasSurvivors("rojo")).toBeFalse();
 	});
 
-	it("should start nothing once the session is ending", async () => {
+	it("should start nothing once the session is ending", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = await makePartsAsync(true);

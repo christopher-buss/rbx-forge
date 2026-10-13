@@ -1,10 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
-import type { FakeChild } from "../../test/helpers/fake-process.ts";
 import type { ReporterEvent } from "../seams/reporter.ts";
 import { encodeMessage } from "./channel.ts";
-import type { SupervisorRun } from "./launcher.ts";
 import { createSupervisorLauncher } from "./launcher.ts";
 
 const REQUEST = { compiler: true, config: {}, open: false };
@@ -12,11 +10,11 @@ const REQUEST = { compiler: true, config: {}, open: false };
 function launch() {
 	const spawner = createFakeSpawner();
 	const onEvent = vi.fn<(event: ReporterEvent) => void>();
-	const run: SupervisorRun = createSupervisorLauncher(
+	const run = createSupervisorLauncher(
 		{ childProcess: spawner.runner, host: { execPath: "/node" } },
 		"/forge/dist/supervisor.mjs",
 	)({ cwd: "/project", env: { PATH: "/bin" }, onEvent, request: REQUEST });
-	const child: FakeChild = spawner.children[0]!;
+	const child = spawner.children[0]!;
 	let written = "";
 	child.stdin.setEncoding("utf8");
 	child.stdin.on("data", (chunk: string) => {
@@ -32,7 +30,7 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(createSupervisorLauncher, () => {
-	it("should run the entry detached with Node, the request, and piped streams", () => {
+	it("should run the entry detached with Node, the request, and piped streams", ({ expect }) => {
 		expect.assertions(1);
 
 		const { call } = launch();
@@ -50,7 +48,9 @@ describe(createSupervisorLauncher, () => {
 		});
 	});
 
-	it("should relay events and resolve with the result once the supervisor exits", async () => {
+	it("should relay events and resolve with the result once the supervisor exits", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { child, onEvent, run } = launch();
@@ -68,7 +68,9 @@ describe(createSupervisorLauncher, () => {
 		expect(onEvent).toHaveBeenCalledExactlyOnceWith({ message: "hi", type: "info" });
 	});
 
-	it("should resolve at once once the supervisor let this start go, and ignore its later exit", async () => {
+	it("should resolve at once once the supervisor let this start go, and ignore its later exit", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { child, run } = launch();
@@ -82,7 +84,7 @@ describe(createSupervisorLauncher, () => {
 		expect(result).toStrictEqual({ data: { stopped: ["rojo"] }, summary: "Let go." });
 	});
 
-	it("should reject with the session's failure", async () => {
+	it("should reject with the session's failure", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { child, run } = launch();
@@ -103,7 +105,9 @@ describe(createSupervisorLauncher, () => {
 		});
 	});
 
-	it("should reject with internal_error and its stderr when it exits without a result", async () => {
+	it("should reject with internal_error and its stderr when it exits without a result", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const exited = launch();
@@ -123,7 +127,9 @@ describe(createSupervisorLauncher, () => {
 		});
 	});
 
-	it("should reject with internal_error when the supervisor does not start", async () => {
+	it("should reject with internal_error when the supervisor does not start", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { child, run } = launch();
@@ -135,7 +141,9 @@ describe(createSupervisorLauncher, () => {
 		});
 	});
 
-	it("should pass a stop signal on through the owner pipe, even after the pipe broke", async () => {
+	it("should pass a stop signal on through the owner pipe, even after the pipe broke", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { child, run, written } = launch();

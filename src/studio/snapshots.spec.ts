@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
 import { listSnapshots, pruneSnapshots, SNAPSHOT_KEEP_COUNT, snapshotName } from "./snapshots.ts";
@@ -28,7 +28,7 @@ function at(name: string): string {
 }
 
 describe(snapshotName, () => {
-	it("should name a snapshot by its time, then the place's name", () => {
+	it("should name a snapshot by its time, then the place's name", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(snapshotName(Date.UTC(2026, 8, 26, 10, 15, 0, 123), "places/game.rbxlx")).toBe(
@@ -38,13 +38,13 @@ describe(snapshotName, () => {
 });
 
 describe(listSnapshots, () => {
-	it("should list none when the folder does not exist", () => {
+	it("should list none when the folder does not exist", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(listSnapshots(createMemoryFileSystem().fileSystem, DIRECTORY)).toStrictEqual([]);
 	});
 
-	it("should list place files oldest first, and skip lock files and others", () => {
+	it("should list place files oldest first, and skip lock files and others", ({ expect }) => {
 		expect.assertions(1);
 
 		const { fileSystem } = createMemoryFileSystem({
@@ -62,7 +62,7 @@ describe(listSnapshots, () => {
 });
 
 describe(pruneSnapshots, () => {
-	it(`should keep the ${SNAPSHOT_KEEP_COUNT} newest snapshots`, () => {
+	it(`should keep the ${SNAPSHOT_KEEP_COUNT} newest snapshots`, ({ expect }) => {
 		expect.assertions(2);
 
 		const { fileSystem } = createMemoryFileSystem(seed(SNAPSHOT_KEEP_COUNT + 2));
@@ -76,7 +76,7 @@ describe(pruneSnapshots, () => {
 		);
 	});
 
-	it("should delete nothing with no more than the kept count", () => {
+	it("should delete nothing with no more than the kept count", ({ expect }) => {
 		expect.assertions(1);
 
 		const { fileSystem } = createMemoryFileSystem(seed(SNAPSHOT_KEEP_COUNT));
@@ -84,7 +84,7 @@ describe(pruneSnapshots, () => {
 		expect(pruneSnapshots(fileSystem, DIRECTORY)).toStrictEqual({ pruned: [], warnings: [] });
 	});
 
-	it("should keep an old snapshot that a Studio has open", () => {
+	it("should keep an old snapshot that a Studio has open", ({ expect }) => {
 		expect.assertions(2);
 
 		const { fileSystem } = createMemoryFileSystem(
@@ -95,7 +95,7 @@ describe(pruneSnapshots, () => {
 		expect(fileSystem.existsSync(at(snapshot(0)))).toBeTrue();
 	});
 
-	it("should warn about a snapshot it cannot delete and go on", () => {
+	it("should warn about a snapshot it cannot delete and go on", ({ expect }) => {
 		expect.assertions(1);
 
 		// A folder with a place's name: deleting it as a file fails.

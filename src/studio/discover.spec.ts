@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -65,13 +65,13 @@ function find(setup: Setup, environment: Environment = {}, studioPath?: string):
 }
 
 describe(findStudioExecutable, () => {
-	it("should read the link handler, then the .rbxl file type", () => {
+	it("should read the link handler, then the .rbxl file type", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(STUDIO_REGISTRY_KEYS).toStrictEqual([LINK_KEY, PLACE_KEY]);
 	});
 
-	it("should take the flag first", () => {
+	it("should take the flag first", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -86,7 +86,7 @@ describe(findStudioExecutable, () => {
 		).toStrictEqual({ path: FLAG_EXE, source: "flag" });
 	});
 
-	it("should take the variable over the registry, in any case on Windows", () => {
+	it("should take the variable over the registry, in any case on Windows", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -97,7 +97,7 @@ describe(findStudioExecutable, () => {
 		).toStrictEqual({ path: ENV_EXE, source: "environment" });
 	});
 
-	it("should treat an empty variable as unset", () => {
+	it("should treat an empty variable as unset", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -108,7 +108,7 @@ describe(findStudioExecutable, () => {
 		).toStrictEqual({ path: LINK_EXE, source: "registry" });
 	});
 
-	it("should fail when the flag or the variable names no file", () => {
+	it("should fail when the flag or the variable names no file", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(catchForgeError(() => find({}, {}, FLAG_EXE))).toMatchObject({
@@ -121,7 +121,9 @@ describe(findStudioExecutable, () => {
 		});
 	});
 
-	it("should fall back to the .rbxl file type when the link handler is missing or gone", () => {
+	it("should fall back to the .rbxl file type when the link handler is missing or gone", ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const registry = { [PLACE_KEY]: `"${PLACE_EXE}" "%1"` };
@@ -135,7 +137,7 @@ describe(findStudioExecutable, () => {
 		).toStrictEqual({ path: PLACE_EXE, source: "registry" });
 	});
 
-	it("should skip a registry value that fails to read or names no program", () => {
+	it("should skip a registry value that fails to read or names no program", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -146,7 +148,7 @@ describe(findStudioExecutable, () => {
 		).toBeUndefined();
 	});
 
-	it("should fail with native_missing when the addon does not load", () => {
+	it("should fail with native_missing when the addon does not load", ({ expect }) => {
 		expect.assertions(1);
 
 		const error = catchForgeError(() => {
@@ -160,13 +162,13 @@ describe(findStudioExecutable, () => {
 		expect(error.code).toBe("native_missing");
 	});
 
-	it("should find nothing when the addon has no registry read", () => {
+	it("should find nothing when the addon has no registry read", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(find({ files: [LINK_EXE] })).toBeUndefined();
 	});
 
-	it("should find the installed app on macOS", () => {
+	it("should find the installed app on macOS", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(find({ files: [MACOS_STUDIO_PATH], platform: "darwin" })).toStrictEqual({
@@ -176,7 +178,7 @@ describe(findStudioExecutable, () => {
 		expect(find({ platform: "darwin" })).toBeUndefined();
 	});
 
-	it("should find nothing with the no-installed-Studio lookup", () => {
+	it("should find nothing with the no-installed-Studio lookup", ({ expect }) => {
 		expect.assertions(3);
 
 		const none = { installedStudio: noInstalledStudio };
@@ -190,7 +192,7 @@ describe(findStudioExecutable, () => {
 		).toStrictEqual({ path: ENV_EXE, source: "environment" });
 	});
 
-	it("should find nothing on Linux", () => {
+	it("should find nothing on Linux", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(find({ files: [LINK_EXE, MACOS_STUDIO_PATH], platform: "linux" })).toBeUndefined();
@@ -208,7 +210,7 @@ describe(commandExecutable, () => {
 		[String.raw`C:\Roblox\RobloxStudioBeta.EXE`, String.raw`C:\Roblox\RobloxStudioBeta.EXE`],
 		[String.raw`C:\Roblox\Studio.exes %1`, undefined],
 		["", undefined],
-	] as const)("should read %j as %j", ([command, executable]) => {
+	] as const)("should read %j as %j", ([command, executable], { expect }) => {
 		expect.assertions(1);
 
 		expect(commandExecutable(command)).toBe(executable);
@@ -216,7 +218,7 @@ describe(commandExecutable, () => {
 });
 
 describe(withStudioPath, () => {
-	it("should put the resolved flag in the session's environment", () => {
+	it("should put the resolved flag in the session's environment", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(

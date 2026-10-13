@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import {
 	createCommandContext,
@@ -54,7 +54,7 @@ function input(flags: FlagValues = {}): CommandInput {
 }
 
 describe(runSyncbackCommandAsync, () => {
-	it("should sync the configured input into the configured project", async () => {
+	it("should sync the configured input into the configured project", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, specs } = makeSyncback({
@@ -80,7 +80,7 @@ describe(runSyncbackCommandAsync, () => {
 		]);
 	});
 
-	it("should take --input and --project over the config", async () => {
+	it("should take --input and --project over the config", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, specs } = makeSyncback({
@@ -100,7 +100,7 @@ describe(runSyncbackCommandAsync, () => {
 		]);
 	});
 
-	it("should surface Rojo's error message", async () => {
+	it("should surface Rojo's error message", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeSyncback({}, exited(1, ["[ERROR] place file is locked"]));

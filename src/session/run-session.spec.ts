@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createFakeReaper, createFakeSignals } from "../../test/helpers/fake-reaper.ts";
 import type { FakeReaper, FakeReaperOptions, FakeSignals } from "../../test/helpers/fake-reaper.ts";
@@ -78,7 +78,7 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(runSessionAsync, () => {
-	it("should admit the reaper, run the body, and end on a stop signal", async () => {
+	it("should admit the reaper, run the body, and end on a stop signal", async ({ expect }) => {
 		expect.assertions(4);
 
 		const { fake, outcome, signals } = startSession(async (scope) => {
@@ -102,7 +102,7 @@ describe(runSessionAsync, () => {
 		expect(signals.listeners()).toBe(0);
 	});
 
-	it("should keep running when a service exits", async () => {
+	it("should keep running when a service exits", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { fake, outcome, signals } = startSession();
@@ -116,7 +116,7 @@ describe(runSessionAsync, () => {
 		expect(calls).toStrictEqual(["go", "spawn rojo"]);
 	});
 
-	it("should stop one worker with the session's grace, and keep running", async () => {
+	it("should stop one worker with the session's grace, and keep running", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { fake, outcome, signals } = startSession(async (scope) => {
@@ -130,7 +130,7 @@ describe(runSessionAsync, () => {
 		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "stop rojo 250", "terminate 250"]);
 	});
 
-	it("should keep the first reason it ends with", async () => {
+	it("should keep the first reason it ends with", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { outcome, signals } = startSession(async (scope) => {
@@ -143,7 +143,7 @@ describe(runSessionAsync, () => {
 		await expect(outcome).resolves.toMatchObject({ reason: { type: "shutdown" } });
 	});
 
-	it("should let a forced shutdown hurry the reaper's end", async () => {
+	it("should let a forced shutdown hurry the reaper's end", async ({ expect }) => {
 		expect.assertions(1);
 
 		const fake = createFakeReaper({ end: END });
@@ -164,7 +164,9 @@ describe(runSessionAsync, () => {
 		expect(fake.calls).toStrictEqual(["go", "spawn rojo", "terminate 250 hurried"]);
 	});
 
-	it("should never admit the reaper or run the body after a stop signal during its launch", async () => {
+	it("should never admit the reaper or run the body after a stop signal during its launch", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const signals = createFakeSignals();
@@ -186,7 +188,7 @@ describe(runSessionAsync, () => {
 		expect(body).not.toHaveBeenCalled();
 	});
 
-	it("should start no further service after a stop signal", async () => {
+	it("should start no further service after a stop signal", async ({ expect }) => {
 		expect.assertions(3);
 
 		const signals = createFakeSignals();
@@ -214,7 +216,9 @@ describe(runSessionAsync, () => {
 		expect(started).toStrictEqual([expect.objectContaining({ id: "rojo" }), undefined]);
 	});
 
-	it("should end with failed and terminate the reaper when the body rejects", async () => {
+	it("should end with failed and terminate the reaper when the body rejects", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const error = new ForgeError("process_failed", "no rojo");
@@ -228,7 +232,7 @@ describe(runSessionAsync, () => {
 		expect(signals.listeners()).toBe(0);
 	});
 
-	it("should abort the scope's signal once the session ends", async () => {
+	it("should abort the scope's signal once the session ends", async ({ expect }) => {
 		expect.assertions(1);
 
 		let scopeSignal: AbortSignal | undefined;
@@ -242,7 +246,9 @@ describe(runSessionAsync, () => {
 		expect(scopeSignal).toHaveProperty("aborted", true);
 	});
 
-	it("should wait for every tracked task after the reaper ended, even ones added late", async () => {
+	it("should wait for every tracked task after the reaper ended, even ones added late", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const order: Array<string> = [];
@@ -274,7 +280,7 @@ describe(runSessionAsync, () => {
 		expect(order).toStrictEqual(["first", "late", "returned"]);
 	});
 
-	it("should wait for a body that still runs when the session ends", async () => {
+	it("should wait for a body that still runs when the session ends", async ({ expect }) => {
 		expect.assertions(1);
 
 		const order: Array<string> = [];
@@ -294,7 +300,7 @@ describe(runSessionAsync, () => {
 		expect(order).toStrictEqual(["body", "returned"]);
 	});
 
-	it("should stop listening for signals when the reaper cannot launch", async () => {
+	it("should stop listening for signals when the reaper cannot launch", async ({ expect }) => {
 		expect.assertions(2);
 
 		const signals = createFakeSignals();
@@ -309,7 +315,7 @@ describe(runSessionAsync, () => {
 		expect(signals.listeners()).toBe(0);
 	});
 
-	it("should end with owner_gone when the owner pipe closes", async () => {
+	it("should end with owner_gone when the owner pipe closes", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { outcome, signals } = startSession();
@@ -319,7 +325,7 @@ describe(runSessionAsync, () => {
 		await expect(outcome).resolves.toMatchObject({ reason: { type: "owner_gone" } });
 	});
 
-	it("should end at once on a stop request that came before the session", async () => {
+	it("should end at once on a stop request that came before the session", async ({ expect }) => {
 		expect.assertions(2);
 
 		const signals = createFakeSignals();
@@ -345,7 +351,7 @@ describe(runSessionAsync, () => {
 		["admitted", ["go", "terminate 250"]],
 	])(
 		"should close admission for good when the owner goes while paused at %s",
-		async ([point, calls]) => {
+		async ([point, calls], { expect }) => {
 			expect.assertions(2);
 
 			const signals = createFakeSignals();
@@ -360,7 +366,7 @@ describe(runSessionAsync, () => {
 		},
 	);
 
-	it("should pause at leased before go and at admitted before the body", async () => {
+	it("should pause at leased before go and at admitted before the body", async ({ expect }) => {
 		expect.assertions(1);
 
 		const order: Array<string> = [];

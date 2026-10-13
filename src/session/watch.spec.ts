@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { ManualClock } from "../../test/helpers/manual-clock.ts";
@@ -54,7 +54,7 @@ function watching(files: Record<string, string> = {}): Watching {
 }
 
 describe(waitForStudioCloseAsync, () => {
-	it("should resolve true once the lock file appeared and went away", async () => {
+	it("should resolve true once the lock file appeared and went away", async ({ expect }) => {
 		expect.assertions(3);
 
 		const watch = watching();
@@ -76,7 +76,9 @@ describe(waitForStudioCloseAsync, () => {
 		await expect(closed).resolves.toBeTrue();
 	});
 
-	it("should resolve false when the watch ends before Studio opened the place", async () => {
+	it("should resolve false when the watch ends before Studio opened the place", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const watch = watching();
@@ -89,7 +91,9 @@ describe(waitForStudioCloseAsync, () => {
 		expect(onOpen).not.toHaveBeenCalled();
 	});
 
-	it("should resolve false when the watch ends while Studio has the place open", async () => {
+	it("should resolve false when the watch ends while Studio has the place open", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const watch = watching({ "game.rbxl.lock": "1" });
@@ -102,7 +106,9 @@ describe(waitForStudioCloseAsync, () => {
 		expect(onOpen).toHaveBeenCalledOnce();
 	});
 
-	it("should wait for a lock file that names the recorded Studio, not an old one", async () => {
+	it("should wait for a lock file that names the recorded Studio, not an old one", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const watch = watching({ "game.rbxl.lock": "3\nRobloxStudioBeta\nhost\n" });
@@ -120,7 +126,7 @@ describe(waitForStudioCloseAsync, () => {
 		expect(onOpen).toHaveBeenCalledOnce();
 	});
 
-	it("should resolve true once the lock file names another process", async () => {
+	it("should resolve true once the lock file names another process", async ({ expect }) => {
 		expect.assertions(1);
 
 		const watch = watching({ "game.rbxl.lock": "7" });
@@ -132,7 +138,7 @@ describe(waitForStudioCloseAsync, () => {
 		await expect(closed).resolves.toBeTrue();
 	});
 
-	it("should resolve true once the recorded Studio's lock file went away", async () => {
+	it("should resolve true once the recorded Studio's lock file went away", async ({ expect }) => {
 		expect.assertions(1);
 
 		const watch = watching({ "game.rbxl.lock": "7" });
@@ -144,7 +150,9 @@ describe(waitForStudioCloseAsync, () => {
 		await expect(closed).resolves.toBeTrue();
 	});
 
-	it("should resolve true once the recorded Studio exits while its lock file names it", async () => {
+	it("should resolve true once the recorded Studio exits while its lock file names it", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		let isRunning = true;
@@ -160,7 +168,9 @@ describe(waitForStudioCloseAsync, () => {
 		expect(onOpen).toHaveBeenCalledOnce();
 	});
 
-	it("should resolve true, never open, when the recorded Studio exits before its lock file", async () => {
+	it("should resolve true, never open, when the recorded Studio exits before its lock file", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		let isRunning = true;
@@ -178,7 +188,7 @@ describe(waitForStudioCloseAsync, () => {
 });
 
 describe(watchSaves, () => {
-	it("should call onSave once per write, not for the file as it was", async () => {
+	it("should call onSave once per write, not for the file as it was", async ({ expect }) => {
 		expect.assertions(2);
 
 		const watch = watching({ "game.rbxl": "v1" });
@@ -199,7 +209,7 @@ describe(watchSaves, () => {
 		expect(onSave).toHaveBeenCalledTimes(2);
 	});
 
-	it("should see a place that did not exist at the start", async () => {
+	it("should see a place that did not exist at the start", async ({ expect }) => {
 		expect.assertions(1);
 
 		const watch = watching();
@@ -213,7 +223,7 @@ describe(watchSaves, () => {
 		expect(onSave).toHaveBeenCalledOnce();
 	});
 
-	it("should look at the file between two polls on check", async () => {
+	it("should look at the file between two polls on check", async ({ expect }) => {
 		expect.assertions(2);
 
 		const watch = watching({ "game.rbxl": "v1" });

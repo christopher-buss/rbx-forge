@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { gunzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import {
 	launch,
@@ -22,7 +22,9 @@ function managedDirectory(home: string): string {
 describe.skipIf(process.platform !== "win32" && process.platform !== "darwin")(
 	"managed Rojo plugin",
 	() => {
-		it("should patch a real stock model coherently before a session opens Studio", async () => {
+		it("should patch a real stock model coherently before a session opens Studio", async ({
+			expect,
+		}) => {
 			expect.assertions(3);
 
 			const project = await makeProjectAsync();

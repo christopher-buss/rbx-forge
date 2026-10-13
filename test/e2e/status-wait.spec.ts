@@ -7,7 +7,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
@@ -33,7 +33,7 @@ describe("forge status --wait", () => {
 		{ name: "two start lines of one compile", compileMs: "500", ends: "1", starts: "2" },
 	])(
 		"should return the build of the last edit with $name",
-		async ({ compileMs, ends, starts }) => {
+		async ({ compileMs, ends, starts }, { expect }) => {
 			expect.assertions(5);
 
 			const fixture = await makeFixtureAsync({ projectType: "rbxts" });
@@ -65,7 +65,9 @@ describe("forge status --wait", () => {
 		},
 	);
 
-	it("should return the build of the last edit from sloptor's NDJSON events", async () => {
+	it("should return the build of the last edit from sloptor's NDJSON events", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync({
@@ -110,7 +112,9 @@ describe("forge status --wait", () => {
 		).toContainEqual(["build", "--json", "-w"]);
 	});
 
-	it("should return the status at once with --timeout 0 while a compile runs", async () => {
+	it("should return the status at once with --timeout 0 while a compile runs", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
@@ -131,7 +135,9 @@ describe("forge status --wait", () => {
 		expect(statusOf(now)).toMatchObject({ building: true, lastBuild: { errors: 0 } });
 	});
 
-	it("should return at once with the compiler off in a project with no watch command", async () => {
+	it("should return at once with the compiler off in a project with no watch command", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync();

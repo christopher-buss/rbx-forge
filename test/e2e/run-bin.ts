@@ -8,7 +8,7 @@ import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 
 const REPOSITORY = path.join(import.meta.dirname, "..", "..");
 // Runs after `build`: the bin imports `dist/cli.mjs`.
-export const BIN: string = path.join(REPOSITORY, "bin", "rbx-forge.js");
+export const BIN = path.join(REPOSITORY, "bin", "rbx-forge.js");
 
 /** One finished run of the built bin. */
 export interface BinRun {

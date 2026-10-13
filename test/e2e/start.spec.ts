@@ -8,7 +8,7 @@
 import { readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
@@ -113,7 +113,9 @@ function describeWorker({ args, role }: WorkerRecord): string {
 }
 
 describe("forge start", () => {
-	it("should run the whole workflow, go on when its Studio closes, and leave zero survivors once killed", async () => {
+	it("should run the whole workflow, go on when its Studio closes, and leave zero survivors once killed", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync({
@@ -176,7 +178,9 @@ describe("forge start", () => {
 		}).toStrictEqual({ isStudioAlive: true, survivors: [] });
 	});
 
-	it("should run only the compiler with --no-open: no Rojo, no Studio, and no port taken", async () => {
+	it("should run only the compiler with --no-open: no Rojo, no Studio, and no port taken", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
@@ -204,7 +208,7 @@ describe("forge start", () => {
 		).resolves.toStrictEqual([]);
 	});
 
-	it("should keep Rojo and Studio when the compiler exits", async () => {
+	it("should keep Rojo and Studio when the compiler exits", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ projectType: "rbxts" });
@@ -230,7 +234,9 @@ describe("forge start", () => {
 		).resolves.toStrictEqual([]);
 	});
 
-	it("should kill a hook's whole tree when start is hard-killed while the hook runs", async () => {
+	it("should kill a hook's whole tree when start is hard-killed while the hook runs", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({
@@ -253,7 +259,9 @@ describe("forge start", () => {
 });
 
 describe("forge start --no-compiler", () => {
-	it("should serve on the fixed port and leave zero survivors when start is hard-killed", async () => {
+	it("should serve on the fixed port and leave zero survivors when start is hard-killed", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
@@ -277,7 +285,9 @@ describe("forge start --no-compiler", () => {
 		await expect(waitForDeathAsync(records.map(({ pid }) => pid))).resolves.toStrictEqual([]);
 	});
 
-	it("should write a worktree wrapper while building the original project", async () => {
+	it("should write a worktree wrapper while building the original project", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
@@ -314,7 +324,7 @@ describe("forge start --no-compiler", () => {
 		);
 	});
 
-	it("should report ready once Rojo runs", async () => {
+	it("should report ready once Rojo runs", async ({ expect }) => {
 		expect.assertions(1);
 
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
@@ -346,7 +356,7 @@ describe("forge start --no-compiler", () => {
 	});
 
 	// Windows cannot send SIGTERM to another process: `kill` terminates it.
-	it.skipIf(IS_WINDOWS)("should stop every worker on SIGTERM and exit 0", async () => {
+	it.skipIf(IS_WINDOWS)("should stop every worker on SIGTERM and exit 0", async ({ expect }) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
@@ -363,7 +373,9 @@ describe("forge start --no-compiler", () => {
 		await expect(waitForDeathAsync(records.map(({ pid }) => pid))).resolves.toStrictEqual([]);
 	});
 
-	it("should fail only Rojo's part when it exits, killing what it left, and keep the session", async () => {
+	it("should fail only Rojo's part when it exits, killing what it left, and keep the session", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });
@@ -387,7 +399,9 @@ describe("forge start --no-compiler", () => {
 		);
 	});
 
-	it("should fail with port_in_use when the fixed port is busy, starting nothing", async () => {
+	it("should fail with port_in_use when the fixed port is busy, starting nothing", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(STUDIO_PROJECT, { studio: true });

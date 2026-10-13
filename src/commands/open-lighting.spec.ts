@@ -1,5 +1,6 @@
 import path from "node:path";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -15,10 +16,13 @@ import { createStudioLauncher } from "../studio/launcher.ts";
 import { runSnapshotLightingAsync } from "../studio/snapshot-lighting.ts";
 import { runOpenAsync } from "./open.ts";
 
-function hiddenSnapshot({
-	desktop = "hidden",
-	watcherFails = false,
-}: { desktop?: "hidden" | "user"; watcherFails?: boolean } = {}) {
+function hiddenSnapshot(
+	onTestFinished: TestContext["onTestFinished"],
+	{
+		desktop = "hidden",
+		watcherFails = false,
+	}: { desktop?: "hidden" | "user"; watcherFails?: boolean } = {},
+) {
 	const clock = createManualClock(0);
 	const memory = createMemoryFileSystem({ "RobloxStudioBeta.exe": "", "tools/rojo.exe": "" });
 	const native = createFakeNative({
@@ -85,10 +89,13 @@ function hiddenSnapshot({
 }
 
 describe("hidden snapshot automatic Lighting", () => {
-	it("returns the opened snapshot before watching its delayed migration prompt", async () => {
+	it("returns the opened snapshot before watching its delayed migration prompt", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
-		const run = hiddenSnapshot();
+		const run = hiddenSnapshot(onTestFinished);
 
 		await expect(runOpenAsync(run.context, { config: {}, flags: {} })).resolves.toMatchObject({
 			data: { desktop: "hidden", studio: { pid: 42 } },
@@ -103,10 +110,13 @@ describe("hidden snapshot automatic Lighting", () => {
 		expect(run.studio).toMatchObject({ alive: true, blocked: false });
 	});
 
-	it("returns the opened hidden snapshot with a warning when its helper cannot start", async () => {
+	it("returns the opened hidden snapshot with a warning when its helper cannot start", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const run = hiddenSnapshot({ watcherFails: true });
+		const run = hiddenSnapshot(onTestFinished, { watcherFails: true });
 
 		await expect(runOpenAsync(run.context, { config: {}, flags: {} })).resolves.toMatchObject({
 			data: { desktop: "hidden", studio: { pid: 42 } },
@@ -118,10 +128,10 @@ describe("hidden snapshot automatic Lighting", () => {
 		});
 	});
 
-	it("leaves user-desktop prompts to the user", async () => {
+	it("leaves user-desktop prompts to the user", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 
-		const run = hiddenSnapshot({ desktop: "user", watcherFails: true });
+		const run = hiddenSnapshot(onTestFinished, { desktop: "user", watcherFails: true });
 
 		await expect(runOpenAsync(run.context, { config: {}, flags: {} })).resolves.toMatchObject({
 			data: { desktop: "user" },

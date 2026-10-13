@@ -1,5 +1,5 @@
 import path from "node:path";
-import { assert, describe, expect, it, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import {
 	createCommandContext,
@@ -99,7 +99,7 @@ function step(trail: Array<string>, value = "built"): () => Promise<string> {
 }
 
 describe(runWithHooksAsync, () => {
-	it("should run the step alone when the command has no hooks", async () => {
+	it("should run the step alone when the command has no hooks", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, trail } = makeHookRun();
@@ -109,7 +109,9 @@ describe(runWithHooksAsync, () => {
 		).resolves.toStrictEqual({ hooks: [], value: "built" });
 	});
 
-	it("should run pre hooks, then the step, then post hooks, each in order", async () => {
+	it("should run pre hooks, then the step, then post hooks, each in order", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context, trail } = makeHookRun();
@@ -123,7 +125,7 @@ describe(runWithHooksAsync, () => {
 		expect(trail).toStrictEqual(["pre 1", "pre 2", "step", "post 1", "post 2"]);
 	});
 
-	it("should run a phase that has no list as empty", async () => {
+	it("should run a phase that has no list as empty", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, trail } = makeHookRun();
@@ -137,7 +139,7 @@ describe(runWithHooksAsync, () => {
 		expect(trail).toStrictEqual(["step", "lint"]);
 	});
 
-	it("should return every hook result with the step's value", async () => {
+	it("should return every hook result with the step's value", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, trail } = makeHookRun({
@@ -176,7 +178,9 @@ describe(runWithHooksAsync, () => {
 		});
 	});
 
-	it("should run a hook through /bin/sh in the project, with local bins and its identity", async () => {
+	it("should run a hook through /bin/sh in the project, with local bins and its identity", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context, specs, trail } = makeHookRun({
@@ -204,7 +208,9 @@ describe(runWithHooksAsync, () => {
 		]);
 	});
 
-	it("should run a Windows hook through cmd.exe, keeping the case of Path", async () => {
+	it("should run a Windows hook through cmd.exe, keeping the case of Path", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context, specs, trail } = makeHookRun({
@@ -226,7 +232,7 @@ describe(runWithHooksAsync, () => {
 		});
 	});
 
-	it("should report each hook as a step", async () => {
+	it("should report each hook as a step", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, reporter, trail } = makeHookRun({ outcomes: { lint: exited(1) } });
@@ -247,7 +253,7 @@ describe(runWithHooksAsync, () => {
 	});
 
 	describe("when a pre hook fails", () => {
-		it("should abort before later hooks and the step", async () => {
+		it("should abort before later hooks and the step", async ({ expect }) => {
 			expect.assertions(1);
 
 			const { context, trail } = makeHookRun({ outcomes: { "pre 1": exited(2) } });
@@ -263,7 +269,7 @@ describe(runWithHooksAsync, () => {
 			expect(trail).toStrictEqual(["pre 1"]);
 		});
 
-		it("should fail with hook_failed, the output tail, and the results", async () => {
+		it("should fail with hook_failed, the output tail, and the results", async ({ expect }) => {
 			expect.assertions(3);
 
 			const output = Array.from({ length: 12 }, (_, index) => `line ${index}`);
@@ -303,7 +309,7 @@ describe(runWithHooksAsync, () => {
 		});
 	});
 
-	it("should not run post hooks when the step fails", async () => {
+	it("should not run post hooks when the step fails", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, trail } = makeHookRun();
@@ -317,7 +323,9 @@ describe(runWithHooksAsync, () => {
 		expect(trail).toStrictEqual([]);
 	});
 
-	it("should fail after the step when a post hook fails, keeping earlier results", async () => {
+	it("should fail after the step when a post hook fails, keeping earlier results", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, trail } = makeHookRun({ outcomes: { lint: exited(1) } });
@@ -337,7 +345,7 @@ describe(runWithHooksAsync, () => {
 		]);
 	});
 
-	it("should fail a hook that a signal ended", async () => {
+	it("should fail a hook that a signal ended", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, trail } = makeHookRun({ outcomes: { lint: exited(null) } });
@@ -348,7 +356,7 @@ describe(runWithHooksAsync, () => {
 		expect(error.message).toBe("Hook build:post:0 failed (exit code null): lint");
 	});
 
-	it("should fail a hook that timed out, as killed", async () => {
+	it("should fail a hook that timed out, as killed", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, trail } = makeHookRun({
@@ -379,7 +387,7 @@ describe(runWithHooksAsync, () => {
 		]);
 	});
 
-	it("should fail a hook whose shell could not start", async () => {
+	it("should fail a hook whose shell could not start", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, trail } = makeHookRun({
@@ -406,7 +414,7 @@ describe(runWithHooksAsync, () => {
 	});
 
 	describe("cycle guard", () => {
-		it("should skip a hook that is already running above this run", async () => {
+		it("should skip a hook that is already running above this run", async ({ expect }) => {
 			expect.assertions(2);
 
 			const { context, reporter, trail } = makeHookRun({
@@ -443,7 +451,7 @@ describe(runWithHooksAsync, () => {
 			]);
 		});
 
-		it("should pass the inherited stack on with the hook added", async () => {
+		it("should pass the inherited stack on with the hook added", async ({ expect }) => {
 			expect.assertions(1);
 
 			const { context, specs, trail } = makeHookRun({
@@ -459,7 +467,7 @@ describe(runWithHooksAsync, () => {
 			expect(specs[0]!.env["RBX_FORGE_HOOK_STACK"]).toBe("open:pre:0,build:post:0");
 		});
 
-		it("should run a hook eight deep", async () => {
+		it("should run a hook eight deep", async ({ expect }) => {
 			expect.assertions(1);
 
 			const stack = Array.from({ length: 7 }, (_, index) => `open:pre:${index}`).join(",");
@@ -476,7 +484,7 @@ describe(runWithHooksAsync, () => {
 			expect(trail).toStrictEqual(["lint", "step"]);
 		});
 
-		it("should fail a hook nine deep before it or the step runs", async () => {
+		it("should fail a hook nine deep before it or the step runs", async ({ expect }) => {
 			expect.assertions(4);
 
 			const inherited = Array.from({ length: 8 }, (_, index) => `open:pre:${index}`);

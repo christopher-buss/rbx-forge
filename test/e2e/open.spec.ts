@@ -4,7 +4,8 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import { withVariables } from "../../src/process/environment.ts";
@@ -87,9 +88,13 @@ function makeFixture(files: Record<string, string> = {}): Fixture {
  * Wait for the fixture Studio to start: it may start after forge exited.
  *
  * @param log - The fixture log.
+ * @param expect - Assertions for this test.
  * @returns The Studio's record.
  */
-async function waitForStudioAsync(log: string): Promise<WorkerRecord> {
+async function waitForStudioAsync(
+	log: string,
+	expect: TestContext["expect"],
+): Promise<WorkerRecord> {
 	const deadline = Date.now() + 20_000;
 	let studio = readWorkerLog(log).find(({ role }) => role === "studio");
 	while (studio === undefined && Date.now() < deadline) {
@@ -128,7 +133,7 @@ describe("forge open", () => {
 	it.skipIf(!IS_WINDOWS)(
 		"dismisses a snapshot migration prompt after the open CLI has exited",
 		{ timeout: 20_000 },
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(3);
 
 			const fixture = await makeFixtureAsync({ projectType: "luau" }, { studio: true });
@@ -150,7 +155,9 @@ describe("forge open", () => {
 		},
 	);
 
-	it("should open a snapshot on the user desktop when the flag overrides hidden config", async () => {
+	it("should open a snapshot on the user desktop when the flag overrides hidden config", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { forge, log } = makeFixture({
@@ -161,7 +168,7 @@ describe("forge open", () => {
 			}),
 		});
 		const { status, stdout } = await forge(["open", "--desktop", "user", "--json"]);
-		await waitForStudioAsync(log);
+		await waitForStudioAsync(log, expect);
 
 		expect(status).toBe(EXIT_SUCCESS);
 		expect(parseResult(stdout).data).toMatchObject({
@@ -172,7 +179,7 @@ describe("forge open", () => {
 
 	it.skipIf(!IS_WINDOWS)(
 		"should warn and open the snapshot on the user desktop when a job forbids breakaway",
-		async () => {
+		async ({ expect, onTestFinished }) => {
 			expect.assertions(5);
 
 			const fixture = await makeFixtureAsync({ projectType: "luau" }, { studio: true });
@@ -218,12 +225,14 @@ describe("forge open", () => {
 		},
 	);
 
-	it("should build a snapshot, then start Studio with it directly, and Studio outlives forge", async () => {
+	it("should build a snapshot, then start Studio with it directly, and Studio outlives forge", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const { forge, log, snapshots } = makeFixture();
 		const { status, stdout } = await forge(["open", "--json"]);
-		const studio = await waitForStudioAsync(log);
+		const studio = await waitForStudioAsync(log, expect);
 		const { data } = parseResult(stdout);
 		const [name] = readdirSync(snapshots);
 		const snapshot = path.join(snapshots, name!);
@@ -247,17 +256,19 @@ describe("forge open", () => {
 
 	// POSIX gives an orphan a new parent (init or a subreaper) once forge
 	// exits, often before Studio starts; Windows keeps the creator's PID.
-	it.skipIf(!IS_WINDOWS)("should start Studio as forge's own child", async () => {
+	it.skipIf(!IS_WINDOWS)("should start Studio as forge's own child", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { forge, log } = makeFixture();
 		const { pid } = await forge(["open"]);
-		const studio = await waitForStudioAsync(log);
+		const studio = await waitForStudioAsync(log, expect);
 
 		expect(studio.ppid).toBe(pid);
 	});
 
-	it("should keep the five newest snapshots, and every one a Studio has open", async () => {
+	it("should keep the five newest snapshots, and every one a Studio has open", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const old = [0, 1, 2, 3, 4, 5].map((index) => `2020-01-01T00-00-0${index}-000_game.rbxl`);
@@ -270,7 +281,7 @@ describe("forge open", () => {
 
 		const { forge, log, snapshots } = makeFixture(files);
 		const { stdout } = await forge(["open", "--json"]);
-		await waitForStudioAsync(log);
+		await waitForStudioAsync(log, expect);
 		const { data } = parseResult(stdout);
 
 		expect(data).toMatchObject({ pruned: [path.join(snapshots, old[1]!)] });
@@ -284,7 +295,9 @@ describe("forge open", () => {
 		);
 	});
 
-	it("should open a snapshot while a session runs, and never the session's place", async () => {
+	it("should open a snapshot while a session runs, and never the session's place", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(
@@ -321,7 +334,7 @@ describe("forge open", () => {
 		]);
 	});
 
-	it("should sync a snapshot back with syncback --input", async () => {
+	it("should sync a snapshot back with syncback --input", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { forge, log } = makeFixture();
@@ -336,7 +349,7 @@ describe("forge open", () => {
 		});
 	});
 
-	it("should start the Studio --studio-path names, over the variable", async () => {
+	it("should start the Studio --studio-path names, over the variable", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge, log, place } = makeFixture();
@@ -344,13 +357,15 @@ describe("forge open", () => {
 			["open", "--json", "--studio-path", process.execPath],
 			{ RBX_FORGE_STUDIO_PATH: path.join(place, "missing.exe") },
 		);
-		const studio = await waitForStudioAsync(log);
+		const studio = await waitForStudioAsync(log, expect);
 
 		expect(status).toBe(EXIT_SUCCESS);
 		expect(parseResult(stdout).data).toMatchObject({ studio: { pid: studio.pid } });
 	});
 
-	it("should fail with studio_launch_failed when the Studio path names no file", async () => {
+	it("should fail with studio_launch_failed when the Studio path names no file", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { forge, place } = makeFixture();
@@ -370,14 +385,14 @@ describe("forge open", () => {
 	// association; the fixture \`open\` and \`xdg-open\` on PATH stand in.
 	it.skipIf(IS_WINDOWS)(
 		"should open the snapshot through the platform launcher when it finds no Studio",
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(4);
 
 			const { forge, log } = makeFixture();
 			const { status, stdout } = await forge(["open", "--json"], {
 				RBX_FORGE_STUDIO_PATH: "",
 			});
-			const studio = await waitForStudioAsync(log);
+			const studio = await waitForStudioAsync(log, expect);
 			const { data } = parseResult(stdout);
 
 			expect(status).toBe(EXIT_SUCCESS);
@@ -388,7 +403,7 @@ describe("forge open", () => {
 
 	it.skipIf(IS_WINDOWS)(
 		"should fail with studio_launch_failed when the launcher fails",
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(2);
 
 			const { forge } = makeFixture();

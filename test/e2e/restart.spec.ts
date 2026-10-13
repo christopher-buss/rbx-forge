@@ -7,7 +7,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { EXIT_NOT_RUNNING, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
@@ -85,7 +85,9 @@ function ownersOf({ services }: SessionStatus): Record<string, unknown> {
 }
 
 describe("forge restart", () => {
-	it("should restart the compiler, Rojo on the same port, and a fresh Studio once the old ones are gone", async () => {
+	it("should restart the compiler, Rojo on the same port, and a fresh Studio once the old ones are gone", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -141,7 +143,7 @@ describe("forge restart", () => {
 		).toStrictEqual([true, true, true]);
 	});
 
-	it("should leave the parts a start terminal owns alone, and name them", async () => {
+	it("should leave the parts a start terminal owns alone, and name them", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -165,7 +167,9 @@ describe("forge restart", () => {
 		expect(partsOf(fixture)).toStrictEqual(old);
 	});
 
-	it("should restart the parts a start terminal owns with --force, and keep their owner", async () => {
+	it("should restart the parts a start terminal owns with --force, and keep their owner", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -201,7 +205,9 @@ describe("forge restart", () => {
 		).resolves.toStrictEqual([]);
 	});
 
-	it("should compile fully after a deleted output folder, then start Rojo", async () => {
+	it("should compile fully after a deleted output folder, then start Rojo", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(
@@ -231,7 +237,7 @@ describe("forge restart", () => {
 		expect(rojo[1]!.at).toBeGreaterThanOrEqual(Date.parse(lastBuild.at));
 	});
 
-	it("should fail with not_running when no session runs", async () => {
+	it("should fail with not_running when no session runs", async ({ expect }) => {
 		expect.assertions(1);
 
 		const fixture = await makeFixtureAsync(PROJECT);

@@ -1,4 +1,5 @@
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import type { TestContext } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
@@ -122,16 +123,19 @@ function makeWorld({ holdsLock = true, supervisor = {} }: WorldSetup = {}): Worl
 /**
  * Open the session's control endpoint.
  *
+ * @param testContext - Assertions and cleanup for this test.
  * @param world - The project.
  * @param shutdown - Answers `shutdown`.
- * @param status - Answers `status`; none by default.
- * @param stopParts - Answers `stopParts`; none by default.
+ * @param root3 - Optional status and stop handlers.
  */
 async function listenAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
 	world: World,
 	shutdown: IpcHandler,
-	status?: IpcHandler,
-	stopParts?: IpcHandler,
+	{
+		status,
+		stopParts,
+	}: { status?: IpcHandler | undefined; stopParts?: IpcHandler | undefined } = {},
 ): Promise<void> {
 	const server = startIpcServer(await world.ipc.listenAsync(IDENTITY.endpoint), {
 		handlers: {
@@ -141,7 +145,7 @@ async function listenAsync(
 		},
 		token: "token",
 	});
-	onTestFinished(async () => {
+	testContext.onTestFinished(async () => {
 		await server.closeAsync();
 	});
 }
@@ -150,26 +154,29 @@ async function listenAsync(
  * Serve the session's control endpoint: `shutdown` is recorded, accepted,
  * and passed to `onShutdown`.
  *
+ * @param testContext - Assertions and cleanup for this test.
  * @param world - The project.
  * @param onShutdown - What the supervisor does on it.
- * @param status - Answers `status`; none by default.
- * @param stopParts - Answers `stopParts`; none by default.
+ * @param root3 - Optional status and stop handlers.
  */
 async function serveAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
 	world: World,
 	onShutdown: OnShutdown,
-	status?: IpcHandler,
-	stopParts?: IpcHandler,
+	{
+		status,
+		stopParts,
+	}: { status?: IpcHandler | undefined; stopParts?: IpcHandler | undefined } = {},
 ): Promise<void> {
 	await listenAsync(
+		testContext,
 		world,
 		(parameters) => {
 			world.asked.push(parameters);
 			onShutdown(parameters, world);
 			return { accepted: true, sessionId: "s1" };
 		},
-		status,
-		stopParts,
+		{ status, stopParts },
 	);
 }
 
@@ -331,16 +338,18 @@ function holdLease(world: World, ...entries: Array<FakeSessionProcess>): void {
  * A pause that notes each point, and lets another session take the
  * singleton lock before the delete.
  *
+ * @param testContext - Assertions and cleanup for this test.
  * @param world - The project.
  * @param points - Gets each point.
  * @returns The pause.
  */
 function otherSessionAtDelete(
+	testContext: Pick<TestContext, "onTestFinished">,
 	world: World,
 	points: Array<DownPoint>,
 ): (point: DownPoint) => Promise<void> {
 	let other: FileLock | null = null;
-	onTestFinished(() => {
+	testContext.onTestFinished(() => {
 		other?.release();
 	});
 	return async (point) => {
@@ -383,11 +392,14 @@ async function unlockAsync(world: World): Promise<void> {
 }
 
 describe(stopSessionAsync, () => {
-	it("should stop the session on shutdown and report its supervisor's exit", async () => {
+	it("should stop the session on shutdown and report its supervisor's exit", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
-		await serveAsync(world, exitOnShutdown);
+		await serveAsync({ onTestFinished }, world, exitOnShutdown);
 
 		await expect(downAsync(world)).resolves.toStrictEqual({
 			parts: null,
@@ -400,14 +412,20 @@ describe(stopSessionAsync, () => {
 		expect(world.asked).toStrictEqual([{ sessionId: "s1" }]);
 	});
 
-	it("should ask the session to stop its parts, then wait for its end and barrier", async () => {
+	it("should ask the session to stop its parts, then wait for its end and barrier", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
 		const requests: Array<Record<string, unknown>> = [];
-		await serveAsync(world, exitOnShutdown, READY_STATUS, (parameters) => {
-			requests.push(parameters);
-			return { ...CLOSED_STOPS };
+		await serveAsync({ onTestFinished }, world, exitOnShutdown, {
+			status: READY_STATUS,
+			stopParts: (parameters) => {
+				requests.push(parameters);
+				return { ...CLOSED_STOPS };
+			},
 		});
 
 		await expect(downAsync(world, { keepStudio: false })).resolves.toStrictEqual({
@@ -439,19 +457,25 @@ describe(stopSessionAsync, () => {
 		});
 	});
 
-	it("should leave a session that owned parts keep running, and report them", async () => {
+	it("should leave a session that owned parts keep running, and report them", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
-		await serveAsync(world, exitOnShutdown, READY_STATUS, () => {
-			return {
-				ending: false,
-				kept: [
-					{ owner: "start", part: "studio" },
-					{ owner: "start", part: "compiler" },
-				],
-				stopped: ["rojo"],
-			};
+		await serveAsync({ onTestFinished }, world, exitOnShutdown, {
+			status: READY_STATUS,
+			stopParts: () => {
+				return {
+					ending: false,
+					kept: [
+						{ owner: "start", part: "studio" },
+						{ owner: "start", part: "compiler" },
+					],
+					stopped: ["rojo"],
+				};
+			},
 		});
 
 		await expect(downAsync(world)).resolves.toStrictEqual({
@@ -497,11 +521,14 @@ describe(stopSessionAsync, () => {
 			false,
 			{ code: "identity_mismatch", message: "Not Studio.", place: PLACE, status: "failed" },
 		],
-	])("should report %s", async ([, stops, keepStudio, studio]) => {
+	])("should report %s", async ([, stops, keepStudio, studio], { expect, onTestFinished }) => {
 		expect.assertions(1);
 
 		const world = makeWorld();
-		await serveAsync(world, exitOnShutdown, READY_STATUS, () => stops);
+		await serveAsync({ onTestFinished }, world, exitOnShutdown, {
+			status: READY_STATUS,
+			stopParts: () => stops,
+		});
 
 		await expect(downAsync(world, { keepStudio })).resolves.toMatchObject({
 			status: "stopped",
@@ -521,11 +548,14 @@ describe(stopSessionAsync, () => {
 		["answers stopParts with something else", READY_STATUS, () => ({ ending: "yes" })],
 	])(
 		"should stop the session whole, touching no Studio, when it %s",
-		async ([, status, stop]) => {
+		async ([, status, stop], { expect, onTestFinished }) => {
 			expect.assertions(2);
 
 			const world = makeWorld();
-			await serveAsync(world, exitOnShutdown, status, stop);
+			await serveAsync({ onTestFinished }, world, exitOnShutdown, {
+				status,
+				stopParts: stop,
+			});
 
 			await expect(downAsync(world)).resolves.toStrictEqual({
 				parts: null,
@@ -541,11 +571,14 @@ describe(stopSessionAsync, () => {
 
 	it.for(["compiler", "rojo", "studio"] as const)(
 		"should never stop a session whole whose %s has an owner and that does not answer stopParts",
-		async (part) => {
+		async (part, { expect, onTestFinished }) => {
 			expect.assertions(2);
 
 			const world = makeWorld();
-			await serveAsync(world, exitOnShutdown, ownedStatus("ready", part), silent);
+			await serveAsync({ onTestFinished }, world, exitOnShutdown, {
+				status: ownedStatus("ready", part),
+				stopParts: silent,
+			});
 
 			await expect(downAsync(world)).rejects.toMatchObject({
 				code: "supervisor_unresponsive",
@@ -554,11 +587,17 @@ describe(stopSessionAsync, () => {
 		},
 	);
 
-	it("should stop a session whole that has an owner and does not answer stopParts with --force", async () => {
+	it("should stop a session whole that has an owner and does not answer stopParts with --force", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
-		await serveAsync(world, exitOnShutdown, ownedStatus("ready"), silent);
+		await serveAsync({ onTestFinished }, world, exitOnShutdown, {
+			status: ownedStatus("ready"),
+			stopParts: silent,
+		});
 
 		await expect(downAsync(world, { force: true })).resolves.toMatchObject({
 			parts: null,
@@ -568,19 +607,28 @@ describe(stopSessionAsync, () => {
 		expect(world.asked).toStrictEqual([{ sessionId: "s1" }]);
 	});
 
-	it("should report session_replaced when another session answers stopParts", async () => {
+	it("should report session_replaced when another session answers stopParts", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
-		await serveAsync(world, exitOnShutdown, READY_STATUS, () => {
-			throw new ForgeError("session_replaced", "Session s1 is gone.");
+		await serveAsync({ onTestFinished }, world, exitOnShutdown, {
+			status: READY_STATUS,
+			stopParts: () => {
+				throw new ForgeError("session_replaced", "Session s1 is gone.");
+			},
 		});
 
 		await expect(downAsync(world)).rejects.toMatchObject({ code: "session_replaced" });
 		expect(world.asked).toStrictEqual([]);
 	});
 
-	it("should give the session its Studio time and down's wait to answer stopParts", async () => {
+	it("should give the session its Studio time and down's wait to answer stopParts", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const world = makeWorld();
@@ -598,40 +646,52 @@ describe(stopSessionAsync, () => {
 			return connection;
 		};
 
-		await serveAsync(world, exitOnShutdown, READY_STATUS, () => ({ ...CLOSED_STOPS }));
+		await serveAsync({ onTestFinished }, world, exitOnShutdown, {
+			status: READY_STATUS,
+			stopParts: () => ({ ...CLOSED_STOPS }),
+		});
 		await downAsync(world);
 
 		expect(waits[1]).toBe(STOP_PARTS_WAIT_MS + TIMEOUT_MS);
 	});
 
-	it("should wait for the supervisor after it accepted, asking once", async () => {
+	it("should wait for the supervisor after it accepted, asking once", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
-		await serveAsync(world, ignoreShutdown);
+		await serveAsync({ onTestFinished }, world, ignoreShutdown);
 		at(world, 500, world.exit);
 
 		await expect(downAsync(world)).resolves.toMatchObject({ stoppedBy: "shutdown" });
 		expect(world.asked).toHaveLength(1);
 	});
 
-	it("should ask again while the endpoint is not open yet", async () => {
+	it("should ask again while the endpoint is not open yet", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
 		at(world, 300, () => {
-			void serveAsync(world, exitOnShutdown);
+			void serveAsync({ onTestFinished }, world, exitOnShutdown);
 		});
 
 		await expect(downAsync(world)).resolves.toMatchObject({ stoppedBy: "shutdown" });
 		expect(world.asked).toStrictEqual([{ sessionId: "s1" }]);
 	});
 
-	it("should ask for a graceful shutdown once even with no wait", async () => {
+	it("should ask for a graceful shutdown once even with no wait", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
-		await serveAsync(world, exitOnShutdown);
+		await serveAsync({ onTestFinished }, world, exitOnShutdown);
 
 		await expect(downAsync(world, { timeoutMs: 0 })).resolves.toMatchObject({
 			stoppedBy: "shutdown",
@@ -639,22 +699,25 @@ describe(stopSessionAsync, () => {
 		expect(world.asked).toStrictEqual([{ sessionId: "s1" }]);
 	});
 
-	it("should force the shutdown once the wait passed", async () => {
+	it("should force the shutdown once the wait passed", async ({ expect, onTestFinished }) => {
 		expect.assertions(3);
 
 		const world = makeWorld();
-		await serveAsync(world, exitOnForce);
+		await serveAsync({ onTestFinished }, world, exitOnForce);
 
 		await expect(downAsync(world)).resolves.toMatchObject({ stoppedBy: "forced_shutdown" });
 		expect(world.asked).toStrictEqual([{ sessionId: "s1" }, { force: true, sessionId: "s1" }]);
 		expect(world.clock.now()).toBe(TIMEOUT_MS);
 	});
 
-	it("should report supervisor_unresponsive and kill nothing without --force", async () => {
+	it("should report supervisor_unresponsive and kill nothing without --force", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
 		const world = makeWorld();
-		await serveAsync(world, ignoreShutdown);
+		await serveAsync({ onTestFinished }, world, ignoreShutdown);
 
 		const error = await downAsync(world).catch((err: unknown) => err);
 
@@ -672,7 +735,9 @@ describe(stopSessionAsync, () => {
 		}).toStrictEqual({ alive: true, files: true, waited: TIMEOUT_MS + FORCED_SHUTDOWN_MS });
 	});
 
-	it("should kill a supervisor that does not stop through its pin with --force", async () => {
+	it("should kill a supervisor that does not stop through its pin with --force", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld();
@@ -690,7 +755,9 @@ describe(stopSessionAsync, () => {
 		expect(world.native.processes.get(SUPERVISOR)!.alive).toBeFalse();
 	});
 
-	it("should report supervisor_unresponsive when the killed supervisor stays", async () => {
+	it("should report supervisor_unresponsive when the killed supervisor stays", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld({ supervisor: { ignoresKill: true } });
@@ -709,7 +776,7 @@ describe(stopSessionAsync, () => {
 		["a start time mismatch under a held lock", { startTime: "999" }, true],
 	] as const)(
 		"should kill nothing for %s, and report it gone",
-		async ([, supervisor, holdsLock]) => {
+		async ([, supervisor, holdsLock], { expect }) => {
 			expect.assertions(2);
 
 			const world = makeWorld({ holdsLock, supervisor });
@@ -721,7 +788,9 @@ describe(stopSessionAsync, () => {
 		},
 	);
 
-	it("should wait for a supervisor that let go of the lock until it exits", async () => {
+	it("should wait for a supervisor that let go of the lock until it exits", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false });
@@ -733,7 +802,9 @@ describe(stopSessionAsync, () => {
 		expect(world.clock.now()).toBe(300);
 	});
 
-	it("should never report stopped while a supervisor that let go of the lock still runs", async () => {
+	it("should never report stopped while a supervisor that let go of the lock still runs", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false });
@@ -745,7 +816,9 @@ describe(stopSessionAsync, () => {
 		expect(world.clock.now()).toBe(2500);
 	});
 
-	it("should report a live process without the lock unresponsive, and kill nothing with --force", async () => {
+	it("should report a live process without the lock unresponsive, and kill nothing with --force", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false });
@@ -760,7 +833,7 @@ describe(stopSessionAsync, () => {
 		}).toStrictEqual({ alive: true, waited: TIMEOUT_MS + FORCED_SHUTDOWN_MS });
 	});
 
-	it("should treat a supervisor it cannot open as gone", async () => {
+	it("should treat a supervisor it cannot open as gone", async ({ expect }) => {
 		expect.assertions(1);
 
 		const world = makeWorld({ supervisor: { pinError: "access denied" } });
@@ -770,7 +843,9 @@ describe(stopSessionAsync, () => {
 		});
 	});
 
-	it("should delete the files of a session whose supervisor is gone, under the lock", async () => {
+	it("should delete the files of a session whose supervisor is gone, under the lock", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
@@ -789,7 +864,9 @@ describe(stopSessionAsync, () => {
 		});
 	});
 
-	it("should take a missing session directory as a clear barrier, whatever a scan finds", async () => {
+	it("should take a missing session directory as a clear barrier, whatever a scan finds", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
@@ -799,11 +876,14 @@ describe(stopSessionAsync, () => {
 		await expect(downAsync(world)).resolves.toMatchObject({ removed: false });
 	});
 
-	it("should report session_replaced when another session answers, and stop nothing", async () => {
+	it("should report session_replaced when another session answers, and stop nothing", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const world = makeWorld();
-		await listenAsync(world, () => {
+		await listenAsync({ onTestFinished }, world, () => {
 			throw new ForgeError("session_replaced", "Session s1 is gone.", {
 				details: { sessionId: "s2" },
 			});
@@ -815,7 +895,9 @@ describe(stopSessionAsync, () => {
 		});
 	});
 
-	it("should report cleanup_in_progress with the PIDs while a worker lives", async () => {
+	it("should report cleanup_in_progress with the PIDs while a worker lives", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
@@ -830,7 +912,7 @@ describe(stopSessionAsync, () => {
 		expect(world.memory.fileSystem.existsSync(FILES.identity)).toBeTrue();
 	});
 
-	it("should wait for a held lease even when the scan finds no process", async () => {
+	it("should wait for a held lease even when the scan finds no process", async ({ expect }) => {
 		expect.assertions(1);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
@@ -843,7 +925,7 @@ describe(stopSessionAsync, () => {
 		});
 	});
 
-	it("should clean up what outlived the barrier with --force", async () => {
+	it("should clean up what outlived the barrier with --force", async ({ expect }) => {
 		expect.assertions(2);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
@@ -866,7 +948,9 @@ describe(stopSessionAsync, () => {
 		]);
 	});
 
-	it("should report cleanup_unverifiable and kill nothing it cannot verify", async () => {
+	it("should report cleanup_unverifiable and kill nothing it cannot verify", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
@@ -881,7 +965,9 @@ describe(stopSessionAsync, () => {
 		});
 	});
 
-	it("should report cleanup_in_progress when a process survives the forced cleanup", async () => {
+	it("should report cleanup_in_progress when a process survives the forced cleanup", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
@@ -894,7 +980,9 @@ describe(stopSessionAsync, () => {
 		});
 	});
 
-	it("should treat a session its supervisor deleted during the barrier as clear", async () => {
+	it("should treat a session its supervisor deleted during the barrier as clear", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
@@ -903,7 +991,9 @@ describe(stopSessionAsync, () => {
 		await expect(downAsync(world)).resolves.toMatchObject({ removed: false });
 	});
 
-	it("should fail when the lease cannot be read while the session is there", async () => {
+	it("should fail when the lease cannot be read while the session is there", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
@@ -912,14 +1002,17 @@ describe(stopSessionAsync, () => {
 		await expect(downAsync(world)).rejects.toThrow("isLockFree: denied");
 	});
 
-	it("should keep the files while another session holds the lock", async () => {
+	it("should keep the files while another session holds the lock", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
 		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
 		const points: Array<DownPoint> = [];
 
 		await expect(
-			downAsync(world, { pause: otherSessionAtDelete(world, points) }),
+			downAsync(world, { pause: otherSessionAtDelete({ onTestFinished }, world, points) }),
 		).resolves.toMatchObject({ removed: false });
 		expect(points).toStrictEqual(["barrier", "delete"]);
 		expect(world.memory.fileSystem.existsSync(FILES.identity)).toBeTrue();
