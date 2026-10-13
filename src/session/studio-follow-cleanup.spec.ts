@@ -21,10 +21,11 @@ import { FILE_POLL_MS } from "./worker-context.ts";
 function followingStudio(
 	onTestFinished: TestContext["onTestFinished"],
 	platform: NodeJS.Platform = "win32",
+	{ hasLock = true }: { hasLock?: boolean } = {},
 ) {
 	const memory = createMemoryFileSystem({
 		"game.rbxl": "place",
-		"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+		...(hasLock ? { "game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n` } : {}),
 	});
 	const native = createFakeNative({
 		42: {
@@ -184,5 +185,22 @@ describe("studio follow completion", () => {
 		await run.done();
 
 		expect(run.status.snapshot().services.studio.status).toBe("off");
+	});
+
+	it("settles readiness when the Studio follow ends before its lock appears", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const run = followingStudio(onTestFinished, "linux", { hasLock: false });
+		await flushAsync();
+
+		expect(run.status.snapshot().services.studio.status).toBe("opening");
+
+		run.leave();
+		await run.done();
+
+		await expect(run.open).resolves.toBeUndefined();
 	});
 });
