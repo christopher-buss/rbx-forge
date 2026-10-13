@@ -209,8 +209,8 @@ catalogs:
       specifier: 7.0.2003
       version: 7.0.2003
     publint:
-      specifier: 0.3.24
-      version: 0.3.24
+      specifier: 0.3.25
+      version: 0.3.25
   mutation:
     '@stryker-mutator/api':
       specifier: 10.0.0
@@ -397,10 +397,10 @@ importers:
         version: 7.0.2003
       publint:
         specifier: catalog:lint
-        version: 0.3.24
+        version: 0.3.25
       tsdown:
         specifier: catalog:build
-        version: 0.23.0(oxc-resolver@11.24.2)(publint@0.3.24)(typescript@6.0.3)
+        version: 0.23.0(oxc-resolver@11.24.2)(publint@0.3.25)(typescript@6.0.3)
       typescript:
         specifier: catalog:tsc
         version: 6.0.3
@@ -4843,8 +4843,8 @@ packages:
     resolution: {integrity: sha512-7PiHtLll5LdnKIMw100I+8xJXR5gW2QwWYkT6iJva0bXitZKa/XMrSbdmg3r2Xnaidz9Qumd0VPaMrZlF9V9sA==}
     engines: {node: '>=0.4.0'}
 
-  publint@0.3.24:
-    resolution: {integrity: sha512-9zS56KrKBoqi5Qt8h92uMP8TTM9AYZSgnmCo4u2priMqkOZvQnTsziZ2p5LJ2ywbYkAjoCDp2jda9u4cgFefIw==}
+  publint@0.3.25:
+    resolution: {integrity: sha512-WMMbn/d7JqRlfXQL/JUI4n5skC8cJ5WVr8/wT5mmiYWkUdENkZr1I5rgs2+dQPVRgoJd+JRYtB46MTsuDylw9g==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -9746,7 +9746,7 @@ snapshots:
 
   progress@2.0.3: {}
 
-  publint@0.3.24:
+  publint@0.3.25:
     dependencies:
       '@publint/pack': 0.1.7
       package-manager-detector: 1.8.0
@@ -10019,7 +10019,7 @@ snapshots:
 
   ts-pattern@5.9.0: {}
 
-  tsdown@0.23.0(oxc-resolver@11.24.2)(publint@0.3.24)(typescript@6.0.3):
+  tsdown@0.23.0(oxc-resolver@11.24.2)(publint@0.3.25)(typescript@6.0.3):
     dependencies:
       cac: 7.0.0
       defu: 6.1.7
@@ -10036,7 +10036,7 @@ snapshots:
       unconfig-core: 7.5.0
       verkit: 0.4.1
     optionalDependencies:
-      publint: 0.3.24
+      publint: 0.3.25
       typescript: 6.0.3
     transitivePeerDependencies:
       - '@typescript/native-preview'
