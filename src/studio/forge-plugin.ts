@@ -33,7 +33,12 @@ export function installForgePlugin(context: Pick<CommandContext, "env" | "seams"
 		fileSystem.writeFileSync(temporary, bundled);
 		fileSystem.renameSync(temporary, target);
 	} catch (err) {
-		fileSystem.rmSync(temporary, { force: true });
+		// `force` ignores only ENOENT; POSIX gives ENOTDIR when the folder is a
+		// file.
+		if (fileSystem.existsSync(temporary)) {
+			fileSystem.rmSync(temporary);
+		}
+
 		throw new ForgeError(
 			"forge_plugin_write_failed",
 			`Could not install the forge Studio plugin: ${toForgeError(err).message}`,
