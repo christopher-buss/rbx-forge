@@ -74,13 +74,10 @@ export default defineConfig({
 			{
 				extends: true,
 				test: {
-					// Keep the real Studio project ordered after integration
-					// (#177).
 					name: "integration-real-studio",
 					clearMocks: true,
 					include: [REAL_STUDIO_SPEC],
 					restoreMocks: true,
-					sequence: { groupOrder: 1 },
 					setupFiles,
 					testTimeout: 15_000,
 					unstubEnvs: true,
@@ -104,13 +101,11 @@ export default defineConfig({
 			{
 				extends: true,
 				test: {
-					// Keep the real Studio project ordered after e2e (#177).
 					name: "e2e-real-studio",
 					clearMocks: true,
 					hookTimeout: 30_000,
 					include: [REAL_STUDIO_E2E_SPEC],
 					restoreMocks: true,
-					sequence: { groupOrder: 1 },
 					setupFiles: [...setupFiles, "./test/setup/studio-isolation.ts"],
 					testTimeout: 60_000,
 					unstubEnvs: true,
