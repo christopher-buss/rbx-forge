@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { gunzipSync } from "node:zlib";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
@@ -59,7 +59,9 @@ async function lockedStatusAsync(fixture: Fixture): Promise<SessionStatus> {
 describe.skipIf(process.platform !== "win32" && process.platform !== "darwin")(
 	"cli managed Studio synchronization readiness",
 	() => {
-		it("should keep a locked place opening until its delayed acknowledgement arrives", async () => {
+		it("should keep a locked place opening until its delayed acknowledgement arrives", async ({
+			expect,
+		}) => {
 			expect.assertions(3);
 
 			const fixture = await managedFixtureAsync({ ...STUDIO_PROJECT, ...WATCH_COMMAND });
@@ -79,7 +81,7 @@ describe.skipIf(process.platform !== "win32" && process.platform !== "darwin")(
 
 		it.for(["none", "wrong"])(
 			"should stop a locked Studio while up waits for a %s acknowledgement",
-			async (mode) => {
+			async (mode, { expect }) => {
 				expect.assertions(4);
 
 				const fixture = await managedFixtureAsync({ ...STUDIO_PROJECT, ...WATCH_COMMAND });
@@ -102,7 +104,7 @@ describe.skipIf(process.platform !== "win32" && process.platform !== "darwin")(
 
 		it.for(["stop", "down"])(
 			"should %s a session without a compiler while up waits for acknowledgement",
-			async (command) => {
+			async (command, { expect }) => {
 				expect.assertions(3);
 
 				const fixture = await managedFixtureAsync(STUDIO_PROJECT);

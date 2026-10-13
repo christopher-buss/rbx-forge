@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { batchInvocation, shellInvocation } from "./command-line.ts";
 
 describe(shellInvocation, () => {
-	it("should run a POSIX command line through /bin/sh", () => {
+	it("should run a POSIX command line through /bin/sh", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(shellInvocation("eslint --fix .", "linux", {})).toStrictEqual({
@@ -12,7 +12,7 @@ describe(shellInvocation, () => {
 		});
 	});
 
-	it("should run a Windows command line through ComSpec, unquoted", () => {
+	it("should run a Windows command line through ComSpec, unquoted", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -24,7 +24,7 @@ describe(shellInvocation, () => {
 		});
 	});
 
-	it("should fall back to cmd.exe without ComSpec", () => {
+	it("should fall back to cmd.exe without ComSpec", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(shellInvocation("lint", "win32", {}).file).toBe("cmd.exe");
@@ -32,7 +32,7 @@ describe(shellInvocation, () => {
 });
 
 describe(batchInvocation, () => {
-	it("should escape the file and quote each argument for a shim", () => {
+	it("should escape the file and quote each argument for a shim", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -57,7 +57,7 @@ describe(batchInvocation, () => {
 		[String.raw`C:\out\\`, String.raw`^^^"C:\out\\\\^^^"`],
 		[String.raw`a\"b`, String.raw`^^^"a\\\^^^"b^^^"`],
 		["100% & more", String.raw`^^^"100^^^%^^^ ^^^&^^^ more^^^"`],
-	] as const)("should escape %s as %s", ([argument, escaped]) => {
+	] as const)("should escape %s as %s", ([argument, escaped], { expect }) => {
 		expect.assertions(1);
 
 		expect(batchInvocation("x.cmd", [argument], {}).args[3]).toBe(`"x.cmd ${escaped}"`);

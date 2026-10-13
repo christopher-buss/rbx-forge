@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import type { AddressInfo, Server } from "node:net";
 import { connect, createServer } from "node:net";
 import path from "node:path";
-import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { createFakeNative } from "../../test/helpers/native.ts";
 import type { NativeAddon, NativePipeConnection, NativePipeServer } from "../native/addon.ts";
@@ -78,7 +78,9 @@ function posixBackend(
 }
 
 describe(createNodeTransport, () => {
-	it("should make an owner-only directory, replace a stale socket, and listen", async () => {
+	it("should make an owner-only directory, replace a stale socket, and listen", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const backend = posixBackend(undefined);
@@ -91,7 +93,7 @@ describe(createNodeTransport, () => {
 		expect(backend.fileSystem.chmodSync).toHaveBeenCalledExactlyOnceWith(ENDPOINT, 0o600);
 	});
 
-	it("should reset the mode of an existing directory of this user", async () => {
+	it("should reset the mode of an existing directory of this user", async ({ expect }) => {
 		expect.assertions(1);
 
 		const backend = posixBackend(
@@ -106,7 +108,7 @@ describe(createNodeTransport, () => {
 	it.for([
 		["another user's directory", { isDirectory: true, mode: 0o40_700, uid: 0 }],
 		["a file", { isDirectory: false, mode: 0o100_700, uid: 1000 }],
-	] as const)("should refuse %s", async ([, stat]) => {
+	] as const)("should refuse %s", async ([, stat], { expect }) => {
 		expect.assertions(2);
 
 		const backend = posixBackend(stat, { mkdirError: "EEXIST" });
@@ -119,7 +121,9 @@ describe(createNodeTransport, () => {
 		expect(backend.server.listen).not.toHaveBeenCalled();
 	});
 
-	it("should refuse when the directory cannot be made or the socket cannot listen", async () => {
+	it("should refuse when the directory cannot be made or the socket cannot listen", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const noDirectory = posixBackend(undefined, { mkdirError: "EACCES" });
@@ -135,7 +139,7 @@ describe(createNodeTransport, () => {
 		);
 	});
 
-	it("should open a native pipe server on Windows", async () => {
+	it("should open a native pipe server on Windows", async ({ expect }) => {
 		expect.assertions(2);
 
 		const server: NativePipeServer = {
@@ -160,7 +164,7 @@ describe(createNodeTransport, () => {
 		);
 	});
 
-	it("should report a pipe another process holds", async () => {
+	it("should report a pipe another process holds", async ({ expect }) => {
 		expect.assertions(1);
 
 		const backend = posixBackend(undefined);
@@ -184,7 +188,9 @@ describe(createNodeTransport, () => {
 		});
 	});
 
-	it("should connect a client through the addon on Windows, within the timeout", async () => {
+	it("should connect a client through the addon on Windows, within the timeout", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const client: NativePipeConnection = {
@@ -215,7 +221,10 @@ describe(createNodeTransport, () => {
 		expect(connectPipe).toHaveBeenCalledTimes(2);
 	});
 
-	it("should connect a client, or report that nothing listens", async () => {
+	it("should connect a client, or report that nothing listens", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
 		const server = createServer((socket) => {
@@ -255,7 +264,7 @@ describe(createNodeTransport, () => {
 		["error", 1],
 	] as const)(
 		"should leave no timer behind once the connect ends with %s",
-		async ([event, destroys]) => {
+		async ([event, destroys], { expect, onTestFinished }) => {
 			expect.assertions(2);
 
 			vi.useFakeTimers();
@@ -281,7 +290,7 @@ describe(createNodeTransport, () => {
 		},
 	);
 
-	it("should give up on a connect that does not finish in time", async () => {
+	it("should give up on a connect that does not finish in time", async ({ expect }) => {
 		expect.assertions(2);
 
 		const socket = Object.assign(new EventEmitter(), { destroy: vi.fn<() => void>() });

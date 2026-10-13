@@ -1,13 +1,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_NEEDS_CONFIRMATION, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import { parseLines, parseResult } from "../helpers/output.ts";
 import { makeProject, runBinAsync } from "./run-bin.ts";
 
 describe("forge init", () => {
-	it("should write a typed config file and nothing else", async () => {
+	it("should write a typed config file and nothing else", async ({ expect }) => {
 		expect.assertions(3);
 
 		const project = makeProject({ "package.json": "{}" });
@@ -24,7 +24,9 @@ describe("forge init", () => {
 		);
 	});
 
-	it("should write NDJSON events and a final result when it takes the default", async () => {
+	it("should write NDJSON events and a final result when it takes the default", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeProject();
@@ -46,7 +48,7 @@ describe("forge init", () => {
 		]);
 	});
 
-	it("should exit 4 without a prompt when a config file exists", async () => {
+	it("should exit 4 without a prompt when a config file exists", async ({ expect }) => {
 		expect.assertions(3);
 
 		const project = makeProject({ "rbx-forge.config.ts": "old" });
@@ -69,7 +71,7 @@ describe("forge init", () => {
 		expect(readFileSync(path.join(project, "rbx-forge.config.ts"), "utf8")).toBe("old");
 	});
 
-	it("should write a config that forge loads", async () => {
+	it("should write a config that forge loads", async ({ expect }) => {
 		expect.assertions(2);
 
 		const project = makeProject();

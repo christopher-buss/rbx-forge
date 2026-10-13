@@ -1,5 +1,5 @@
 import path from "node:path";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -48,7 +48,7 @@ function snapshotProject(desktop: "hidden" | "user" = "user") {
 }
 
 describe("saving snapshot Studios", () => {
-	it("saves the snapshot directly when the project also has a session", async () => {
+	it("saves the snapshot directly when the project also has a session", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, memory } = snapshotProject("hidden");
@@ -66,7 +66,7 @@ describe("saving snapshot Studios", () => {
 		).resolves.toMatchObject({ data: { desktop: "hidden", place: PLACE } });
 	});
 
-	it("reports studio_not_open when the snapshot has no lock", async () => {
+	it("reports studio_not_open when the snapshot has no lock", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, memory } = snapshotProject();
@@ -114,23 +114,28 @@ describe("saving snapshot Studios", () => {
 			lock: `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
 			startTime: "1000",
 		},
-	])("refuses a snapshot lock with $name", async ({ alive, executablePath, lock, startTime }) => {
-		expect.assertions(2);
+	])(
+		"refuses a snapshot lock with $name",
+		async ({ alive, executablePath, lock, startTime }, { expect }) => {
+			expect.assertions(2);
 
-		const { context, memory, native } = snapshotProject();
-		memory.fileSystem.writeFileSync(`${PLACE}.lock`, lock);
-		memory.setModifiedTime(`${SNAPSHOT}.lock`, 0);
-		const studio = native.processes.get(42);
-		assert(studio !== undefined);
-		Object.assign(studio, { alive, executablePath, startTime });
+			const { context, memory, native } = snapshotProject();
+			memory.fileSystem.writeFileSync(`${PLACE}.lock`, lock);
+			memory.setModifiedTime(`${SNAPSHOT}.lock`, 0);
+			const studio = native.processes.get(42);
+			assert(studio !== undefined);
+			Object.assign(studio, { alive, executablePath, startTime });
 
-		await expect(
-			runSaveAsync(context, { config: {}, flags: { place: SNAPSHOT } }),
-		).rejects.toMatchObject({ code: "studio_not_open" });
-		expect(memory.fileSystem.readFileSync(PLACE, "utf8")).toBe("snapshot");
-	});
+			await expect(
+				runSaveAsync(context, { config: {}, flags: { place: SNAPSHOT } }),
+			).rejects.toMatchObject({ code: "studio_not_open" });
+			expect(memory.fileSystem.readFileSync(PLACE, "utf8")).toBe("snapshot");
+		},
+	);
 
-	it("reports the actual hidden desktop for a snapshot without session state", async () => {
+	it("reports the actual hidden desktop for a snapshot without session state", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context } = snapshotProject("hidden");
@@ -140,7 +145,7 @@ describe("saving snapshot Studios", () => {
 		).resolves.toMatchObject({ data: { desktop: "hidden", pid: 42, place: PLACE } });
 	});
 
-	it("saves directly without a running session", async () => {
+	it("saves directly without a running session", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, memory } = snapshotProject();

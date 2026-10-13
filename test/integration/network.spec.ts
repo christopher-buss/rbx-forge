@@ -6,12 +6,12 @@ import type { AddressInfo } from "node:net";
 import { connect } from "node:net";
 import process from "node:process";
 import { setImmediate } from "node:timers/promises";
-import { assert, describe, expect, it, onTestFinished, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { nodeNetwork } from "../../src/seams/network.ts";
 
 describe("studio readiness callback", () => {
-	it("should bind only its loopback address", async () => {
+	it("should bind only its loopback address", async ({ expect, onTestFinished }) => {
 		expect.assertions(1);
 
 		const listener = await nodeNetwork.listenForStudioReadyAsync({
@@ -25,7 +25,10 @@ describe("studio readiness callback", () => {
 		await expect(fetch(other)).rejects.toThrow("fetch failed");
 	});
 
-	it("should dispose a partial HTTP request and unregister cancellation", async () => {
+	it("should dispose a partial HTTP request and unregister cancellation", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
 		const abort = new AbortController();
@@ -62,7 +65,9 @@ describe("studio readiness callback", () => {
 		expect(getEventListeners(abort.signal, "abort")).toStrictEqual([]);
 	});
 
-	it("should release an unpublished callback server cancelled during binding", async () => {
+	it("should release an unpublished callback server cancelled during binding", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		await setImmediate();
@@ -91,7 +96,10 @@ describe("studio readiness callback", () => {
 		).toStrictEqual(before);
 	});
 
-	it("should bind a random launch token and identity, consume it once, and dispose", async () => {
+	it("should bind a random launch token and identity, consume it once, and dispose", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(5);
 
 		const info = {
@@ -114,7 +122,10 @@ describe("studio readiness callback", () => {
 		await expect(listener.ready).resolves.toBeTrue();
 	});
 
-	it("should generate distinct random tokens and reject replayed or disposed callbacks", async () => {
+	it("should generate distinct random tokens and reject replayed or disposed callbacks", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(5);
 
 		const listener = await nodeNetwork.listenForStudioReadyAsync({
@@ -140,7 +151,7 @@ describe("studio readiness callback", () => {
 		await expect(fetch(listener.url)).rejects.toThrow("fetch failed");
 	});
 
-	it("should cancel a listening callback and release its port", async () => {
+	it("should cancel a listening callback and release its port", async ({ expect }) => {
 		expect.assertions(2);
 
 		const abort = new AbortController();
@@ -154,7 +165,7 @@ describe("studio readiness callback", () => {
 		await expect(fetch(listener.url)).rejects.toThrow("fetch failed");
 	});
 
-	it("should reject cancelled and cancelled-during-bind launches", async () => {
+	it("should reject cancelled and cancelled-during-bind launches", async ({ expect }) => {
 		expect.assertions(2);
 
 		const identity = { projectName: "Game", sessionId: "launch" };
@@ -172,7 +183,7 @@ describe("studio readiness callback", () => {
 });
 
 describe("rojo server identity", () => {
-	it("should reject a failed API response", async () => {
+	it("should reject a failed API response", async ({ expect, onTestFinished }) => {
 		expect.assertions(1);
 
 		const server = createHttpServer((_request, response) => {
@@ -194,7 +205,10 @@ describe("rojo server identity", () => {
 		);
 	});
 
-	it("should reject a response without a complete Rojo identity", async () => {
+	it("should reject a response without a complete Rojo identity", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const server = createHttpServer((_request, response) => {
@@ -214,7 +228,7 @@ describe("rojo server identity", () => {
 		);
 	});
 
-	it("should cancel a server identity request when its session ends", async () => {
+	it("should cancel a server identity request when its session ends", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(nodeNetwork.getRojoInfoAsync(1, AbortSignal.abort())).rejects.toMatchObject({
@@ -222,7 +236,10 @@ describe("rojo server identity", () => {
 		});
 	});
 
-	it("should decode the msgpack identity from the local Rojo API", async () => {
+	it("should decode the msgpack identity from the local Rojo API", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const info = {

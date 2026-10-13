@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { gunzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { parseResult } from "../helpers/output.ts";
 import { loadRealNative } from "../helpers/real-native.ts";
@@ -36,7 +36,9 @@ function pluginWithWrongProtocol(home: string): string {
 describe.skipIf(process.platform !== "win32" && process.platform !== "darwin")(
 	"cli plugin lifecycle",
 	() => {
-		it("should report protocol mismatch as exit 7 without changing the model or starting Studio", async () => {
+		it("should report protocol mismatch as exit 7 without changing the model or starting Studio", async ({
+			expect,
+		}) => {
 			expect.assertions(4);
 
 			const fixture = await makeFixtureAsync(STUDIO_PROJECT);

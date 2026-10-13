@@ -1,5 +1,5 @@
 import path from "node:path";
-import { assert, describe, expect, it, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
@@ -153,7 +153,7 @@ function launchFiles(up: UpRun): Array<string> {
 }
 
 describe("up flags", () => {
-	it("should take --compiler, --force, --studio, --studio-path, and --syncback", () => {
+	it("should take --compiler, --force, --studio, --studio-path, and --syncback", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(UP_FLAGS.map(({ name }) => name)).toStrictEqual([
@@ -168,7 +168,9 @@ describe("up flags", () => {
 });
 
 describe(runUpAsync, () => {
-	it("should start a detached session, relay its events, and return once it is ready", async () => {
+	it("should start a detached session, relay its events, and return once it is ready", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const { run, up } = makeUp((request, self) => {
@@ -200,7 +202,9 @@ describe(runUpAsync, () => {
 		expect(launchFiles(up)).toStrictEqual([]);
 	});
 
-	it("should name no failed compiler among the parts its own session started", async () => {
+	it("should name no failed compiler among the parts its own session started", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { run } = makeUp((_request, self) => {
@@ -217,7 +221,9 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should fail with compile_timeout when its own session's compiler times out", async () => {
+	it("should fail with compile_timeout when its own session's compiler times out", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { run } = makeUp((_request, self) => {
@@ -239,7 +245,7 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should relay an event the supervisor wrote in two parts once", async () => {
+	it("should relay an event the supervisor wrote in two parts once", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp((request, self) => {
@@ -262,7 +268,9 @@ describe(runUpAsync, () => {
 		expect(up.reporter.events).toStrictEqual([{ message: "half", type: "info" }]);
 	});
 
-	it("should pass --no-compiler and the flags' config on, with no Studio and no Rojo", async () => {
+	it("should pass --no-compiler and the flags' config on, with no Studio and no Rojo", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { up } = makeUp((_request, self) => {
@@ -294,7 +302,9 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should add the compiler a running session misses, and wait until it is ready", async () => {
+	it("should add the compiler a running session misses, and wait until it is ready", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const { run, up } = makeUp();
@@ -319,7 +329,9 @@ describe(runUpAsync, () => {
 		expect(up.now()).toBe(UP_POLL_MS);
 	});
 
-	it("should fail with compile_timeout when the compiler it joined times out", async () => {
+	it("should fail with compile_timeout when the compiler it joined times out", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp();
@@ -340,7 +352,7 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should return when the compiler it waited for exits by itself", async () => {
+	it("should return when the compiler it waited for exits by itself", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp();
@@ -359,7 +371,7 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should ask a running session for no part with --no-compiler", async () => {
+	it("should ask a running session for no part with --no-compiler", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { up } = makeUp();
@@ -382,7 +394,7 @@ describe(runUpAsync, () => {
 		expect(asked).toStrictEqual([{ defaultDesktop: "hidden", parts: [] }]);
 	});
 
-	it("should name each part that runs, and how", async () => {
+	it("should name each part that runs, and how", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp();
@@ -409,7 +421,7 @@ describe(runUpAsync, () => {
 		expect(rojo.summary).toBe("Found session s1 and added no part: Rojo serves on port 34872.");
 	});
 
-	it("should name every part a running session started", async () => {
+	it("should name every part a running session started", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp();
@@ -421,7 +433,7 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should wait for an add as long as the session's own bounds", async () => {
+	it("should wait for an add as long as the session's own bounds", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp();
@@ -433,7 +445,7 @@ describe(runUpAsync, () => {
 		expect(ADD_PARTS_WAIT_MS).toBeGreaterThan(UP_TIMEOUT_MS);
 	});
 
-	it("should return the parts an add started after up's own wait", async () => {
+	it("should return the parts an add started after up's own wait", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp();
@@ -447,7 +459,9 @@ describe(runUpAsync, () => {
 		await expect(run()).resolves.toMatchObject({ data: { added: ["compiler"] } });
 	});
 
-	it("should start a session, then attach Studio and Rojo to it with --studio", async () => {
+	it("should start a session, then attach Studio and Rojo to it with --studio", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const asked: Array<unknown> = [];
@@ -492,7 +506,9 @@ describe(runUpAsync, () => {
 		]);
 	});
 
-	it("should wait for a requested Studio to open and fail if it closes first", async () => {
+	it("should wait for a requested Studio to open and fail if it closes first", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { run, up } = makeUp(undefined, { config: {}, flags: { studio: true } });
@@ -528,7 +544,9 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should describe an opening Studio when only the compiler was requested", async () => {
+	it("should describe an opening Studio when only the compiler was requested", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp();
@@ -544,7 +562,9 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should fail with usage for --studio-path without --studio, and start nothing", async () => {
+	it("should fail with usage for --studio-path without --studio, and start nothing", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp(undefined, {
@@ -559,7 +579,7 @@ describe(runUpAsync, () => {
 		expect(up.detachedSupervisor).not.toHaveBeenCalled();
 	});
 
-	it("should fail with the session's failure to add a part", async () => {
+	it("should fail with the session's failure to add a part", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp();
@@ -571,7 +591,9 @@ describe(runUpAsync, () => {
 		await expect(run()).rejects.toMatchObject({ code: "compiler_missing" });
 	});
 
-	it("should wait on when the session stops while it adds, and ask the next one once", async () => {
+	it("should wait on when the session stops while it adds, and ask the next one once", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp();
@@ -591,7 +613,7 @@ describe(runUpAsync, () => {
 		expect(answers).toStrictEqual([]);
 	});
 
-	it("should wait for a session that is starting instead of starting one", async () => {
+	it("should wait for a session that is starting instead of starting one", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { run, up } = makeUp();
@@ -609,7 +631,9 @@ describe(runUpAsync, () => {
 		expect(up.now()).toBe(UP_POLL_MS);
 	});
 
-	it("should fail with the session's startup failure and remove its report", async () => {
+	it("should fail with the session's startup failure and remove its report", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp((request, self) => {
@@ -630,7 +654,9 @@ describe(runUpAsync, () => {
 		expect(launchFiles(up)).toStrictEqual([]);
 	});
 
-	it("should wait for the other session when its supervisor lost the race", async () => {
+	it("should wait for the other session when its supervisor lost the race", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp((request, self) => {
@@ -647,7 +673,9 @@ describe(runUpAsync, () => {
 		expect(launchFiles(up)).toStrictEqual([]);
 	});
 
-	it("should ask another session that is ready before its own supervisor reported to add parts", async () => {
+	it("should ask another session that is ready before its own supervisor reported to add parts", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { run } = makeUp((_request, self) => {
@@ -670,7 +698,9 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should fail with not_running when the session ended before it was ready", async () => {
+	it("should fail with not_running when the session ended before it was ready", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { run } = makeUp((request, self) => {
@@ -686,7 +716,9 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should fail with internal_error when the supervisor died without a result", async () => {
+	it("should fail with internal_error when the supervisor died without a result", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp((request, self) => {
@@ -704,7 +736,9 @@ describe(runUpAsync, () => {
 		expect(launchFiles(up)).toStrictEqual([]);
 	});
 
-	it("should classify its supervisor ending during a Studio attachment as a launch failure", async () => {
+	it("should classify its supervisor ending during a Studio attachment as a launch failure", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp(
@@ -732,7 +766,9 @@ describe(runUpAsync, () => {
 		expect(up.detachedSupervisor).toHaveBeenCalledOnce();
 	});
 
-	it("should fail with supervisor_unresponsive when the session is not ready in time", async () => {
+	it("should fail with supervisor_unresponsive when the session is not ready in time", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp();
@@ -745,7 +781,9 @@ describe(runUpAsync, () => {
 		expect(up.now()).toBe(UP_TIMEOUT_MS);
 	});
 
-	it("should fail with compile_timeout when a session that answers keeps its compiler starting", async () => {
+	it("should fail with compile_timeout when a session that answers keeps its compiler starting", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { run, up } = makeUp();
@@ -763,7 +801,9 @@ describe(runUpAsync, () => {
 		expect(up.detachedSupervisor).not.toHaveBeenCalled();
 	});
 
-	it("should fail with service_failed when a session that answers keeps Rojo starting", async () => {
+	it("should fail with service_failed when a session that answers keeps Rojo starting", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp();
@@ -778,7 +818,9 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should fail with supervisor_unresponsive when a session that answers starts no part", async () => {
+	it("should fail with supervisor_unresponsive when a session that answers starts no part", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp();
@@ -790,7 +832,9 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should fail with studio_launch_failed when a session that answers keeps Studio opening", async () => {
+	it("should fail with studio_launch_failed when a session that answers keeps Studio opening", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { run, up } = makeUp(undefined, { config: {}, flags: { studio: true } });
@@ -804,7 +848,9 @@ describe(runUpAsync, () => {
 		});
 	});
 
-	it("should start a session once when the one it waits for stays silent, then give up", async () => {
+	it("should start a session once when the one it waits for stays silent, then give up", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { run, up } = makeUp((request, self) => {

@@ -3,7 +3,8 @@ import { spawn } from "node:child_process";
 import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import type { TestContext } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import type { LockMode, NativeAddon } from "../../src/native/addon.ts";
 import {
@@ -18,15 +19,19 @@ import { isProcessAlive } from "../helpers/worker-log.ts";
 
 const LOCK_HOLDER = path.join(import.meta.dirname, "..", "fixtures", "bin", "lock-holder.ts");
 
-const native: NativeAddon = loadRealNative();
+const native = loadRealNative();
 
 function makeLockPath(): string {
 	return path.join(makeTemporaryDirectory(), "test.lock");
 }
 
-function lock(lockPath: string, mode: LockMode): ReturnType<NativeAddon["tryLockFile"]> {
+function lock(
+	testContext: Pick<TestContext, "onTestFinished">,
+	lockPath: string,
+	mode: LockMode,
+): ReturnType<NativeAddon["tryLockFile"]> {
 	const held = native.tryLockFile(lockPath, mode);
-	onTestFinished(() => {
+	testContext.onTestFinished(() => {
 		held?.release();
 	});
 	return held;
@@ -35,16 +40,21 @@ function lock(lockPath: string, mode: LockMode): ReturnType<NativeAddon["tryLock
 /**
  * Start a process that holds a lock, and wait until it holds it.
  *
+ * @param testContext - Assertions and cleanup for this test.
  * @param lockPath - The file to lock.
  * @param mode - The lock mode.
  * @returns The holder process.
  */
-async function holdInChildAsync(lockPath: string, mode: LockMode): Promise<ChildProcess> {
+async function holdInChildAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
+	lockPath: string,
+	mode: LockMode,
+): Promise<ChildProcess> {
 	const child = spawn(process.execPath, [LOCK_HOLDER, realNativePath(), lockPath, mode], {
 		stdio: ["ignore", "pipe", "inherit"],
 		windowsHide: true,
 	});
-	onTestFinished(() => {
+	testContext.onTestFinished(() => {
 		child.kill("SIGKILL");
 	});
 
@@ -65,72 +75,80 @@ function startTimeOf(pid: number): bigint {
 }
 
 describe("native file locks", () => {
-	it("should give an exclusive lock to one holder, without waiting", () => {
+	it("should give an exclusive lock to one holder, without waiting", ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
 		const lockPath = makeLockPath();
 
-		expect(lock(lockPath, "exclusive")).not.toBeNull();
+		expect(lock({ onTestFinished }, lockPath, "exclusive")).not.toBeNull();
 		expect(native.tryLockFile(lockPath, "exclusive")).toBeNull();
 		expect(native.tryLockFile(lockPath, "shared")).toBeNull();
 	});
 
-	it("should share a shared lock and refuse an exclusive one", () => {
+	it("should share a shared lock and refuse an exclusive one", ({ expect, onTestFinished }) => {
 		expect.assertions(3);
 
 		const lockPath = makeLockPath();
 
-		expect(lock(lockPath, "shared")).not.toBeNull();
-		expect(lock(lockPath, "shared")).not.toBeNull();
+		expect(lock({ onTestFinished }, lockPath, "shared")).not.toBeNull();
+		expect(lock({ onTestFinished }, lockPath, "shared")).not.toBeNull();
 		expect(native.tryLockFile(lockPath, "exclusive")).toBeNull();
 	});
 
-	it("should free the lock on release", () => {
+	it("should free the lock on release", ({ expect, onTestFinished }) => {
 		expect.assertions(1);
 
 		const lockPath = makeLockPath();
-		lock(lockPath, "exclusive")!.release();
+		lock({ onTestFinished }, lockPath, "exclusive")!.release();
 
-		expect(lock(lockPath, "exclusive")).not.toBeNull();
+		expect(lock({ onTestFinished }, lockPath, "exclusive")).not.toBeNull();
 	});
 
-	it("should keep the content of an existing lock file", () => {
+	it("should keep the content of an existing lock file", ({ expect, onTestFinished }) => {
 		expect.assertions(1);
 
 		const lockPath = makeLockPath();
 		writeFileSync(lockPath, "kept");
-		lock(lockPath, "exclusive")!.release();
+		lock({ onTestFinished }, lockPath, "exclusive")!.release();
 
 		expect(readFileSync(lockPath, "utf8")).toBe("kept");
 	});
 
-	it("should hold a lock against other processes", async () => {
+	it("should hold a lock against other processes", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 
 		const lockPath = makeLockPath();
-		await holdInChildAsync(lockPath, "shared");
+		await holdInChildAsync({ onTestFinished }, lockPath, "shared");
 
-		expect(lock(lockPath, "shared")).not.toBeNull();
+		expect(lock({ onTestFinished }, lockPath, "shared")).not.toBeNull();
 		expect(native.tryLockFile(lockPath, "exclusive")).toBeNull();
 	});
 
-	it("should release the lock when the holder process dies", async () => {
+	it("should release the lock when the holder process dies", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const lockPath = makeLockPath();
-		const holder = await holdInChildAsync(lockPath, "exclusive");
+		const holder = await holdInChildAsync({ onTestFinished }, lockPath, "exclusive");
 
 		expect(native.tryLockFile(lockPath, "exclusive")).toBeNull();
 
 		holder.kill("SIGKILL");
 		await waitForExitAsync(holder);
 
-		expect(lock(lockPath, "exclusive")).not.toBeNull();
+		expect(lock({ onTestFinished }, lockPath, "exclusive")).not.toBeNull();
 	});
 });
 
 describe("native process identity", () => {
-	it("should leave a process without app windows running after a visibility request", () => {
+	it("should leave a process without app windows running after a visibility request", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const pinned = native.pinProcess(pidOf(spawnSleeper()))!;
@@ -140,7 +158,7 @@ describe("native process identity", () => {
 		expect(pinned.isAlive()).toBeTrue();
 	});
 
-	it("should send no save after its accessibility deadline expires", async () => {
+	it("should send no save after its accessibility deadline expires", async ({ expect }) => {
 		expect.assertions(2);
 
 		const pinned = native.pinProcess(pidOf(spawnSleeper()))!;
@@ -149,7 +167,7 @@ describe("native process identity", () => {
 		expect(pinned.isAlive()).toBeTrue();
 	});
 
-	it("should read the same start time as the pin", () => {
+	it("should read the same start time as the pin", ({ expect }) => {
 		expect.assertions(1);
 
 		const pid = pidOf(spawnSleeper());
@@ -157,7 +175,7 @@ describe("native process identity", () => {
 		expect(native.pinProcess(pid)!.startTime).toBe(native.processStartTime(pid));
 	});
 
-	it("should read a later start time for a later process", () => {
+	it("should read a later start time for a later process", ({ expect }) => {
 		expect.assertions(1);
 
 		const own = startTimeOf(process.pid);
@@ -166,7 +184,7 @@ describe("native process identity", () => {
 		expect(child > own).toBeTrue();
 	});
 
-	it("should report the executable of a pinned process", () => {
+	it("should report the executable of a pinned process", ({ expect }) => {
 		expect.assertions(1);
 
 		const pinned = native.pinProcess(pidOf(spawnSleeper()))!;
@@ -174,7 +192,7 @@ describe("native process identity", () => {
 		expect(realpathSync(pinned.executablePath()!)).toBe(realpathSync(process.execPath));
 	});
 
-	it("should kill the pinned process", async () => {
+	it("should kill the pinned process", async ({ expect }) => {
 		expect.assertions(3);
 
 		const child = spawnSleeper();
@@ -188,7 +206,7 @@ describe("native process identity", () => {
 		expect(isProcessAlive(pidOf(child))).toBeFalse();
 	});
 
-	it("should never kill through a pin whose process was reaped", async () => {
+	it("should never kill through a pin whose process was reaped", async ({ expect }) => {
 		expect.assertions(4);
 
 		const child = spawnSleeper();
@@ -204,7 +222,7 @@ describe("native process identity", () => {
 		expect(isProcessAlive(pidOf(later))).toBeTrue();
 	});
 
-	it("should find no process for a PID that has exited", async () => {
+	it("should find no process for a PID that has exited", async ({ expect }) => {
 		expect.assertions(2);
 
 		const child = spawnSleeper();

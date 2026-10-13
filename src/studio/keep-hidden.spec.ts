@@ -1,5 +1,5 @@
 import path from "node:path";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -154,7 +154,9 @@ function watching({
 }
 
 describe(keepStudioHiddenAsync, () => {
-	it("should hide Studio again within one poll every time it shows itself", async () => {
+	it("should hide Studio again within one poll every time it shows itself", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = watching({ opensAt: 5000, showsAt: [1700, 3100, 3900, 4200] });
@@ -165,7 +167,9 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.studio.appHidden).toBeTrue();
 	});
 
-	it("should stop once the place is open and Studio stayed hidden for the quiet window", async () => {
+	it("should stop once the place is open and Studio stayed hidden for the quiet window", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = watching({ opensAt: 5000, showsAt: [4200] });
@@ -174,7 +178,9 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.now()).toBe(5000 + KEEP_HIDDEN_QUIET_MS);
 	});
 
-	it("should restart the quiet window when Studio shows itself after its place opens", async () => {
+	it("should restart the quiet window when Studio shows itself after its place opens", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = watching({ opensAt: 1000, showsAt: [2000] });
@@ -183,7 +189,9 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.now()).toBe(2000 + KEEP_HIDDEN_QUIET_MS);
 	});
 
-	it("should leave Studio shown once its session records the user desktop", async () => {
+	it("should leave Studio shown once its session records the user desktop", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = watching({ opensAt: 5000, showsAt: [1000], userShowsAt: 2000 });
@@ -193,7 +201,9 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.studio.appHidden).toBeFalse();
 	});
 
-	it("should hide Studio again when its session records another Studio's start time", async () => {
+	it("should hide Studio again when its session records another Studio's start time", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = watching({
@@ -206,7 +216,9 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.hides).toStrictEqual([2000]);
 	});
 
-	it("should hide Studio again when its session records another Studio's PID", async () => {
+	it("should hide Studio again when its session records another Studio's PID", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = watching({ opensAt: 5000, recorded: ["user", { pid: 43 }], userShowsAt: 2000 });
@@ -215,7 +227,9 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.hides).toStrictEqual([2000]);
 	});
 
-	it("should hide Studio again when its session records the hidden desktop", async () => {
+	it("should hide Studio again when its session records the hidden desktop", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = watching({ opensAt: 5000, recorded: ["hidden"], userShowsAt: 2000 });
@@ -224,7 +238,9 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.hides).toStrictEqual([2000]);
 	});
 
-	it("should leave Studio shown while it is the active app, then hide it once it is not", async () => {
+	it("should leave Studio shown while it is the active app, then hide it once it is not", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = watching({ activatesAt: 2000, deactivatesAt: 4000, opensAt: 1000 });
@@ -235,7 +251,7 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.now()).toBe(4000 + KEEP_HIDDEN_QUIET_MS);
 	});
 
-	it("should stop when Studio exits", async () => {
+	it("should stop when Studio exits", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watching({ exitsAt: 500 });
@@ -244,7 +260,7 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.now()).toBe(500);
 	});
 
-	it("should stop at the open bound when the place never opens", async () => {
+	it("should stop at the open bound when the place never opens", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watching();
@@ -253,7 +269,7 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.now()).toBe(STUDIO_OPEN_BOUND_MS);
 	});
 
-	it("should leave a process alone whose start time differs", async () => {
+	it("should leave a process alone whose start time differs", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watching({ showsAt: [KEEP_HIDDEN_POLL_MS] });
@@ -262,7 +278,7 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.now()).toBe(0);
 	});
 
-	it("should leave a missing process alone", async () => {
+	it("should leave a missing process alone", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watching();
@@ -271,7 +287,7 @@ describe(keepStudioHiddenAsync, () => {
 		expect(run.now()).toBe(0);
 	});
 
-	it("should reject a malformed target", async () => {
+	it("should reject a malformed target", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watching();
@@ -281,7 +297,7 @@ describe(keepStudioHiddenAsync, () => {
 });
 
 describe("windows detached window hiding", () => {
-	it("ends without polling when Studio exits before its watcher starts", async () => {
+	it("ends without polling when Studio exits before its watcher starts", async ({ expect }) => {
 		expect.assertions(1);
 
 		const native = createFakeNative({ 42: { alive: true, executablePath: "RobloxStudio" } });
@@ -313,7 +329,7 @@ describe("windows detached window hiding", () => {
 
 	it.for(["exit", "stop"] as const)(
 		"keeps the helper alive until the watcher %s",
-		async (end) => {
+		async (end, { expect }) => {
 			expect.assertions(3);
 
 			const native = createFakeNative({
@@ -348,7 +364,9 @@ describe("windows detached window hiding", () => {
 });
 
 describe(createKeepHiddenLauncher, () => {
-	it("should ignore a watcher that fails to start after the spawn returns", async () => {
+	it("should ignore a watcher that fails to start after the spawn returns", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const spawner = createFakeSpawner((child) => {
@@ -366,7 +384,9 @@ describe(createKeepHiddenLauncher, () => {
 		expect(spawner.children[0]!.referenced).toBeFalse();
 	});
 
-	it("should start the watcher detached through the supervisor entry, with no pipes", () => {
+	it("should start the watcher detached through the supervisor entry, with no pipes", ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const spawner = createFakeSpawner();

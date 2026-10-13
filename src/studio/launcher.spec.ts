@@ -1,5 +1,5 @@
 import path from "node:path";
-import { assert, describe, expect, it, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { createFailingSpawner, createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import type { FakeSpawner, SpawnBehavior } from "../../test/helpers/fake-process.ts";
@@ -113,7 +113,9 @@ function spawnerExiting(exitCode: null | number): FakeSpawner {
 }
 
 describe(studioLaunchInvocation, () => {
-	it("should open the place with start through the Windows shell, quoted for spaces", () => {
+	it("should open the place with start through the Windows shell, quoted for spaces", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		expect(
@@ -126,7 +128,7 @@ describe(studioLaunchInvocation, () => {
 		});
 	});
 
-	it("should pass a Windows place with % in its path only through the variable", () => {
+	it("should pass a Windows place with % in its path only through the variable", ({ expect }) => {
 		expect.assertions(2);
 
 		const place = String.raw`C:\Users\me\%TEMP% 100%\game.rbxl`;
@@ -136,13 +138,13 @@ describe(studioLaunchInvocation, () => {
 		expect(env).toStrictEqual({ rbx_forge_place: place });
 	});
 
-	it("should fall back to cmd.exe when ComSpec is not set", () => {
+	it("should fall back to cmd.exe when ComSpec is not set", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(studioLaunchInvocation(WINDOWS_PLACE, "win32", {}).file).toBe("cmd.exe");
 	});
 
-	it("should open the place with open on macOS", () => {
+	it("should open the place with open on macOS", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(studioLaunchInvocation(POSIX_PLACE, "darwin", { HOME: "/home/me" })).toStrictEqual({
@@ -152,7 +154,7 @@ describe(studioLaunchInvocation, () => {
 		});
 	});
 
-	it("should open a hidden macOS place in the background and hidden", () => {
+	it("should open a hidden macOS place in the background and hidden", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(studioLaunchInvocation(POSIX_PLACE, "darwin", {}, "hidden")).toStrictEqual({
@@ -162,7 +164,7 @@ describe(studioLaunchInvocation, () => {
 		});
 	});
 
-	it("should open the place with xdg-open on Linux", () => {
+	it("should open the place with xdg-open on Linux", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(studioLaunchInvocation(POSIX_PLACE, "linux", {})).toStrictEqual({
@@ -174,7 +176,9 @@ describe(studioLaunchInvocation, () => {
 });
 
 describe(createStudioLauncher, () => {
-	it("should warn when a hidden Studio needs the Windows platform launcher because no executable is discovered", async () => {
+	it("should warn when a hidden Studio needs the Windows platform launcher because no executable is discovered", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { launch } = makeLauncher({
@@ -192,7 +196,9 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should fail with native_missing, not use the platform launcher, when the Windows addon does not load", async () => {
+	it("should fail with native_missing, not use the platform launcher, when the Windows addon does not load", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const spawner = spawnerExiting(0);
@@ -210,7 +216,9 @@ describe(createStudioLauncher, () => {
 		expect(spawner.calls).toHaveLength(0);
 	});
 
-	it("should report the user desktop without a warning for a requested user platform launch", async () => {
+	it("should report the user desktop without a warning for a requested user platform launch", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { launch } = makeLauncher({
@@ -223,7 +231,9 @@ describe(createStudioLauncher, () => {
 		).resolves.toStrictEqual({ desktop: "user", type: "launched" });
 	});
 
-	it("should report the user desktop and warn when a hidden launch cannot break away", async () => {
+	it("should report the user desktop and warn when a hidden launch cannot break away", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { native } = windowsNative(null);
@@ -244,7 +254,9 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should launch a hidden session on the user desktop with hidden windows", async () => {
+	it("should launch a hidden session on the user desktop with hidden windows", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { native, spawns } = windowsNative();
@@ -276,7 +288,7 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should launch and report a Studio on the hidden Windows desktop", async () => {
+	it("should launch and report a Studio on the hidden Windows desktop", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { native, spawns } = windowsNative();
@@ -295,7 +307,9 @@ describe(createStudioLauncher, () => {
 		expect(spawner.calls).toStrictEqual([]);
 	});
 
-	it("should watch snapshot lighting without starting the session window watcher", async () => {
+	it("should watch snapshot lighting without starting the session window watcher", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const { native, spawns } = windowsNative();
@@ -323,7 +337,7 @@ describe(createStudioLauncher, () => {
 		{ desktop: "user", expectedPlacement: { desktop: "user" } },
 	] as const)(
 		"should keep a shown Windows session visible with desktop %s",
-		async ({ desktop, expectedPlacement }) => {
+		async ({ desktop, expectedPlacement }, { expect }) => {
 			expect.assertions(3);
 
 			const { native, spawns } = windowsNative();
@@ -358,7 +372,7 @@ describe(createStudioLauncher, () => {
 		},
 	);
 
-	it("should pass the session RunScript arguments to Studio on Windows", async () => {
+	it("should pass the session RunScript arguments to Studio on Windows", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { native, spawns } = windowsNative();
@@ -375,7 +389,9 @@ describe(createStudioLauncher, () => {
 		]);
 	});
 
-	it("should start Studio directly on Windows, out of the job, and pin it", async () => {
+	it("should start Studio directly on Windows, out of the job, and pin it", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { native, spawns } = windowsNative();
@@ -389,7 +405,7 @@ describe(createStudioLauncher, () => {
 		]);
 	});
 
-	it("should use the platform launcher when the job forbids breakaway", async () => {
+	it("should use the platform launcher when the job forbids breakaway", async ({ expect }) => {
 		expect.assertions(3);
 
 		const spawner = spawnerExiting(0);
@@ -413,7 +429,7 @@ describe(createStudioLauncher, () => {
 		expect(beforeLaunch).toHaveBeenCalledOnce();
 	});
 
-	it("should finish plugin preparation before attempting a direct spawn", async () => {
+	it("should finish plugin preparation before attempting a direct spawn", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { native, spawns } = windowsNative();
@@ -430,7 +446,7 @@ describe(createStudioLauncher, () => {
 		expect(spawns).toHaveLength(1);
 	});
 
-	it("should prevent direct spawn when plugin preparation fails", async () => {
+	it("should prevent direct spawn when plugin preparation fails", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { native, spawns } = windowsNative();
@@ -447,7 +463,9 @@ describe(createStudioLauncher, () => {
 		expect(spawns).toStrictEqual([]);
 	});
 
-	it("should bypass plugin preparation when no executable can be discovered", async () => {
+	it("should bypass plugin preparation when no executable can be discovered", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { launch } = makeLauncher({ childProcess: spawnerExiting(0).runner });
@@ -459,7 +477,7 @@ describe(createStudioLauncher, () => {
 		expect(beforeLaunch).not.toHaveBeenCalled();
 	});
 
-	it("should bypass plugin preparation for an invalid Studio override", async () => {
+	it("should bypass plugin preparation for an invalid Studio override", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { launch } = makeLauncher();
@@ -471,7 +489,9 @@ describe(createStudioLauncher, () => {
 		expect(beforeLaunch).not.toHaveBeenCalled();
 	});
 
-	it("should use the platform launcher when the addon cannot start a detached process", async () => {
+	it("should use the platform launcher when the addon cannot start a detached process", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const native = createFakeNative({}, { [STUDIO_REGISTRY_KEYS[0]!]: `"${STUDIO_EXE}" %1` });
@@ -485,7 +505,9 @@ describe(createStudioLauncher, () => {
 		await expect(launch(launchOf(WINDOWS_PLACE))).resolves.toStrictEqual({ type: "launched" });
 	});
 
-	it("should start the macOS Studio directly, detached, with the place alone", async () => {
+	it("should start the macOS Studio directly, detached, with the place alone", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const spawner = createFakeSpawner();
@@ -510,7 +532,7 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should let forge exit without waiting for a Studio it started", async () => {
+	it("should let forge exit without waiting for a Studio it started", async ({ expect }) => {
 		expect.assertions(1);
 
 		const spawner = createFakeSpawner();
@@ -528,7 +550,7 @@ describe(createStudioLauncher, () => {
 		expect(spawner.children[0]!.referenced).toBeFalse();
 	});
 
-	it("should fail when Studio cannot start", async () => {
+	it("should fail when Studio cannot start", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { launch } = makeLauncher({
@@ -543,7 +565,7 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should fail when Studio exits before forge pins it", async () => {
+	it("should fail when Studio exits before forge pins it", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { launch } = makeLauncher({
@@ -558,7 +580,7 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should fail with a hint when --studio-path names no file", async () => {
+	it("should fail with a hint when --studio-path names no file", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { launch } = makeLauncher();
@@ -572,7 +594,9 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should start the platform launcher detached, hidden, and with no pipes", async () => {
+	it("should start the platform launcher detached, hidden, and with no pipes", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const spawner = spawnerExiting(0);
@@ -595,7 +619,9 @@ describe(createStudioLauncher, () => {
 		]);
 	});
 
-	it("should pass the Windows command line verbatim, with the place in its environment", async () => {
+	it("should pass the Windows command line verbatim, with the place in its environment", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const spawner = spawnerExiting(0);
@@ -609,7 +635,7 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should let forge exit without waiting for the launcher", async () => {
+	it("should let forge exit without waiting for the launcher", async ({ expect }) => {
 		expect.assertions(1);
 
 		const spawner = spawnerExiting(0);
@@ -619,7 +645,7 @@ describe(createStudioLauncher, () => {
 		expect(spawner.children[0]!.referenced).toBeFalse();
 	});
 
-	it("should fail when the launcher exits with an error", async () => {
+	it("should fail when the launcher exits with an error", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { launch } = makeLauncher({ childProcess: spawnerExiting(4).runner });
@@ -630,7 +656,7 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should fail when a signal ends the launcher", async () => {
+	it("should fail when a signal ends the launcher", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { launch } = makeLauncher({ childProcess: spawnerExiting(null).runner });
@@ -641,7 +667,7 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should fail when the launcher cannot start", async () => {
+	it("should fail when the launcher cannot start", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { launch } = makeLauncher({ childProcess: createFailingSpawner("ENOENT") });
@@ -652,7 +678,9 @@ describe(createStudioLauncher, () => {
 		});
 	});
 
-	it("should stop waiting for a launcher that keeps running and count it as launched", async () => {
+	it("should stop waiting for a launcher that keeps running and count it as launched", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const spawner = createFakeSpawner();
@@ -667,7 +695,7 @@ describe(createStudioLauncher, () => {
 		expect(spawner.children[0]!.referenced).toBeFalse();
 	});
 
-	it("should clear the wait timer once the launcher exits", async () => {
+	it("should clear the wait timer once the launcher exits", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { clock, launch } = makeLauncher({ childProcess: spawnerExiting(0).runner });
@@ -707,7 +735,9 @@ function macosNative(result: Error | number = 1000): {
 }
 
 describe("macOS Studio launch", () => {
-	it("should launch a hidden Studio through LaunchServices, never activated, and keep it hidden", async () => {
+	it("should launch a hidden Studio through LaunchServices, never activated, and keep it hidden", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const spawner = createFakeSpawner();
@@ -744,7 +774,9 @@ describe("macOS Studio launch", () => {
 		]);
 	});
 
-	it("should launch a user Studio through LaunchServices, activated, with the RunScript task", async () => {
+	it("should launch a user Studio through LaunchServices, activated, with the RunScript task", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const spawner = createFakeSpawner();
@@ -777,7 +809,9 @@ describe("macOS Studio launch", () => {
 		expect(spawner.calls).toHaveLength(0);
 	});
 
-	it("should launch Studio activated through LaunchServices when no desktop is requested", async () => {
+	it("should launch Studio activated through LaunchServices when no desktop is requested", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { launches, native } = macosNative();
@@ -794,7 +828,7 @@ describe("macOS Studio launch", () => {
 		expect(launches[0]).toMatchObject({ activates: true, hides: false });
 	});
 
-	it("should fail when LaunchServices cannot launch Studio", async () => {
+	it("should fail when LaunchServices cannot launch Studio", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { native } = macosNative(new Error("launch denied"));
@@ -810,7 +844,7 @@ describe("macOS Studio launch", () => {
 		});
 	});
 
-	it("should warn when the watcher that keeps Studio hidden cannot start", async () => {
+	it("should warn when the watcher that keeps Studio hidden cannot start", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { native } = macosNative();
@@ -831,7 +865,9 @@ describe("macOS Studio launch", () => {
 		expect(outcome.warning).toContain("the watcher that keeps it hidden could not start");
 	});
 
-	it("should start an executable outside an app bundle directly and report the user desktop with a warning", async () => {
+	it("should start an executable outside an app bundle directly and report the user desktop with a warning", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const executable = "/opt/studio/RobloxStudio";
@@ -855,7 +891,9 @@ describe("macOS Studio launch", () => {
 		expect(launches).toHaveLength(0);
 	});
 
-	it("should start a hidden Studio directly on Linux, never through LaunchServices, without a warning", async () => {
+	it("should start a hidden Studio directly on Linux, never through LaunchServices, without a warning", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { launches, native } = macosNative();
@@ -876,7 +914,9 @@ describe("macOS Studio launch", () => {
 		expect(spawner.calls.map(({ file }) => file)).toStrictEqual([MACOS_STUDIO_PATH]);
 	});
 
-	it("should open a hidden place in the background with the platform launcher and warn that it may not stay hidden", async () => {
+	it("should open a hidden place in the background with the platform launcher and warn that it may not stay hidden", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const spawner = spawnerExiting(0);

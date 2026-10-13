@@ -12,7 +12,7 @@ import path from "node:path";
 import process from "node:process";
 import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, it } from "vitest";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { nodeChildProcessRunner } from "../../src/seams/child-process.ts";
@@ -142,7 +142,10 @@ function filesLeft({ forge }: Project): Array<string> {
 }
 
 describe("supervisor", () => {
-	it("should keep the session files while it runs and delete them once a stop request ended it", async () => {
+	it("should keep the session files while it runs and delete them once a stop request ended it", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(4);
 
 		const project = await makeSessionProjectAsync();
@@ -204,7 +207,10 @@ describe("supervisor", () => {
 		}).toStrictEqual({ files: [], survivors: [] });
 	}, 60_000);
 
-	it("should stop the session with owner_gone at owner-pipe EOF, leaving nothing", async () => {
+	it("should stop the session with owner_gone at owner-pipe EOF, leaving nothing", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const project = await makeSessionProjectAsync();

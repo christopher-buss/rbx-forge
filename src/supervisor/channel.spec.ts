@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import type { CommandFailure, ReporterEvent } from "../seams/reporter.ts";
@@ -43,7 +43,7 @@ const EVENTS: Array<ReporterEvent> = [
 ];
 
 describe(parseSessionRequest, () => {
-	it("should read back what start encodes", () => {
+	it("should read back what start encodes", ({ expect }) => {
 		expect.assertions(1);
 
 		const request = {
@@ -55,7 +55,7 @@ describe(parseSessionRequest, () => {
 		expect(parseSessionRequest(encodeSessionRequest(request))).toStrictEqual(request);
 	});
 
-	it("should read back what up encodes", () => {
+	it("should read back what up encodes", ({ expect }) => {
 		expect.assertions(1);
 
 		const request = {
@@ -68,7 +68,7 @@ describe(parseSessionRequest, () => {
 		expect(parseSessionRequest(encodeSessionRequest(request))).toStrictEqual(request);
 	});
 
-	it("should read back --force, and leave it out when false", () => {
+	it("should read back --force, and leave it out when false", ({ expect }) => {
 		expect.assertions(2);
 
 		const forced = { compiler: true, config: {}, force: true, open: true };
@@ -88,7 +88,7 @@ describe(parseSessionRequest, () => {
 		'{"compiler":true}',
 		'{"compiler":1,"config":{},"open":true}',
 		'{"compiler":true,"config":{},"force":1,"open":true}',
-	])("should fail with internal_error on %j", (text) => {
+	])("should fail with internal_error on %j", (text, { expect }) => {
 		expect.assertions(2);
 
 		const error = catchForgeError(() => parseSessionRequest(text));
@@ -97,7 +97,7 @@ describe(parseSessionRequest, () => {
 		expect(error.message).toStartWith("The supervisor got no session request: ");
 	});
 
-	it("should fail with internal_error on a config layer the schema rejects", () => {
+	it("should fail with internal_error on a config layer the schema rejects", ({ expect }) => {
 		expect.assertions(1);
 
 		const config = { gracefulTimeoutMs: "y", rojoPort: "x" };
@@ -116,7 +116,7 @@ describe(parseSessionRequest, () => {
 });
 
 describe(parseOwnerLine, () => {
-	it("should read a stop line as its signal", () => {
+	it("should read a stop line as its signal", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(encodeStop("SIGINT")).toBe('{"signal":"SIGINT","type":"stop"}\n');
@@ -128,7 +128,7 @@ describe(parseOwnerLine, () => {
 
 	it.for(["", "stop", '{"signal":"SIGKILL","type":"stop"}', '{"signal":"SIGINT"}'])(
 		"should ignore %j",
-		(line) => {
+		(line, { expect }) => {
 			expect.assertions(1);
 
 			expect(parseOwnerLine(line)).toBeUndefined();
@@ -137,7 +137,7 @@ describe(parseOwnerLine, () => {
 });
 
 describe(parseMessage, () => {
-	it.for(EVENTS)("should read back a $type event", (event) => {
+	it.for(EVENTS)("should read back a $type event", (event, { expect }) => {
 		expect.assertions(1);
 
 		const message: SupervisorMessage = { event, type: "event" };
@@ -145,7 +145,7 @@ describe(parseMessage, () => {
 		expect(parseMessage(encodeMessage(message).trimEnd())).toStrictEqual(message);
 	});
 
-	it("should read back both results", () => {
+	it("should read back both results", ({ expect }) => {
 		expect.assertions(2);
 
 		const ok: SupervisorMessage = {
@@ -171,7 +171,7 @@ describe(parseMessage, () => {
 		'{"type":"result","ok":true,"data":{}}',
 		'{"type":"result","ok":false,"error":{"code":"x"}}',
 		'{"type":"other"}',
-	])("should ignore %j", (line) => {
+	])("should ignore %j", (line, { expect }) => {
 		expect.assertions(1);
 
 		expect(parseMessage(line)).toBeUndefined();
@@ -187,7 +187,7 @@ describe(createChannelReporter, () => {
 		return { lines, reporter };
 	}
 
-	it("should write each event as one message line", () => {
+	it("should write each event as one message line", ({ expect }) => {
 		expect.assertions(1);
 
 		const { lines, reporter } = record();
@@ -196,7 +196,7 @@ describe(createChannelReporter, () => {
 		expect(lines).toStrictEqual([{ event: { message: "ready", type: "info" }, type: "event" }]);
 	});
 
-	it("should write a success as an ok result", () => {
+	it("should write a success as an ok result", ({ expect }) => {
 		expect.assertions(1);
 
 		const { lines, reporter } = record();
@@ -207,7 +207,7 @@ describe(createChannelReporter, () => {
 		]);
 	});
 
-	it("should write a failure with its details and hint only when it has them", () => {
+	it("should write a failure with its details and hint only when it has them", ({ expect }) => {
 		expect.assertions(1);
 
 		const { lines, reporter } = record();
@@ -236,7 +236,7 @@ describe(createChannelReporter, () => {
 });
 
 describe(failureError, () => {
-	it("should rebuild the error with its code, details, and hint", () => {
+	it("should rebuild the error with its code, details, and hint", ({ expect }) => {
 		expect.assertions(1);
 
 		const error = failureError({
@@ -254,7 +254,7 @@ describe(failureError, () => {
 		]);
 	});
 
-	it("should make an unknown code internal_error, with no details or hint", () => {
+	it("should make an unknown code internal_error, with no details or hint", ({ expect }) => {
 		expect.assertions(1);
 
 		const error = failureError({ code: "from_the_future", message: "odd" });

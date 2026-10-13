@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { ForgeErrorCode } from "./errors.ts";
 import { ERROR_CODES, ForgeError } from "./errors.ts";
@@ -15,7 +15,7 @@ import {
 } from "./exit-codes.ts";
 
 describe(ForgeError, () => {
-	it("should carry its code, message, hint, and cause", () => {
+	it("should carry its code, message, hint, and cause", ({ expect }) => {
 		expect.assertions(4);
 
 		const cause = new Error("root");
@@ -27,7 +27,7 @@ describe(ForgeError, () => {
 		expect(error.cause).toBe(cause);
 	});
 
-	it("should name itself in stack traces", () => {
+	it("should name itself in stack traces", ({ expect }) => {
 		expect.assertions(1);
 
 		const error = new ForgeError("usage", "x");
@@ -35,7 +35,7 @@ describe(ForgeError, () => {
 		expect(error.name).toBe("ForgeError");
 	});
 
-	it("should leave the hint and details undefined when none are given", () => {
+	it("should leave the hint and details undefined when none are given", ({ expect }) => {
 		expect.assertions(2);
 
 		const error = new ForgeError("usage", "x");
@@ -44,7 +44,7 @@ describe(ForgeError, () => {
 		expect(error.details).toBeUndefined();
 	});
 
-	it("should carry machine-readable details", () => {
+	it("should carry machine-readable details", ({ expect }) => {
 		expect.assertions(1);
 
 		const error = new ForgeError("hook_failed", "x", { details: { hooks: [] } });
@@ -66,7 +66,7 @@ describe(ForgeError, () => {
 		["supervisor_unresponsive", EXIT_CLEANUP_PENDING],
 		["previous_generation_alive", EXIT_CLEANUP_PENDING],
 		["interrupted", EXIT_INTERRUPTED],
-	] as const)("should map %s to exit code %i", ([code, exitCode]) => {
+	] as const)("should map %s to exit code %i", ([code, exitCode], { expect }) => {
 		expect.assertions(1);
 
 		const error = new ForgeError(code, "x");
@@ -83,16 +83,19 @@ const ALL_CODES = Object.keys(ERROR_CODES).filter(isErrorCode);
 const DOCUMENTED_EXIT_CODES = new Set(EXIT_CODE_HELP.map(([code]) => code));
 
 describe("error codes", () => {
-	it.for(ALL_CODES)("should give %s a documented exit code other than success", (code) => {
-		expect.assertions(2);
+	it.for(ALL_CODES)(
+		"should give %s a documented exit code other than success",
+		(code, { expect }) => {
+			expect.assertions(2);
 
-		const { exitCode } = ERROR_CODES[code];
+			const { exitCode } = ERROR_CODES[code];
 
-		expect(DOCUMENTED_EXIT_CODES.has(exitCode)).toBeTrue();
-		expect(exitCode).not.toBe(EXIT_SUCCESS);
-	});
+			expect(DOCUMENTED_EXIT_CODES.has(exitCode)).toBeTrue();
+			expect(exitCode).not.toBe(EXIT_SUCCESS);
+		},
+	);
 
-	it.for(ALL_CODES)("should describe %s in one sentence", (code) => {
+	it.for(ALL_CODES)("should describe %s in one sentence", (code, { expect }) => {
 		expect.assertions(1);
 
 		expect(ERROR_CODES[code].text).toMatch(/^[A-Z`][^\n]*\.$/);

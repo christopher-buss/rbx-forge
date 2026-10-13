@@ -4,7 +4,8 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import type { TestContext } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { studioProcess } from "../../src/studio/launcher.ts";
 import {
@@ -18,10 +19,13 @@ import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 import { waitForDeathAsync } from "../helpers/worker-log.ts";
 
 async function hiddenStudioAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
 	close = "exit",
 	variables: Record<string, string> = {},
-	desktop: "hidden" | "user" = "hidden",
-	hiddenWindows = false,
+	{
+		desktop = "hidden",
+		hiddenWindows = false,
+	}: { desktop?: "hidden" | "user"; hiddenWindows?: boolean } = {},
 ) {
 	const native = loadRealNative();
 	assert(native.spawnDetached !== undefined);
@@ -44,7 +48,7 @@ async function hiddenStudioAsync(
 	assert(pid !== null);
 	const pin = native.pinProcess(pid);
 	assert(pin !== null);
-	onTestFinished(() => {
+	testContext.onTestFinished(() => {
 		pin.kill();
 		pin.waitForExit(5000);
 	});
@@ -75,6 +79,7 @@ async function queryHiddenClientAsync(pid: number): Promise<string> {
 }
 
 async function launchSnapshotWatcherAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
 	studio: { pid: number; startTime: string },
 	place: string,
 ): Promise<number> {
@@ -108,7 +113,7 @@ console.log(launch({ cwd: ${JSON.stringify(path.dirname(place))}, env: { ...proc
 	});
 	const pinned = loadRealNative().pinProcess(pid);
 	assert(pinned !== null);
-	onTestFinished(() => {
+	testContext.onTestFinished(() => {
 		pinned.kill();
 		pinned.waitForExit(5000);
 	});
@@ -116,10 +121,18 @@ console.log(launch({ cwd: ${JSON.stringify(path.dirname(place))}, env: { ...proc
 }
 
 describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
-	it("launches a hidden session on the user desktop and preserves its visibility", async () => {
+	it("launches a hidden session on the user desktop and preserves its visibility", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { pin } = await hiddenStudioAsync("exit", {}, "user", true);
+		const { pin } = await hiddenStudioAsync(
+			{ onTestFinished },
+			"exit",
+			{},
+			{ desktop: "user", hiddenWindows: true },
+		);
 
 		expect({ desktop: pin.desktop(), visibility: pin.windowVisibility() }).toStrictEqual({
 			desktop: "user",
@@ -128,10 +141,13 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 		expect(studioProcess(pin)).toMatchObject({ desktop: "hidden" });
 	});
 
-	it("keeps snapshots on the hidden desktop when their windows are shown there", async () => {
+	it("keeps snapshots on the hidden desktop when their windows are shown there", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { pin } = await hiddenStudioAsync();
+		const { pin } = await hiddenStudioAsync({ onTestFinished });
 		assert(pin.setWindowVisibility("user"));
 
 		await expect.poll(() => pin.windowVisibility()).toBe("user");
@@ -141,13 +157,14 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 	it(
 		"dismisses a delayed snapshot prompt after the launching client exits",
 		{ timeout: 20_000 },
-		async () => {
+		async ({ expect, onTestFinished }) => {
 			expect.assertions(5);
 
-			const { pin, place } = await hiddenStudioAsync("exit", {
+			const { pin, place } = await hiddenStudioAsync({ onTestFinished }, "exit", {
 				FIXTURE_STUDIO_DIALOG_DELAY_MS: "7000",
 			});
 			const watcherPid = await launchSnapshotWatcherAsync(
+				{ onTestFinished },
 				{ pid: pin.pid, startTime: pin.startTime },
 				place,
 			);
@@ -167,11 +184,15 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 		},
 	);
 
-	it("ends the independent snapshot watcher when Studio exits", async () => {
+	it("ends the independent snapshot watcher when Studio exits", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(4);
 
-		const { pin, place } = await hiddenStudioAsync();
+		const { pin, place } = await hiddenStudioAsync({ onTestFinished });
 		const watcherPid = await launchSnapshotWatcherAsync(
+			{ onTestFinished },
 			{ pid: pin.pid, startTime: pin.startTime },
 			place,
 		);
@@ -189,10 +210,13 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 		expect(watcher.isAlive()).toBeFalse();
 	});
 
-	it("queries and closes hidden Studio from a client that never launched it", async () => {
+	it("queries and closes hidden Studio from a client that never launched it", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { pin, place } = await hiddenStudioAsync();
+		const { pin, place } = await hiddenStudioAsync({ onTestFinished });
 		const stdout = await queryHiddenClientAsync(pin.pid);
 
 		expect(stdout.trim()).toBe('{"blocked":false,"closed":true,"desktop":"hidden"}');
@@ -202,12 +226,15 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 		expect(existsSync(`${place}.lock`)).toBeFalse();
 	});
 
-	it("dismisses only the exact migration dialog of the pinned hidden Studio", async () => {
+	it("dismisses only the exact migration dialog of the pinned hidden Studio", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(4);
 
 		const variables = { FIXTURE_STUDIO_DIALOG_DELAY_MS: "0" };
-		const first = await hiddenStudioAsync("exit", variables);
-		const second = await hiddenStudioAsync("exit", variables);
+		const first = await hiddenStudioAsync({ onTestFinished }, "exit", variables);
+		const second = await hiddenStudioAsync({ onTestFinished }, "exit", variables);
 		await sleep(300);
 
 		expect([first.pin.isBlocked(), second.pin.isBlocked()]).toStrictEqual([true, true]);
@@ -232,10 +259,15 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 		expect([first.pin.isBlocked(), second.pin.isBlocked()]).toStrictEqual([false, true]);
 	});
 
-	it("makes concurrent and expired dismissal requests harmless", async () => {
+	it("makes concurrent and expired dismissal requests harmless", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(4);
 
-		const { pin } = await hiddenStudioAsync("exit", { FIXTURE_STUDIO_DIALOG_DELAY_MS: "0" });
+		const { pin } = await hiddenStudioAsync({ onTestFinished }, "exit", {
+			FIXTURE_STUDIO_DIALOG_DELAY_MS: "0",
+		});
 		await sleep(300);
 
 		await expect(
@@ -258,20 +290,23 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 
 	it.for(["hidden", "user"] as const)(
 		"reports a missing save menu on the %s desktop",
-		async (desktop) => {
+		async (desktop, { expect, onTestFinished }) => {
 			expect.assertions(1);
 
-			const { pin } = await hiddenStudioAsync("exit", {}, desktop);
+			const { pin } = await hiddenStudioAsync({ onTestFinished }, "exit", {}, { desktop });
 
 			await expect(pin.requestSave(5000)).resolves.toBe("no_menu_item");
 		},
 	);
 
-	it("should open one desktop for successive detached Studios and close their windows", async () => {
+	it("should open one desktop for successive detached Studios and close their windows", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(4);
 
-		const first = await hiddenStudioAsync();
-		const second = await hiddenStudioAsync();
+		const first = await hiddenStudioAsync({ onTestFinished });
+		const second = await hiddenStudioAsync({ onTestFinished });
 
 		expect([first.pin.desktop(), second.pin.desktop()]).toStrictEqual(["hidden", "hidden"]);
 		expect(first.pin.requestClose()).toBeTrue();
@@ -285,10 +320,13 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 		]).toStrictEqual([false, false]);
 	});
 
-	it("should detect a modal on the hidden desktop after a close request", async () => {
+	it("should detect a modal on the hidden desktop after a close request", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
-		const { pin } = await hiddenStudioAsync("dialog");
+		const { pin } = await hiddenStudioAsync({ onTestFinished }, "dialog");
 
 		expect(pin.isBlocked()).toBeFalse();
 		expect(pin.requestClose()).toBeTrue();

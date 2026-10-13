@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { compileInstanceGlob } from "./instance-glob.ts";
 
@@ -36,7 +36,7 @@ describe(compileInstanceGlob, () => {
 		{ path: ["Workspace", "line\nbreak"], pattern: "Workspace/line?break" },
 		{ path: ["Workspace", "line\nbreak"], pattern: "Workspace/*" },
 		{ path: ["Workspace", ""], pattern: "Workspace/*" },
-	])("should match $path with $pattern", ({ path, pattern }) => {
+	])("should match $path with $pattern", ({ path, pattern }, { expect }) => {
 		expect.assertions(1);
 
 		expect(compileInstanceGlob(pattern)(path)).toBeTrue();
@@ -57,7 +57,7 @@ describe(compileInstanceGlob, () => {
 		{ path: ["Workspace", "a/b"], pattern: "Workspace/a/b" },
 		{ path: ["Workspace", "Mxp"], pattern: "Workspace/M.p" },
 		{ path: ["Workspace", "Map"], pattern: "Workspace/[M]ap" },
-	])("should not match $path with $pattern", ({ path, pattern }) => {
+	])("should not match $path with $pattern", ({ path, pattern }, { expect }) => {
 		expect.assertions(1);
 
 		expect(compileInstanceGlob(pattern)(path)).toBeFalse();

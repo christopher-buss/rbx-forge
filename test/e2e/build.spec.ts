@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS, EXIT_USAGE } from "../../src/exit-codes.ts";
 import type { FixtureProject, FixtureProjectOptions } from "../helpers/fixture-project.ts";
@@ -40,7 +40,7 @@ async function waitForExitAsync(
 }
 
 describe("forge build", () => {
-	it("should build the configured output with the Rojo on PATH", async () => {
+	it("should build the configured output with the Rojo on PATH", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge, project } = makeFixture();
@@ -54,7 +54,7 @@ describe("forge build", () => {
 		expect(readFileSync(path.join(project, "game.rbxl"), "utf8")).toBe("fake place\n");
 	});
 
-	it("should build to --output, creating its folder", async () => {
+	it("should build to --output, creating its folder", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { forge, project } = makeFixture();
@@ -64,7 +64,7 @@ describe("forge build", () => {
 		expect(existsSync(path.join(project, "out", "place.rbxl"))).toBeTrue();
 	});
 
-	it("should pass --plugin to Rojo", async () => {
+	it("should pass --plugin to Rojo", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { forge, log } = makeFixture();
@@ -76,7 +76,7 @@ describe("forge build", () => {
 		]);
 	});
 
-	it("should exit 2 for --output with --plugin", async () => {
+	it("should exit 2 for --output with --plugin", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { forge } = makeFixture();
@@ -92,7 +92,7 @@ describe("forge build", () => {
 		expect(parseResult(stdout).error!.code).toBe("usage");
 	});
 
-	it("should fail with rojo_missing when Rojo is not installed", async () => {
+	it("should fail with rojo_missing when Rojo is not installed", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { forge } = makeFixture({ fixtureBins: false });
@@ -105,7 +105,9 @@ describe("forge build", () => {
 		});
 	});
 
-	it("should run a Node-based Rojo from a dependency with the current Node", async () => {
+	it("should run a Node-based Rojo from a dependency with the current Node", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { forge, log } = makeFixture({
@@ -135,7 +137,7 @@ describe("forge build", () => {
 	});
 
 	describe("hooks", () => {
-		it("should run pre and post hooks around Rojo and report them", async () => {
+		it("should run pre and post hooks around Rojo and report them", async ({ expect }) => {
 			expect.assertions(3);
 
 			const { forge, log } = makeFixture({
@@ -165,7 +167,7 @@ describe("forge build", () => {
 			]);
 		});
 
-		it("should abort the build when a pre hook fails", async () => {
+		it("should abort the build when a pre hook fails", async ({ expect }) => {
 			expect.assertions(4);
 
 			const { forge, log, project } = makeFixture({
@@ -182,7 +184,7 @@ describe("forge build", () => {
 			expect(existsSync(path.join(project, "game.rbxl"))).toBeFalse();
 		});
 
-		it("should run a post hook that calls forge build only once", async () => {
+		it("should run a post hook that calls forge build only once", async ({ expect }) => {
 			expect.assertions(3);
 
 			const { forge, log } = makeFixture({
@@ -200,7 +202,7 @@ describe("forge build", () => {
 			);
 		});
 
-		it("should fail a hook nested deeper than 8", async () => {
+		it("should fail a hook nested deeper than 8", async ({ expect }) => {
 			expect.assertions(3);
 
 			const { forge, log } = makeFixture({
@@ -216,7 +218,7 @@ describe("forge build", () => {
 			expect(readWorkerLog(log)).toStrictEqual([]);
 		});
 
-		it("should kill a hook's whole process tree when it times out", async () => {
+		it("should kill a hook's whole process tree when it times out", async ({ expect }) => {
 			expect.assertions(3);
 
 			const { forge, log } = makeFixture({

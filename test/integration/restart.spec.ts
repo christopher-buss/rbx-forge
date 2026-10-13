@@ -2,7 +2,7 @@
  * `restartParts` against a real supervisor and reaper: each old process
  * tree, grandchildren included, is gone before its part starts again.
  */
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
@@ -106,7 +106,9 @@ async function restartAsync(
 }
 
 describe("restartParts", () => {
-	it("should stop the compiler's tree until it is gone, then start the compiler again with its owner", async () => {
+	it("should stop the compiler's tree until it is gone, then start the compiler again with its owner", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync();
@@ -121,7 +123,9 @@ describe("restartParts", () => {
 		});
 	}, 60_000);
 
-	it("should stop each tree until it is gone, then start Studio, Rojo, and the compiler again with their owner", async () => {
+	it("should stop each tree until it is gone, then start Studio, Rojo, and the compiler again with their owner", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const project = await makeProjectAsync({ studio: { autoRecovery: "keep" } });

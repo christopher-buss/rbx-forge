@@ -1,5 +1,5 @@
 import path from "node:path";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { createFakeNative } from "../../test/helpers/native.ts";
 import {
@@ -72,7 +72,7 @@ function watchingSnapshot({
 describe("hidden snapshot Lighting watcher", () => {
 	it.for(["gone", "exited"] as const)(
 		"ignores a Studio that has %s before its watcher starts",
-		async (kind) => {
+		async (kind, { expect }) => {
 			expect.assertions(1);
 
 			const run = watchingSnapshot();
@@ -84,7 +84,9 @@ describe("hidden snapshot Lighting watcher", () => {
 		},
 	);
 
-	it("dismisses a prompt seven seconds after the place lock while leaving other Studios alone", async () => {
+	it("dismisses a prompt seven seconds after the place lock while leaving other Studios alone", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const run = watchingSnapshot();
@@ -95,7 +97,7 @@ describe("hidden snapshot Lighting watcher", () => {
 		expect(run.now()).toBe(7000);
 	});
 
-	it("exits as soon as the launched Studio exits", async () => {
+	it("exits as soon as the launched Studio exits", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watchingSnapshot({ exits: true });
@@ -104,7 +106,7 @@ describe("hidden snapshot Lighting watcher", () => {
 		expect(run.now()).toBe(500);
 	});
 
-	it("exits after the bounded opening wait if no place lock appears", async () => {
+	it("exits after the bounded opening wait if no place lock appears", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watchingSnapshot({ hasDialog: false, hasLock: false });
@@ -113,7 +115,7 @@ describe("hidden snapshot Lighting watcher", () => {
 		expect(run.now()).toBe(180_000);
 	});
 
-	it("exits after the post-lock wait when there is no migration prompt", async () => {
+	it("exits after the post-lock wait when there is no migration prompt", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watchingSnapshot({ hasDialog: false });
@@ -122,7 +124,7 @@ describe("hidden snapshot Lighting watcher", () => {
 		expect(run.now()).toBe(30_000);
 	});
 
-	it("leaves a reused Studio PID untouched", async () => {
+	it("leaves a reused Studio PID untouched", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = watchingSnapshot({ identity: "41" });
@@ -134,7 +136,7 @@ describe("hidden snapshot Lighting watcher", () => {
 });
 
 describe("snapshot Lighting helper launch", () => {
-	it("starts Node with one exact place identity and a defined environment", () => {
+	it("starts Node with one exact place identity and a defined environment", ({ expect }) => {
 		expect.assertions(2);
 
 		const native = createFakeNative();
@@ -171,7 +173,7 @@ describe("snapshot Lighting helper launch", () => {
 		]);
 	});
 
-	it.for(["missing", "denied"] as const)("reports a %s detached helper", (kind) => {
+	it.for(["missing", "denied"] as const)("reports a %s detached helper", (kind, { expect }) => {
 		expect.assertions(1);
 
 		const native = createFakeNative();

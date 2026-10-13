@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import {
 	createCommandContext,
@@ -100,7 +100,9 @@ function input(flags: CommandInput["flags"] = {}, config: ConfigLayer = {}): Com
 }
 
 describe(runTypegenCommandAsync, () => {
-	it("should write the service types of Rojo's sourcemap to the configured output", async () => {
+	it("should write the service types of Rojo's sourcemap to the configured output", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { context, memory, specs } = makeTypegen();
@@ -144,7 +146,9 @@ interface Workspace {
 `);
 	});
 
-	it("should read the configured project and write to --output, creating its folders", async () => {
+	it("should read the configured project and write to --output, creating its folders", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, memory, specs } = makeTypegen({
@@ -160,7 +164,7 @@ interface Workspace {
 		expect(memory.files()).toContainKey(output);
 	});
 
-	it("should run when the output and .forge folders already exist", async () => {
+	it("should run when the output and .forge folders already exist", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, memory } = makeTypegen({
@@ -171,7 +175,7 @@ interface Workspace {
 		expect(memory.files()).toContainKey("src/services.d.ts");
 	});
 
-	it("should apply the configured filters", async () => {
+	it("should apply the configured filters", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, memory } = makeTypegen({
@@ -184,7 +188,7 @@ interface Workspace {
 		);
 	});
 
-	it("should warn about each sibling left out for its name", async () => {
+	it("should warn about each sibling left out for its name", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, reporter } = makeTypegen();
@@ -197,7 +201,7 @@ interface Workspace {
 		});
 	});
 
-	it("should remove the sourcemap after reading it", async () => {
+	it("should remove the sourcemap after reading it", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, memory } = makeTypegen();
@@ -206,7 +210,7 @@ interface Workspace {
 		expect(memory.files()).not.toContainKey(".forge/sourcemap.json");
 	});
 
-	it("should fail with sourcemap_invalid when Rojo writes no sourcemap", async () => {
+	it("should fail with sourcemap_invalid when Rojo writes no sourcemap", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, memory } = makeTypegen({ sourcemap: null });
@@ -219,7 +223,9 @@ interface Workspace {
 		expect(memory.files()).not.toContainKey("src/services.d.ts");
 	});
 
-	it("should fail with sourcemap_invalid and remove a sourcemap it cannot read", async () => {
+	it("should fail with sourcemap_invalid and remove a sourcemap it cannot read", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, memory } = makeTypegen({ sourcemap: '{"name":"game"}' });
@@ -230,7 +236,7 @@ interface Workspace {
 		expect(memory.files()).not.toContainKey(".forge/sourcemap.json");
 	});
 
-	it("should fail with process_failed when Rojo fails", async () => {
+	it("should fail with process_failed when Rojo fails", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, memory } = makeTypegen({
@@ -244,7 +250,7 @@ interface Workspace {
 		expect(memory.files()).not.toContainKey("src/services.d.ts");
 	});
 
-	it("should fail with rojo_missing when Rojo is not installed", async () => {
+	it("should fail with rojo_missing when Rojo is not installed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeTypegen({ files: {} });
@@ -254,7 +260,7 @@ interface Workspace {
 		});
 	});
 
-	it("should refuse a Luau project before running Rojo", async () => {
+	it("should refuse a Luau project before running Rojo", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, specs } = makeTypegen({ file: { projectType: "luau" } });
@@ -268,7 +274,7 @@ interface Workspace {
 		expect(specs).toStrictEqual([]);
 	});
 
-	it("should run typegen hooks around Rojo and return their results", async () => {
+	it("should run typegen hooks around Rojo and return their results", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, order } = makeTypegen({
@@ -283,7 +289,7 @@ interface Workspace {
 		]);
 	});
 
-	it("should skip post hooks when Rojo fails", async () => {
+	it("should skip post hooks when Rojo fails", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, order } = makeTypegen({

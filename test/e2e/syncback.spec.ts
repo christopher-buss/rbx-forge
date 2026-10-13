@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { FixtureProject } from "../helpers/fixture-project.ts";
@@ -33,7 +33,7 @@ function rojoSyncback(project: string, input: string): { args: Array<string>; ro
 }
 
 describe("forge syncback", () => {
-	it("should sync the configured input into the configured project", async () => {
+	it("should sync the configured input into the configured project", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge, log, project } = makeFixture({
@@ -50,7 +50,7 @@ describe("forge syncback", () => {
 		expect(ran(log)).toStrictEqual([PROBE, rojoSyncback("sync.project.json", "studio.rbxl")]);
 	});
 
-	it("should take --input and --project over the config", async () => {
+	it("should take --input and --project over the config", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { forge, log } = makeFixture();
@@ -66,7 +66,9 @@ describe("forge syncback", () => {
 		expect(ran(log).at(-1)).toStrictEqual(rojoSyncback("other.project.json", "out/place.rbxl"));
 	});
 
-	it("should report syncback_unsupported when Rojo has no syncback, before any hook runs", async () => {
+	it("should report syncback_unsupported when Rojo has no syncback, before any hook runs", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { forge, log } = makeFixture({ hooks: { syncback: { pre: ["hook pre"] } } });
@@ -83,7 +85,7 @@ describe("forge syncback", () => {
 		expect(ran(log)).toStrictEqual([PROBE]);
 	});
 
-	it("should report Rojo's error and exit non-zero, skipping post hooks", async () => {
+	it("should report Rojo's error and exit non-zero, skipping post hooks", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge, log } = makeFixture({ hooks: { syncback: { post: ["hook post"] } } });
@@ -100,7 +102,7 @@ describe("forge syncback", () => {
 		expect(readWorkerLog(log).map(({ role }) => role)).toStrictEqual(["rojo", "rojo"]);
 	});
 
-	it("should run pre and post hooks around Rojo and report them", async () => {
+	it("should run pre and post hooks around Rojo and report them", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge, log } = makeFixture({
@@ -121,7 +123,7 @@ describe("forge syncback", () => {
 		]);
 	});
 
-	it("should fail the syncback when a pre hook fails", async () => {
+	it("should fail the syncback when a pre hook fails", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { forge, log } = makeFixture({ hooks: { syncback: { pre: ["hook pre"] } } });

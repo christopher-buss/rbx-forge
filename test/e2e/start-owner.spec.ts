@@ -6,7 +6,7 @@
  */
 import { chmodSync, readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { EXIT_FAILURE, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
@@ -74,7 +74,7 @@ describe("forge start next to an agent's session", () => {
 		},
 	])(
 		"should join hidden Studio in place with desktop $desktop and flags $flags",
-		async ({ config, desktop, flags }) => {
+		async ({ config, desktop, flags }, { expect, onTestFinished }) => {
 			expect.assertions(5);
 
 			const fixture = await makeFixtureAsync({ ...PROJECT, ...config }, { studio: true });
@@ -120,7 +120,9 @@ describe("forge start next to an agent's session", () => {
 		},
 	);
 
-	it("should take the agent's compiler without a restart, add Studio and Rojo, and keep them from down and stop", async () => {
+	it("should take the agent's compiler without a restart, add Studio and Rojo, and keep them from down and stop", async ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -160,7 +162,9 @@ describe("forge start next to an agent's session", () => {
 		expect(isProcessAlive(compiler)).toBeTrue();
 	});
 
-	it("should take only the compiler with --no-open, and leave the agent's Studio and Rojo to stop", async () => {
+	it("should take only the compiler with --no-open, and leave the agent's Studio and Rojo to stop", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -183,7 +187,9 @@ describe("forge start next to an agent's session", () => {
 		expect(stop.status).toBe(EXIT_SUCCESS);
 	});
 
-	it("should stop what it added and give back what it took once it is killed, leaving Studio open", async () => {
+	it("should stop what it added and give back what it took once it is killed, leaving Studio open", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -218,7 +224,7 @@ describe("forge start next to an agent's session", () => {
 	});
 
 	// Windows cannot send SIGINT to another process: `kill` terminates it.
-	it.skipIf(IS_WINDOWS)("should report what it let go of on Ctrl+C", async () => {
+	it.skipIf(IS_WINDOWS)("should report what it let go of on Ctrl+C", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -240,7 +246,7 @@ describe("forge start next to an agent's session", () => {
 		});
 	});
 
-	it("should refuse to join a session another start owns", async () => {
+	it("should refuse to join a session another start owns", async ({ expect }) => {
 		expect.assertions(1);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });
@@ -255,7 +261,9 @@ describe("forge start next to an agent's session", () => {
 });
 
 describe("forge stop --force on a Studio a start owns", () => {
-	it("should close it, and keep the start session, which ends on its owner's end", async () => {
+	it("should close it, and keep the start session, which ends on its owner's end", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(PROJECT, { studio: true });

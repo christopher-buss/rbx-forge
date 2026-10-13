@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { CompileEvent, CompileReport } from "./diagnostics.ts";
 import { createCompilerOutputParser } from "./sloptor.ts";
@@ -48,13 +48,13 @@ function event(fields: Record<string, unknown>): string {
 const START = event({ at: "2026-09-25T18:00:00.000Z", changed: [], event: "buildStart" });
 
 describe(createCompilerOutputParser, () => {
-	it("should read a sloptor buildStart as a start event", () => {
+	it("should read a sloptor buildStart as a start event", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(readAll([START])).toStrictEqual([{ type: "start" }]);
 	});
 
-	it("should read a sloptor buildEnd with its diagnostics and error count", () => {
+	it("should read a sloptor buildEnd with its diagnostics and error count", ({ expect }) => {
 		expect.assertions(1);
 
 		const end = event({
@@ -119,19 +119,21 @@ describe(createCompilerOutputParser, () => {
 		]);
 	});
 
-	it("should strip a trailing carriage return before it parses an event", () => {
+	it("should strip a trailing carriage return before it parses an event", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(readAll([`${START}\r`])).toStrictEqual([{ type: "start" }]);
 	});
 
-	it("should ignore a sloptor event it does not know", () => {
+	it("should ignore a sloptor event it does not know", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(readAll([event({ event: "watching", files: 12 })])).toStrictEqual([undefined]);
 	});
 
-	it("should ignore a sloptor event with the wrong fields, and not read it as text", () => {
+	it("should ignore a sloptor event with the wrong fields, and not read it as text", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const badEnd = event({ diagnostics: [{ file: "src/a.ts" }], event: "buildEnd" });
@@ -168,7 +170,7 @@ describe(createCompilerOutputParser, () => {
 		]);
 	});
 
-	it("should read a line that is not valid JSON as rbxtsc text", () => {
+	it("should read a line that is not valid JSON as rbxtsc text", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -196,7 +198,7 @@ describe(createCompilerOutputParser, () => {
 		});
 	});
 
-	it("should read a JSON line with no string event field as rbxtsc text", () => {
+	it("should read a JSON line with no string event field as rbxtsc text", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -225,7 +227,7 @@ describe(createCompilerOutputParser, () => {
 		});
 	});
 
-	it("should read rbxtsc output as before", () => {
+	it("should read rbxtsc output as before", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -239,7 +241,7 @@ describe(createCompilerOutputParser, () => {
 		]);
 	});
 
-	it("should count a failed buildEnd with no error diagnostics as one error", () => {
+	it("should count a failed buildEnd with no error diagnostics as one error", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(readAll([event({ diagnostics: [], event: "buildEnd", ok: false })])).toStrictEqual([
@@ -247,7 +249,7 @@ describe(createCompilerOutputParser, () => {
 		]);
 	});
 
-	it("should read the result of a one-shot sloptor build as the report", () => {
+	it("should read the result of a one-shot sloptor build as the report", ({ expect }) => {
 		expect.assertions(1);
 
 		const result = event({
@@ -264,7 +266,7 @@ describe(createCompilerOutputParser, () => {
 		});
 	});
 
-	it("should count no error for a one-shot result that succeeded with warnings", () => {
+	it("should count no error for a one-shot result that succeeded with warnings", ({ expect }) => {
 		expect.assertions(1);
 
 		const warning = { ...TS2322, severity: "warning" };
@@ -282,7 +284,9 @@ describe(createCompilerOutputParser, () => {
 		});
 	});
 
-	it("should count a failed one-shot result with no error diagnostics as one error", () => {
+	it("should count a failed one-shot result with no error diagnostics as one error", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const result = event({ diagnostics: [], durationMs: 1, files: 1, ok: false, version: "1" });
@@ -290,7 +294,7 @@ describe(createCompilerOutputParser, () => {
 		expect(compileOnce([result]).report).toStrictEqual({ diagnostics: [], errors: 1 });
 	});
 
-	it("should read a JSON line that is not a one-shot result as rbxtsc text", () => {
+	it("should read a JSON line that is not a one-shot result as rbxtsc text", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -313,7 +317,7 @@ describe(createCompilerOutputParser, () => {
 		});
 	});
 
-	it("should report rbxtsc diagnostics when no one-shot result comes", () => {
+	it("should report rbxtsc diagnostics when no one-shot result comes", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(compileOnce(["src/a.ts:3:7 - error TS2322: Bad."]).report).toStrictEqual({

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { ConfigFile, Spawn, SpawnResult } from "./worktree.ts";
 import {
@@ -59,13 +59,13 @@ function memoryConfig(contents?: string, realpath?: string) {
 }
 
 describe(worktrunkBinary, () => {
-	it("should use git-wt.exe on Windows, where wt can be Windows Terminal", () => {
+	it("should use git-wt.exe on Windows, where wt can be Windows Terminal", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(worktrunkBinary("win32")).toBe("git-wt.exe");
 	});
 
-	it("should use wt elsewhere", () => {
+	it("should use wt elsewhere", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(worktrunkBinary("darwin")).toBe("wt");
@@ -73,7 +73,7 @@ describe(worktrunkBinary, () => {
 });
 
 describe(resolveProjectDirectory, () => {
-	it("should take CLAUDE_PROJECT_DIR when it is set", () => {
+	it("should take CLAUDE_PROJECT_DIR when it is set", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(resolveProjectDirectory({ CLAUDE_PROJECT_DIR: "/project" }, "/cwd")).toBe(
@@ -81,7 +81,7 @@ describe(resolveProjectDirectory, () => {
 		);
 	});
 
-	it("should fall back to the working directory when it is empty or unset", () => {
+	it("should fall back to the working directory when it is empty or unset", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(resolveProjectDirectory({ CLAUDE_PROJECT_DIR: "" }, "/cwd")).toBe("/cwd");
@@ -90,7 +90,7 @@ describe(resolveProjectDirectory, () => {
 });
 
 describe(resolveClaudeConfigPath, () => {
-	it("should put the config in CLAUDE_CONFIG_DIR when it is set", () => {
+	it("should put the config in CLAUDE_CONFIG_DIR when it is set", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(resolveClaudeConfigPath({ CLAUDE_CONFIG_DIR: "/config" }, "/home")).toBe(
@@ -98,7 +98,7 @@ describe(resolveClaudeConfigPath, () => {
 		);
 	});
 
-	it("should put the config in the home directory when it is empty or unset", () => {
+	it("should put the config in the home directory when it is empty or unset", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(resolveClaudeConfigPath({ CLAUDE_CONFIG_DIR: "" }, "/home")).toBe(
@@ -109,7 +109,7 @@ describe(resolveClaudeConfigPath, () => {
 });
 
 describe(trustWorktree, () => {
-	it("should create the config when it does not exist", () => {
+	it("should create the config when it does not exist", ({ expect }) => {
 		expect.assertions(1);
 
 		const { config, read } = memoryConfig();
@@ -120,7 +120,7 @@ describe(trustWorktree, () => {
 		});
 	});
 
-	it("should trust the real path and the literal path, and keep other fields", () => {
+	it("should trust the real path and the literal path, and keep other fields", ({ expect }) => {
 		expect.assertions(1);
 
 		const { config, read } = memoryConfig(
@@ -142,7 +142,7 @@ describe(trustWorktree, () => {
 		});
 	});
 
-	it("should replace a projects value that is not an object", () => {
+	it("should replace a projects value that is not an object", ({ expect }) => {
 		expect.assertions(1);
 
 		const { config, read } = memoryConfig(JSON.stringify({ projects: [] }));
@@ -153,7 +153,7 @@ describe(trustWorktree, () => {
 		});
 	});
 
-	it("should not write when the worktree is already trusted", () => {
+	it("should not write when the worktree is already trusted", ({ expect }) => {
 		expect.assertions(1);
 
 		const contents = JSON.stringify({
@@ -165,7 +165,7 @@ describe(trustWorktree, () => {
 		expect(writes).toBeEmpty();
 	});
 
-	it("should throw when the config is not a JSON object", () => {
+	it("should throw when the config is not a JSON object", ({ expect }) => {
 		expect.assertions(1);
 
 		const { config } = memoryConfig("[]");
@@ -177,7 +177,7 @@ describe(trustWorktree, () => {
 });
 
 describe(runWorktreeCreate, () => {
-	it("should print the worktree path from worktrunk's JSON result", () => {
+	it("should print the worktree path from worktrunk's JSON result", ({ expect }) => {
 		expect.assertions(1);
 
 		const { spawn } = fakeSpawn({
@@ -190,7 +190,7 @@ describe(runWorktreeCreate, () => {
 		expect(create(spawn)).toStrictEqual({ code: 0, stderr: "", stdout: `${WORKTREE}\n` });
 	});
 
-	it("should branch from the fetched remote default branch", () => {
+	it("should branch from the fetched remote default branch", ({ expect }) => {
 		expect.assertions(1);
 
 		const { calls, spawn } = fakeSpawn({ originHead: { status: 0, stdout: "origin/trunk\n" } });
@@ -214,7 +214,7 @@ describe(runWorktreeCreate, () => {
 		]);
 	});
 
-	it("should fall back to origin/main when origin/HEAD is not set", () => {
+	it("should fall back to origin/main when origin/HEAD is not set", ({ expect }) => {
 		expect.assertions(1);
 
 		const { calls, spawn } = fakeSpawn({ originHead: { status: 128 } });
@@ -223,7 +223,7 @@ describe(runWorktreeCreate, () => {
 		expect(calls[1]).toStrictEqual(["git", "fetch", "origin", "main", "--quiet"]);
 	});
 
-	it("should trust the new worktree", () => {
+	it("should trust the new worktree", ({ expect }) => {
 		expect.assertions(1);
 
 		const trusted: Array<string> = [];
@@ -234,7 +234,7 @@ describe(runWorktreeCreate, () => {
 		expect(trusted).toStrictEqual([WORKTREE]);
 	});
 
-	it("should still succeed when trust fails", () => {
+	it("should still succeed when trust fails", ({ expect }) => {
 		expect.assertions(1);
 
 		const result = create(fakeSpawn().spawn, () => {
@@ -253,7 +253,7 @@ describe(runWorktreeCreate, () => {
 		{ stdin: "{}", what: "no name" },
 		{ stdin: '{"name":""}', what: "an empty name" },
 		{ stdin: '{"name":1}', what: "a name that is not a string" },
-	])("should fail when stdin has $what", ({ stdin }) => {
+	])("should fail when stdin has $what", ({ stdin }, { expect }) => {
 		expect.assertions(1);
 
 		const result = runWorktreeCreate({
@@ -270,7 +270,7 @@ describe(runWorktreeCreate, () => {
 		});
 	});
 
-	it("should fail when worktrunk does not spawn", () => {
+	it("should fail when worktrunk does not spawn", ({ expect }) => {
 		expect.assertions(1);
 
 		const { spawn } = fakeSpawn({ worktrunk: { error: new Error("ENOENT"), status: null } });
@@ -280,7 +280,7 @@ describe(runWorktreeCreate, () => {
 		);
 	});
 
-	it("should fail when worktrunk exits non-zero", () => {
+	it("should fail when worktrunk exits non-zero", ({ expect }) => {
 		expect.assertions(1);
 
 		const { spawn } = fakeSpawn({ worktrunk: { status: 2 } });
@@ -292,7 +292,7 @@ describe(runWorktreeCreate, () => {
 		});
 	});
 
-	it("should fail when worktrunk prints no path", () => {
+	it("should fail when worktrunk prints no path", ({ expect }) => {
 		expect.assertions(1);
 
 		const { spawn } = fakeSpawn({ worktrunk: { status: 0 } });
@@ -302,7 +302,7 @@ describe(runWorktreeCreate, () => {
 });
 
 describe(runWorktreeRemove, () => {
-	it("should remove the worktree with worktrunk, dirty or not", () => {
+	it("should remove the worktree with worktrunk, dirty or not", ({ expect }) => {
 		expect.assertions(2);
 
 		const { calls, spawn } = fakeSpawn();
@@ -314,7 +314,7 @@ describe(runWorktreeRemove, () => {
 		]);
 	});
 
-	it("should fail when stdin has no worktree path", () => {
+	it("should fail when stdin has no worktree path", ({ expect }) => {
 		expect.assertions(1);
 
 		const result = runWorktreeRemove({
@@ -326,7 +326,7 @@ describe(runWorktreeRemove, () => {
 		expect(result.stderr).toBe("worktree-remove: missing `worktree_path` in stdin payload\n");
 	});
 
-	it("should fail when worktrunk fails", () => {
+	it("should fail when worktrunk fails", ({ expect }) => {
 		expect.assertions(1);
 
 		const { spawn } = fakeSpawn({ worktrunk: { status: 1 } });

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import {
 	createCommandContext,
@@ -76,7 +76,7 @@ function input(flags: CommandInput["flags"] = {}, config: ConfigLayer = {}): Com
 }
 
 describe(runBuildCommandAsync, () => {
-	it("should build the configured project to the configured output", async () => {
+	it("should build the configured project to the configured output", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, specs } = makeBuild({
@@ -97,7 +97,7 @@ describe(runBuildCommandAsync, () => {
 		]);
 	});
 
-	it("should build to --output and create its folder", async () => {
+	it("should build to --output and create its folder", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, memory, specs } = makeBuild();
@@ -115,7 +115,7 @@ describe(runBuildCommandAsync, () => {
 		expect(memory.files()).toContainKey("out");
 	});
 
-	it("should build into the plugins folder with --plugin", async () => {
+	it("should build into the plugins folder with --plugin", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, specs } = makeBuild();
@@ -134,7 +134,7 @@ describe(runBuildCommandAsync, () => {
 		]);
 	});
 
-	it("should refuse --output with --plugin before loading the config", async () => {
+	it("should refuse --output with --plugin before loading the config", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { configLoader, context } = makeBuild();
@@ -149,7 +149,9 @@ describe(runBuildCommandAsync, () => {
 		expect(configLoader).not.toHaveBeenCalled();
 	});
 
-	it("should run the configured Rojo command, as a Node tool when a dependency has it", async () => {
+	it("should run the configured Rojo command, as a Node tool when a dependency has it", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context, specs } = makeBuild({
@@ -176,7 +178,7 @@ describe(runBuildCommandAsync, () => {
 		});
 	});
 
-	it("should fail with rojo_missing when Rojo is not installed", async () => {
+	it("should fail with rojo_missing when Rojo is not installed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeBuild({ files: {} });
@@ -189,7 +191,7 @@ describe(runBuildCommandAsync, () => {
 		});
 	});
 
-	it("should run build hooks around Rojo and return their results", async () => {
+	it("should run build hooks around Rojo and return their results", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, order } = makeBuild({
@@ -204,7 +206,7 @@ describe(runBuildCommandAsync, () => {
 		]);
 	});
 
-	it("should skip post hooks when Rojo fails", async () => {
+	it("should skip post hooks when Rojo fails", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, order } = makeBuild({

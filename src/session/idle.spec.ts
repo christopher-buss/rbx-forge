@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import { createRecordingReporter } from "../../test/helpers/seams.ts";
@@ -12,7 +12,7 @@ const MINUTE_MS = 60_000;
 const NOTHING: PartStops = { ending: false, kept: [], stopped: [] };
 
 describe(createIdleTracker, () => {
-	it("should be idle one timeout after its start with no activity", () => {
+	it("should be idle one timeout after its start with no activity", ({ expect }) => {
 		expect.assertions(1);
 
 		const tracker = createIdleTracker(30, 1000);
@@ -20,7 +20,7 @@ describe(createIdleTracker, () => {
 		expect(tracker.idleAt()).toBe(1000 + 30 * MINUTE_MS);
 	});
 
-	it("should start the time again on each activity", () => {
+	it("should start the time again on each activity", ({ expect }) => {
 		expect.assertions(2);
 
 		const tracker = createIdleTracker(2, 0);
@@ -33,13 +33,13 @@ describe(createIdleTracker, () => {
 		expect(tracker.idleAt()).toBe(100_000 + 2 * MINUTE_MS);
 	});
 
-	it("should take a fraction of a minute", () => {
+	it("should take a fraction of a minute", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(createIdleTracker(0.5, 0).idleAt()).toBe(30_000);
 	});
 
-	it("should never be idle with a timeout of 0", () => {
+	it("should never be idle with a timeout of 0", ({ expect }) => {
 		expect.assertions(1);
 
 		const tracker = createIdleTracker(0, 0);
@@ -93,7 +93,9 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(stopWhenIdleAsync, () => {
-	it("should stop the parts with no owner once the timeout passed with no activity", async () => {
+	it("should stop the parts with no owner once the timeout passed with no activity", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = watchIdle(1);
@@ -108,7 +110,7 @@ describe(stopWhenIdleAsync, () => {
 		expect(run.stopAsync).toHaveBeenCalledExactlyOnceWith(IDLE_STOP);
 	});
 
-	it("should wait for the timeout again after an activity", async () => {
+	it("should wait for the timeout again after an activity", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = watchIdle(1);
@@ -125,7 +127,7 @@ describe(stopWhenIdleAsync, () => {
 		expect(run.stopAsync).toHaveBeenCalledOnce();
 	});
 
-	it("should stop again only after one more timeout with no activity", async () => {
+	it("should stop again only after one more timeout with no activity", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = watchIdle(1);
@@ -142,7 +144,7 @@ describe(stopWhenIdleAsync, () => {
 		expect(run.stopAsync).toHaveBeenCalledTimes(2);
 	});
 
-	it("should report the parts it stopped", async () => {
+	it("should report the parts it stopped", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watchIdle(30, { ending: true, kept: [], stopped: ["studio", "compiler"] });
@@ -159,7 +161,7 @@ describe(stopWhenIdleAsync, () => {
 		]);
 	});
 
-	it("should report nothing when it stopped no part", async () => {
+	it("should report nothing when it stopped no part", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watchIdle(1);
@@ -171,7 +173,7 @@ describe(stopWhenIdleAsync, () => {
 		expect(run.reporter.events).toStrictEqual([]);
 	});
 
-	it("should end quietly when the session is already stopping", async () => {
+	it("should end quietly when the session is already stopping", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = watchIdle(1, new ForgeError("not_running", "stopping"));
@@ -183,7 +185,7 @@ describe(stopWhenIdleAsync, () => {
 		expect(run.reporter.events).toStrictEqual([]);
 	});
 
-	it("should never stop with a timeout of 0, and leave no timer", async () => {
+	it("should never stop with a timeout of 0, and leave no timer", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = watchIdle(0);
@@ -194,7 +196,7 @@ describe(stopWhenIdleAsync, () => {
 		expect(run.clock.pending()).toBe(0);
 	});
 
-	it("should end with the session, and leave no timer", async () => {
+	it("should end with the session, and leave no timer", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = watchIdle(1);
@@ -206,7 +208,7 @@ describe(stopWhenIdleAsync, () => {
 		expect(run.clock.pending()).toBe(0);
 	});
 
-	it("should not stop once the session ended during the stop", async () => {
+	it("should not stop once the session ended during the stop", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = watchIdle(1);

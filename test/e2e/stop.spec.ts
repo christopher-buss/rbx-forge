@@ -3,7 +3,7 @@ import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it, expect as matchers } from "vitest";
 
 import { EXIT_FAILURE, EXIT_IDENTITY_UNVERIFIED, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import { parseOpened, parseResult } from "../helpers/output.ts";
@@ -44,7 +44,7 @@ const NATIVE = nativeEnvironment(NATIVE_DIRECTORY);
  * How a Studio that closes on the request goes: it exits right after it
  * removes its lock file, and forge may see the gap and end it at once.
  */
-const CLOSED_END: unknown = expect.toBeOneOf(["exited", "lock_released"]);
+const CLOSED_END: unknown = matchers.toBeOneOf(["exited", "lock_released"]);
 /**
  * How forge ends a Studio behind a dialog: POSIX sees no dialog, so the time
  * limit.
@@ -107,7 +107,9 @@ async function openSnapshotAsync(fixture: Fixture): Promise<{ pid: number; place
 }
 
 describe("forge stop", () => {
-	it("should close a verified Studio with a close request, and no other Studio", async () => {
+	it("should close a verified Studio with a close request, and no other Studio", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const { other, place, project, studio } = await makeStudioProjectAsync();
@@ -131,7 +133,7 @@ describe("forge stop", () => {
 		}).toStrictEqual({ isOtherAlive: true, isOtherOpen: true });
 	});
 
-	it("should end a Studio behind a dialog, and remove its lock file", async () => {
+	it("should end a Studio behind a dialog, and remove its lock file", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { place, project, studio } = await makeStudioProjectAsync({
@@ -155,7 +157,9 @@ describe("forge stop", () => {
 		expect(existsSync(`${place}.lock`)).toBeFalse();
 	});
 
-	it("should end a Studio at once once it closed the place, and keep auto-recovery files with --recovery keep", async () => {
+	it("should end a Studio at once once it closed the place, and keep auto-recovery files with --recovery keep", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { project, studio } = await makeStudioProjectAsync({
@@ -176,7 +180,9 @@ describe("forge stop", () => {
 		expect(isProcessAlive(pidOf(studio))).toBeFalse();
 	});
 
-	it("should wait for the Studio a start is opening, then close it through the session with --force", async () => {
+	it("should wait for the Studio a start is opening, then close it through the session with --force", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
@@ -195,7 +201,9 @@ describe("forge stop", () => {
 		expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
 	});
 
-	it("should close the attached Studio and stop its Rojo, and keep the compiler and the session", async () => {
+	it("should close the attached Studio and stop its Rojo, and keep the compiler and the session", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(
@@ -229,7 +237,7 @@ describe("forge stop", () => {
 		await expect(waitForDeathAsync([studio!.pid], 2000)).resolves.toStrictEqual([]);
 	});
 
-	it("should close a Studio with --force, as one with no owner", async () => {
+	it("should close a Studio with --force, as one with no owner", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({ open: { buildFirst: true } }, { studio: true });
@@ -245,7 +253,7 @@ describe("forge stop", () => {
 		expect(down.result.error!.code).toBe("not_running");
 	});
 
-	it("should close the Studio of the place --place names, and no other", async () => {
+	it("should close the Studio of the place --place names, and no other", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { other, place, project, studio } = await makeStudioProjectAsync();
@@ -270,7 +278,7 @@ describe("forge stop", () => {
 		}).toStrictEqual({ isOpen: true, isStudioAlive: true });
 	});
 
-	it("should close every snapshot Studio that forge open opened", async () => {
+	it("should close every snapshot Studio that forge open opened", async ({ expect }) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync({}, { studio: true });
@@ -291,7 +299,7 @@ describe("forge stop", () => {
 		expect([first, second].map(({ pid }) => isProcessAlive(pid))).toStrictEqual([false, false]);
 	});
 
-	it("should close only the snapshot Studio --place names", async () => {
+	it("should close only the snapshot Studio --place names", async ({ expect }) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync({}, { studio: true });
@@ -315,7 +323,9 @@ describe("forge stop", () => {
 		expect(isProcessAlive(second.pid)).toBeTrue();
 	});
 
-	it("should kill nothing when a stale lock names a PID that another program reused", async () => {
+	it("should kill nothing when a stale lock names a PID that another program reused", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const pid = pidOf(spawnSleeper());
@@ -329,7 +339,9 @@ describe("forge stop", () => {
 		expect(readFileSync(lockPath, "utf8")).toBe(lockFile);
 	});
 
-	it("should kill nothing when the lock file was written on another computer", async () => {
+	it("should kill nothing when the lock file was written on another computer", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const pid = pidOf(spawnFakeStudio());
@@ -342,7 +354,9 @@ describe("forge stop", () => {
 		expect(existsSync(lockPath)).toBeTrue();
 	});
 
-	it("should kill nothing when a Studio that started after the lock file reused its PID", async () => {
+	it("should kill nothing when a Studio that started after the lock file reused its PID", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const pid = pidOf(spawnFakeStudio());
@@ -358,7 +372,9 @@ describe("forge stop", () => {
 		expect(existsSync(lockPath)).toBeTrue();
 	});
 
-	it("should report that Studio is not running when the lock names an exited PID", async () => {
+	it("should report that Studio is not running when the lock names an exited PID", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const sleeper = spawnSleeper();
@@ -377,7 +393,9 @@ describe("forge stop", () => {
 		});
 	});
 
-	it("should fail with native_missing when the native addon does not load", async () => {
+	it("should fail with native_missing when the native addon does not load", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const pid = pidOf(spawnSleeper());

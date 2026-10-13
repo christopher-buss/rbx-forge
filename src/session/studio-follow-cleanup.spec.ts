@@ -1,7 +1,8 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -17,10 +18,14 @@ import { createStatusStore } from "./status.ts";
 import { followSessionStudio, leaveStudio } from "./studio-part.ts";
 import { FILE_POLL_MS } from "./worker-context.ts";
 
-function followingStudio(platform: NodeJS.Platform = "win32") {
+function followingStudio(
+	onTestFinished: TestContext["onTestFinished"],
+	platform: NodeJS.Platform = "win32",
+	{ hasLock = true }: { hasLock?: boolean } = {},
+) {
 	const memory = createMemoryFileSystem({
 		"game.rbxl": "place",
-		"game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
+		...(hasLock ? { "game.rbxl.lock": `42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n` } : {}),
 	});
 	const native = createFakeNative({
 		42: {
@@ -128,10 +133,10 @@ async function flushAsync(): Promise<void> {
 describe("studio follow completion", () => {
 	it.for(["darwin", "linux"] as const)(
 		"leaves Windows migration dialogs alone on a %s host",
-		async (platform) => {
+		async (platform, { expect, onTestFinished }) => {
 			expect.assertions(1);
 
-			const run = followingStudio(platform);
+			const run = followingStudio(onTestFinished, platform);
 			run.finishInspection();
 			await run.open;
 			await flushAsync();
@@ -140,10 +145,13 @@ describe("studio follow completion", () => {
 		},
 	);
 
-	it("records Studio closed only after its in-flight native dialog inspection ends", async () => {
+	it("records Studio closed only after its in-flight native dialog inspection ends", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
-		const run = followingStudio();
+		const run = followingStudio(onTestFinished);
 		await run.open;
 		await run.inspected;
 		run.closePlace();
@@ -158,10 +166,13 @@ describe("studio follow completion", () => {
 		expect(run.studio).toMatchObject({ alive: true, blocked: false });
 	});
 
-	it("keeps a detached Studio off when its earlier close observation finishes after release", async () => {
+	it("keeps a detached Studio off when its earlier close observation finishes after release", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const run = followingStudio();
+		const run = followingStudio(onTestFinished);
 		await run.open;
 		await run.inspected;
 		run.closePlace();
@@ -174,5 +185,22 @@ describe("studio follow completion", () => {
 		await run.done();
 
 		expect(run.status.snapshot().services.studio.status).toBe("off");
+	});
+
+	it("settles readiness when the Studio follow ends before its lock appears", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const run = followingStudio(onTestFinished, "linux", { hasLock: false });
+		await flushAsync();
+
+		expect(run.status.snapshot().services.studio.status).toBe("opening");
+
+		run.leave();
+		await run.done();
+
+		await expect(run.open).resolves.toBeUndefined();
 	});
 });

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createFakeSignals } from "../../test/helpers/fake-reaper.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
@@ -37,7 +37,7 @@ async function flushAsync(): Promise<void> {
 }
 
 describe(runLogsAsync, () => {
-	it("should print every line of the log as a log event", async () => {
+	it("should print every line of the log as a log event", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, reporter } = makeRun({ ".forge/logs/rojo.log": "one\r\ntwo\n" });
@@ -54,7 +54,7 @@ describe(runLogsAsync, () => {
 		]);
 	});
 
-	it("should say so when the log has no lines yet", async () => {
+	it("should say so when the log has no lines yet", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeRun({ ".forge/logs/compiler.log": "half a line" });
@@ -70,7 +70,7 @@ describe(runLogsAsync, () => {
 	it.for([
 		["no name", {}, "Name the log to read."],
 		["an unknown name", { argument: "rojo2" }, 'There is no log named "rojo2".'],
-	] as const)("should fail with usage on %s", async ([, named, message]) => {
+	] as const)("should fail with usage on %s", async ([, named, message], { expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeRun();
@@ -88,7 +88,9 @@ describe(runLogsAsync, () => {
 		});
 	});
 
-	it("should follow new lines, a split line, and a rotation until a stop signal", async () => {
+	it("should follow new lines, a split line, and a rotation until a stop signal", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { clock, context, memory, reporter, signals } = makeRun({
@@ -126,7 +128,7 @@ describe(runLogsAsync, () => {
 		expect(signals.listeners()).toBe(0);
 	});
 
-	it("should stop following at once on a stop signal", async () => {
+	it("should stop following at once on a stop signal", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, signals } = makeRun();

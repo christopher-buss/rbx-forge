@@ -1,5 +1,5 @@
 import path from "node:path";
-import { assert, describe, expect, it, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { FakeSession } from "../../test/helpers/fake-session.ts";
@@ -127,7 +127,7 @@ const EVERY_PART = {
 };
 
 describe(runRestartAsync, () => {
-	it("should fail with not_running when no session runs", async () => {
+	it("should fail with not_running when no session runs", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(restartAsync(makeRestart())).rejects.toMatchObject({
@@ -137,7 +137,9 @@ describe(runRestartAsync, () => {
 		});
 	});
 
-	it("should restart every part it may touch and report the ready session", async () => {
+	it("should restart every part it may touch and report the ready session", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = makeRestart();
@@ -164,7 +166,7 @@ describe(runRestartAsync, () => {
 		});
 	});
 
-	it("should ask with --force, --recovery, and --studio-path", async () => {
+	it("should ask with --force, --recovery, and --studio-path", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = makeRestart();
@@ -205,7 +207,7 @@ describe(runRestartAsync, () => {
 		],
 	] as const)(
 		"should name the owned parts it left alone: %j",
-		async ([kept, added, start, end, studio]) => {
+		async ([kept, added, start, end, studio], { expect }) => {
 			expect.assertions(1);
 
 			const run = makeRestart();
@@ -219,7 +221,9 @@ describe(runRestartAsync, () => {
 		},
 	);
 
-	it("should say a found Studio stays open, besides the owned parts it left alone", async () => {
+	it("should say a found Studio stays open, besides the owned parts it left alone", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = makeRestart();
@@ -233,7 +237,9 @@ describe(runRestartAsync, () => {
 		});
 	});
 
-	it("should give the session as long to answer as its stop and adds may take", async () => {
+	it("should give the session as long to answer as its stop and adds may take", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = makeRestart({ gracefulTimeoutMs: 1234 });
@@ -264,7 +270,7 @@ describe(runRestartAsync, () => {
 		);
 	});
 
-	it("should fail as Studio's close failed, and say it restarted nothing", async () => {
+	it("should fail as Studio's close failed, and say it restarted nothing", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = makeRestart();
@@ -285,7 +291,7 @@ describe(runRestartAsync, () => {
 		});
 	});
 
-	it("should wait until no part is starting", async () => {
+	it("should wait until no part is starting", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = makeRestart();
@@ -297,7 +303,9 @@ describe(runRestartAsync, () => {
 		expect(run.now()).toBe(3 * UP_POLL_MS);
 	});
 
-	it("should fail with supervisor_unresponsive when the session starts no part in time", async () => {
+	it("should fail with supervisor_unresponsive when the session starts no part in time", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = makeRestart();
@@ -310,7 +318,9 @@ describe(runRestartAsync, () => {
 		});
 	});
 
-	it("should fail with compile_timeout when the compiler is not ready in time", async () => {
+	it("should fail with compile_timeout when the compiler is not ready in time", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = makeRestart();
@@ -328,7 +338,7 @@ describe(runRestartAsync, () => {
 });
 
 describe("restart flags", () => {
-	it("should take --force, --recovery, and --studio-path", () => {
+	it("should take --force, --recovery, and --studio-path", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(RESTART_FLAGS.map(({ name }) => name)).toStrictEqual([

@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { encodeRequest, parseEvent } from "./protocol.ts";
 
 const REPORT = { exitCode: 0, forced: false, incomplete: false, signal: null, survivors: [] };
 
 describe(encodeRequest, () => {
-	it("should write a control request as one JSON line", () => {
+	it("should write a control request as one JSON line", ({ expect }) => {
 		expect.assertions(3);
 
 		expect(encodeRequest({ type: "go" })).toBe('{"type":"go"}\n');
@@ -17,7 +17,9 @@ describe(encodeRequest, () => {
 		);
 	});
 
-	it("should write a spawn with defined variables only and verbatim off by default", () => {
+	it("should write a spawn with defined variables only and verbatim off by default", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const line = encodeRequest({
@@ -44,7 +46,7 @@ describe(encodeRequest, () => {
 		});
 	});
 
-	it("should pass verbatim arguments on and leave out a missing log", () => {
+	it("should pass verbatim arguments on and leave out a missing log", ({ expect }) => {
 		expect.assertions(2);
 
 		const line = encodeRequest({
@@ -73,7 +75,7 @@ describe(encodeRequest, () => {
 });
 
 describe(parseEvent, () => {
-	it("should read every event the reaper writes", () => {
+	it("should read every event the reaper writes", ({ expect }) => {
 		expect.assertions(5);
 
 		expect(parseEvent('{"type":"leased","pid":4}')).toStrictEqual({ pid: 4, type: "leased" });
@@ -96,7 +98,7 @@ describe(parseEvent, () => {
 		).toStrictEqual({ reports: [{ id: "a", report: REPORT }], type: "terminated" });
 	});
 
-	it("should read the PIDs of the members that outlived the bound", () => {
+	it("should read the PIDs of the members that outlived the bound", ({ expect }) => {
 		expect.assertions(1);
 
 		const report = { ...REPORT, incomplete: true, survivors: [41, 42] };
@@ -118,7 +120,7 @@ describe(parseEvent, () => {
 			"survivors that are not PIDs",
 			'{"type":"exited","id":"a","report":{"exitCode":0,"forced":false,"incomplete":true,"signal":null,"survivors":["x"]}}',
 		],
-	] as const)("should return undefined for %s", ([, line]) => {
+	] as const)("should return undefined for %s", ([, line], { expect }) => {
 		expect.assertions(1);
 
 		expect(parseEvent(line)).toBeUndefined();

@@ -1,7 +1,7 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
 import path from "node:path";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -21,7 +21,7 @@ import { saveStudioAsync } from "../studio/save-studio.ts";
 import { runSaveAsync } from "./save.ts";
 
 describe(runSaveAsync, () => {
-	it("rejects a malformed session save result", async () => {
+	it("rejects a malformed session save result", async ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
@@ -39,7 +39,7 @@ describe(runSaveAsync, () => {
 
 	it.for<"missing" | "wrong_pid" | "wrong_process">(["missing", "wrong_pid", "wrong_process"])(
 		"refuses the %s place lock even when the session records Studio",
-		async (kind) => {
+		async (kind, { expect }) => {
 			expect.assertions(1);
 
 			const memory = createMemoryFileSystem({
@@ -78,7 +78,7 @@ describe(runSaveAsync, () => {
 
 	it.for(["hidden", "user"] as const)(
 		"saves hidden Studio on the %s physical desktop after dismissing Lighting",
-		async (desktop) => {
+		async (desktop, { expect }) => {
 			expect.assertions(2);
 
 			const memory = createMemoryFileSystem({
@@ -129,7 +129,7 @@ describe(runSaveAsync, () => {
 		{ button: "Continue", desktop: "user", title: "Lighting Technology Migration" },
 	] as const)(
 		"preserves the $title dialog on the $desktop desktop with button $button",
-		async ({ button, desktop, title }) => {
+		async ({ button, desktop, title }, { expect }) => {
 			expect.assertions(2);
 
 			const memory = createMemoryFileSystem({
@@ -157,7 +157,9 @@ describe(runSaveAsync, () => {
 		},
 	);
 
-	it("reports timeout when hidden dialog inspection consumes the remaining deadline", async () => {
+	it("reports timeout when hidden dialog inspection consumes the remaining deadline", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({
@@ -200,7 +202,7 @@ describe(runSaveAsync, () => {
 
 	it.for([null, "hidden"] as const)(
 		"reports studio_busy for a modal before saving with visibility %s",
-		async (windowVisibility) => {
+		async (windowVisibility, { expect }) => {
 			expect.assertions(1);
 
 			const memory = createMemoryFileSystem({
@@ -225,7 +227,9 @@ describe(runSaveAsync, () => {
 		},
 	);
 
-	it("reports an accessibility deadline without treating a late disk write as a save", async () => {
+	it("reports an accessibility deadline without treating a late disk write as a save", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({
@@ -260,7 +264,7 @@ describe(runSaveAsync, () => {
 		).rejects.toMatchObject({ code: "save_failed", details: { reason: "timeout" } });
 	});
 
-	it("rejects a zero timeout", async () => {
+	it("rejects a zero timeout", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(
@@ -270,7 +274,7 @@ describe(runSaveAsync, () => {
 
 	it.for<"cancelled" | "expired">(["cancelled", "expired"])(
 		"leaves the place unchanged when the save is %s before the menu request",
-		async (kind) => {
+		async (kind, { expect }) => {
 			expect.assertions(2);
 
 			const memory = createMemoryFileSystem({
@@ -314,7 +318,9 @@ describe(runSaveAsync, () => {
 		},
 	);
 
-	it("saves a found session Studio one request at a time and resets its idle timeout", async () => {
+	it("saves a found session Studio one request at a time and resets its idle timeout", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const memory = createMemoryFileSystem({
@@ -386,7 +392,7 @@ describe(runSaveAsync, () => {
 		expect(results[0].data["desktop"]).toBe("hidden");
 	});
 
-	it("waits for an opening Studio before saving", async () => {
+	it("waits for an opening Studio before saving", async ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({
@@ -436,7 +442,7 @@ describe(runSaveAsync, () => {
 		expect(result).toMatchObject({ durationMs: 400, mtime: "1970-01-01T00:00:02.000Z" });
 	});
 
-	it("reports studio_not_open when no session owns a Studio", async () => {
+	it("reports studio_not_open when no session owns a Studio", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(
@@ -444,7 +450,7 @@ describe(runSaveAsync, () => {
 		).rejects.toMatchObject({ code: "studio_not_open" });
 	});
 
-	it("returns a saved place only after its changed mtime settles", async () => {
+	it("returns a saved place only after its changed mtime settles", async ({ expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({
@@ -496,7 +502,7 @@ describe(runSaveAsync, () => {
 		"no_menu_item",
 		"ignore",
 		"throw",
-	])("reports the %s save outcome", async (mode) => {
+	])("reports the %s save outcome", async (mode, { expect }) => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem({
@@ -536,7 +542,7 @@ describe(runSaveAsync, () => {
 		).rejects.toMatchObject({ code: "save_failed", details: { reason: reasons[mode] } });
 	});
 
-	it("refuses a read-only place before Studio can show a save dialog", async () => {
+	it("refuses a read-only place before Studio can show a save dialog", async ({ expect }) => {
 		expect.assertions(2);
 
 		const memory = createMemoryFileSystem({

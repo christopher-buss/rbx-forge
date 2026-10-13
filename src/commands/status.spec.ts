@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
@@ -34,7 +34,7 @@ function makeContext(): {
 }
 
 describe(runStatusAsync, () => {
-	it("should omit the desktop for a Studio that is off", async () => {
+	it("should omit the desktop for a Studio that is off", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
@@ -57,7 +57,7 @@ describe(runStatusAsync, () => {
 
 	it.for(["hidden", "user"] as const)(
 		"should show Studio's actual %s desktop in text status",
-		async (desktop) => {
+		async (desktop, { expect }) => {
 			expect.assertions(1);
 
 			const { context, ipc, memory } = makeContext();
@@ -78,7 +78,7 @@ describe(runStatusAsync, () => {
 		},
 	);
 
-	it("should return the running session's status", async () => {
+	it("should return the running session's status", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
@@ -112,7 +112,7 @@ describe(runStatusAsync, () => {
 		});
 	});
 
-	it("should describe a session with no build or syncback run yet", async () => {
+	it("should describe a session with no build or syncback run yet", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
@@ -149,7 +149,7 @@ describe(runStatusAsync, () => {
 		});
 	});
 
-	it("should describe failed parts with their exit code", async () => {
+	it("should describe failed parts with their exit code", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
@@ -183,7 +183,7 @@ describe(runStatusAsync, () => {
 		});
 	});
 
-	it("should name no Rojo port before the session chose one", async () => {
+	it("should name no Rojo port before the session chose one", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
@@ -199,7 +199,7 @@ describe(runStatusAsync, () => {
 		expect(summary.split("\n", 2)[1]).toBe("  rojo: off");
 	});
 
-	it("should report the plain lines of a fresh session", async () => {
+	it("should report the plain lines of a fresh session", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
@@ -216,7 +216,9 @@ describe(runStatusAsync, () => {
 		});
 	});
 
-	it("should fail with not_running when no session runs or its endpoint is silent", async () => {
+	it("should fail with not_running when no session runs or its endpoint is silent", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, ipc, memory } = makeContext();
@@ -234,7 +236,9 @@ describe(runStatusAsync, () => {
 		await expect(runStatusAsync(context)).rejects.toMatchObject({ code: "not_running" });
 	});
 
-	it("should ask the session for a fresh build with --wait, for 300 s by default", async () => {
+	it("should ask the session for a fresh build with --wait, for 300 s by default", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, ipc, memory } = makeContext();
@@ -254,19 +258,22 @@ describe(runStatusAsync, () => {
 		["2", 2000],
 		["0.5", 500],
 		["2147000", 2_147_000_000],
-	] as const)("should pass --timeout %s (seconds) on to the wait", async ([seconds, ms]) => {
-		expect.assertions(1);
+	] as const)(
+		"should pass --timeout %s (seconds) on to the wait",
+		async ([seconds, ms], { expect }) => {
+			expect.assertions(1);
 
-		const { context, ipc, memory } = makeContext();
-		const session = await serveFakeSessionAsync(memory, ipc);
-		const asked = vi.fn<IpcHandler>(() => ({ ...session.status }));
-		session.freshStatus = asked;
-		await runStatusAsync(context, withFlags({ timeout: seconds, wait: true }));
+			const { context, ipc, memory } = makeContext();
+			const session = await serveFakeSessionAsync(memory, ipc);
+			const asked = vi.fn<IpcHandler>(() => ({ ...session.status }));
+			session.freshStatus = asked;
+			await runStatusAsync(context, withFlags({ timeout: seconds, wait: true }));
 
-		expect(asked).toHaveBeenCalledExactlyOnceWith({ timeoutMs: ms });
-	});
+			expect(asked).toHaveBeenCalledExactlyOnceWith({ timeoutMs: ms });
+		},
+	);
 
-	it("should give the session time to answer past the wait itself", async () => {
+	it("should give the session time to answer past the wait itself", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
@@ -281,7 +288,7 @@ describe(runStatusAsync, () => {
 		).resolves.toMatchObject({ data: session.status });
 	});
 
-	it("should ask for the status now without --wait", async () => {
+	it("should ask for the status now without --wait", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
@@ -293,7 +300,7 @@ describe(runStatusAsync, () => {
 		await expect(runStatusAsync(context)).resolves.toMatchObject({ data: session.status });
 	});
 
-	it("should fail with the session's compile_timeout", async () => {
+	it("should fail with the session's compile_timeout", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();
@@ -314,7 +321,7 @@ describe(runStatusAsync, () => {
 		[{ timeout: " ", wait: true }, '--timeout takes a number of seconds, not " ".'],
 		[{ timeout: true, wait: true }, '--timeout takes a number of seconds, not "true".'],
 		[{ timeout: "2147001", wait: true }, '--timeout takes a number of seconds, not "2147001".'],
-	] as const)("should fail with usage for the flags %j", async ([flags, message]) => {
+	] as const)("should fail with usage for the flags %j", async ([flags, message], { expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeContext();
@@ -325,7 +332,7 @@ describe(runStatusAsync, () => {
 		});
 	});
 
-	it("should show a compile that runs", async () => {
+	it("should show a compile that runs", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, ipc, memory } = makeContext();

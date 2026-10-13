@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import {
 	createCommandContext,
@@ -156,7 +156,9 @@ function oldSnapshots(count: number): Record<string, string> {
 }
 
 describe(runOpenAsync, () => {
-	it("should let the desktop flag override the snapshot's configured hidden desktop", async () => {
+	it("should let the desktop flag override the snapshot's configured hidden desktop", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = makeOpen({
@@ -171,7 +173,7 @@ describe(runOpenAsync, () => {
 		);
 	});
 
-	it("should use the snapshot's configured desktop", async () => {
+	it("should use the snapshot's configured desktop", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = makeOpen({
@@ -184,7 +186,7 @@ describe(runOpenAsync, () => {
 		expect(run.launcher).toHaveBeenCalledWith(expect.objectContaining({ desktop: "user" }));
 	});
 
-	it("should report the actual desktop of a directly launched snapshot", async () => {
+	it("should report the actual desktop of a directly launched snapshot", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = makeOpen({
@@ -201,7 +203,9 @@ describe(runOpenAsync, () => {
 		});
 	});
 
-	it("should return the actual desktop and report a hidden launch fallback warning", async () => {
+	it("should return the actual desktop and report a hidden launch fallback warning", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const warning =
@@ -222,18 +226,23 @@ describe(runOpenAsync, () => {
 		["win32", "tools/rojo.exe"],
 		["darwin", "tools/rojo"],
 		["linux", "tools/rojo"],
-	] as const)("should launch a visible snapshot by default on %s", async ([platform, tool]) => {
-		expect.assertions(1);
+	] as const)(
+		"should launch a visible snapshot by default on %s",
+		async ([platform, tool], { expect }) => {
+			expect.assertions(1);
 
-		const run = makeOpen({ files: { [tool]: "" }, platform });
-		await runOpenAsync(run.context, input());
+			const run = makeOpen({ files: { [tool]: "" }, platform });
+			await runOpenAsync(run.context, input());
 
-		expect(run.launcher).toHaveBeenCalledWith(
-			expect.objectContaining({ desktop: "user", watchHiddenLighting: false }),
-		);
-	});
+			expect(run.launcher).toHaveBeenCalledWith(
+				expect.objectContaining({ desktop: "user", watchHiddenLighting: false }),
+			);
+		},
+	);
 
-	it("should launch a hidden macOS snapshot without the Windows Lighting watcher", async () => {
+	it("should launch a hidden macOS snapshot without the Windows Lighting watcher", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = makeOpen({ platform: "darwin" });
@@ -250,7 +259,7 @@ describe(runOpenAsync, () => {
 		["linux", "tools/rojo", "user", false],
 	] as const)(
 		"should honor hidden snapshot config on %s with the platform's Lighting watcher",
-		async ([platform, tool, desktop, watchHiddenLighting]) => {
+		async ([platform, tool, desktop, watchHiddenLighting], { expect }) => {
 			expect.assertions(1);
 
 			const run = makeOpen({
@@ -266,7 +275,9 @@ describe(runOpenAsync, () => {
 		},
 	);
 
-	it("should let the hidden flag override visible config and watch Windows Lighting", async () => {
+	it("should let the hidden flag override visible config and watch Windows Lighting", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const run = makeOpen({
@@ -281,7 +292,7 @@ describe(runOpenAsync, () => {
 		);
 	});
 
-	it("should build a snapshot into .forge/snapshots, then open it", async () => {
+	it("should build a snapshot into .forge/snapshots, then open it", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { context, launcher, order, specs } = makeOpen();
@@ -320,7 +331,9 @@ describe(runOpenAsync, () => {
 		});
 	});
 
-	it("should build a snapshot even when the config turns buildFirst off and the place exists", async () => {
+	it("should build a snapshot even when the config turns buildFirst off and the place exists", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context, order } = makeOpen({
@@ -332,7 +345,9 @@ describe(runOpenAsync, () => {
 		expect(order).toStrictEqual(["rojo", "studio"]);
 	});
 
-	it("should build the snapshot from open.projectPath and name it after open.buildOutputPath", async () => {
+	it("should build the snapshot from open.projectPath and name it after open.buildOutputPath", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, launcher, specs } = makeOpen({
@@ -354,7 +369,9 @@ describe(runOpenAsync, () => {
 		);
 	});
 
-	it("should keep the five newest snapshots and report the ones it deleted", async () => {
+	it("should keep the five newest snapshots and report the ones it deleted", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, memory } = makeOpen({ files: oldSnapshots(6) });
@@ -375,7 +392,7 @@ describe(runOpenAsync, () => {
 		]);
 	});
 
-	it("should warn about a snapshot it cannot delete, and still open", async () => {
+	it("should warn about a snapshot it cannot delete, and still open", async ({ expect }) => {
 		expect.assertions(3);
 
 		const name = "2024-01-01T00-00-00-000_game.rbxl";
@@ -396,7 +413,7 @@ describe(runOpenAsync, () => {
 		expect(order).toStrictEqual(["rojo", "studio"]);
 	});
 
-	it("should start the Studio --studio-path names, and report it", async () => {
+	it("should start the Studio --studio-path names, and report it", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, launcher } = makeOpen({
@@ -409,7 +426,7 @@ describe(runOpenAsync, () => {
 		expect(launcher.mock.calls[0]![0].studioPath).toBe(path.join(PROJECT, "bin/Studio.exe"));
 	});
 
-	it("should report the build and opening Studio as steps", async () => {
+	it("should report the build and opening Studio as steps", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, reporter } = makeOpen();
@@ -423,7 +440,7 @@ describe(runOpenAsync, () => {
 		]);
 	});
 
-	it("should pass on the launcher's hint", async () => {
+	it("should pass on the launcher's hint", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeOpen({
@@ -435,7 +452,7 @@ describe(runOpenAsync, () => {
 		});
 	});
 
-	it("should not open Studio when the build fails", async () => {
+	it("should not open Studio when the build fails", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, launcher } = makeOpen({ outcomes: { rojo: exited(1) } });
@@ -446,7 +463,7 @@ describe(runOpenAsync, () => {
 		expect(launcher).not.toHaveBeenCalled();
 	});
 
-	it("should fail with studio_launch_failed when the launcher fails", async () => {
+	it("should fail with studio_launch_failed when the launcher fails", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, reporter } = makeOpen({
@@ -466,7 +483,9 @@ describe(runOpenAsync, () => {
 		]);
 	});
 
-	it("should run open hooks around the build and the launch, and build hooks around the build", async () => {
+	it("should run open hooks around the build and the launch, and build hooks around the build", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, order } = makeOpen({
@@ -501,7 +520,7 @@ describe(runOpenAsync, () => {
 		});
 	});
 
-	it("should skip open post hooks when the launch fails", async () => {
+	it("should skip open post hooks when the launch fails", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, order } = makeOpen({
@@ -517,7 +536,7 @@ describe(runOpenAsync, () => {
 });
 
 describe(openPlaceAsync, () => {
-	it("should build the place first by default, then open it", async () => {
+	it("should build the place first by default, then open it", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { context, launcher, order, specs } = makeOpen();
@@ -543,7 +562,7 @@ describe(openPlaceAsync, () => {
 		});
 	});
 
-	it("should open the place as it is when the caller built it", async () => {
+	it("should open the place as it is when the caller built it", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, order } = makeOpen();
@@ -552,7 +571,9 @@ describe(openPlaceAsync, () => {
 		expect(order).toStrictEqual(["studio"]);
 	});
 
-	it("should open an existing place without building when buildFirst is off", async () => {
+	it("should open an existing place without building when buildFirst is off", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, order } = makeOpen({ files: { "game.rbxl": "place" } });
@@ -567,7 +588,7 @@ describe(openPlaceAsync, () => {
 		expect(order).toStrictEqual(["studio"]);
 	});
 
-	it("should build and open the given place from its own project", async () => {
+	it("should build and open the given place from its own project", async ({ expect }) => {
 		expect.assertions(2);
 
 		const place = path.join(PROJECT, "places", "test.rbxl");
@@ -585,7 +606,9 @@ describe(openPlaceAsync, () => {
 		expect(launcher.mock.calls[0]![0].place).toBe(place);
 	});
 
-	it("should fail with place_not_found when the place is missing and it cannot ask", async () => {
+	it("should fail with place_not_found when the place is missing and it cannot ask", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, launcher } = makeOpen();
@@ -598,7 +621,9 @@ describe(openPlaceAsync, () => {
 		expect(launcher).not.toHaveBeenCalled();
 	});
 
-	it("should offer to build a missing place and build it when the user agrees", async () => {
+	it("should offer to build a missing place and build it when the user agrees", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { confirm, context, order } = makeOpen({ answer: true });
@@ -611,7 +636,7 @@ describe(openPlaceAsync, () => {
 		expect(order).toStrictEqual(["rojo", "studio"]);
 	});
 
-	it("should fail with declined when the user declines the build", async () => {
+	it("should fail with declined when the user declines the build", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, order } = makeOpen({ answer: false });

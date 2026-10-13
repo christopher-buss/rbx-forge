@@ -4,7 +4,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
-import { assert, describe, expect, it, onTestFinished } from "vitest";
+import { assert, describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import {
 	loadRealNative,
@@ -17,7 +18,7 @@ import {
 } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 
-async function windowStudioAsync() {
+async function windowStudioAsync(onTestFinished: TestContext["onTestFinished"]) {
 	const directory = makeTemporaryDirectory({ "game.rbxl": "place" });
 	const place = path.join(directory, "game.rbxl");
 	const trigger = path.join(directory, "new-window");
@@ -41,7 +42,7 @@ async function windowStudioAsync() {
 	return { child, pinned, trigger };
 }
 
-async function launchHiddenStudioAsync() {
+async function launchHiddenStudioAsync(onTestFinished: TestContext["onTestFinished"]) {
 	const directory = makeTemporaryDirectory({ "game.rbxl": "place", "session.lua": "" });
 	const place = path.join(directory, "game.rbxl");
 	const trigger = path.join(directory, "new-window");
@@ -78,10 +79,13 @@ console.log(JSON.stringify(outcome));`;
 }
 
 describe.skipIf(process.platform !== "win32")("windows native window visibility", () => {
-	it("keeps new windows hidden after the launching process exits", async () => {
+	it("keeps new windows hidden after the launching process exits", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(7);
 
-		const { pinned, trigger } = await launchHiddenStudioAsync();
+		const { pinned, trigger } = await launchHiddenStudioAsync(onTestFinished);
 
 		expect(pinned.desktop()).toBe("user");
 
@@ -98,10 +102,13 @@ describe.skipIf(process.platform !== "win32")("windows native window visibility"
 		await expect.poll(() => readFileSync(`${trigger}.visible`, "utf8")).toBe("true");
 	});
 
-	it("hides every window, re-hides new windows, and stops watching when shown", async () => {
+	it("hides every window, re-hides new windows, and stops watching when shown", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(5);
 
-		const { pinned, trigger } = await windowStudioAsync();
+		const { pinned, trigger } = await windowStudioAsync(onTestFinished);
 
 		expect({
 			desktop: pinned.desktop(),
@@ -123,10 +130,13 @@ describe.skipIf(process.platform !== "win32")("windows native window visibility"
 		}).toStrictEqual({ active: true, visibility: "user" });
 	});
 
-	it("ends its watcher and refuses window operations after the pinned process exits", async () => {
+	it("ends its watcher and refuses window operations after the pinned process exits", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { child, pinned } = await windowStudioAsync();
+		const { child, pinned } = await windowStudioAsync(onTestFinished);
 
 		expect(pinned.startWindowHiding()).toBeTrue();
 

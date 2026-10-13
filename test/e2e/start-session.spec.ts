@@ -10,7 +10,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import { EXIT_FAILURE } from "../../src/exit-codes.ts";
 import { parseResult } from "../helpers/output.ts";
@@ -172,8 +173,9 @@ function reaperPids(fixture: Fixture): Array<number> {
  * outlived a failed test.
  *
  * @param pid - The process.
+ * @param onTestFinished - Register cleanup for this test.
  */
-function killOnFinish(pid: number): void {
+function killOnFinish(pid: number, onTestFinished: TestContext["onTestFinished"]): void {
 	// Pinned now: a kill by PID at the end could hit a process that reused it.
 	const pin = pinNow(pid);
 	onTestFinished(() => {
@@ -225,7 +227,9 @@ function sessionFilesLeft(fixture: Fixture): Array<string> {
 }
 
 describe("forge start supervisor", () => {
-	it("should refuse a second start in the project with session_running, leaving the first alone", async () => {
+	it("should refuse a second start in the project with session_running, leaving the first alone", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(WATCH_COMMAND);
@@ -246,7 +250,7 @@ describe("forge start supervisor", () => {
 			}),
 		)(
 			"should leave zero survivors when killed %s (%s), starting no worker after the kill",
-			async ([, kill, point]) => {
+			async ([, kill, point], { expect, onTestFinished }) => {
 				expect.assertions(3);
 
 				const fixture = await makeFixtureAsync({ projectType: "rbxts" }, { studio: true });
@@ -256,7 +260,7 @@ describe("forge start supervisor", () => {
 					...point.variables,
 				});
 				const supervisor = await point.reach(fixture, session);
-				killOnFinish(supervisor);
+				killOnFinish(supervisor, onTestFinished);
 				await waitForQuietLogAsync(fixture.log);
 				const reapers = reaperPids(fixture);
 				const killedAt = Date.now();

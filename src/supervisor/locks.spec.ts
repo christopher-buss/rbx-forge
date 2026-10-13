@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -20,7 +20,7 @@ function makeSeams() {
 }
 
 describe(acquireSingleton, () => {
-	it("should take .forge/supervisor.lock exclusively, making .forge first", () => {
+	it("should take .forge/supervisor.lock exclusively, making .forge first", ({ expect }) => {
 		expect.assertions(2);
 
 		const { memory, native, seams } = makeSeams();
@@ -30,7 +30,7 @@ describe(acquireSingleton, () => {
 		expect(memory.files()).toStrictEqual({ ".forge": null });
 	});
 
-	it("should refuse with session_running while another supervisor holds it", () => {
+	it("should refuse with session_running while another supervisor holds it", ({ expect }) => {
 		expect.assertions(2);
 
 		const { native, seams } = makeSeams();

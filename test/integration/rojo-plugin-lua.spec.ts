@@ -2,12 +2,15 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, it } from "vitest";
 
 import { SCRIPTS } from "../../src/studio/rojo-plugin.ts";
 
 describe("shipped Rojo plugin Lua", () => {
-	it("should enforce launch identity, reconnect safely, and scope readiness to the original session", () => {
+	it("should enforce launch identity, reconnect safely, and scope readiness to the original session", ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const directory = mkdtempSync(path.join(os.tmpdir(), "forge-plugin-lua-"));

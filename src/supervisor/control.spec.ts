@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { ForgeError } from "../errors.ts";
 import type { BuildWatch } from "../session/build-watch.ts";
@@ -96,7 +96,7 @@ function makeTarget() {
 describe(controlHandlers, () => {
 	it.for([{}, { desktop: "other" }, { desktop: 7 }])(
 		"should reject malformed move parameters %j",
-		async (parameters) => {
+		async (parameters, { expect }) => {
 			expect.assertions(1);
 
 			await expect(
@@ -108,7 +108,7 @@ describe(controlHandlers, () => {
 		},
 	);
 
-	it("accepts a visibility request without a save timeout", async () => {
+	it("accepts a visibility request without a save timeout", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(
@@ -116,7 +116,9 @@ describe(controlHandlers, () => {
 		).rejects.toMatchObject({ code: "studio_not_open", message: "No session Studio is open." });
 	});
 
-	it("should reject a move addressed to a replaced session before looking for its Studio", async () => {
+	it("should reject a move addressed to a replaced session before looking for its Studio", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		await expect(
@@ -132,7 +134,7 @@ describe(controlHandlers, () => {
 		});
 	});
 
-	it("should answer status with the status now, once merged compiles settled", () => {
+	it("should answer status with the status now, once merged compiles settled", ({ expect }) => {
 		expect.assertions(2);
 
 		const { builds, handlers, status } = makeTarget();
@@ -141,7 +143,7 @@ describe(controlHandlers, () => {
 		expect(builds.tick).toHaveBeenCalledOnce();
 	});
 
-	it("should answer freshStatus with the status once the build is fresh", async () => {
+	it("should answer freshStatus with the status once the build is fresh", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { builds, handlers, status } = makeTarget();
@@ -154,7 +156,7 @@ describe(controlHandlers, () => {
 
 	it.for([[{}], [{ timeoutMs: "5" }], [{ timeoutMs: -1 }]] as const)(
 		"should wait the default time for freshStatus params %j",
-		async ([parameters]) => {
+		async ([parameters], { expect }) => {
 			expect.assertions(1);
 
 			const { builds, handlers } = makeTarget();
@@ -164,7 +166,7 @@ describe(controlHandlers, () => {
 		},
 	);
 
-	it("should fail freshStatus as the wait fails", async () => {
+	it("should fail freshStatus as the wait fails", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { builds, handlers } = makeTarget();
@@ -173,7 +175,7 @@ describe(controlHandlers, () => {
 		await expect(handlers.freshStatus!({})).rejects.toMatchObject({ code: "compile_timeout" });
 	});
 
-	it("should stop the session on shutdown, for its own id or none", () => {
+	it("should stop the session on shutdown, for its own id or none", ({ expect }) => {
 		expect.assertions(3);
 
 		const { handlers, request } = makeTarget();
@@ -189,7 +191,7 @@ describe(controlHandlers, () => {
 		expect(request).toHaveBeenCalledWith({ type: "shutdown" });
 	});
 
-	it("should force the shutdown when asked with force", () => {
+	it("should force the shutdown when asked with force", ({ expect }) => {
 		expect.assertions(2);
 
 		const { handlers, request } = makeTarget();
@@ -201,7 +203,7 @@ describe(controlHandlers, () => {
 		expect(request).toHaveBeenCalledExactlyOnceWith({ force: true, type: "shutdown" });
 	});
 
-	it("should not force the shutdown for a force that is not true", () => {
+	it("should not force the shutdown for a force that is not true", ({ expect }) => {
 		expect.assertions(1);
 
 		const { handlers, request } = makeTarget();
@@ -210,7 +212,7 @@ describe(controlHandlers, () => {
 		expect(request).toHaveBeenCalledExactlyOnceWith({ type: "shutdown" });
 	});
 
-	it("should refuse to stop for another session's id", () => {
+	it("should refuse to stop for another session's id", ({ expect }) => {
 		expect.assertions(2);
 
 		const { handlers, request } = makeTarget();
@@ -227,7 +229,7 @@ describe(controlHandlers, () => {
 		expect(request).not.toHaveBeenCalled();
 	});
 
-	it("should answer addParts with the parts the session started", async () => {
+	it("should answer addParts with the parts the session started", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { addAsync, handlers } = makeTarget();
@@ -246,7 +248,7 @@ describe(controlHandlers, () => {
 		[{ parts: "compiler" }],
 		[{ parts: ["rojo"] }],
 		[{ parts: [], studioPath: 1 }],
-	] as const)("should refuse addParts params %j with usage", async ([parameters]) => {
+	] as const)("should refuse addParts params %j with usage", async ([parameters], { expect }) => {
 		expect.assertions(3);
 
 		const { addAsync, handlers } = makeTarget();
@@ -257,7 +259,7 @@ describe(controlHandlers, () => {
 		expect(addAsync).not.toHaveBeenCalled();
 	});
 
-	it("should answer stopParts with what the session stopped and kept", async () => {
+	it("should answer stopParts with what the session stopped and kept", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { handlers, stopAsync } = makeTarget();
@@ -284,7 +286,7 @@ describe(controlHandlers, () => {
 		});
 	});
 
-	it("should refuse stopParts for another session's id", async () => {
+	it("should refuse stopParts for another session's id", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { handlers, stopAsync } = makeTarget();
@@ -302,18 +304,23 @@ describe(controlHandlers, () => {
 		[{ scope: "idle" }],
 		[{ force: "yes", scope: "down" }],
 		[{ place: 1, scope: "stop" }],
-	] as const)("should refuse stopParts params %j with usage", async ([parameters]) => {
-		expect.assertions(3);
+	] as const)(
+		"should refuse stopParts params %j with usage",
+		async ([parameters], { expect }) => {
+			expect.assertions(3);
 
-		const { handlers, stopAsync } = makeTarget();
-		const stopped = handlers.stopParts!(parameters);
+			const { handlers, stopAsync } = makeTarget();
+			const stopped = handlers.stopParts!(parameters);
 
-		await expect(stopped).rejects.toMatchObject({ code: "usage" });
-		await expect(stopped).rejects.toThrow("stopParts takes a scope: ");
-		expect(stopAsync).not.toHaveBeenCalled();
-	});
+			await expect(stopped).rejects.toMatchObject({ code: "usage" });
+			await expect(stopped).rejects.toThrow("stopParts takes a scope: ");
+			expect(stopAsync).not.toHaveBeenCalled();
+		},
+	);
 
-	it("should answer restartParts with what the session stopped, kept, and started", async () => {
+	it("should answer restartParts with what the session stopped, kept, and started", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { handlers, restartAsync } = makeTarget();
@@ -341,7 +348,7 @@ describe(controlHandlers, () => {
 		expect(restartAsync.mock.calls[1]).toStrictEqual([{ force: false }]);
 	});
 
-	it("should refuse restartParts for another session's id", async () => {
+	it("should refuse restartParts for another session's id", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { handlers, restartAsync } = makeTarget();
@@ -354,7 +361,7 @@ describe(controlHandlers, () => {
 
 	it.for([[{ force: "yes" }], [{ recovery: "trash" }], [{ studioPath: 1 }]] as const)(
 		"should refuse restartParts params %j with usage",
-		async ([parameters]) => {
+		async ([parameters], { expect }) => {
 			expect.assertions(3);
 
 			const { handlers, restartAsync } = makeTarget();
@@ -368,7 +375,7 @@ describe(controlHandlers, () => {
 		},
 	);
 
-	it("should answer sync with the session's syncback run", async () => {
+	it("should answer sync with the session's syncback run", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { handlers, runAsync } = makeTarget();
@@ -379,7 +386,9 @@ describe(controlHandlers, () => {
 });
 
 describe(controlOwner, () => {
-	it("should join with the parts asked for, and answer with the session's id", async () => {
+	it("should join with the parts asked for, and answer with the session's id", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { ownAsync, owner } = makeTarget();
@@ -393,7 +402,7 @@ describe(controlOwner, () => {
 		});
 	});
 
-	it("should refuse a join with no list of parts", async () => {
+	it("should refuse a join with no list of parts", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { ownAsync, owner } = makeTarget();
@@ -404,7 +413,7 @@ describe(controlOwner, () => {
 
 	it.for(["gone", "release"] as const)(
 		"should let go of the parts as its owner is gone, on %s",
-		async (how) => {
+		async (how, { expect }) => {
 			expect.assertions(2);
 
 			const { owner, releaseAsync } = makeTarget();

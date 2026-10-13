@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
@@ -118,7 +118,7 @@ function makeCompile({
 }
 
 describe(runCompileCommandAsync, () => {
-	it("should refuse a Luau project without running anything", async () => {
+	it("should refuse a Luau project without running anything", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, specs } = makeCompile({ projectType: "luau" });
@@ -132,7 +132,9 @@ describe(runCompileCommandAsync, () => {
 		expect(specs).toStrictEqual([]);
 	});
 
-	it("should run the compiler once in the project and report a clean compile", async () => {
+	it("should run the compiler once in the project and report a clean compile", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, specs } = makeCompile({
@@ -155,7 +157,7 @@ describe(runCompileCommandAsync, () => {
 		]);
 	});
 
-	it("should run the configured compiler command with its arguments", async () => {
+	it("should run the configured compiler command with its arguments", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, specs } = makeCompile({
@@ -170,7 +172,7 @@ describe(runCompileCommandAsync, () => {
 		});
 	});
 
-	it("should write the full output, without colors, to the compile log", async () => {
+	it("should write the full output, without colors, to the compile log", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context, memory } = makeCompile({
@@ -191,7 +193,7 @@ describe(runCompileCommandAsync, () => {
 		);
 	});
 
-	it("should fail with every diagnostic and the error count", async () => {
+	it("should fail with every diagnostic and the error count", async ({ expect }) => {
 		expect.assertions(1);
 
 		const output = recorded("type-errors.txt");
@@ -225,7 +227,9 @@ describe(runCompileCommandAsync, () => {
 		});
 	});
 
-	it("should show only the last output lines, without colors, in the message", async () => {
+	it("should show only the last output lines, without colors, in the message", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const output = Array.from({ length: 30 }, (_, index) => `${GREY}line ${index}${RESET}`);
@@ -247,7 +251,7 @@ describe(runCompileCommandAsync, () => {
 		});
 	});
 
-	it("should count errors in the message", async () => {
+	it("should count errors in the message", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeCompile({
@@ -261,7 +265,7 @@ describe(runCompileCommandAsync, () => {
 		);
 	});
 
-	it("should report warnings of a compile that succeeded", async () => {
+	it("should report warnings of a compile that succeeded", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeCompile({
@@ -289,7 +293,9 @@ describe(runCompileCommandAsync, () => {
 		});
 	});
 
-	it("should count errors a compiler reports while it still exits with code 0", async () => {
+	it("should count errors a compiler reports while it still exits with code 0", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context } = makeCompile({
@@ -309,7 +315,7 @@ describe(runCompileCommandAsync, () => {
 		expect(summary).toBe(`Compiled: 1 error, 1 warning. Full output: ${LOG}`);
 	});
 
-	it("should fail with the diagnostics of a one-shot sloptor result", async () => {
+	it("should fail with the diagnostics of a one-shot sloptor result", async ({ expect }) => {
 		expect.assertions(1);
 
 		const result = {
@@ -350,7 +356,9 @@ describe(runCompileCommandAsync, () => {
 		});
 	});
 
-	it("should count a failed sloptor result with no diagnostics as one error, no warnings", async () => {
+	it("should count a failed sloptor result with no diagnostics as one error, no warnings", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const result = { diagnostics: [], durationMs: 1, files: 1, ok: false, version: "1" };
@@ -362,7 +370,7 @@ describe(runCompileCommandAsync, () => {
 		expect(summary).toBe(`Compiled: 1 error, 0 warnings. Full output: ${LOG}`);
 	});
 
-	it("should fail as process_failed when a signal ends the compiler", async () => {
+	it("should fail as process_failed when a signal ends the compiler", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeCompile({ runs: { rbxtsc: { exitCode: null, output: [] } } });
@@ -373,7 +381,9 @@ describe(runCompileCommandAsync, () => {
 		});
 	});
 
-	it("should fail with compiler_missing when the compiler is not installed", async () => {
+	it("should fail with compiler_missing when the compiler is not installed", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context } = makeCompile({ files: {} });
@@ -386,7 +396,9 @@ describe(runCompileCommandAsync, () => {
 		});
 	});
 
-	it("should run compile hooks around the compiler and return their results", async () => {
+	it("should run compile hooks around the compiler and return their results", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { context, order } = makeCompile({
@@ -401,7 +413,7 @@ describe(runCompileCommandAsync, () => {
 		]);
 	});
 
-	it("should skip post hooks when the compile fails", async () => {
+	it("should skip post hooks when the compile fails", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, order } = makeCompile({
@@ -455,7 +467,7 @@ function compilerStatus(status: PartStatus, lastBuild?: LastBuild): SessionStatu
 }
 
 describe("runCompileCommandAsync with a running session", () => {
-	it("should report the session's fresh build and run no compiler", async () => {
+	it("should report the session's fresh build and run no compiler", async ({ expect }) => {
 		expect.assertions(3);
 
 		const run = makeCompile();
@@ -481,7 +493,7 @@ describe("runCompileCommandAsync with a running session", () => {
 		expect(run.specs).toStrictEqual([]);
 	});
 
-	it("should fail with the build's diagnostics when it has errors", async () => {
+	it("should fail with the build's diagnostics when it has errors", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = makeCompile();
@@ -508,7 +520,7 @@ describe("runCompileCommandAsync with a running session", () => {
 		expect(run.specs).toStrictEqual([]);
 	});
 
-	it("should list at most 20 errors in the message", async () => {
+	it("should list at most 20 errors in the message", async ({ expect }) => {
 		expect.assertions(1);
 
 		const errors = Array.from({ length: 25 }, (_, index) => {
@@ -529,7 +541,7 @@ describe("runCompileCommandAsync with a running session", () => {
 		await expect(runCompileCommandAsync(run.context, INPUT)).rejects.toThrow(tail.join("\n"));
 	});
 
-	it("should name a diagnostic with no location by its code alone", async () => {
+	it("should name a diagnostic with no location by its code alone", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = makeCompile();
@@ -551,7 +563,7 @@ describe("runCompileCommandAsync with a running session", () => {
 
 	it.for<PartStatus>(["off", "failed"])(
 		"should fail with compiler_off when the session's compiler is %s",
-		async (status) => {
+		async (status, { expect }) => {
 			expect.assertions(2);
 
 			const run = makeCompile();
@@ -570,7 +582,7 @@ describe("runCompileCommandAsync with a running session", () => {
 		},
 	);
 
-	it("should run compile hooks around the wait", async () => {
+	it("should run compile hooks around the wait", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = makeCompile({
@@ -591,7 +603,7 @@ describe("runCompileCommandAsync with a running session", () => {
 		]);
 	});
 
-	it("should pass on a failure of the wait", async () => {
+	it("should pass on a failure of the wait", async ({ expect }) => {
 		expect.assertions(2);
 
 		const run = makeCompile();
@@ -606,7 +618,9 @@ describe("runCompileCommandAsync with a running session", () => {
 		expect(run.specs).toStrictEqual([]);
 	});
 
-	it("should fail, and compile nothing, when the session answers with no status", async () => {
+	it("should fail, and compile nothing, when the session answers with no status", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = makeCompile();
@@ -619,7 +633,7 @@ describe("runCompileCommandAsync with a running session", () => {
 		expect(run.specs).toStrictEqual([]);
 	});
 
-	it("should compile once when the named session no longer answers", async () => {
+	it("should compile once when the named session no longer answers", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = makeCompile();

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { assert, describe, expect, it, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
@@ -53,7 +53,7 @@ async function startWithAsync(flags: Record<string, boolean> = {}) {
 }
 
 describe(runStartAsync, () => {
-	it("should read --syncback into syncback.runOnStart", () => {
+	it("should read --syncback into syncback.runOnStart", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(START_FLAGS).toContainEqual(
@@ -61,7 +61,9 @@ describe(runStartAsync, () => {
 		);
 	});
 
-	it("should launch the supervisor with the project, environment, and request", async () => {
+	it("should launch the supervisor with the project, environment, and request", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const plain = await startWithAsync();
@@ -77,7 +79,9 @@ describe(runStartAsync, () => {
 		expect(bare.launches[0]!.request).toMatchObject({ compiler: false, open: false });
 	});
 
-	it("should ask for forced cleanup of an earlier session only with --force", async () => {
+	it("should ask for forced cleanup of an earlier session only with --force", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const forced = await startWithAsync({ force: true });
@@ -96,7 +100,7 @@ describe(runStartAsync, () => {
 		});
 	});
 
-	it("should report the supervisor's events and return its result", async () => {
+	it("should report the supervisor's events and return its result", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { launches, reporter, result, running } = await startWithAsync();
@@ -110,7 +114,7 @@ describe(runStartAsync, () => {
 		expect(reporter.events).toStrictEqual([{ message: "ready", type: "info" }]);
 	});
 
-	it("should pass stop signals on until the supervisor ends", async () => {
+	it("should pass stop signals on until the supervisor ends", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { result, running, signals, stop } = await startWithAsync();
@@ -224,7 +228,7 @@ describe("runStartAsync next to a running session", () => {
 		{ config: { studio: { desktop: "user" } }, desktop: "user" },
 	] as const)(
 		"should resolve the join desktop $desktop from flags over the config file",
-		async ({ config, desktop }) => {
+		async ({ config, desktop }, { expect }) => {
 			expect.assertions(1);
 
 			let session: FakeSession | undefined;
@@ -255,7 +259,7 @@ describe("runStartAsync next to a running session", () => {
 		{ config: { studio: { desktop: "hidden" } }, desktop: { desktop: "hidden" } },
 	] as const)(
 		"should join as its owner with $desktop and let go on a stop signal",
-		async ({ config, desktop }) => {
+		async ({ config, desktop }, { expect }) => {
 			expect.assertions(4);
 
 			let session: FakeSession | undefined;
@@ -293,7 +297,7 @@ describe("runStartAsync next to a running session", () => {
 		},
 	);
 
-	it("should ask for no part with --no-compiler and --no-open", async () => {
+	it("should ask for no part with --no-compiler and --no-open", async ({ expect }) => {
 		expect.assertions(2);
 
 		let session: FakeSession | undefined;
@@ -336,7 +340,7 @@ describe("runStartAsync next to a running session", () => {
 				);
 			},
 		],
-	] as const)("should say the session ended when it %s", async ([, end]) => {
+	] as const)("should say the session ended when it %s", async ([, end], { expect }) => {
 		expect.assertions(1);
 
 		let session: FakeSession | undefined;
@@ -358,7 +362,7 @@ describe("runStartAsync next to a running session", () => {
 		});
 	});
 
-	it("should fail with the release's other failures", async () => {
+	it("should fail with the release's other failures", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await joinWithAsync(
@@ -377,7 +381,7 @@ describe("runStartAsync next to a running session", () => {
 		await expect(run.running).rejects.toMatchObject({ code: "hook_failed" });
 	});
 
-	it("should fail with the join's failure", async () => {
+	it("should fail with the join's failure", async ({ expect }) => {
 		expect.assertions(1);
 
 		const run = await joinWithAsync(
@@ -394,7 +398,7 @@ describe("runStartAsync next to a running session", () => {
 		await expect(run.running).rejects.toMatchObject({ code: "session_running" });
 	});
 
-	it("should give up on a join on a stop signal", async () => {
+	it("should give up on a join on a stop signal", async ({ expect }) => {
 		expect.assertions(1);
 
 		const joining = Promise.withResolvers<Record<string, unknown>>();
@@ -420,7 +424,7 @@ describe("runStartAsync next to a running session", () => {
 		});
 	});
 
-	it("should join the session that won the race to start", async () => {
+	it("should join the session that won the race to start", async ({ expect }) => {
 		expect.assertions(1);
 
 		let ipcOf: MemoryTransport | undefined;
@@ -447,7 +451,9 @@ describe("runStartAsync next to a running session", () => {
 		await expect(run.running).resolves.toMatchObject({ data: { sessionId: "s1" } });
 	});
 
-	it("should fail with session_running when the session that holds the project never answers", async () => {
+	it("should fail with session_running when the session that holds the project never answers", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const run = await joinWithAsync(

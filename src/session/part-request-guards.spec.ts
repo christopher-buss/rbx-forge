@@ -1,11 +1,11 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { createPartRequests } from "./part-requests.ts";
 
 describe("guarded session stops", () => {
-	it("explains when the running session has no Studio move handler", async () => {
+	it("explains when the running session has no Studio move handler", async ({ expect }) => {
 		expect.assertions(1);
 
 		const parts = createPartRequests();
@@ -17,7 +17,7 @@ describe("guarded session stops", () => {
 		});
 	});
 
-	it("keeps the session running when a queued stop is no longer needed", async () => {
+	it("keeps the session running when a queued stop is no longer needed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const parts = createPartRequests();
@@ -38,7 +38,9 @@ describe("guarded session stops", () => {
 		});
 	});
 
-	it("stops once the request reaches the queue and its guard still allows it", async () => {
+	it("stops once the request reaches the queue and its guard still allows it", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const parts = createPartRequests();

@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { entryMode, gzippedTarball } from "../../test/helpers/tarball.ts";
 import { setEntryMode } from "./tarball.ts";
 
 describe(setEntryMode, () => {
-	it("should set the mode of the named entry and keep its checksum valid", () => {
+	it("should set the mode of the named entry and keep its checksum valid", ({ expect }) => {
 		expect.assertions(2);
 
 		const packed = gzippedTarball([
@@ -18,7 +18,7 @@ describe(setEntryMode, () => {
 		expect(entryMode(updated, 0)).toBe("0000644");
 	});
 
-	it("should find an entry whose path is split into a ustar prefix", () => {
+	it("should find an entry whose path is split into a ustar prefix", ({ expect }) => {
 		expect.assertions(1);
 
 		const packed = gzippedTarball([{ name: "forge-reaper", prefix: "package", size: 1 }]);
@@ -26,7 +26,7 @@ describe(setEntryMode, () => {
 		expect(entryMode(setEntryMode(packed, "package/forge-reaper", 0o755), 0)).toBe("0000755");
 	});
 
-	it("should throw when the entry is missing", () => {
+	it("should throw when the entry is missing", ({ expect }) => {
 		expect.assertions(1);
 
 		const packed = gzippedTarball([{ name: "package/package.json", size: 1 }]);

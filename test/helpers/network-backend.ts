@@ -45,7 +45,7 @@ export function createFakeNetworkBackend(): FakeNetworkBackend {
 		backend,
 		...binding,
 		fetch,
-		request: (url: string, method = "GET") => receiveRequest(request, url, method),
+		request: (url, method = "GET") => receiveRequest(request, url, method),
 	};
 }
 

@@ -1,5 +1,6 @@
 import path from "node:path";
-import { describe, expect, it, onTestFinished } from "vitest";
+import type { TestContext } from "vitest";
+import { describe, it } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { makeStatus } from "../../test/helpers/fake-session.ts";
@@ -96,6 +97,7 @@ function makeContext({
  * Serve session `s1`'s endpoint: `status` answers, `stopParts` answers
  * `stops` and records each request, and `shutdown` ends the supervisor.
  *
+ * @param testContext - Assertions and cleanup for this test.
  * @param project - The context and addon of {@link makeContext}.
  * @param project.context - The run.
  * @param project.native - Its addon.
@@ -103,6 +105,7 @@ function makeContext({
  * @returns Every `stopParts` request's params.
  */
 async function serveStopsAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
 	{ context, native }: { context: CommandContext; native: FakeNative },
 	stops: PartStops,
 ): Promise<Array<Record<string, unknown>>> {
@@ -122,7 +125,7 @@ async function serveStopsAsync(
 		},
 		token: "token",
 	});
-	onTestFinished(async () => {
+	testContext.onTestFinished(async () => {
 		await server.closeAsync();
 	});
 	return requests;
@@ -159,7 +162,9 @@ async function downAsync(
 }
 
 describe(runDownAsync, () => {
-	it("should report stopped once the supervisor is gone and the barrier is clear", async () => {
+	it("should report stopped once the supervisor is gone and the barrier is clear", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { context } = makeContext();
@@ -197,11 +202,11 @@ describe(runDownAsync, () => {
 		],
 	] as const)(
 		"should say in the summary when it %s the session's Studio",
-		async ([, stop, sentence]) => {
+		async ([, stop, sentence], { expect, onTestFinished }) => {
 			expect.assertions(1);
 
 			const project = makeContext({ isSupervisorAlive: true });
-			await serveStopsAsync(project, closedStudio(stop));
+			await serveStopsAsync({ onTestFinished }, project, closedStudio(stop));
 
 			await expect(downAsync(project.context)).resolves.toMatchObject({
 				summary: `Stopped session s1; every process of it is gone.${sentence}`,
@@ -209,22 +214,28 @@ describe(runDownAsync, () => {
 		},
 	);
 
-	it("should name macOS's close time when the session's Studio did not close", async () => {
+	it("should name macOS's close time when the session's Studio did not close", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeContext({ host: { platform: "darwin" }, isSupervisorAlive: true });
-		await serveStopsAsync(project, closedStudio(ended("timeout")));
+		await serveStopsAsync({ onTestFinished }, project, closedStudio(ended("timeout")));
 
 		await expect(downAsync(project.context)).resolves.toMatchObject({
 			summary: `Stopped session s1; every process of it is gone. Roblox Studio (PID 4242): it did not close within ${MAC_STUDIO_CLOSE_MS / 1000} s, so forge ended it without saving.`,
 		});
 	});
 
-	it("should say in the summary when the session cannot verify its Studio", async () => {
+	it("should say in the summary when the session cannot verify its Studio", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeContext({ isSupervisorAlive: true });
-		await serveStopsAsync(project, {
+		await serveStopsAsync({ onTestFinished }, project, {
 			ending: true,
 			kept: [],
 			stopped: ["rojo"],
@@ -236,11 +247,14 @@ describe(runDownAsync, () => {
 		});
 	});
 
-	it("should ask the session to handle the auto-recovery files as --recovery says", async () => {
+	it("should ask the session to handle the auto-recovery files as --recovery says", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeContext({ isSupervisorAlive: true });
-		const requests = await serveStopsAsync(project, NOTHING);
+		const requests = await serveStopsAsync({ onTestFinished }, project, NOTHING);
 		await downAsync(project.context, {}, { studio: { autoRecovery: "delete" } });
 
 		expect(requests).toStrictEqual([
@@ -248,7 +262,10 @@ describe(runDownAsync, () => {
 		]);
 	});
 
-	it("should take the auto-recovery mode from the config file", async () => {
+	it("should take the auto-recovery mode from the config file", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeContext({ isSupervisorAlive: true });
@@ -259,17 +276,17 @@ describe(runDownAsync, () => {
 			};
 		};
 
-		const requests = await serveStopsAsync(project, NOTHING);
+		const requests = await serveStopsAsync({ onTestFinished }, project, NOTHING);
 		await downAsync(project.context);
 
 		expect(requests).toMatchObject([{ recovery: "keep" }]);
 	});
 
-	it("should say when the session had no part to stop", async () => {
+	it("should say when the session had no part to stop", async ({ expect, onTestFinished }) => {
 		expect.assertions(1);
 
 		const project = makeContext({ isSupervisorAlive: true });
-		await serveStopsAsync(project, NOTHING);
+		await serveStopsAsync({ onTestFinished }, project, NOTHING);
 
 		await expect(downAsync(project.context)).resolves.toMatchObject({
 			data: { parts: { kept: [], stopped: [] }, studio: { status: "none" } },
@@ -277,11 +294,14 @@ describe(runDownAsync, () => {
 		});
 	});
 
-	it("should leave the session's Studio open with --keep-studio", async () => {
+	it("should leave the session's Studio open with --keep-studio", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
 		const project = makeContext({ isSupervisorAlive: true });
-		const requests = await serveStopsAsync(project, {
+		const requests = await serveStopsAsync({ onTestFinished }, project, {
 			ending: true,
 			kept: [],
 			stopped: ["rojo"],
@@ -294,11 +314,14 @@ describe(runDownAsync, () => {
 		expect(requests).toMatchObject([{ keepStudio: true }]);
 	});
 
-	it("should say a found Studio stays open, and end the session", async () => {
+	it("should say a found Studio stays open, and end the session", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeContext({ isSupervisorAlive: true });
-		await serveStopsAsync(project, {
+		await serveStopsAsync({ onTestFinished }, project, {
 			ending: true,
 			foundStudio: true,
 			kept: [],
@@ -316,11 +339,14 @@ describe(runDownAsync, () => {
 		});
 	});
 
-	it("should say a found Studio stays open while owned parts keep the session", async () => {
+	it("should say a found Studio stays open while owned parts keep the session", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const project = makeContext({ isSupervisorAlive: true });
-		await serveStopsAsync(project, {
+		await serveStopsAsync({ onTestFinished }, project, {
 			ending: false,
 			foundStudio: true,
 			kept: [{ owner: "start", part: "compiler" }],
@@ -355,11 +381,11 @@ describe(runDownAsync, () => {
 		],
 	] as const)(
 		"should succeed and name the parts it kept: %j",
-		async ([stopped, kept, summary]) => {
+		async ([stopped, kept, summary], { expect, onTestFinished }) => {
 			expect.assertions(2);
 
 			const project = makeContext({ isSupervisorAlive: true });
-			await serveStopsAsync(project, {
+			await serveStopsAsync({ onTestFinished }, project, {
 				ending: false,
 				kept: [...kept],
 				stopped: [...stopped],
@@ -373,7 +399,7 @@ describe(runDownAsync, () => {
 		},
 	);
 
-	it("should name a supervisor --force killed", async () => {
+	it("should name a supervisor --force killed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeContext({ isSupervisorAlive: true });
@@ -384,7 +410,7 @@ describe(runDownAsync, () => {
 		});
 	});
 
-	it("should not kill the supervisor without --force", async () => {
+	it("should not kill the supervisor without --force", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeContext({ isSupervisorAlive: true });
@@ -394,7 +420,7 @@ describe(runDownAsync, () => {
 		});
 	});
 
-	it("should wait the default bound for the barrier", async () => {
+	it("should wait the default bound for the barrier", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, elapsed } = makeContext({ isLeaseHeld: true });
@@ -403,7 +429,7 @@ describe(runDownAsync, () => {
 		expect(elapsed()).toBe(DOWN_TIMEOUT_MS);
 	});
 
-	it("should wait as long as --timeout says", async () => {
+	it("should wait as long as --timeout says", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { context, elapsed } = makeContext({ isLeaseHeld: true });
@@ -414,7 +440,7 @@ describe(runDownAsync, () => {
 		expect(elapsed()).toBe(2500);
 	});
 
-	it.for(["-1", "soon", " "])("should refuse --timeout %j", async (timeout) => {
+	it.for(["-1", "soon", " "])("should refuse --timeout %j", async (timeout, { expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeContext();
@@ -425,7 +451,7 @@ describe(runDownAsync, () => {
 		});
 	});
 
-	it("should report not_running when no session is named", async () => {
+	it("should report not_running when no session is named", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { context } = makeContext({ isNamed: false });

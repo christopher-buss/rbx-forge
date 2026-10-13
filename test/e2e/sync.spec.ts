@@ -4,7 +4,7 @@
  * test stops the session it left.
  */
 import { utimesSync, writeFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { EXIT_NOT_RUNNING, EXIT_SUCCESS } from "../../src/exit-codes.ts";
 import type { WorkerRecord } from "../helpers/worker-log.ts";
@@ -23,7 +23,7 @@ function syncbackRuns(log: string): Array<WorkerRecord> {
 }
 
 describe("forge sync", () => {
-	it("should run syncback and its hooks inside the running session", async () => {
+	it("should run syncback and its hooks inside the running session", async ({ expect }) => {
 		expect.assertions(4);
 
 		const fixture = await makeFixtureAsync(HOOKED);
@@ -49,7 +49,7 @@ describe("forge sync", () => {
 		});
 	});
 
-	it("should report not_running when no session runs", async () => {
+	it("should report not_running when no session runs", async ({ expect }) => {
 		expect.assertions(1);
 
 		const fixture = await makeFixtureAsync(HOOKED);
@@ -61,7 +61,7 @@ describe("forge sync", () => {
 		});
 	});
 
-	it("should report the run's failure with its hook results", async () => {
+	it("should report the run's failure with its hook results", async ({ expect }) => {
 		expect.assertions(2);
 
 		const fixture = await makeFixtureAsync({
@@ -78,7 +78,9 @@ describe("forge sync", () => {
 		});
 	});
 
-	it("should wait for the save watch's run and its hooks, never running alongside them", async () => {
+	it("should wait for the save watch's run and its hooks, never running alongside them", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const fixture = await makeFixtureAsync(HOOKED);

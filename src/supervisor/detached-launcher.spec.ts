@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createFailingSpawner, createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -42,7 +42,9 @@ function backendFor(
 }
 
 describe(createDetachedLauncher, () => {
-	it("should start the entry in a new session with its output in the supervisor log", () => {
+	it("should start the entry in a new session with its output in the supervisor log", ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const backend = backendFor("linux");
@@ -75,28 +77,34 @@ describe(createDetachedLauncher, () => {
 		expect(backend.spawner.children[0]!.referenced).toBeFalse();
 	});
 
-	it.for(["started", "failed"] as const)("should close the log once the spawn %s", (outcome) => {
-		expect.assertions(1);
+	it.for(["started", "failed"] as const)(
+		"should close the log once the spawn %s",
+		(outcome, { expect }) => {
+			expect.assertions(1);
 
-		const backend = backendFor("linux");
-		const spawns = { failed: createFailingSpawner("ENOENT"), started: backend.childProcess };
-		try {
-			createDetachedLauncher(
-				{ ...backend, childProcess: spawns[outcome] },
-				ENTRY,
-			)({
-				cwd: PROJECT,
-				env: {},
-				request: REQUEST,
-			});
-		} catch {
-			// The failed spawn throws; the log closes either way.
-		}
+			const backend = backendFor("linux");
+			const spawns = {
+				failed: createFailingSpawner("ENOENT"),
+				started: backend.childProcess,
+			};
+			try {
+				createDetachedLauncher(
+					{ ...backend, childProcess: spawns[outcome] },
+					ENTRY,
+				)({
+					cwd: PROJECT,
+					env: {},
+					request: REQUEST,
+				});
+			} catch {
+				// The failed spawn throws; the log closes either way.
+			}
 
-		expect(backend.fileSystem.closeSync).toHaveBeenCalledOnce();
-	});
+			expect(backend.fileSystem.closeSync).toHaveBeenCalledOnce();
+		},
+	);
 
-	it("should keep a thread pool size the caller set", () => {
+	it("should keep a thread pool size the caller set", ({ expect }) => {
 		expect.assertions(1);
 
 		const backend = backendFor("darwin");
@@ -112,7 +120,7 @@ describe(createDetachedLauncher, () => {
 		expect(backend.spawner.calls[0]!.options["env"]).toStrictEqual({ UV_THREADPOOL_SIZE: "4" });
 	});
 
-	it("should report a supervisor that did not start", () => {
+	it("should report a supervisor that did not start", ({ expect }) => {
 		expect.assertions(1);
 
 		const backend = { ...backendFor("linux"), childProcess: createFailingSpawner("ENOENT") };
@@ -128,7 +136,7 @@ describe(createDetachedLauncher, () => {
 		);
 	});
 
-	it("should start it through the addon with breakaway on Windows", () => {
+	it("should start it through the addon with breakaway on Windows", ({ expect }) => {
 		expect.assertions(2);
 
 		const spawnDetached = vi.fn<(spawn: DetachedSpawn) => null | number>().mockReturnValue(77);
@@ -152,7 +160,7 @@ describe(createDetachedLauncher, () => {
 		});
 	});
 
-	it("should refuse with detach_unsupported when the job forbids breakaway", () => {
+	it("should refuse with detach_unsupported when the job forbids breakaway", ({ expect }) => {
 		expect.assertions(1);
 
 		const backend = backendFor("win32", () => null);

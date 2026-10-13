@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { CompileEvent, Diagnostic } from "../compiler/diagnostics.ts";
 import type { FreshnessTracker } from "./freshness.ts";
@@ -37,7 +37,7 @@ function feed(events: ReadonlyArray<readonly [number, BuildEvent]>): FreshnessTr
 }
 
 describe(createFreshnessTracker, () => {
-	it("should have no build and no answer before the first compile", () => {
+	it("should have no build and no answer before the first compile", ({ expect }) => {
 		expect.assertions(3);
 
 		const tracker = feed([[100, START]]);
@@ -47,7 +47,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.freshAt(0)).toBeUndefined();
 	});
 
-	it("should build from a start event to its end event", () => {
+	it("should build from a start event to its end event", ({ expect }) => {
 		expect.assertions(3);
 
 		const tracker = createFreshnessTracker();
@@ -68,7 +68,9 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.building()).toBeFalse();
 	});
 
-	it("should take a end event with no start event as a build that started when it ended", () => {
+	it("should take a end event with no start event as a build that started when it ended", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		expect(feed([[500, FOUND]]).lastBuild()).toMatchObject({
@@ -77,7 +79,7 @@ describe(createFreshnessTracker, () => {
 		});
 	});
 
-	it("should answer one quiet window after the call when no compile starts", () => {
+	it("should answer one quiet window after the call when no compile starts", ({ expect }) => {
 		expect.assertions(2);
 
 		// An edit that the compiler does not see: no start event comes.
@@ -90,7 +92,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.lastBuild()).toMatchObject({ at: iso(400) });
 	});
 
-	it("should answer one quiet window after a build that ended after the call", () => {
+	it("should answer one quiet window after a build that ended after the call", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(
@@ -101,7 +103,7 @@ describe(createFreshnessTracker, () => {
 		).toBe(400 + QUIET_WINDOW_MS);
 	});
 
-	it("should wait for the compile of a save just before the call", () => {
+	it("should wait for the compile of a save just before the call", ({ expect }) => {
 		expect.assertions(3);
 
 		const tracker = feed([
@@ -120,7 +122,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.lastBuild()).toMatchObject({ at: iso(5400), startedAt: iso(5051) });
 	});
 
-	it("should answer after the last compile of a burst of saves", () => {
+	it("should answer after the last compile of a burst of saves", ({ expect }) => {
 		expect.assertions(1);
 
 		const tracker = feed([
@@ -137,7 +139,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.freshAt(900)).toBe(2400 + QUIET_WINDOW_MS);
 	});
 
-	it("should stay building until each start event has its end event", () => {
+	it("should stay building until each start event has its end event", ({ expect }) => {
 		expect.assertions(4);
 
 		// A save during a compile: a second start event before the first
@@ -159,7 +161,9 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.lastBuild()).toMatchObject({ at: iso(1700), startedAt: iso(1200) });
 	});
 
-	it("should count start events that one end event ended as merged once the output stays silent", () => {
+	it("should count start events that one end event ended as merged once the output stays silent", ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		// Two start events, one compile: 400 ms is the longest compile.
@@ -179,7 +183,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.freshAt(900)).toBe(bound + QUIET_WINDOW_MS);
 	});
 
-	it("should have nothing to settle before any event", () => {
+	it("should have nothing to settle before any event", ({ expect }) => {
 		expect.assertions(2);
 
 		const tracker = createFreshnessTracker();
@@ -188,7 +192,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.tick(1_000_000)).toBeFalse();
 	});
 
-	it("should never settle the first compile, however long it runs", () => {
+	it("should never settle the first compile, however long it runs", ({ expect }) => {
 		expect.assertions(2);
 
 		const tracker = feed([[0, START]]);
@@ -197,7 +201,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.building()).toBeTrue();
 	});
 
-	it("should count open start events as merged once a new compile starts", () => {
+	it("should count open start events as merged once a new compile starts", ({ expect }) => {
 		expect.assertions(3);
 
 		const tracker = feed([
@@ -217,7 +221,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.lastBuild()).toMatchObject({ at: iso(100_300), startedAt: iso(3000) });
 	});
 
-	it("should wait twice the longest compile for merged start events", () => {
+	it("should wait twice the longest compile for merged start events", ({ expect }) => {
 		expect.assertions(1);
 
 		const tracker = feed([
@@ -231,7 +235,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.settleAt()).toBe(6500 + 2 * 5000);
 	});
 
-	it("should measure the silence from the last output line", () => {
+	it("should measure the silence from the last output line", ({ expect }) => {
 		expect.assertions(2);
 
 		const tracker = feed([
@@ -247,7 +251,9 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.tick(1400 + 2 * 400)).toBeFalse();
 	});
 
-	it("should have nothing to settle while every start event is answered or its compile runs", () => {
+	it("should have nothing to settle while every start event is answered or its compile runs", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const tracker = feed([
@@ -263,7 +269,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.settleAt()).toBeUndefined();
 	});
 
-	it("should not answer for an edit until a compile starts after it", () => {
+	it("should not answer for an edit until a compile starts after it", ({ expect }) => {
 		expect.assertions(3);
 
 		// The watcher notices an edit at 5000 only at 11_000.
@@ -281,7 +287,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.freshAt(6000, 11_000)).toBe(11_400 + QUIET_WINDOW_MS);
 	});
 
-	it("should not count a compile that started before the edit", () => {
+	it("should not count a compile that started before the edit", ({ expect }) => {
 		expect.assertions(2);
 
 		const tracker = feed([
@@ -295,7 +301,7 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.freshAt(3000, 1000)).toBe(3000 + QUIET_WINDOW_MS);
 	});
 
-	it("should count a merged start event after the edit", () => {
+	it("should count a merged start event after the edit", ({ expect }) => {
 		expect.assertions(1);
 
 		const tracker = feed([
@@ -312,7 +318,9 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.freshAt(900, 1100)).toBe(bound + QUIET_WINDOW_MS);
 	});
 
-	it("should give the compiler one pickup window from the call or its last build to start a compile for an edit", () => {
+	it("should give the compiler one pickup window from the call or its last build to start a compile for an edit", ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const tracker = feed([
@@ -328,13 +336,15 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.pickupBy(5000, 7000)).toBe(6400 + EDIT_PICKUP_MS);
 	});
 
-	it("should not take an end event with no start event as a compile after a later edit", () => {
+	it("should not take an end event with no start event as a compile after a later edit", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		expect(feed([[500, FOUND]]).freshAt(1000, 800)).toBeUndefined();
 	});
 
-	it("should count a compile that started at the time of the edit", () => {
+	it("should count a compile that started at the time of the edit", ({ expect }) => {
 		expect.assertions(1);
 
 		const tracker = feed([
@@ -347,7 +357,9 @@ describe(createFreshnessTracker, () => {
 		expect(tracker.pickupBy(3000, 1000)).toBeUndefined();
 	});
 
-	it("should set no pickup bound once a compile started after the edit, while one runs, or before the first build", () => {
+	it("should set no pickup bound once a compile started after the edit, while one runs, or before the first build", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const tracker = feed([[0, START]]);

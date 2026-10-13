@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { encodeLine, isRelease, parseHello, parseRequest, parseResponse } from "./protocol.ts";
 
 describe(encodeLine, () => {
-	it("should write one JSON object and a newline", () => {
+	it("should write one JSON object and a newline", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(encodeLine({ protocol: 1, token: "t", type: "hello" })).toBe(
@@ -13,7 +13,7 @@ describe(encodeLine, () => {
 });
 
 describe(parseHello, () => {
-	it("should read a hello back", () => {
+	it("should read a hello back", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(parseHello('{"protocol":1,"token":"t","type":"hello"}')).toStrictEqual({
@@ -27,7 +27,7 @@ describe(parseHello, () => {
 		["not JSON", "hello"],
 		["another type", '{"protocol":1,"token":"t","type":"request"}'],
 		["no token", '{"protocol":1,"type":"hello"}'],
-	] as const)("should read %s as no hello", ([, line]) => {
+	] as const)("should read %s as no hello", ([, line], { expect }) => {
 		expect.assertions(1);
 
 		expect(parseHello(line)).toBeUndefined();
@@ -35,7 +35,7 @@ describe(parseHello, () => {
 });
 
 describe(isRelease, () => {
-	it("should read a release line, and nothing else, as a release", () => {
+	it("should read a release line, and nothing else, as a release", ({ expect }) => {
 		expect.assertions(3);
 
 		expect(isRelease(encodeLine({ type: "release" }).trim())).toBeTrue();
@@ -45,7 +45,7 @@ describe(isRelease, () => {
 });
 
 describe(parseRequest, () => {
-	it("should read a request, with no params as empty params", () => {
+	it("should read a request, with no params as empty params", ({ expect }) => {
 		expect.assertions(3);
 
 		expect(parseRequest('{"method":"status","type":"request"}')).toStrictEqual({
@@ -63,7 +63,7 @@ describe(parseRequest, () => {
 		["not JSON", "{"],
 		["an unknown method", '{"method":"exec","type":"request"}'],
 		["a hello", '{"protocol":1,"token":"t","type":"hello"}'],
-	] as const)("should read %s as no request", ([, line]) => {
+	] as const)("should read %s as no request", ([, line], { expect }) => {
 		expect.assertions(1);
 
 		expect(parseRequest(line)).toBeUndefined();
@@ -71,7 +71,7 @@ describe(parseRequest, () => {
 });
 
 describe(parseResponse, () => {
-	it("should read a success and a failure", () => {
+	it("should read a success and a failure", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(parseResponse('{"ok":true,"result":{"a":1},"type":"response"}')).toStrictEqual({
@@ -94,7 +94,7 @@ describe(parseResponse, () => {
 		["not JSON", ""],
 		["a success without a result", '{"ok":true,"type":"response"}'],
 		["a failure without a message", '{"error":{"code":"x"},"ok":false,"type":"response"}'],
-	] as const)("should read %s as no response", ([, line]) => {
+	] as const)("should read %s as no response", ([, line], { expect }) => {
 		expect.assertions(1);
 
 		expect(parseResponse(line)).toBeUndefined();

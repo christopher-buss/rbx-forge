@@ -1,6 +1,6 @@
 import { fromPartial } from "@total-typescript/shoehorn";
 
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
@@ -38,7 +38,7 @@ function saveControl(save?: PartHandlers["save"]) {
 describe("session save control", () => {
 	it.for([undefined, "100", NaN, Infinity, 0, -1])(
 		"rejects the invalid save deadline %s before saving",
-		async (timeoutMs) => {
+		async (timeoutMs, { expect }) => {
 			expect.assertions(1);
 
 			const { save } = saveControl(async () => {
@@ -52,7 +52,7 @@ describe("session save control", () => {
 		},
 	);
 
-	it("refuses a save for a replaced session", async () => {
+	it("refuses a save for a replaced session", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { save } = saveControl(async () => SAVED);
@@ -62,7 +62,7 @@ describe("session save control", () => {
 		});
 	});
 
-	it("returns saved metadata and cancels its deadline after success", async () => {
+	it("returns saved metadata and cancels its deadline after success", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { manual, save } = saveControl(async () => SAVED);
@@ -71,7 +71,7 @@ describe("session save control", () => {
 		expect(manual.pending()).toBe(0);
 	});
 
-	it("returns the save failure and cancels its deadline", async () => {
+	it("returns the save failure and cancels its deadline", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { manual, save } = saveControl(async () => {
@@ -82,7 +82,7 @@ describe("session save control", () => {
 		expect(manual.pending()).toBe(0);
 	});
 
-	it("reports no Studio when the session has no save handler", async () => {
+	it("reports no Studio when the session has no save handler", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { save } = saveControl();
@@ -93,7 +93,9 @@ describe("session save control", () => {
 		});
 	});
 
-	it("expires at its deadline and cancels the action before it can change the place", async () => {
+	it("expires at its deadline and cancels the action before it can change the place", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const release = Promise.withResolvers<void>();

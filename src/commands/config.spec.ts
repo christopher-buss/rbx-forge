@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createCommandContext, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
@@ -12,7 +12,7 @@ function contextWithFile(value: unknown): ReturnType<typeof createCommandContext
 }
 
 describe(runConfigAsync, () => {
-	it("should return the resolved config and its file", async () => {
+	it("should return the resolved config and its file", async ({ expect }) => {
 		expect.assertions(1);
 
 		const result = await runConfigAsync(contextWithFile({ projectType: "luau" }), {
@@ -26,7 +26,7 @@ describe(runConfigAsync, () => {
 		});
 	});
 
-	it("should show the file and the config as indented JSON", async () => {
+	it("should show the file and the config as indented JSON", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { summary } = await runConfigAsync(contextWithFile({ projectType: "luau" }), {

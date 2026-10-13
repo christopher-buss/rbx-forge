@@ -1,5 +1,5 @@
 import path from "node:path";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { entryMode, gzippedTarball } from "../../test/helpers/tarball.ts";
@@ -132,7 +132,7 @@ function publishSetup(reads: Record<string, string> = {}, failing: ReadonlyArray
 }
 
 describe("native targets", () => {
-	it("should name each napi target as napi does", () => {
+	it("should name each napi target as napi does", ({ expect }) => {
 		expect.assertions(2);
 
 		expect(NATIVE_TARGETS.map((target) => target.rust)).toStrictEqual(packageJson.napi.targets);
@@ -147,7 +147,7 @@ describe("native targets", () => {
 });
 
 describe(platformReadme, () => {
-	it("should name the package and point to the package to install", () => {
+	it("should name the package and point to the package to install", ({ expect }) => {
 		expect.assertions(1);
 
 		const target = NATIVE_TARGETS.find(({ target: name }) => name === "linux-arm64-musl");
@@ -167,7 +167,7 @@ describe(platformReadme, () => {
 });
 
 describe(platformManifest, () => {
-	it("should ship the addon and the reaper for a musl target", () => {
+	it("should ship the addon and the reaper for a musl target", ({ expect }) => {
 		expect.assertions(1);
 
 		const target = NATIVE_TARGETS.find(({ target: name }) => name === "linux-x64-musl");
@@ -186,7 +186,7 @@ describe(platformManifest, () => {
 		});
 	});
 
-	it("should name the Windows reaper with .exe and give no libc", () => {
+	it("should name the Windows reaper with .exe and give no libc", ({ expect }) => {
 		expect.assertions(2);
 
 		const manifest = platformManifest({}, NATIVE_TARGETS[0]!, "2.0.0");
@@ -200,7 +200,7 @@ describe(platformManifest, () => {
 });
 
 describe(releaseVersion, () => {
-	it("should return the version the tag names", () => {
+	it("should return the version the tag names", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(releaseVersion(ROOT_MANIFEST, "v1.0.0")).toBe("1.0.0");
@@ -209,7 +209,7 @@ describe(releaseVersion, () => {
 	it.for([
 		{ reference: "v1.0.1", what: "another version" },
 		{ reference: undefined, what: "no tag" },
-	])("should throw for $what", ({ reference }) => {
+	])("should throw for $what", ({ reference }, { expect }) => {
 		expect.assertions(1);
 
 		expect(() => releaseVersion(ROOT_MANIFEST, reference)).toThrow(
@@ -217,7 +217,7 @@ describe(releaseVersion, () => {
 		);
 	});
 
-	it("should refuse a prerelease", () => {
+	it("should refuse a prerelease", ({ expect }) => {
 		expect.assertions(1);
 
 		const manifest = JSON.stringify({ version: "1.0.0-rc.0" });
@@ -227,7 +227,7 @@ describe(releaseVersion, () => {
 		);
 	});
 
-	it("should throw when package.json has no version", () => {
+	it("should throw when package.json has no version", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(() => releaseVersion("{}", "v1.0.0")).toThrow("package.json has no version");
@@ -235,7 +235,7 @@ describe(releaseVersion, () => {
 });
 
 describe(runReleaseCheck, () => {
-	it("should run every gate step with real Studio on Windows", () => {
+	it("should run every gate step with real Studio on Windows", ({ expect }) => {
 		expect.assertions(2);
 
 		const processes = fakeProcesses({ reads: CLEAN_MAIN });
@@ -258,7 +258,7 @@ describe(runReleaseCheck, () => {
 		);
 	});
 
-	it("should run without real Studio on macOS and say so", () => {
+	it("should run without real Studio on macOS and say so", ({ expect }) => {
 		expect.assertions(3);
 
 		const processes = fakeProcesses({ reads: CLEAN_MAIN });
@@ -272,7 +272,7 @@ describe(runReleaseCheck, () => {
 		);
 	});
 
-	it("should refuse another platform", () => {
+	it("should refuse another platform", ({ expect }) => {
 		expect.assertions(2);
 
 		const processes = fakeProcesses({ reads: CLEAN_MAIN });
@@ -283,7 +283,7 @@ describe(runReleaseCheck, () => {
 		expect(processes.runs).toBeEmpty();
 	});
 
-	it("should stop at the first failing step", () => {
+	it("should stop at the first failing step", ({ expect }) => {
 		expect.assertions(2);
 
 		const processes = fakeProcesses({ failing: ["pnpm lint"], reads: CLEAN_MAIN });
@@ -311,7 +311,7 @@ describe(runReleaseCheck, () => {
 			message: "HEAD is not origin/main; pull or push first",
 			reads: { ...CLEAN_MAIN, "git rev-parse origin/main": "def\n" },
 		},
-	])("should refuse with $message", ({ message, reads }) => {
+	])("should refuse with $message", ({ message, reads }, { expect }) => {
 		expect.assertions(2);
 
 		const processes = fakeProcesses({ reads });
@@ -322,7 +322,7 @@ describe(runReleaseCheck, () => {
 		expect(processes.runs.filter((line) => line.startsWith("pnpm"))).toBeEmpty();
 	});
 
-	it("should throw when git cannot run", () => {
+	it("should throw when git cannot run", ({ expect }) => {
 		expect.assertions(1);
 
 		const processes = fakeProcesses();
@@ -334,7 +334,7 @@ describe(runReleaseCheck, () => {
 });
 
 describe(publishRelease, () => {
-	it("should publish every platform package, then the root package", () => {
+	it("should publish every platform package, then the root package", ({ expect }) => {
 		expect.assertions(2);
 
 		const { dependencies, processes } = publishSetup();
@@ -354,7 +354,9 @@ describe(publishRelease, () => {
 		]);
 	});
 
-	it("should stage the addon, the reaper, the license, a README, and a manifest", () => {
+	it("should stage the addon, the reaper, the license, a README, and a manifest", ({
+		expect,
+	}) => {
 		expect.assertions(5);
 
 		const { contents, dependencies } = publishSetup();
@@ -377,7 +379,7 @@ describe(publishRelease, () => {
 	it.for([
 		{ entry: 0, target: "darwin-arm64" },
 		{ entry: 1, target: "win32-x64-msvc" },
-	])("should publish an executable reaper for $target", ({ entry, target }) => {
+	])("should publish an executable reaper for $target", ({ entry, target }, { expect }) => {
 		expect.assertions(1);
 
 		const { bytes, dependencies } = publishSetup();
@@ -388,7 +390,9 @@ describe(publishRelease, () => {
 		expect(entryMode(tarball!, entry)).toBe("0000755");
 	});
 
-	it("should publish the root with the platform packages as optional dependencies, then restore it", () => {
+	it("should publish the root with the platform packages as optional dependencies, then restore it", ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { contents, dependencies, writes } = publishSetup();
@@ -415,7 +419,7 @@ describe(publishRelease, () => {
 		expect(contents.get(path.join("repo", "package.json"))).toBe(ROOT_MANIFEST);
 	});
 
-	it("should skip a package already on npm at this version", () => {
+	it("should skip a package already on npm at this version", ({ expect }) => {
 		expect.assertions(2);
 
 		const { dependencies, processes } = publishSetup({
@@ -429,7 +433,7 @@ describe(publishRelease, () => {
 		]);
 	});
 
-	it("should name every missing artifact and publish nothing", () => {
+	it("should name every missing artifact and publish nothing", ({ expect }) => {
 		expect.assertions(2);
 
 		const { contents, dependencies, processes } = publishSetup();
@@ -447,7 +451,7 @@ describe(publishRelease, () => {
 		expect(processes.runs).toBeEmpty();
 	});
 
-	it("should restore the root manifest when its pack fails", () => {
+	it("should restore the root manifest when its pack fails", ({ expect }) => {
 		expect.assertions(2);
 
 		const { contents, dependencies } = publishSetup({}, [ROOT_PACK]);
@@ -460,7 +464,7 @@ describe(publishRelease, () => {
 });
 
 describe(bootstrapRelease, () => {
-	it("should download the CI artifacts for HEAD, build, and publish on next", () => {
+	it("should download the CI artifacts for HEAD, build, and publish on next", ({ expect }) => {
 		expect.assertions(2);
 
 		const { dependencies, processes, removed } = publishSetup(BOOTSTRAP_READS);
@@ -474,7 +478,7 @@ describe(bootstrapRelease, () => {
 		]);
 	});
 
-	it("should refuse a stable version", () => {
+	it("should refuse a stable version", ({ expect }) => {
 		expect.assertions(1);
 
 		const { dependencies } = publishSetup(BOOTSTRAP_READS);
@@ -484,7 +488,7 @@ describe(bootstrapRelease, () => {
 		}).toThrow("bootstrap publishes a prerelease only, not 1.0.0");
 	});
 
-	it("should refuse a dirty working tree", () => {
+	it("should refuse a dirty working tree", ({ expect }) => {
 		expect.assertions(1);
 
 		const { dependencies } = publishSetup({
@@ -500,7 +504,7 @@ describe(bootstrapRelease, () => {
 	it.for([
 		{ stdout: "null\n", what: "no run" },
 		{ stdout: "", what: "nothing" },
-	])("should refuse when gh lists $what", ({ stdout }) => {
+	])("should refuse when gh lists $what", ({ stdout }, { expect }) => {
 		expect.assertions(1);
 
 		const { dependencies } = publishSetup({ ...BOOTSTRAP_READS, [RUN_LIST]: stdout });
@@ -513,7 +517,7 @@ describe(bootstrapRelease, () => {
 	it.for([
 		{ repository: undefined, what: "no repository" },
 		{ repository: "https://gitlab.com/owner/forge", what: "a repository off GitHub" },
-	])("should refuse a package.json with $what", ({ repository }) => {
+	])("should refuse a package.json with $what", ({ repository }, { expect }) => {
 		expect.assertions(1);
 
 		const { contents, dependencies } = publishSetup(BOOTSTRAP_READS);
@@ -527,7 +531,7 @@ describe(bootstrapRelease, () => {
 		}).toThrow("package.json#repository names no GitHub repository");
 	});
 
-	it("should take the repository from a string", () => {
+	it("should take the repository from a string", ({ expect }) => {
 		expect.assertions(1);
 
 		const { contents, dependencies, processes } = publishSetup({
@@ -549,7 +553,7 @@ describe(bootstrapRelease, () => {
 		);
 	});
 
-	it("should throw when the download fails", () => {
+	it("should throw when the download fails", ({ expect }) => {
 		expect.assertions(1);
 
 		const { dependencies } = publishSetup(BOOTSTRAP_READS);

@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
@@ -100,7 +100,9 @@ async function crashAsync(role: string) {
 }
 
 describe("a service's exit", () => {
-	it("should fail only Rojo's part, and keep the session and the compiler running", async () => {
+	it("should fail only Rojo's part, and keep the session and the compiler running", async ({
+		expect,
+	}) => {
 		expect.assertions(4);
 
 		const { alive, run, status } = await crashAsync("rojo");
@@ -126,7 +128,7 @@ describe("a service's exit", () => {
 		});
 	}, 60_000);
 
-	it("should fail only the compiler's part, and keep Rojo serving", async () => {
+	it("should fail only the compiler's part, and keep Rojo serving", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { alive, run, status } = await crashAsync("rbxtsc");
@@ -147,7 +149,7 @@ describe("a service's exit", () => {
 		expect(alive).toContain("rojo");
 	}, 60_000);
 
-	it("should start the failed compiler again on addParts, as a new part", async () => {
+	it("should start the failed compiler again on addParts, as a new part", async ({ expect }) => {
 		expect.assertions(4);
 
 		const { addCompilerAsync, run, secondCompilerAsync } = await crashAsync("rbxtsc");

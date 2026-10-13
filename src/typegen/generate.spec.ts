@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import type { TypegenFilter } from "./generate.ts";
 import { generateServiceTypes } from "./generate.ts";
@@ -36,7 +36,7 @@ const GAME = place(
 );
 
 describe(generateServiceTypes, () => {
-	it("should type every instance under each service", () => {
+	it("should type every instance under each service", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(generateServiceTypes(GAME, ALL)).toStrictEqual({
@@ -68,7 +68,7 @@ interface Workspace {
 		});
 	});
 
-	it("should write only the header when no instance is typed", () => {
+	it("should write only the header when no instance is typed", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(generateServiceTypes(place(), ALL)).toStrictEqual({
@@ -78,7 +78,7 @@ interface Workspace {
 		});
 	});
 
-	it("should leave out services with no typed children", () => {
+	it("should leave out services with no typed children", ({ expect }) => {
 		expect.assertions(1);
 
 		const game = place(
@@ -89,7 +89,7 @@ interface Workspace {
 		expect(generateServiceTypes(game, ALL).services).toStrictEqual(["Workspace"]);
 	});
 
-	it("should leave out StarterPlayer and PluginDebugService", () => {
+	it("should leave out StarterPlayer and PluginDebugService", ({ expect }) => {
 		expect.assertions(1);
 
 		const game = place(
@@ -109,7 +109,7 @@ interface Workspace {
 		});
 	});
 
-	it("should name the interface after the service's class", () => {
+	it("should name the interface after the service's class", ({ expect }) => {
 		expect.assertions(1);
 
 		const game = place(instance("MyWorkspace", "Workspace", instance("Map", "Model")));
@@ -119,7 +119,7 @@ interface Workspace {
 		);
 	});
 
-	it("should mark only Workspace.Terrain readonly", () => {
+	it("should mark only Workspace.Terrain readonly", ({ expect }) => {
 		expect.assertions(1);
 
 		const game = place(
@@ -164,7 +164,7 @@ interface Lighting {
 		["line\nbreak", String.raw`"line\nbreak"`],
 		["é", '"é"'],
 		["", '""'],
-	] as const)("should write the property for %j as %s", ([name, property]) => {
+	] as const)("should write the property for %j as %s", ([name, property], { expect }) => {
 		expect.assertions(1);
 
 		const game = place(instance("Workspace", "Workspace", instance(name, "Part")));
@@ -174,7 +174,7 @@ interface Lighting {
 		);
 	});
 
-	it("should keep the first of two siblings with one name and report the rest", () => {
+	it("should keep the first of two siblings with one name and report the rest", ({ expect }) => {
 		expect.assertions(1);
 
 		const game = place(
@@ -204,7 +204,9 @@ interface Workspace {
 	});
 
 	describe("filters", () => {
-		it("should type only instances an include pattern matches, with their ancestors", () => {
+		it("should type only instances an include pattern matches, with their ancestors", ({
+			expect,
+		}) => {
 			expect.assertions(1);
 
 			const filter = { ...ALL, include: ["ReplicatedStorage/Assets/Sword/**"] };
@@ -225,7 +227,9 @@ interface ReplicatedStorage {
 			});
 		});
 
-		it("should type a matched instance without its children when they do not match", () => {
+		it("should type a matched instance without its children when they do not match", ({
+			expect,
+		}) => {
 			expect.assertions(1);
 
 			const filter = { ...ALL, include: ["ReplicatedStorage/Assets", "Workspace/*"] };
@@ -243,7 +247,7 @@ interface Workspace {
 `);
 		});
 
-		it("should type instances any include pattern matches", () => {
+		it("should type instances any include pattern matches", ({ expect }) => {
 			expect.assertions(1);
 
 			const filter = { ...ALL, include: ["**/Handle", "**/util"] };
@@ -263,13 +267,13 @@ interface ReplicatedStorage {
 `);
 		});
 
-		it("should type nothing with no include patterns", () => {
+		it("should type nothing with no include patterns", ({ expect }) => {
 			expect.assertions(1);
 
 			expect(generateServiceTypes(GAME, { ...ALL, include: [] }).source).toBe(`${HEADER}\n`);
 		});
 
-		it("should leave out an excluded instance and everything under it", () => {
+		it("should leave out an excluded instance and everything under it", ({ expect }) => {
 			expect.assertions(1);
 
 			const filter = { ...ALL, exclude: ["ReplicatedStorage/Assets/Sword", "Workspace/Map"] };
@@ -295,7 +299,7 @@ interface Workspace {
 `);
 		});
 
-		it("should let an exclude pattern win over an include pattern", () => {
+		it("should let an exclude pattern win over an include pattern", ({ expect }) => {
 			expect.assertions(1);
 
 			const filter = {
@@ -314,7 +318,7 @@ interface ReplicatedStorage {
 `);
 		});
 
-		it("should leave out a whole service an exclude pattern matches", () => {
+		it("should leave out a whole service an exclude pattern matches", ({ expect }) => {
 			expect.assertions(1);
 
 			const filter = { ...ALL, exclude: ["ReplicatedStorage", "ServerScriptService/**"] };
@@ -322,7 +326,7 @@ interface ReplicatedStorage {
 			expect(generateServiceTypes(GAME, filter).services).toStrictEqual(["Workspace"]);
 		});
 
-		it("should not report siblings that a filter left out", () => {
+		it("should not report siblings that a filter left out", ({ expect }) => {
 			expect.assertions(1);
 
 			const game = place(
@@ -390,14 +394,14 @@ interface Workspace {
 			],
 		] as const)(
 			"should type instances down to level %i (a service is level 1)",
-			([maxDepth, source]) => {
+			([maxDepth, source], { expect }) => {
 				expect.assertions(1);
 
 				expect(generateServiceTypes(GAME, { ...ALL, maxDepth }).source).toBe(source);
 			},
 		);
 
-		it("should not type an included instance deeper than the limit", () => {
+		it("should not type an included instance deeper than the limit", ({ expect }) => {
 			expect.assertions(1);
 
 			const filter = { ...ALL, include: ["**/Handle"], maxDepth: 3 };

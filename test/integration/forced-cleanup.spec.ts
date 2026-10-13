@@ -11,7 +11,7 @@
  */
 import assert from "node:assert/strict";
 import process from "node:process";
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { ForgeError } from "../../src/errors.ts";
 import type { CleanupReport } from "../../src/native/addon.ts";
@@ -79,7 +79,7 @@ async function forcedCleanupAsync(run: Launched): Promise<CleanupReport> {
 describe("forced cleanup", () => {
 	it(
 		"should refuse with the surviving PIDs, then kill the tree and the reaper last with --force",
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(5);
 
 			const project = await makeProjectAsync();
@@ -121,7 +121,7 @@ describe("forced cleanup", () => {
 	// Windows: the reaper's jobs kill every descendant when it dies.
 	it.skipIf(process.platform === "win32")(
 		"should find a scrubbed descendant that keeps the lease after the reaper died, and kill it",
-		async () => {
+		async ({ expect }) => {
 			expect.assertions(4);
 
 			const project = await makeProjectAsync();

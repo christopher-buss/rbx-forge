@@ -1,7 +1,7 @@
 import { fromAny } from "@total-typescript/shoehorn";
 
 import type { SpawnOptions } from "node:child_process";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createFailingSpawner, createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import type { FakeChild, SpawnBehavior } from "../../test/helpers/fake-process.ts";
@@ -109,7 +109,7 @@ function taskkillMissing(clock: ManualClock): {
 }
 
 describe(createChildProcessRunner, () => {
-	it("should spawn the file hidden, with piped output and no stdin", async () => {
+	it("should spawn the file hidden, with piped output and no stdin", async ({ expect }) => {
 		expect.assertions(1);
 
 		const spawner = createFakeSpawner(exitWith(0));
@@ -131,7 +131,9 @@ describe(createChildProcessRunner, () => {
 		]);
 	});
 
-	it("should keep a Windows child in the console's group and pass verbatim arguments on", async () => {
+	it("should keep a Windows child in the console's group and pass verbatim arguments on", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const spawner = createFakeSpawner(exitWith(0));
@@ -146,7 +148,7 @@ describe(createChildProcessRunner, () => {
 		});
 	});
 
-	it("should report the exit code, the duration, and the output tail", async () => {
+	it("should report the exit code, the duration, and the output tail", async ({ expect }) => {
 		expect.assertions(1);
 
 		const clock = createManualClock(5000);
@@ -168,7 +170,9 @@ describe(createChildProcessRunner, () => {
 		});
 	});
 
-	it("should join lines split across chunks and keep a last line with no newline", async () => {
+	it("should join lines split across chunks and keep a last line with no newline", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const spawner = createFakeSpawner(exitWith(0, ["Built the pl", "ace\nAll do", "ne"]));
@@ -180,7 +184,7 @@ describe(createChildProcessRunner, () => {
 		);
 	});
 
-	it("should keep only the last lines of long output", async () => {
+	it("should keep only the last lines of long output", async ({ expect }) => {
 		expect.assertions(1);
 
 		const lines = Array.from({ length: OUTPUT_TAIL_LINES + 5 }, (_, index) => `line ${index}`);
@@ -193,7 +197,7 @@ describe(createChildProcessRunner, () => {
 		);
 	});
 
-	it("should keep only the last lines when the output ends mid-line", async () => {
+	it("should keep only the last lines when the output ends mid-line", async ({ expect }) => {
 		expect.assertions(1);
 
 		const lines = Array.from({ length: OUTPUT_TAIL_LINES }, (_, index) => `line ${index}`);
@@ -206,7 +210,9 @@ describe(createChildProcessRunner, () => {
 		);
 	});
 
-	it("should hand every output line to onLine, past the tail and a last partial line", async () => {
+	it("should hand every output line to onLine, past the tail and a last partial line", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const lines = Array.from({ length: OUTPUT_TAIL_LINES + 5 }, (_, index) => `line ${index}`);
@@ -226,7 +232,9 @@ describe(createChildProcessRunner, () => {
 		expect(seen).toStrictEqual([...lines, "split line", "no newline"]);
 	});
 
-	it("should hand no partial line to onLine when the output ends with a newline", async () => {
+	it("should hand no partial line to onLine when the output ends with a newline", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const spawner = createFakeSpawner(exitWith(0, ["done\n"]));
@@ -241,7 +249,7 @@ describe(createChildProcessRunner, () => {
 		expect(seen).toStrictEqual(["done"]);
 	});
 
-	it("should report a process a signal ended", async () => {
+	it("should report a process a signal ended", async ({ expect }) => {
 		expect.assertions(1);
 
 		const spawner = createFakeSpawner((child) => {
@@ -257,7 +265,7 @@ describe(createChildProcessRunner, () => {
 		);
 	});
 
-	it("should report a process that could not start", async () => {
+	it("should report a process that could not start", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(
@@ -269,7 +277,7 @@ describe(createChildProcessRunner, () => {
 		});
 	});
 
-	it("should stop waiting for the timeout once the process exits", async () => {
+	it("should stop waiting for the timeout once the process exits", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { clock, run } = makeRunner({ childProcess: createFakeSpawner(exitWith(0)).runner });
@@ -278,7 +286,9 @@ describe(createChildProcessRunner, () => {
 		expect(clock.pending()).toBe(0);
 	});
 
-	it("should kill the process group of a POSIX process that outlives its timeout", async () => {
+	it("should kill the process group of a POSIX process that outlives its timeout", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const spawner = createFakeSpawner((child) => {
@@ -299,7 +309,7 @@ describe(createChildProcessRunner, () => {
 		expect(kill).toHaveBeenCalledExactlyOnceWith(-1000, "SIGKILL");
 	});
 
-	it("should still wait for the process when its group is already gone", async () => {
+	it("should still wait for the process when its group is already gone", async ({ expect }) => {
 		expect.assertions(1);
 
 		const spawner = createFakeSpawner(() => {
@@ -315,7 +325,7 @@ describe(createChildProcessRunner, () => {
 		await expect(run({ ...SPEC, timeoutMs: 10 })).resolves.toMatchObject({ type: "timed_out" });
 	});
 
-	it("should kill the process tree of a Windows process with taskkill", async () => {
+	it("should kill the process tree of a Windows process with taskkill", async ({ expect }) => {
 		expect.assertions(3);
 
 		const clock = createManualClock();
@@ -333,7 +343,7 @@ describe(createChildProcessRunner, () => {
 		});
 	});
 
-	it("should find taskkill in C:\\Windows without SystemRoot", async () => {
+	it("should find taskkill in C:\\Windows without SystemRoot", async ({ expect }) => {
 		expect.assertions(1);
 
 		const clock = createManualClock();
@@ -344,7 +354,7 @@ describe(createChildProcessRunner, () => {
 		expect(spawner.calls[1]!.file).toBe("C:\\Windows\\System32\\taskkill.exe");
 	});
 
-	it("should kill the process alone when taskkill cannot start", async () => {
+	it("should kill the process alone when taskkill cannot start", async ({ expect }) => {
 		expect.assertions(2);
 
 		const clock = createManualClock();
@@ -355,7 +365,9 @@ describe(createChildProcessRunner, () => {
 		expect(children[0]!.kills).toStrictEqual(["SIGKILL"]);
 	});
 
-	it("should stop reading output a killed process's descendants still hold", async () => {
+	it("should stop reading output a killed process's descendants still hold", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const spawner = createFakeSpawner(() => {
@@ -372,7 +384,7 @@ describe(createChildProcessRunner, () => {
 		expect(spawner.children[0]!.stdout.destroyed).toBeTrue();
 	});
 
-	it("should hand the last partial line of a timed-out process to onLine", async () => {
+	it("should hand the last partial line of a timed-out process to onLine", async ({ expect }) => {
 		expect.assertions(1);
 
 		const clock = createManualClock();

@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, it } from "vitest";
+import type { TestContext } from "vitest";
 
 import type { WorkerSpec } from "../../src/reaper/protocol.ts";
 import type { Reaper } from "../../src/reaper/reaper-client.ts";
@@ -46,9 +47,12 @@ interface TestSession {
  * Start a real reaper in a temporary directory. The test's end kills it and
  * every fixture process it logged, whatever the test did.
  *
+ * @param onTestFinished - Register cleanup for this test.
  * @returns The reaper and helpers for its workers.
  */
-async function startSessionAsync(): Promise<TestSession> {
+async function startSessionAsync(
+	onTestFinished: TestContext["onTestFinished"],
+): Promise<TestSession> {
 	const directory = makeTemporaryDirectory();
 	const leasePath = path.join(directory, "workers.lock");
 	const log = path.join(directory, "workers.ndjson");
@@ -108,10 +112,13 @@ function pidsOf(log: string): Array<number> {
 }
 
 describe("reaper", () => {
-	it("should tag every worker and descendant with the session and worker ids", async () => {
+	it("should tag every worker and descendant with the session and worker ids", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
-		const { log, reaper, sessionId, worker } = await startSessionAsync();
+		const { log, reaper, sessionId, worker } = await startSessionAsync(onTestFinished);
 		reaper.go();
 		await reaper.spawnAsync(worker("rojo", { FIXTURE_GRANDCHILDREN: "1" }));
 		const records = await waitForWorkersAsync(log, 2);
@@ -122,10 +129,13 @@ describe("reaper", () => {
 		]);
 	});
 
-	it("should leave zero survivors after a graceful terminate", async () => {
+	it("should leave zero survivors after a graceful terminate", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
-		const { log, reaper, worker } = await startSessionAsync();
+		const { log, reaper, worker } = await startSessionAsync(onTestFinished);
 		reaper.go();
 		await reaper.spawnAsync(worker("rojo", { FIXTURE_GRANDCHILDREN: "2" }));
 		await reaper.spawnAsync(worker("compiler", { FIXTURE_GRANDCHILDREN: "2" }));
@@ -142,10 +152,13 @@ describe("reaper", () => {
 		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
 	});
 
-	it("should reject spawns after terminate, release the lease, and exit", async () => {
+	it("should reject spawns after terminate, release the lease, and exit", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(5);
 
-		const { leasePath, log, reaper, worker } = await startSessionAsync();
+		const { leasePath, log, reaper, worker } = await startSessionAsync(onTestFinished);
 		reaper.go();
 		await reaper.spawnAsync(worker("rojo", { FIXTURE_IGNORE_SIGNALS: "1" }));
 		await waitForWorkersAsync(log, 1);
@@ -163,10 +176,13 @@ describe("reaper", () => {
 		expect(native.tryLockFile(leasePath, "exclusive")).not.toBeNull();
 	});
 
-	it("should force-kill a worker that ignores the graceful stop", async () => {
+	it("should force-kill a worker that ignores the graceful stop", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(3);
 
-		const { log, reaper, worker } = await startSessionAsync();
+		const { log, reaper, worker } = await startSessionAsync(onTestFinished);
 		reaper.go();
 		const rojo = await reaper.spawnAsync(
 			worker("rojo", { FIXTURE_GRANDCHILDREN: "1", FIXTURE_IGNORE_SIGNALS: "1" }),
@@ -180,10 +196,13 @@ describe("reaper", () => {
 		await expect(reaper.terminateAsync(1000)).resolves.toMatchObject({ terminated: true });
 	});
 
-	it("should kill descendants spawned at startup when the reaper dies", async () => {
+	it("should kill descendants spawned at startup when the reaper dies", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { log, reaper, worker } = await startSessionAsync();
+		const { log, reaper, worker } = await startSessionAsync(onTestFinished);
 		reaper.go();
 		await reaper.spawnAsync(worker("rojo", { FIXTURE_GRANDCHILDREN: "3" }));
 		await waitForWorkersAsync(log, 4);
@@ -193,12 +212,15 @@ describe("reaper", () => {
 		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
 	});
 
-	it("should leave nothing when the reaper dies right after it creates a worker", async () => {
+	it("should leave nothing when the reaper dies right after it creates a worker", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
 		const survivors: Array<number> = [];
 		for (let round = 0; round < RACE_ROUNDS; round++) {
-			const { reaper, worker } = await startSessionAsync();
+			const { reaper, worker } = await startSessionAsync(onTestFinished);
 			reaper.go();
 			const spawned = await reaper.spawnAsync(worker(`rojo-${round}`));
 			process.kill(reaper.pid, "SIGKILL");
@@ -209,10 +231,10 @@ describe("reaper", () => {
 		expect(survivors).toStrictEqual([]);
 	}, 300_000);
 
-	it("should kill setsid and double-forked descendants", async () => {
+	it("should kill setsid and double-forked descendants", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 
-		const { log, reaper, worker } = await startSessionAsync();
+		const { log, reaper, worker } = await startSessionAsync(onTestFinished);
 		reaper.go();
 		await reaper.spawnAsync(
 			worker("rojo", {
@@ -232,10 +254,13 @@ describe("reaper", () => {
 		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
 	});
 
-	it("should kill escaped descendants of a worker that exits on its own", async () => {
+	it("should kill escaped descendants of a worker that exits on its own", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { log, reaper, worker } = await startSessionAsync();
+		const { log, reaper, worker } = await startSessionAsync(onTestFinished);
 		reaper.go();
 		const rojo = await reaper.spawnAsync(
 			worker("rojo", {
@@ -250,10 +275,13 @@ describe("reaper", () => {
 		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
 	});
 
-	it("should kill an escaped chain that ignores SIGTERM and storms in one run", async () => {
+	it("should kill an escaped chain that ignores SIGTERM and storms in one run", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const { log, reaper, worker } = await startSessionAsync();
+		const { log, reaper, worker } = await startSessionAsync(onTestFinished);
 		reaper.go();
 		await reaper.spawnAsync(
 			worker("rojo", {
@@ -274,11 +302,14 @@ describe("reaper", () => {
 		await expect(waitForDeathAsync(pidsOf(log))).resolves.toStrictEqual([]);
 	});
 
-	it("should never kill escaped descendants of another worker or session", async () => {
+	it("should never kill escaped descendants of another worker or session", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(2);
 
-		const first = await startSessionAsync();
-		const second = await startSessionAsync();
+		const first = await startSessionAsync(onTestFinished);
+		const second = await startSessionAsync(onTestFinished);
 		first.reaper.go();
 		second.reaper.go();
 		await first.reaper.spawnAsync(
@@ -308,10 +339,10 @@ describe("reaper", () => {
 	// macOS they are an accepted limit.
 	it.skipIf(process.platform !== "linux")(
 		"should kill an orphan that scrubbed its markers once the session ends",
-		async () => {
+		async ({ expect, onTestFinished }) => {
 			expect.assertions(2);
 
-			const { log, reaper, worker } = await startSessionAsync();
+			const { log, reaper, worker } = await startSessionAsync(onTestFinished);
 			reaper.go();
 			await reaper.spawnAsync(
 				worker("rojo", { ...ESCAPED, FIXTURE_GRANDCHILDREN: "1", FIXTURE_SCRUB: "1" }),
@@ -330,10 +361,10 @@ describe("reaper", () => {
 	// Windows has no SIGTERM to catch: there the reaper's jobs close instead.
 	it.skipIf(process.platform === "win32")(
 		"should stop every tree when the reaper gets SIGTERM, as on parent death",
-		async () => {
+		async ({ expect, onTestFinished }) => {
 			expect.assertions(2);
 
-			const { log, reaper, worker } = await startSessionAsync();
+			const { log, reaper, worker } = await startSessionAsync(onTestFinished);
 			reaper.go();
 			await reaper.spawnAsync(worker("rojo", { ...ESCAPED, FIXTURE_GRANDCHILDREN: "2" }));
 			await waitForWorkersAsync(log, 3);
@@ -344,10 +375,13 @@ describe("reaper", () => {
 		},
 	);
 
-	it("should reject a worker whose program does not exist", async () => {
+	it("should reject a worker whose program does not exist", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(1);
 
-		const { directory, reaper, worker } = await startSessionAsync();
+		const { directory, reaper, worker } = await startSessionAsync(onTestFinished);
 		reaper.go();
 
 		await expect(

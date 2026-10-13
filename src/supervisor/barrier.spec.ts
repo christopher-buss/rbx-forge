@@ -1,4 +1,4 @@
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { FakeSessionProcess } from "../../test/helpers/native.ts";
@@ -70,7 +70,7 @@ function leaseHolder(
 }
 
 describe(targetOf, () => {
-	it("should name the session's id, lease, and reaper record", () => {
+	it("should name the session's id, lease, and reaper record", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(targetOf(OLD)).toStrictEqual({
@@ -82,7 +82,9 @@ describe(targetOf, () => {
 });
 
 describe(waitForBarrierAsync, () => {
-	it("should clear at once when the lease is free and no process is left, holding nothing", async () => {
+	it("should clear at once when the lease is free and no process is left, holding nothing", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { manual, native, seams } = makeSeams();
@@ -92,7 +94,9 @@ describe(waitForBarrierAsync, () => {
 		expect([native.locks.size, manual.pending()]).toStrictEqual([0, 0]);
 	});
 
-	it("should wait while a process that closed the lease still carries the marker", async () => {
+	it("should wait while a process that closed the lease still carries the marker", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { manual, native, seams } = makeSeams();
@@ -106,7 +110,7 @@ describe(waitForBarrierAsync, () => {
 		expect(native.locks.size).toBe(0);
 	});
 
-	it("should wait until the last lease holder lets go", async () => {
+	it("should wait until the last lease holder lets go", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { manual, native, seams } = makeSeams();
@@ -119,7 +123,7 @@ describe(waitForBarrierAsync, () => {
 		await expect(waiting).resolves.toStrictEqual({ clear: true, pids: [] });
 	});
 
-	it("should report the surviving PIDs at the bound", async () => {
+	it("should report the surviving PIDs at the bound", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { manual, native, seams } = makeSeams();
@@ -131,7 +135,9 @@ describe(waitForBarrierAsync, () => {
 		expect(manual.pending()).toBe(0);
 	});
 
-	it("should report a held lease with no process it can name as not clear", async () => {
+	it("should report a held lease with no process it can name as not clear", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { manual, native, seams } = makeSeams();
@@ -142,7 +148,7 @@ describe(waitForBarrierAsync, () => {
 		await expect(waiting).resolves.toStrictEqual({ clear: false, pids: [] });
 	});
 
-	it("should stop waiting when the signal aborts", async () => {
+	it("should stop waiting when the signal aborts", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { manual, native, seams } = makeSeams();
@@ -158,7 +164,9 @@ describe(waitForBarrierAsync, () => {
 });
 
 describe(clearOldSessionsAsync, () => {
-	it("should delete every old session whose barrier is clear, and the hint", async () => {
+	it("should delete every old session whose barrier is clear, and the hint", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { memory, native, seams } = makeSeams(OLD_FILES);
@@ -173,7 +181,9 @@ describe(clearOldSessionsAsync, () => {
 		expect([cleanups, native.cleanups]).toStrictEqual([[], []]);
 	});
 
-	it("should fail with previous_generation_alive and the PIDs when an old session outlives the bound", async () => {
+	it("should fail with previous_generation_alive and the PIDs when an old session outlives the bound", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { manual, memory, native, seams } = makeSeams(OLD_FILES);
@@ -195,7 +205,7 @@ describe(clearOldSessionsAsync, () => {
 		expect(native.cleanups).toStrictEqual([]);
 	});
 
-	it("should name no PIDs when it cannot name the lease's holder", async () => {
+	it("should name no PIDs when it cannot name the lease's holder", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { manual, native, seams } = makeSeams(OLD_FILES);
@@ -213,7 +223,9 @@ describe(clearOldSessionsAsync, () => {
 		});
 	});
 
-	it("should force-clean an old session that outlives the bound, then delete it", async () => {
+	it("should force-clean an old session that outlives the bound, then delete it", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { manual, memory, native, seams } = makeSeams(OLD_FILES);
@@ -238,7 +250,9 @@ describe(clearOldSessionsAsync, () => {
 		expect(memory.files()).toStrictEqual({ ".forge/sessions": null });
 	});
 
-	it("should not force-clean an old session whose barrier clears within the bound", async () => {
+	it("should not force-clean an old session whose barrier clears within the bound", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { manual, native, seams } = makeSeams(OLD_FILES);
@@ -256,7 +270,9 @@ describe(clearOldSessionsAsync, () => {
 		expect(native.cleanups).toStrictEqual([]);
 	});
 
-	it("should refuse with cleanup_unverifiable, killing none of them, and keep the files", async () => {
+	it("should refuse with cleanup_unverifiable, killing none of them, and keep the files", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { manual, memory, native, seams } = makeSeams(OLD_FILES);
@@ -285,7 +301,9 @@ describe(clearOldSessionsAsync, () => {
 		expect(Object.keys(memory.files())).toContain(".forge/sessions/old/supervisor.id");
 	});
 
-	it("should fail with previous_generation_alive when processes survive the cleanup", async () => {
+	it("should fail with previous_generation_alive when processes survive the cleanup", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { manual, native, seams } = makeSeams(OLD_FILES);
@@ -303,7 +321,7 @@ describe(clearOldSessionsAsync, () => {
 		});
 	});
 
-	it("should wait for the settle time after a cleanup, not less", async () => {
+	it("should wait for the settle time after a cleanup, not less", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { manual, native, seams } = makeSeams(OLD_FILES);
@@ -321,7 +339,9 @@ describe(clearOldSessionsAsync, () => {
 		await expect(clearing).resolves.toHaveLength(1);
 	});
 
-	it("should keep the old sessions when the signal aborts, holding no lease", async () => {
+	it("should keep the old sessions when the signal aborts, holding no lease", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { native, seams } = makeSeams(OLD_FILES);
@@ -339,7 +359,9 @@ describe(clearOldSessionsAsync, () => {
 		expect(native.cleanups).toStrictEqual([]);
 	});
 
-	it("should keep the files when the signal aborts while it waits after a cleanup", async () => {
+	it("should keep the files when the signal aborts while it waits after a cleanup", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { manual, memory, native, seams } = makeSeams(OLD_FILES);
@@ -357,7 +379,7 @@ describe(clearOldSessionsAsync, () => {
 		expect(Object.keys(memory.files())).toContain(".forge/sessions/old/supervisor.id");
 	});
 
-	it("should do nothing without a sessions directory", async () => {
+	it("should do nothing without a sessions directory", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { memory, seams } = makeSeams();

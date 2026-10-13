@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, it } from "vitest";
 
 import { resolveConfig } from "../config/resolve.ts";
 import type { ConfigLayer, ProjectType } from "../config/schema.ts";
@@ -23,7 +23,9 @@ const RBXTSC = {
 };
 
 describe(planSession, () => {
-	it("should compile, build, open, and watch with rbxtsc -w for a roblox-ts project", () => {
+	it("should compile, build, open, and watch with rbxtsc -w for a roblox-ts project", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		expect(plan("rbxts")).toStrictEqual({
@@ -35,7 +37,7 @@ describe(planSession, () => {
 		});
 	});
 
-	it("should add the watch flag after the configured compiler arguments", () => {
+	it("should add the watch flag after the configured compiler arguments", ({ expect }) => {
 		expect.assertions(1);
 
 		const { compiler } = plan("rbxts", ALL, { rbxts: { args: ["--verbose"], command: "tsc" } });
@@ -43,7 +45,7 @@ describe(planSession, () => {
 		expect(compiler).toMatchObject({ call: { args: ["--verbose", "-w"], command: "tsc" } });
 	});
 
-	it("should run no part with --no-open --no-compiler", () => {
+	it("should run no part with --no-open --no-compiler", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(plan("rbxts", { compiler: false, open: false })).toStrictEqual({
@@ -55,7 +57,9 @@ describe(planSession, () => {
 		});
 	});
 
-	it("should run only the compiler, with no compile or build step, with --no-open and for up", () => {
+	it("should run only the compiler, with no compile or build step, with --no-open and for up", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		expect(plan("rbxts", { compiler: true, open: false })).toStrictEqual({
@@ -67,13 +71,13 @@ describe(planSession, () => {
 		});
 	});
 
-	it("should run syncback on save when syncback.runOnStart is set", () => {
+	it("should run syncback on save when syncback.runOnStart is set", ({ expect }) => {
 		expect.assertions(1);
 
 		expect(plan("luau", ALL, { syncback: { runOnStart: true } }).syncback).toBeTrue();
 	});
 
-	it("should run the Luau watch command, without a compile step or diagnostics", () => {
+	it("should run the Luau watch command, without a compile step or diagnostics", ({ expect }) => {
 		expect.assertions(1);
 
 		const layer = { luau: { watch: { args: ["watch"], command: "darklua" } } };
@@ -96,7 +100,9 @@ describe(planSession, () => {
 		});
 	});
 
-	it("should run no compiler and build nothing for a Luau project with no watch command", () => {
+	it("should run no compiler and build nothing for a Luau project with no watch command", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		expect(plan("luau")).toMatchObject({ build: false, compile: false, compiler: undefined });

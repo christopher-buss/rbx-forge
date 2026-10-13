@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import {
 	createCommandContext,
@@ -56,7 +56,7 @@ function answering(answers: { choose?: string; confirm?: boolean }): Prompter {
 }
 
 describe(runInitAsync, () => {
-	it("should write a typed config file and nothing else", async () => {
+	it("should write a typed config file and nothing else", async ({ expect }) => {
 		expect.assertions(1);
 
 		const project = makeProject({ "package.json": "{}" });
@@ -68,7 +68,9 @@ describe(runInitAsync, () => {
 		});
 	});
 
-	it("should write a config that imports defineConfig and sets the project type", () => {
+	it("should write a config that imports defineConfig and sets the project type", ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		expect(renderConfigFile("rbxts")).toBe(
@@ -83,7 +85,7 @@ describe(runInitAsync, () => {
 		);
 	});
 
-	it("should report the path and project type", async () => {
+	it("should report the path and project type", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(initAsync(makeProject(), { type: "rbxts" })).resolves.toStrictEqual({
@@ -92,7 +94,7 @@ describe(runInitAsync, () => {
 		});
 	});
 
-	it("should reject an unknown --type as usage", async () => {
+	it("should reject an unknown --type as usage", async ({ expect }) => {
 		expect.assertions(1);
 
 		await expect(initAsync(makeProject(), { type: "python" })).rejects.toMatchObject({
@@ -103,7 +105,7 @@ describe(runInitAsync, () => {
 	});
 
 	describe("without a terminal", () => {
-		it("should take rbxts as the default project type and say so", async () => {
+		it("should take rbxts as the default project type and say so", async ({ expect }) => {
 			expect.assertions(2);
 
 			const project = makeProject();
@@ -115,7 +117,7 @@ describe(runInitAsync, () => {
 			]);
 		});
 
-		it("should fail with needs_confirmation when a config file exists", async () => {
+		it("should fail with needs_confirmation when a config file exists", async ({ expect }) => {
 			expect.assertions(2);
 
 			const project = makeProject({ "rbx-forge.config.ts": "old" });
@@ -128,7 +130,7 @@ describe(runInitAsync, () => {
 			expect(project.disk.files()["rbx-forge.config.ts"]).toBe("old");
 		});
 
-		it("should replace the config file with --force", async () => {
+		it("should replace the config file with --force", async ({ expect }) => {
 			expect.assertions(2);
 
 			const project = makeProject({ "rbx-forge.config.ts": "old" });
@@ -143,7 +145,7 @@ describe(runInitAsync, () => {
 	});
 
 	describe("at a terminal", () => {
-		it("should ask for the project type, offering rbxts first", async () => {
+		it("should ask for the project type, offering rbxts first", async ({ expect }) => {
 			expect.assertions(3);
 
 			const prompter = answering({ choose: "luau" });
@@ -159,7 +161,7 @@ describe(runInitAsync, () => {
 			expect(project.reporter.events).toBeEmpty();
 		});
 
-		it("should not ask for the project type when --type is given", async () => {
+		it("should not ask for the project type when --type is given", async ({ expect }) => {
 			expect.assertions(1);
 
 			const prompter = answering({});
@@ -168,7 +170,7 @@ describe(runInitAsync, () => {
 			expect(prompter.choose).not.toHaveBeenCalled();
 		});
 
-		it("should replace an existing config file when the user agrees", async () => {
+		it("should replace an existing config file when the user agrees", async ({ expect }) => {
 			expect.assertions(3);
 
 			const prompter = answering({ confirm: true });
@@ -187,7 +189,9 @@ describe(runInitAsync, () => {
 			expect(project.disk.files()["rbx-forge.config.ts"]).toBe(renderConfigFile("rbxts"));
 		});
 
-		it("should keep the config file and fail as declined when the user refuses", async () => {
+		it("should keep the config file and fail as declined when the user refuses", async ({
+			expect,
+		}) => {
 			expect.assertions(2);
 
 			const prompter = answering({ confirm: false });
@@ -206,7 +210,7 @@ describe(runInitAsync, () => {
 
 	it.for(["rbx-forge.config.json", "rbx-forge.config.mjs"])(
 		"should refuse to write beside %s, even with --force",
-		async (other) => {
+		async (other, { expect }) => {
 			expect.assertions(2);
 
 			const project = makeProject({ [other]: "{}" });
@@ -220,7 +224,7 @@ describe(runInitAsync, () => {
 		},
 	);
 
-	it("should name every other config file it found", async () => {
+	it("should name every other config file it found", async ({ expect }) => {
 		expect.assertions(1);
 
 		const project = makeProject({ "rbx-forge.config.js": "", "rbx-forge.config.json": "{}" });
@@ -230,7 +234,7 @@ describe(runInitAsync, () => {
 		});
 	});
 
-	it("should ignore files that only look like a config file", async () => {
+	it("should ignore files that only look like a config file", async ({ expect }) => {
 		expect.assertions(1);
 
 		const project = makeProject({ "rbx-forge.config.ts.bak": "old", "rbx-forge.configs": "x" });

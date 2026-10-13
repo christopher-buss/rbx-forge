@@ -1,5 +1,5 @@
 import type { Mock } from "vitest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import { ForgeError } from "../errors.ts";
@@ -83,7 +83,7 @@ async function builtAsync(edits?: BuildWatchOptions["edits"]): Promise<Harness> 
 }
 
 describe(createBuildWatch, () => {
-	it("should answer at once when the session tracks no compiler", async () => {
+	it("should answer at once when the session tracks no compiler", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { wait } = makeWatch(false);
@@ -91,7 +91,7 @@ describe(createBuildWatch, () => {
 		await expect(wait().wait).resolves.toBeUndefined();
 	});
 
-	it("should tell the status each compile's start and build", async () => {
+	it("should tell the status each compile's start and build", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { advanceAsync, lineAsync, recorder } = makeWatch();
@@ -112,7 +112,7 @@ describe(createBuildWatch, () => {
 		);
 	});
 
-	it("should return the build that ended a line, and nothing for other lines", () => {
+	it("should return the build that ended a line, and nothing for other lines", ({ expect }) => {
 		expect.assertions(2);
 
 		const { watch } = makeWatch();
@@ -121,7 +121,7 @@ describe(createBuildWatch, () => {
 		expect(watch.read(FOUND)).toMatchObject({ errors: 0 });
 	});
 
-	it("should wait for the first compile of a session that is starting", async () => {
+	it("should wait for the first compile of a session that is starting", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { advanceAsync, lineAsync, wait } = makeWatch();
@@ -140,7 +140,9 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).resolves.toBeUndefined();
 	});
 
-	it("should answer one quiet window after an edit that starts no compile", async () => {
+	it("should answer one quiet window after an edit that starts no compile", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { advanceAsync, wait } = await builtAsync();
@@ -153,7 +155,7 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).resolves.toBeUndefined();
 	});
 
-	it("should wait for the compile of a save just before the call", async () => {
+	it("should wait for the compile of a save just before the call", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { advanceAsync, lineAsync, recorder, wait } = await builtAsync();
@@ -174,7 +176,7 @@ describe(createBuildWatch, () => {
 		);
 	});
 
-	it("should answer only after the last compile of a burst of saves", async () => {
+	it("should answer only after the last compile of a burst of saves", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { advanceAsync, lineAsync, wait } = await builtAsync();
@@ -194,7 +196,9 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).resolves.toBeUndefined();
 	});
 
-	it("should answer once start lines that one summary line ended count as merged", async () => {
+	it("should answer once start lines that one summary line ended count as merged", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { advanceAsync, lineAsync, recorder, wait } = await builtAsync();
@@ -215,7 +219,7 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).resolves.toBeUndefined();
 	});
 
-	it("should settle merged start lines when the status is read", async () => {
+	it("should settle merged start lines when the status is read", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { advanceAsync, lineAsync, recorder, watch } = await builtAsync();
@@ -231,7 +235,7 @@ describe(createBuildWatch, () => {
 		expect(recorder.building.mock.lastCall).toStrictEqual([false]);
 	});
 
-	it("should fail with compile_timeout when no fresh build comes in time", async () => {
+	it("should fail with compile_timeout when no fresh build comes in time", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { advanceAsync, lineAsync, wait } = await builtAsync();
@@ -247,7 +251,7 @@ describe(createBuildWatch, () => {
 		});
 	});
 
-	it("should tell why a wait timed out before the first compile", async () => {
+	it("should tell why a wait timed out before the first compile", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { advanceAsync, wait } = makeWatch();
@@ -257,7 +261,7 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).rejects.toThrow("the first compile has not ended");
 	});
 
-	it("should tell why a wait timed out while compiles kept starting", async () => {
+	it("should tell why a wait timed out while compiles kept starting", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { advanceAsync, lineAsync, wait } = await builtAsync();
@@ -271,7 +275,7 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).rejects.toThrow("compiles kept starting");
 	});
 
-	it("should fail every wait, now and later, once the compiler exits", async () => {
+	it("should fail every wait, now and later, once the compiler exits", async ({ expect }) => {
 		expect.assertions(3);
 
 		const { lineAsync, recorder, wait, watch } = await builtAsync();
@@ -287,7 +291,9 @@ describe(createBuildWatch, () => {
 		await expect(wait().wait).rejects.toMatchObject({ code: "service_failed" });
 	});
 
-	it("should wait for the first build of a compiler that starts again after a failure", async () => {
+	it("should wait for the first build of a compiler that starts again after a failure", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { advanceAsync, lineAsync, wait, watch } = await builtAsync();
@@ -305,7 +311,9 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).resolves.toBeUndefined();
 	});
 
-	it("should answer a wait from before the compiler started with its first build", async () => {
+	it("should answer a wait from before the compiler started with its first build", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { advanceAsync, lineAsync, wait, watch } = makeWatch();
@@ -319,7 +327,9 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).resolves.toBeUndefined();
 	});
 
-	it("should wait for the builds of a compiler added to a session that tracked none", async () => {
+	it("should wait for the builds of a compiler added to a session that tracked none", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { advanceAsync, wait, watch } = makeWatch(false);
@@ -330,7 +340,7 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).rejects.toMatchObject({ code: "compile_timeout" });
 	});
 
-	it("should stay closed when a compiler starts once the session stops", async () => {
+	it("should stay closed when a compiler starts once the session stops", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { wait, watch } = makeWatch();
@@ -340,7 +350,7 @@ describe(createBuildWatch, () => {
 		await expect(wait().wait).rejects.toMatchObject({ code: "not_running" });
 	});
 
-	it("should tell when the quiet window is longer than the wait", async () => {
+	it("should tell when the quiet window is longer than the wait", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { advanceAsync, wait } = await builtAsync();
@@ -352,7 +362,7 @@ describe(createBuildWatch, () => {
 		);
 	});
 
-	it("should not wait with a timeout of 0, even while a compile runs", async () => {
+	it("should not wait with a timeout of 0, even while a compile runs", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { lineAsync, wait } = await builtAsync();
@@ -361,7 +371,7 @@ describe(createBuildWatch, () => {
 		await expect(wait(0).wait).resolves.toBeUndefined();
 	});
 
-	it("should fail every wait with not_running once the session stops", async () => {
+	it("should fail every wait with not_running once the session stops", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { recorder, wait, watch } = makeWatch();
@@ -376,7 +386,9 @@ describe(createBuildWatch, () => {
 		});
 	});
 
-	it("should settle merged start lines before it reads a late output line", async () => {
+	it("should settle merged start lines before it reads a late output line", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { advanceAsync, lineAsync, recorder } = await builtAsync();
@@ -389,7 +401,9 @@ describe(createBuildWatch, () => {
 		expect(recorder.building.mock.lastCall).toStrictEqual([false]);
 	});
 
-	it("should wait for a compile that starts after an edit the watcher sees late", async () => {
+	it("should wait for a compile that starts after an edit the watcher sees late", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const edits = vi.fn<BuildWatchOptions["edits"]>(() => EDIT);
@@ -407,7 +421,7 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).resolves.toBeUndefined();
 	});
 
-	it("should not wait longer for an edit that a compile started after", async () => {
+	it("should not wait longer for an edit that a compile started after", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { advanceAsync, wait } = await builtAsync(() => ({ at: 0, path: "src/a.ts" }));
@@ -417,7 +431,9 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).resolves.toBeUndefined();
 	});
 
-	it("should fail with edit_not_compiled when no compile starts for an edit within the pickup window", async () => {
+	it("should fail with edit_not_compiled when no compile starts for an edit within the pickup window", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { advanceAsync, wait } = await builtAsync(() => EDIT);
@@ -439,7 +455,9 @@ describe(createBuildWatch, () => {
 		});
 	});
 
-	it("should not wait again for an edit that already failed its pickup window", async () => {
+	it("should not wait again for an edit that already failed its pickup window", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { advanceAsync, wait } = await builtAsync(() => EDIT);
@@ -452,7 +470,9 @@ describe(createBuildWatch, () => {
 		await expect(second.wait).resolves.toBeUndefined();
 	});
 
-	it("should start the pickup window when a compile that started before the edit ends", async () => {
+	it("should start the pickup window when a compile that started before the edit ends", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { advanceAsync, lineAsync, wait } = await builtAsync(() => {
@@ -474,7 +494,9 @@ describe(createBuildWatch, () => {
 		await expect(waiting.wait).rejects.toMatchObject({ code: "edit_not_compiled" });
 	});
 
-	it("should tell why a wait timed out before a compile started for an edit", async () => {
+	it("should tell why a wait timed out before a compile started for an edit", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const { advanceAsync, wait } = await builtAsync(() => EDIT);
