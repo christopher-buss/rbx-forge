@@ -18,6 +18,19 @@ export interface ActivePlugin {
 }
 
 /**
+ * Start the plugin. Without a capture URL it returns at once: no request, no
+ * output, no UI.
+ *
+ * @param root - Where forge puts the capture instance.
+ * @param io - HTTP, output, and engine services.
+ * @returns The active plugin; `undefined` when inert.
+ */
+export function startPlugin(root: Instance, io: PluginIo): ActivePlugin | undefined {
+	const url = findCaptureUrl(root);
+	return url === undefined ? undefined : { io, url };
+}
+
+/**
  * Find the forge capture URL.
  *
  * @param root - Where forge puts the capture instance.
@@ -30,18 +43,5 @@ function findCaptureUrl(root: Instance): string | undefined {
 	}
 
 	const url = capture.GetAttribute(CAPTURE_URL_ATTRIBUTE);
-	return typeIs(url, "string") && url !== "" ? url : undefined;
-}
-
-/**
- * Start the plugin. Without a capture URL it returns at once: no request, no
- * output, no UI.
- *
- * @param root - Where forge puts the capture instance.
- * @param io - HTTP, output, and engine services.
- * @returns The active plugin; `undefined` when inert.
- */
-export function startPlugin(root: Instance, io: PluginIo): ActivePlugin | undefined {
-	const url = findCaptureUrl(root);
-	return url === undefined ? undefined : { io, url };
+	return url !== "" && typeIs(url, "string") ? url : undefined;
 }

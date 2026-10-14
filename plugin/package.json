@@ -2,19 +2,20 @@
 	"name": "@rbx-forge/studio-plugin",
 	"version": "0.0.0",
 	"private": true,
-	"type": "module",
 	"description": "The forge Studio plugin, built to ForgePlugin.rbxm",
 	"license": "MIT",
+	"type": "module",
 	"scripts": {
 		"build": "rbxtsc --type model --project tsconfig.build.json && rojo build default.project.json --output ForgePlugin.rbxm",
 		"test": "rbxtsc --type game --rojo test.project.json && rojo build test.project.json --output test.rbxl && jest-roblox"
 	},
 	"devDependencies": {
 		"@isentinel/jest-roblox": "catalog:plugin",
+		"@isentinel/roblox-ts": "catalog:plugin",
+		"@isentinel/tsconfig": "catalog:tsc",
 		"@rbxts/compiler-types": "catalog:plugin",
 		"@rbxts/jest": "catalog:plugin",
 		"@rbxts/jest-globals": "catalog:plugin",
-		"@rbxts/types": "catalog:plugin",
-		"roblox-ts": "catalog:plugin"
+		"@rbxts/types": "catalog:plugin"
 	}
 }

@@ -13,7 +13,7 @@ function createIo(): { io: PluginIo; output: jest.Mock; request: jest.Mock } {
 			history: game.GetService("ChangeHistoryService"),
 			serialization: game.GetService("SerializationService"),
 		},
-	} as unknown as PluginIo;
+	};
 	return { io, output, request };
 }
 
@@ -34,7 +34,8 @@ describe("startPlugin", () => {
 
 		const { io, output, request } = createIo();
 		const root = new Instance("Folder");
-		new Instance("Configuration", root).Name = CAPTURE_INSTANCE;
+		const capture = new Instance("Configuration", root);
+		capture.Name = CAPTURE_INSTANCE;
 
 		expect(startPlugin(root, io)).toBeUndefined();
 		expect(request).never.toHaveBeenCalled();
@@ -62,7 +63,7 @@ describe("startPlugin", () => {
 		capture.Name = CAPTURE_INSTANCE;
 		capture.SetAttribute(CAPTURE_URL_ATTRIBUTE, "http://127.0.0.1:1/x");
 
-		expect(startPlugin(root, io)?.url).toBe("http://127.0.0.1:1/x");
+		expect(startPlugin(root, io)).toMatchObject({ url: "http://127.0.0.1:1/x" });
 		expect(request).never.toHaveBeenCalled();
 		expect(output).never.toHaveBeenCalled();
 	});

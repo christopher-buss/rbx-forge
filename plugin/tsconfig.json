@@ -1,18 +1,4 @@
 {
-	"compilerOptions": {
-		"allowSyntheticDefaultImports": true,
-		"downlevelIteration": true,
-		"module": "commonjs",
-		"moduleDetection": "force",
-		"moduleResolution": "Node",
-		"noLib": true,
-		"strict": true,
-		"target": "ESNext",
-		"typeRoots": ["node_modules/@rbxts"],
-		"rootDir": "src",
-		"outDir": "out",
-		"incremental": true,
-		"tsBuildInfoFile": "out/tsconfig.tsbuildinfo"
-	},
+	"extends": "@isentinel/tsconfig/roblox",
 	"include": ["src"]
 }
