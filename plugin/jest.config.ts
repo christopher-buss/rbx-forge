@@ -5,6 +5,14 @@ export default defineConfig({
 	placeFile: "test.rbxl",
 	rojoProject: "test.project.json",
 	test: {
+		collectCoverage: true,
+		coveragePathIgnorePatterns: ["**/main.server.ts"],
+		coverageThreshold: {
+			branches: 100,
+			functions: 100,
+			lines: 100,
+			statements: 100,
+		},
 		projects: [
 			{
 				test: {
