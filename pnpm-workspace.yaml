@@ -11,7 +11,9 @@ minimumReleaseAgeExclude:
 
 minimumReleaseAgeExcludePrune: true
 
+# The plugin's Jest runtime (plugin/test.project.json).
 publicHoistPattern:
+  - "@rbxts-js/*"
   - "@typescript/*"
 
 saveExact: true
@@ -22,6 +24,9 @@ trustPolicyIgnoreAfter: 10080 # 7 days
 updateConfig:
   ignoreDependencies:
     - typescript
+
+packages:
+  - plugin
 
 overrides:
   "@typescript-eslint/eslint-plugin": 8.70.1
@@ -42,9 +47,10 @@ catalogs:
     "@commitlint/cli": 21.2.3
     "@commitlint/config-conventional": 21.2.3
     "@commitlint/types": 21.2.3
-    "@isentinel/eslint-config": 6.0.0
+    "@isentinel/eslint-config": 6.1.0
     "@vitest/eslint-plugin": 1.6.27
     eslint: 10.11.0
+    eslint-plugin-jest: 29.16.0
     eslint-plugin-jest-extended: 3.0.1
     eslint-plugin-n: 18.3.0
     eslint-plugin-pnpm: 1.9.1
@@ -60,6 +66,13 @@ catalogs:
     "@stryker-mutator/vitest-runner": 10.0.0
   native:
     "@napi-rs/cli": 3.10.8
+  plugin:
+    "@isentinel/jest-roblox": 0.4.6
+    "@isentinel/roblox-ts": 4.0.12
+    "@rbxts/compiler-types": 3.0.0-types.0
+    "@rbxts/jest": 3.16.0-ts.2
+    "@rbxts/jest-globals": 3.16.0-ts.2
+    "@rbxts/types": 1.0.957
   release:
     bumpp: 12.3.0
   runtime:

@@ -5,9 +5,9 @@ import path from "node:path";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
-import { readVariable } from "../process/environment.ts";
 import { runRojoAsync } from "../rojo/rojo.ts";
 import type { RojoServerInfo } from "../seams/network.ts";
+import { studioPluginsFolder } from "./plugins-folder.ts";
 import patched from "./rojo-plugin/patched.json" with { type: "json" };
 
 /**
@@ -96,20 +96,9 @@ export async function prepareRojoPluginAsync(
 	return FORGE;
 }
 
-function pluginPath({ env, seams }: CommandContext): string | undefined {
-	const { platform } = seams.host;
-	const home = readVariable(env, platform === "win32" ? "USERPROFILE" : "HOME", platform);
-	if (home === undefined || home === "") {
-		return undefined;
-	}
-
-	if (platform === "win32") {
-		return path.join(home, "AppData", "Local", "Roblox", "Plugins", "RojoManagedPlugin.rbxm");
-	}
-
-	return platform === "darwin"
-		? path.join(home, "Documents", "Roblox", "Plugins", "RojoManagedPlugin.rbxm")
-		: undefined;
+function pluginPath(context: CommandContext): string | undefined {
+	const folder = studioPluginsFolder(context);
+	return folder === undefined ? undefined : path.join(folder, "RojoManagedPlugin.rbxm");
 }
 
 function manual(context: CommandContext, reason: string): PluginCapabilities {

@@ -7,6 +7,8 @@
  * Each test cleans up only the Studio returned by its launcher or recorded
  * in its session, through a PID and start-time pin. The managed Rojo plugin
  * must already have the current patch; these tests never install or patch it.
+ * Every direct launch installs the inert forge plugin in the user's Plugins
+ * folder, as forge does for users; a current copy is left unwritten.
  *
  * Places (`test/fixtures/studio/`):
  *
@@ -25,6 +27,7 @@ import {
 	copyFileSync,
 	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
 	statSync,
 	writeFileSync,
@@ -138,7 +141,7 @@ async function makeRealProjectAsync(fixturePlace: string): Promise<Fixture> {
 	return { ...fixture, place: path.join(fixture.project, PLACE) };
 }
 
-async function compatibilitySnapshotAsync(): Promise<Fixture> {
+async function compatibilitySnapshotAsync(fixturePlace = "compatibility.rbxl"): Promise<Fixture> {
 	const fixture = await makeFixtureAsync({ projectType: "luau" });
 	const directory = path.join(fixture.project, "node_modules", "snapshot-rojo");
 	mkdirSync(directory, { recursive: true });
@@ -156,7 +159,7 @@ async function compatibilitySnapshotAsync(): Promise<Fixture> {
 import path from 'node:path';
 const output = process.argv[process.argv.indexOf('--output') + 1];
 mkdirSync(path.dirname(output), { recursive: true });
-copyFileSync(${JSON.stringify(path.join(PLACES, "compatibility.rbxl"))}, output);`,
+copyFileSync(${JSON.stringify(path.join(PLACES, fixturePlace))}, output);`,
 	);
 	return fixture;
 }
@@ -273,6 +276,73 @@ function notOwnedBy(testContext: Pick<TestContext, "expect">, studio: number): u
 	return testContext.expect.toSatisfy((owner: number) => owner !== studio);
 }
 
+/** The forge plugin this build ships. */
+const BUNDLED_PLUGIN = path.join(import.meta.dirname, "../../dist/forge-plugin/ForgePlugin.rbxm");
+
+/**
+ * The installed forge plugin in the user's Plugins folder.
+ *
+ * @returns Its path.
+ */
+function installedPlugin(): string {
+	const home = env["RBX_FORGE_TEST_REAL_USERPROFILE"] ?? "";
+	return path.join(home, "AppData/Local/Roblox/Plugins/ForgePlugin.rbxm");
+}
+
+/**
+ * The log of the Studio that opened `place`: Studio writes its command line,
+ * with the place, at the top of its log.
+ *
+ * @param place - The snapshot this test opened.
+ * @returns The log's lines; empty until Studio writes it.
+ */
+function studioLogLines(place: string): Array<string> {
+	const logs = path.join(env["RBX_FORGE_TEST_REAL_LOCALAPPDATA"] ?? "", "Roblox", "logs");
+	const needle = place.replaceAll("\\", "/");
+	return (
+		readdirSync(logs)
+			.filter((file) => file.includes("_Studio_"))
+			.map((name) => readFileSync(path.join(logs, name), "utf8").split(/\r?\n/u))
+			.find((lines) => {
+				return lines
+					.slice(0, 20)
+					.some((line) => line.replaceAll("\\", "/").includes(needle));
+			}) ?? []
+	);
+}
+
+function hasRunForgePlugin(place: string): boolean {
+	return studioLogLines(place).some((line) => line.includes("loadPlugin user_ForgePlugin.rbxm"));
+}
+
+/**
+ * Open a saved snapshot on the hidden desktop; the test's end stops its Studio.
+ *
+ * @returns The snapshot, and the installed forge plugin's modification time.
+ */
+async function openPluginSnapshotAsync(): Promise<{ place: string; pluginModified: number }> {
+	const fixture = await compatibilitySnapshotAsync("saved.rbxl");
+	const pin = studioCleanup();
+	const opened = await runForgeAsync(
+		fixture,
+		["open", "--desktop", "hidden", "--json"],
+		realVariables(),
+	);
+	const { place, studio } = parseOpened(opened.result.data);
+	assert(opened.status === 0 && studio !== null, JSON.stringify(opened.result));
+	pin(studio);
+	const { mtimeMs, size } = statSync(installedPlugin());
+	note({ command: "forge-plugin-open", plugin: size, result: opened.result });
+	return { place, pluginModified: mtimeMs };
+}
+
+/**
+ * Lines in which Studio reads and loads a user plugin, and restores its IDE
+ * state.
+ */
+const PLUGIN_LOAD_LINE =
+	/\[FLog::(?:PluginFileRead|PluginLoadingEnhanced|PluginDebugState)\] (?:Hashing Plugin '|Plugin file read '|loadPlugin |Restoring (?:IDE|debugger) state for plugin `)user_ForgePlugin\.rbxm/u;
+
 function saveOutcome(run: UpRun): string {
 	return run.status === 0 ? "saved" : JSON.stringify(run.result);
 }
@@ -318,6 +388,36 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 				.toBeFalse();
 			expect(pinned.isAlive()).toBeTrue();
 			expect(foregroundOwner()).toStrictEqual(notOwnedBy({ expect }, studio.pid));
+		},
+	);
+
+	it(
+		"installs the forge plugin, which Studio loads and which stays inert",
+		{ timeout: 300_000 },
+		async ({ expect }) => {
+			expect.assertions(7);
+
+			const first = await openPluginSnapshotAsync();
+			const second = await openPluginSnapshotAsync();
+
+			expect(readFileSync(installedPlugin())).toStrictEqual(readFileSync(BUNDLED_PLUGIN));
+			// The second launch found a current copy and left it unwritten.
+			expect(second.pluginModified).toBe(first.pluginModified);
+
+			await expect
+				.poll(() => hasRunForgePlugin(first.place), { interval: 500, timeout: OPEN_MS })
+				.toBeTrue();
+			await expect
+				.poll(() => existsSync(`${first.place}.lock`), { interval: 100, timeout: OPEN_MS })
+				.toBeTrue();
+
+			await sleep(QUIET_MS);
+			const lines = studioLogLines(first.place);
+			const mentions = lines.filter((line) => line.includes("ForgePlugin"));
+
+			expect(mentions).not.toBeEmpty();
+			expect(mentions.filter((line) => !PLUGIN_LOAD_LINE.test(line))).toStrictEqual([]);
+			expect(lines.filter((line) => line.includes("ForgeCapture"))).toStrictEqual([]);
 		},
 	);
 

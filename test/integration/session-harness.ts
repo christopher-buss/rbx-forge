@@ -41,6 +41,8 @@ import type { WorkerRecord } from "../helpers/worker-log.ts";
 import { killLoggedWorkersAsync, readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
 
 const SUPERVISOR = path.join(import.meta.dirname, "..", "..", "src", "supervisor.ts");
+/** The forge plugin a supervisor run from source installs. */
+const FORGE_PLUGIN_MODEL = path.join(import.meta.dirname, "../fixtures/models/forge-plugin.rbxm");
 const FAKE_WORKER = path.join(import.meta.dirname, "..", "fixtures", "bin", "fake-worker.ts");
 const PATH_NAME = /^path$/i;
 const POLL_MS = 50;
@@ -377,6 +379,7 @@ function environmentFor({
 			FIXTURE_LOG: log,
 			PATH: path.join(project, "fixture-bin"),
 			RBX_FORGE_NATIVE_DIR: NATIVE_DIRECTORY,
+			RBX_FORGE_PLUGIN_MODEL: FORGE_PLUGIN_MODEL,
 			RBX_FORGE_TEST_PAUSE_DIR: pauses,
 			...variables,
 		};

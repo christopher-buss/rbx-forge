@@ -14,6 +14,7 @@
 import { appendFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import packageJson from "../package.json" with { type: "json" };
 import { ForgeError, toForgeError } from "./errors.ts";
@@ -59,6 +60,11 @@ function readRequest(): ForgeError | SessionRequest {
  */
 function createSupervisorSeams(): Seams {
 	return createNodeSeams({
+		// Runs from source name a model (`RBX_FORGE_PLUGIN_MODEL`); builds ship
+		// one.
+		forgePluginPath:
+			process.env["RBX_FORGE_PLUGIN_MODEL"] ??
+			fileURLToPath(new URL("forge-plugin/ForgePlugin.rbxm", import.meta.url)),
 		input: process.stdin,
 		nativeDirectory: process.env["RBX_FORGE_NATIVE_DIR"],
 		noInstalledStudio: process.env["RBX_FORGE_TEST_NO_INSTALLED_STUDIO"] === "1",

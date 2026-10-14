@@ -11,11 +11,18 @@ task.spawn(function()
 			sequence += 1
 			local probe = workspace:FindFirstChild("ForgeSyncProbe")
 			local value = if probe and probe:IsA("StringValue") then probe.Value else ""
-			local query = "?name=" .. HttpService:UrlEncode(game.Name)
-				.. "&value=" .. HttpService:UrlEncode(value)
-				.. "&connection=" .. HttpService:UrlEncode(workspace:GetAttribute("__Rojo_ConnectionUrl") or "")
-				.. "&sequence=" .. tostring(sequence)
-				.. "&loadCount=" .. tostring(game:GetAttribute("__ForgeSyncTestLoads_" .. game:GetAttribute("__ForgeSyncTestLaunch")) or 0)
+			local query = "?name="
+				.. HttpService:UrlEncode(game.Name)
+				.. "&value="
+				.. HttpService:UrlEncode(value)
+				.. "&connection="
+				.. HttpService:UrlEncode(workspace:GetAttribute("__Rojo_ConnectionUrl") or "")
+				.. "&sequence="
+				.. tostring(sequence)
+				.. "&loadCount="
+				.. tostring(
+					game:GetAttribute("__ForgeSyncTestLoads_" .. game:GetAttribute("__ForgeSyncTestLaunch")) or 0
+				)
 			requestThread = task.spawn(function()
 				pcall(HttpService.GetAsync, HttpService, endpoint .. query, true)
 			end)

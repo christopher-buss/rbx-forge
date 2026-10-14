@@ -9,6 +9,7 @@ export default defineConfig({
 	copy({ outDir }) {
 		const to = path.join(outDir, "rojo-plugin");
 		return [
+			{ from: "plugin/ForgePlugin.rbxm", to: path.join(outDir, "forge-plugin") },
 			{ from: "src/studio/rojo-plugin/LICENSE.txt", to },
 			{ from: "src/studio/rojo-plugin/NOTICE.txt", to },
 			{ from: "src/studio/rojo-plugin/stock.json", to },

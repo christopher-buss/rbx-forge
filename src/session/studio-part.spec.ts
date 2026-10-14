@@ -130,6 +130,21 @@ function fixture(
 }
 
 describe("session Studio plugin capabilities", () => {
+	it("should install the forge plugin beside the managed Rojo plugin", async ({ expect }) => {
+		expect.assertions(1);
+
+		const sources = SCRIPTS.map(
+			({ hash, source }) => `-- rbx-forge patch ${VERSION} stock ${hash}
+${source}`,
+		);
+		const run = fixture([...sources, "return { protocolVersion = 5 }"]);
+		await run.open();
+
+		expect(run.memory.files()["Documents/Roblox/Plugins/ForgePlugin.rbxm"]).toBe(
+			"forge plugin model",
+		);
+	});
+
 	it("should recognize the current patched bodies without rewriting them", async ({ expect }) => {
 		expect.assertions(2);
 
@@ -229,7 +244,7 @@ describe("session Studio plugin capabilities", () => {
 	it("should cancel before plugin preparation without installing or writing", async ({
 		expect,
 	}) => {
-		expect.assertions(4);
+		expect.assertions(5);
 
 		const run = fixture([stock.App, stock.ServeSession, "protocolVersion = 5,"], false, true, {
 			beforePrepare: (abort) => {
@@ -245,6 +260,7 @@ describe("session Studio plugin capabilities", () => {
 		expect(run.processRunner).not.toHaveBeenCalled();
 		expect(write).not.toHaveBeenCalled();
 		expect(run.close).toHaveBeenCalledOnce();
+		expect(run.memory.files()["Documents/Roblox/Plugins/ForgePlugin.rbxm"]).toBeUndefined();
 	});
 
 	it("should cancel after reading a current plugin before Studio launches", async ({

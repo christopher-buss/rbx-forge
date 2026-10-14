@@ -56,9 +56,10 @@ title fails commitlint, or whose title it cannot read.
 ## Commands
 
 ```bash
-pnpm build             # tsdown → dist/{cli,supervisor,index}.mjs
+pnpm build             # build:plugin, then tsdown → dist/{cli,supervisor,index}.mjs
 pnpm build:all         # build:native, build:reaper, then build
 pnpm build:native      # napi addon into reaper/target/napi
+pnpm build:plugin      # rbxtsc + rojo → dist/forge-plugin/ForgePlugin.rbxm
 pnpm build:reaper      # forge-reaper binary next to the addon
 pnpm typecheck         # tsc --build (TypeScript 7 via the @typescript/native alias)
 pnpm lint              # isentinel-lint: oxlint, then ESLint (also Markdown, cspell)
@@ -66,6 +67,7 @@ pnpm knip
 pnpm test:unit         # 100% coverage threshold
 pnpm test:integration  # needs build:native and build:reaper
 pnpm test:e2e          # needs build:all
+pnpm test:plugin       # plugin specs in a Studio of their own
 pnpm mutation          # Stryker; the floor only moves up
 pnpm release           # bumpp; the preversion gate runs every local test first
 cargo test --manifest-path reaper/Cargo.toml
@@ -75,7 +77,8 @@ A fresh worktree needs `pnpm build:all` before integration or e2e tests; a
 worktree from `wt`, Claude Code, or T3 Code starts it in the background
 (`.config/wt.toml`). `pnpm test:other-user` runs only in the CI job that creates
 a second local user. Before a task is done, lint, typecheck, knip, and every
-test project must pass.
+test project must pass; on Windows, `pnpm test:plugin` too after a change in
+`plugin/`.
 
 ## Test levels
 
@@ -87,6 +90,9 @@ test project must pass.
   builds projects and stages old sessions.
 - **E2E** (`test/e2e/`): the built CLI as a subprocess in a temp fixture
   project. Assert only NDJSON, exit codes, files, and the process table.
+- **Plugin** (`plugin/src/*.spec.ts`): jest-roblox specs, run by
+  `pnpm test:plugin` through the local studio-cli backend, which starts its own
+  Studio. A Windows pre-push hk step.
 - **Fixtures**: `test/fixtures/bin/fake-worker.ts` plays rojo, the compiler, and
   hooks; its header lists the environment variables that shape its process tree.
   `test/helpers/fixture-project.ts` makes e2e projects.

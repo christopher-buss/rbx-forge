@@ -1,0 +1,8 @@
+{
+	"name": "ForgePlugin",
+	"tree": {
+		"$className": "Folder",
+		"include": { "$path": "include" },
+		"plugin": { "$path": "build" }
+	}
+}

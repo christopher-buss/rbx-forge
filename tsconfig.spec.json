@@ -21,6 +21,7 @@
 		"test/**/*.ts",
 		"test/fixtures/rojo-plugin-v2.json",
 		"scripts/**/*.ts",
-		"*.config.ts"
+		"*.config.ts",
+		"plugin/*.config.ts"
 	]
 }

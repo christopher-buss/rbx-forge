@@ -1,4 +1,10 @@
-import { isentinel } from "@isentinel/eslint-config";
+import { GLOB_SRC, GLOB_TESTS, isentinel } from "@isentinel/eslint-config";
+
+const PLUGIN_SRC = `plugin/src/${GLOB_SRC}`;
+const PLUGIN_TESTS = GLOB_TESTS.map((glob) => `plugin/src/${glob}`);
+const NODE_TESTS = ["src", "scripts", "test"].flatMap((directory) => {
+	return GLOB_TESTS.map((glob) => `${directory}/${glob}`);
+});
 
 export default isentinel(
 	{
@@ -11,14 +17,16 @@ export default isentinel(
 			"reports/**",
 			".agents/**",
 			".claude/**",
+			"plugin/{build,include,out,.jest-roblox}/**",
 		],
 		namedConfigs: true,
 		naming: true,
 		oxlint: "native",
 		pnpm: true,
-		roblox: false,
+		roblox: { files: [PLUGIN_SRC], filesTypeAware: [PLUGIN_SRC] },
 		test: {
-			vitest: { extended: true, typecheck: true },
+			jest: { extended: true, files: PLUGIN_TESTS },
+			vitest: { extended: true, files: NODE_TESTS, typecheck: true },
 		},
 		type: "package",
 		typescript: {

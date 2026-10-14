@@ -145,7 +145,9 @@ default. Rojo 7.7.0 and 7.7.1 share the supported stock sources; other versions
 are preserved when their sources are unrecognized, with a warning that names the
 plugin and server Rojo versions or reports hand edits. Restore the stock plugin
 with the project's `rojo plugin install`, then restart Studio. See
-[Managed Rojo plugin](./docs/studio.md#managed-rojo-plugin).
+[Managed Rojo plugin](./docs/studio.md#managed-rojo-plugin). Every direct Studio
+launch also installs forge's own Studio plugin; it stays inert in a Studio forge
+does not serve. See [Forge plugin](./docs/studio.md#forge-plugin).
 
 A Studio that already had the place open when the session attached it is a found
 Studio (`origin: "found"` in `status`; a Studio the session opened is `forge`).

@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -17,8 +18,10 @@ const USER_ID = process.getuid?.();
 function makeSeams(
 	nativeDirectory?: string,
 	skipInstalledStudio = false,
+	forgePluginPath = "/forge/forge-plugin/ForgePlugin.rbxm",
 ): ReturnType<typeof createNodeSeams> {
 	return createNodeSeams({
+		forgePluginPath,
 		input: new PassThrough(),
 		nativeDirectory,
 		noInstalledStudio: skipInstalledStudio,
@@ -28,6 +31,18 @@ function makeSeams(
 }
 
 describe(createNodeSeams, () => {
+	it("should read the bundled forge plugin from disk", ({ expect }) => {
+		expect.assertions(1);
+
+		const directory = makeTemporaryDirectory();
+		const model = path.join(directory, "ForgePlugin.rbxm");
+		writeFileSync(model, "model");
+
+		const decoder = new TextDecoder();
+
+		expect(decoder.decode(makeSeams(undefined, false, model).readForgePlugin())).toBe("model");
+	});
+
 	it("should read and write the real disk", ({ expect }) => {
 		expect.assertions(1);
 
@@ -181,6 +196,7 @@ describe(createNodeSeams, () => {
 
 		const input = new PassThrough();
 		const { prompter } = createNodeSeams({
+			forgePluginPath: "/forge/forge-plugin/ForgePlugin.rbxm",
 			input,
 			nativeDirectory: undefined,
 			noInstalledStudio: false,

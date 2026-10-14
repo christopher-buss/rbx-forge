@@ -110,6 +110,17 @@ placement.
 record hidden and shown windows on the user's desktop. `stop` and `down` also
 close hidden windows and end a Studio blocked by a modal dialog at once.
 
+## Forge plugin
+
+Before every direct Studio launch (sessions and `forge open` snapshots), forge
+installs its own plugin, `ForgePlugin.rbxm`, in the same Plugins folder as the
+managed Rojo plugin. Forge writes it atomically and leaves a byte-equal copy
+alone, so an open Studio does not reload it. Found Studios, and launches through
+the platform launcher, install nothing. The plugin loads in every Studio and
+does nothing (no requests, no output, no UI) unless the place holds a forge
+capture URL. A write failure fails the launch with `forge_plugin_write_failed`
+(exit 8).
+
 ## Managed Rojo plugin
 
 After a successful place build, immediately before attempting a new direct

@@ -33,6 +33,7 @@ export type ForgeErrorCode =
 	| "detach_unsupported"
 	| "edit_not_compiled"
 	| "endpoint_in_use"
+	| "forge_plugin_write_failed"
 	| "hook_depth_exceeded"
 	| "hook_failed"
 	| "identity_mismatch"
@@ -120,6 +121,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	endpoint_in_use: {
 		exitCode: EXIT_FAILURE,
 		text: "Another process holds the session's control endpoint, or its directory is not safe.",
+	},
+	forge_plugin_write_failed: {
+		exitCode: EXIT_PLUGIN_WRITE_FAILED,
+		text: "The forge Studio plugin could not be installed.",
 	},
 	hook_depth_exceeded: {
 		exitCode: EXIT_FAILURE,
