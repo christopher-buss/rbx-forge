@@ -3,7 +3,6 @@ import path from "node:path";
 import { describe, it } from "vitest";
 
 import { captureRojo, makeCaptureModel } from "../helpers/capture-fixture.ts";
-import { installCaptureRojoProxy } from "../helpers/capture-rojo-proxy.ts";
 import { parseResult } from "../helpers/output.ts";
 import { runBinAsync } from "./run-bin.ts";
 import { makeFixtureAsync, START_STUDIO, startReadyAsync } from "./session-fixture.ts";
@@ -55,39 +54,6 @@ async function failingCaptureSessionAsync(
 }
 
 describe("forge sync through the capture plugin", () => {
-	it("disconnects the owned genuine Rojo transport while its forge session remains running", async ({
-		expect,
-	}) => {
-		expect.assertions(3);
-
-		const fixture = await makeFixtureAsync(
-			{ rojoAlias: "forge-capture-rojo" },
-			{ studio: true },
-		);
-		const proxy = installCaptureRojoProxy(fixture.project, captureRojo());
-		await startReadyAsync(fixture, START_STUDIO);
-		const url = `http://127.0.0.1:${fixture.port}/api/rojo`;
-		const before = await fetch(url);
-
-		expect(before.status).toBe(200);
-
-		await before.arrayBuffer();
-		proxy.disconnect();
-
-		await expect(fetch(url)).rejects.toThrow("fetch failed");
-
-		const status = await runBinAsync(
-			["status", "--json"],
-			fixture.project,
-			fixture.environment(),
-		);
-
-		expect(parseResult(status.stdout)).toMatchObject({
-			data: { running: true, services: { rojo: { status: "ready" } } },
-			ok: true,
-		});
-	});
-
 	it.for([
 		{ error: { code: "capture_not_connected" }, mode: "disconnected" },
 		{

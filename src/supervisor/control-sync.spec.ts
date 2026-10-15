@@ -3,9 +3,12 @@ import { fromPartial } from "@total-typescript/shoehorn";
 import { assert, describe, it } from "vitest";
 
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
+import type { CaptureWarning } from "../capture/protocol.ts";
 import { ForgeError } from "../errors.ts";
 import { createPartRequests } from "../session/part-requests.ts";
 import type { PartHandlers } from "../session/part-requests.ts";
+import { createSessionSync } from "../session/session-sync.ts";
+import type { SyncbackAttempt } from "../session/session-sync.ts";
 import type { StudioSave } from "../studio/save-studio.ts";
 import { controlHandlers } from "./control.ts";
 
@@ -34,6 +37,88 @@ function captureWhileIdle(release: Promise<void>): NonNullable<PartHandlers["sav
 }
 
 describe("capture-based sync control", () => {
+	it("preserves a syncback failure when the capture has no warnings", async ({ expect }) => {
+		expect.assertions(1);
+
+		const failure = new ForgeError("process_failed", "Rojo exited.", {
+			details: { exitCode: 2 },
+		});
+		const parts = createPartRequests();
+		parts.attach(fromPartial({ save: async () => SAVED }));
+		const sync = createSessionSync();
+		sync.attach(async () => ({ error: failure, ok: false }));
+		const handlers = controlHandlers(
+			fromPartial({
+				clock: createManualClock().clock,
+				parts,
+				saveMethod: "capture",
+				sessionId: "s1",
+				sync,
+			}),
+		);
+		assert(handlers.sync !== undefined);
+
+		await expect(handlers.sync({})).rejects.toBe(failure);
+	});
+
+	it("keeps consumed capture warnings when a syncback hook fails", async ({ expect }) => {
+		expect.assertions(2);
+
+		const warning = {
+			property: "StreamingTargetRadius",
+			reason: "unreadable",
+			service: "Workspace",
+		} satisfies CaptureWarning;
+		const captures = [
+			{ ...SAVED, warnings: [warning] },
+			{ ...SAVED, warnings: [] },
+		];
+		const parts = createPartRequests();
+		parts.attach(
+			fromPartial({
+				save: async () => {
+					const capture = captures.shift();
+					assert(capture !== undefined);
+					return capture;
+				},
+			}),
+		);
+		let attempt: SyncbackAttempt = {
+			error: new ForgeError("hook_failed", "Lint failed.", {
+				details: { hooks: [] },
+				hint: "Fix the hook.",
+			}),
+			ok: false,
+		};
+		const sync = createSessionSync();
+		sync.attach(async () => attempt);
+		const handlers = controlHandlers(
+			fromPartial({
+				clock: createManualClock().clock,
+				parts,
+				saveMethod: "capture",
+				sessionId: "s1",
+				sync,
+			}),
+		);
+		assert(handlers.sync !== undefined);
+
+		await expect(handlers.sync({})).rejects.toMatchObject({
+			code: "hook_failed",
+			details: { captureWarnings: [warning], hooks: [] },
+			hint: "Fix the hook.",
+			message: "Lint failed.",
+		});
+
+		attempt = {
+			hooks: [],
+			ok: true,
+			value: { durationMs: 1, input: SAVED.place, project: "default.project.json" },
+		};
+
+		await expect(handlers.sync({})).resolves.toMatchObject({ capture: { warnings: [] } });
+	});
+
 	it("shares one capture queue between an explicit save and sync", async ({ expect }) => {
 		expect.assertions(1);
 

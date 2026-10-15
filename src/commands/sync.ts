@@ -1,6 +1,6 @@
 import { type } from "arktype";
 
-import { emitCaptureWarnings } from "../capture/warnings.ts";
+import { emitCaptureFailureWarnings, emitCaptureWarnings } from "../capture/warnings.ts";
 import { findSession } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import { callSessionAsync } from "../ipc/client.ts";
@@ -39,6 +39,15 @@ const syncResult = type({
  *   `hook_failed` with the hook results in `details.hooks`.
  */
 export async function runSyncAsync(context: CommandContext): Promise<CommandResult> {
+	try {
+		return await syncAsync(context);
+	} catch (err) {
+		emitCaptureFailureWarnings(context.reporter, err);
+		throw err;
+	}
+}
+
+async function syncAsync(context: CommandContext): Promise<CommandResult> {
 	const session = findSession(context.seams.fileSystem, forgeFiles(context.cwd));
 	if (session === undefined) {
 		throw new ForgeError("not_running", "No session runs for this project.", {

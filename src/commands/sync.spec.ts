@@ -151,20 +151,43 @@ describe(runSyncAsync, () => {
 	});
 
 	it("should fail with the run's own error, its hook results kept", async ({ expect }) => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const ipc = createMemoryTransport();
 		const { context, memory } = makeContext(ipc);
 		const session = await serveFakeSessionAsync(memory, ipc);
+		const warning = {
+			property: "StreamingTargetRadius",
+			reason: "unreadable",
+			service: "Workspace",
+		};
 		session.sync = () => {
-			throw new ForgeError("hook_failed", "lint failed.", { details: { hooks: [HOOK] } });
+			throw new ForgeError("hook_failed", "lint failed.", {
+				details: { captureWarnings: [warning], hooks: [HOOK] },
+			});
 		};
 
-		await expect(runSyncAsync(context)).rejects.toMatchObject({
+		const events: Array<unknown> = [];
+		const reporter = createJsonReporter({
+			stderr: () => {},
+			stdout: (line) => {
+				events.push(JSON.parse(line));
+			},
+		});
+
+		await expect(runSyncAsync({ ...context, reporter })).rejects.toMatchObject({
 			code: "hook_failed",
-			details: { hooks: [HOOK] },
+			details: { captureWarnings: [warning], hooks: [HOOK] },
 			message: "lint failed.",
 		});
+		expect(events).toStrictEqual([
+			{
+				...warning,
+				message:
+					"Workspace.StreamingTargetRadius cannot be captured; set it in the project file.",
+				type: "warning",
+			},
+		]);
 	});
 
 	it("should fail with internal_error when the answer is not a sync result", async ({
