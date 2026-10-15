@@ -4,6 +4,7 @@ import { assert, describe, it } from "vitest";
 
 import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
+import type { SaveMethod } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import { createPartRequests } from "../session/part-requests.ts";
 import type { PartHandlers } from "../session/part-requests.ts";
@@ -19,7 +20,7 @@ const SAVED: StudioSave = {
 	place: "/project/game.rbxl",
 };
 
-function saveControl(save?: PartHandlers["save"]) {
+function saveControl(save?: PartHandlers["save"], saveMethod?: SaveMethod) {
 	const manual = createManualClock();
 	const parts = createPartRequests();
 	parts.attach(fromPartial({ save }));
@@ -27,6 +28,7 @@ function saveControl(save?: PartHandlers["save"]) {
 		fromPartial({
 			clock: manual.clock,
 			parts,
+			saveMethod,
 			sessionId: "s1",
 			status: { snapshot: makeStatus },
 		}),
@@ -36,6 +38,22 @@ function saveControl(save?: PartHandlers["save"]) {
 }
 
 describe("session save control", () => {
+	it("reports a capture deadline without using the menu save error code", async ({ expect }) => {
+		expect.assertions(1);
+
+		const pending = Promise.withResolvers<StudioSave>();
+		const { manual, save } = saveControl(async () => pending.promise, "capture");
+		const saving = Promise.resolve(save({ timeoutMs: 1000 }));
+		const rejected = saving.catch((err: unknown) => err);
+		manual.advance(1000);
+		pending.resolve(SAVED);
+
+		await expect(rejected).resolves.toMatchObject({
+			code: "capture_timeout",
+			details: { reason: "timeout" },
+		});
+	});
+
 	it.for([undefined, "100", NaN, Infinity, 0, -1])(
 		"rejects the invalid save deadline %s before saving",
 		async (timeoutMs, { expect }) => {

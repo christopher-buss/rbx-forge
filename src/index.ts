@@ -3,6 +3,7 @@
  */
 export { defineConfig } from "./config/define-config.ts";
 export type {
+	SaveMethod,
 	AutoRecoveryMode,
 	ForgeConfig,
 	HookCommand,

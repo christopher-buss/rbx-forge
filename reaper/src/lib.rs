@@ -8,6 +8,7 @@
 //! error. "Not there" outcomes (a lock held by someone else, a PID with no
 //! live process) are `null`, not errors.
 
+mod capture;
 mod model;
 #[allow(dead_code, reason = "the worker layer serves only the reaper binary")]
 mod os;
@@ -19,7 +20,7 @@ mod windows_exports;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use napi::bindgen_prelude::AsyncTask;
+use napi::bindgen_prelude::{AsyncTask, Uint8Array};
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
 
@@ -33,6 +34,27 @@ fn to_napi(context: &str, err: &std::io::Error) -> Error {
 #[must_use]
 pub fn native_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
+}
+
+/// Assemble captured service children into a Rojo-built place atomically.
+///
+/// # Errors
+///
+/// When either model is unreadable, roots are invalid, or the output cannot be replaced.
+#[napi]
+pub fn assemble_place(
+    base_path: String,
+    model: Uint8Array,
+    services_json: String,
+    output_path: String,
+) -> Result<()> {
+    capture::assemble_place(
+        Path::new(&base_path),
+        model.as_ref(),
+        &services_json,
+        Path::new(&output_path),
+    )
+    .map_err(|err| to_napi(&format!("assemble place in {output_path}"), &err))
 }
 
 /// Read script sources in request order, using instance-name paths from the model root.

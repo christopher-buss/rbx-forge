@@ -20,6 +20,7 @@
 		"src/**/*.spec-d.ts",
 		"test/**/*.ts",
 		"test/fixtures/rojo-plugin-v2.json",
+		"test/fixtures/rojo-plugin-v3.json",
 		"scripts/**/*.ts",
 		"*.config.ts",
 		"plugin/*.config.ts"

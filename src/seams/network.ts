@@ -7,6 +7,9 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { connect, createServer } from "node:net";
 
+import { listenCaptureAsync } from "../capture/listener.ts";
+import type { CaptureAddress, CaptureListener } from "../capture/protocol.ts";
+
 /** The identity advertised by Rojo's msgpack API. */
 export interface RojoServerInfo {
 	projectName: string;
@@ -54,6 +57,12 @@ export interface Network {
 	 * serves by default. Resolves `false` when anything else listens there.
 	 */
 	isPortFreeAsync: (port: number) => Promise<boolean>;
+	/** Bind the plugin's capture-only loopback channel. */
+	listenForCaptureAsync: (
+		identity: Pick<RojoServerInfo, "projectName" | "sessionId">,
+		signal?: AbortSignal,
+		address?: CaptureAddress,
+	) => Promise<CaptureListener>;
 	/** Bind a temporary acknowledgement endpoint before launching Studio. */
 	listenForStudioReadyAsync: (
 		identity: Pick<RojoServerInfo, "projectName" | "sessionId">,
@@ -123,6 +132,9 @@ export function createNodeNetwork(backend: NetworkBackend): Network {
 	return {
 		...nodePorts,
 		getRojoInfoAsync: async (port, signal) => readRojoInfoAsync(backend.fetch, port, signal),
+		listenForCaptureAsync: async (identity, signal, address) => {
+			return listenCaptureAsync(backend, identity, signal, address);
+		},
 		listenForStudioReadyAsync: async (identity, signal) => {
 			return listenStudioReadyAsync(backend, identity, signal);
 		},

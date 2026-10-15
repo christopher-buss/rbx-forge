@@ -259,6 +259,16 @@ export interface ModelScriptSource {
 /** The addon's exports. */
 export interface NativeAddon {
 	/**
+	 * Replace captured service children and keep project-declared nodes,
+	 * atomically.
+	 */
+	assemblePlace: (
+		basePath: string,
+		model: Uint8Array,
+		servicesJson: string,
+		outputPath: string,
+	) => void;
+	/**
 	 * Windows only: connect to the pipe at `path` as a client, waiting at most
 	 * `timeoutMs` for a free instance. `node:net` would wait up to 30 s for a
 	 * busy pipe, whatever its own timeout.
