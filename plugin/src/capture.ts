@@ -189,9 +189,9 @@ function captureReferences(
 	return { carriers, reference };
 }
 
-function postError(active: ActivePlugin, url: string, reason: string): void {
+function postError(active: ActivePlugin, url: string, reason: string, message?: string): void {
 	active.io.http.request({
-		Body: active.io.http.encode({ error: reason }),
+		Body: active.io.http.encode({ error: reason, message }),
 		Headers: { "Content-Type": "application/json" },
 		Method: "POST",
 		Url: url,
@@ -211,8 +211,9 @@ function frameCapture(io: PluginIo, payload: CapturePayload): string {
 function serializeCapture(active: ActivePlugin, postUrl: string): void {
 	const [isCaptured, payload] = pcall(() => captureInstances(game, active));
 	if (!isCaptured) {
-		active.io.output(`Forge capture failed: ${tostring(payload)}`);
-		postError(active, postUrl, "serialize_failed");
+		const message = tostring(payload);
+		active.io.output(`Forge capture failed: ${message}`);
+		postError(active, postUrl, "serialize_failed", message);
 		return;
 	}
 

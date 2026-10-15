@@ -451,6 +451,30 @@ describe("capture listener", () => {
 		},
 	);
 
+	it("should retain the named serialization diagnostic in its structured capture error", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const message = "Lighting attribute Reference: unsupported capture value InstanceHandle";
+		const body = JSON.stringify({ error: "serialize_failed", message });
+		const rejected = expect(
+			fixture.listener.captureAsync(AbortSignal.any([])),
+		).rejects.toMatchObject({
+			code: "capture_rejected",
+			details: { message, response: body },
+		});
+		const url = await dispatchedUrlAsync(fixture);
+		const reply = await fixture.request(url, "POST", [body], {
+			"content-type": "application/json",
+		}).finished;
+		await rejected;
+
+		expect(reply.status).toBe(400);
+	});
+
 	it("should report Studio's rejection as a capture error", async ({
 		expect,
 		onTestFinished,
@@ -470,6 +494,31 @@ describe("capture listener", () => {
 			"content-type": "application/json",
 		}).finished;
 
+		await rejected;
+
+		expect(reply.status).toBe(400);
+	});
+
+	it("should reject a diagnostic message that is not text", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const rejected = expect(
+			fixture.listener.captureAsync(AbortSignal.any([])),
+		).rejects.toMatchObject({
+			code: "capture_rejected",
+			message: "Studio sent an invalid capture.",
+		});
+		const url = await dispatchedUrlAsync(fixture);
+		const reply = await fixture.request(
+			url,
+			"POST",
+			[JSON.stringify({ error: "serialize_failed", message: { attribute: "Reference" } })],
+			{ "content-type": "application/json" },
+		).finished;
 		await rejected;
 
 		expect(reply.status).toBe(400);

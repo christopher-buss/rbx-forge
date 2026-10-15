@@ -121,6 +121,15 @@ does nothing (no requests, no output, no UI) unless the place holds a forge
 capture URL. A write failure fails the launch with `forge_plugin_write_failed`
 (exit 8).
 
+Captures read serialized service properties through Studio's runtime reflection.
+Readable properties, service attributes, and tags reach the saved place; properties
+Studio prevents the plugin from reading keep their project values.
+
+Reference attributes (`InstanceHandle`) currently fail capture because the pinned
+native and Rojo attribute codecs cannot preserve them. The diagnostic names the
+affected service attribute or instance, including in CLI JSON. The previous place
+file stays unchanged.
+
 ## Managed Rojo plugin
 
 After a successful place build, immediately before attempting a new direct

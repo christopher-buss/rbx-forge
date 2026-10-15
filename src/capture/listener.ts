@@ -10,6 +10,7 @@ import type { Capture, CaptureAddress, CaptureListener } from "./protocol.ts";
 const metadataSchema = type({
 	services: type({ name: "string > 0", roots: "number.integer >= 0[]" }).array(),
 });
+const rejectionSchema = type({ "error": "string", "message?": "string" });
 const MAX_BODY_BYTES = 128 * 1024 * 1024;
 const POLL_MS = 20_000;
 
@@ -283,8 +284,10 @@ async function readBodyAsync(incoming: IncomingMessage): Promise<Buffer> {
 async function readCaptureAsync(incoming: IncomingMessage): Promise<Capture> {
 	const body = await readBodyAsync(incoming);
 	if (incoming.headers["content-type"] === "application/json") {
+		const response = body.toString("utf8");
+		const rejection = rejectionSchema.assert(JSON.parse(response));
 		throw new ForgeError("capture_rejected", "Studio rejected the capture.", {
-			details: { response: body.toString("utf8") },
+			details: { message: rejection.message, response },
 		});
 	}
 

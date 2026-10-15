@@ -1,4 +1,5 @@
 /* cspell:words fromstring readu readstring rbxassetid keypoints pcall */
+/* cspell:words rawget */
 import { describe, expect, it, jest } from "@rbxts/jest-globals";
 
 import {
@@ -607,12 +608,16 @@ describe("startPlugin", () => {
 	});
 
 	it("should report serialization failure", () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const { messages, posts } = playPoll({ failure: "serialize" });
 		assert(posts[0] !== undefined);
+		const body = posts[0].Body;
+		assert(typeIs(body, "string"));
+		const rejection = game.GetService("HttpService").JSONDecode(body);
 
-		expect(posts[0].Body).toBe('{"error":"serialize_failed"}');
+		expect(rawget(rejection, "error")).toBe("serialize_failed");
+		expect(rawget(rejection, "message")).toMatch("serialization unavailable");
 		expect(messages[0]).toMatch("serialization unavailable");
 	});
 
