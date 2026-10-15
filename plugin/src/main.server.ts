@@ -2,6 +2,8 @@
 import { pollCaptures, startPlugin } from "./capture";
 import type { PluginIo } from "./capture";
 import type { ReflectedProperty } from "./service-metadata";
+import { createWarningIo } from "./warning-runtime";
+import { createWarningSession } from "./warning-session";
 
 const root = game.GetService("ServerStorage");
 const http = game.GetService("HttpService");
@@ -49,13 +51,20 @@ const io: PluginIo = {
 		serialize: (instances) => serialization.SerializeInstancesAsync(instances),
 	},
 };
+const warningSession = createWarningSession(() => createWarningIo(game, io.services));
+plugin.Unloading.Connect(() => {
+	warningSession.close();
+});
 let current: string | undefined;
 for (;;) {
 	task.wait(0.25);
 	const active = startPlugin(root, io);
+	const warnings = warningSession.update(active?.capture);
 	if (active?.url !== current) {
 		current = active?.url;
 		if (active !== undefined) {
+			assert(warnings !== undefined);
+			active.warnings = warnings;
 			task.spawn(() => {
 				pollCaptures(root, active);
 			});

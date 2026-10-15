@@ -1,4 +1,5 @@
 /* cspell:words pcall rawget fromstring writeu */
+import type { CaptureWarning, CaptureWarnings } from "./capture-warnings";
 import { captureServiceMetadata } from "./service-metadata";
 import type { CaptureValue, ServiceMetadata, ServiceMetadataIo } from "./service-metadata";
 
@@ -28,12 +29,14 @@ export interface ActivePlugin {
 	capture: Configuration;
 	io: PluginIo;
 	url: string;
+	warnings?: CaptureWarnings;
 }
 
 /** The one model and its service root indices. */
 export interface CapturePayload {
 	model: buffer;
 	services: Array<ServiceMetadata & { name: string; roots: Array<number> }>;
+	warnings: Array<CaptureWarning>;
 }
 
 interface ServiceRoots {
@@ -101,7 +104,8 @@ export function captureInstances(root: Instance, active: ActivePlugin): CaptureP
 			});
 		}
 
-		return { model: active.io.services.serialize(instances), services };
+		const model = active.io.services.serialize(instances);
+		return { model, services, warnings: active.warnings?.capture() ?? [] };
 	});
 	for (const carrier of carriers) {
 		carrier.Destroy();
@@ -199,7 +203,9 @@ function postError(active: ActivePlugin, url: string, reason: string, message?: 
 }
 
 function frameCapture(io: PluginIo, payload: CapturePayload): string {
-	const header = buffer.fromstring(io.http.encode({ services: payload.services }));
+	const header = buffer.fromstring(
+		io.http.encode({ services: payload.services, warnings: payload.warnings }),
+	);
 	const size = buffer.len(header);
 	const body = buffer.create(4 + size + buffer.len(payload.model));
 	buffer.writeu32(body, 0, size);
