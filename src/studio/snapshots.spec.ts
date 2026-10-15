@@ -62,6 +62,21 @@ describe(listSnapshots, () => {
 });
 
 describe(pruneSnapshots, () => {
+	it("removes a pruned snapshot's capture credentials and launch script", ({ expect }) => {
+		expect.assertions(3);
+
+		const { fileSystem } = createMemoryFileSystem(
+			seed(SNAPSHOT_KEEP_COUNT + 1, {
+				[`.forge/snapshots/${snapshot(0)}.capture.json`]: "credentials",
+				[`.forge/snapshots/${snapshot(0)}.capture.lua`]: "marker",
+			}),
+		);
+
+		expect(pruneSnapshots(fileSystem, DIRECTORY).pruned).toStrictEqual([at(snapshot(0))]);
+		expect(fileSystem.existsSync(`${at(snapshot(0))}.capture.json`)).toBeFalse();
+		expect(fileSystem.existsSync(`${at(snapshot(0))}.capture.lua`)).toBeFalse();
+	});
+
 	it(`should keep the ${SNAPSHOT_KEEP_COUNT} newest snapshots`, ({ expect }) => {
 		expect.assertions(2);
 
