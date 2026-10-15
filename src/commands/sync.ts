@@ -1,5 +1,6 @@
 import { type } from "arktype";
 
+import { emitCaptureWarnings } from "../capture/warnings.ts";
 import { findSession } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import { callSessionAsync } from "../ipc/client.ts";
@@ -58,6 +59,7 @@ export async function runSyncAsync(context: CommandContext): Promise<CommandResu
 		});
 	}
 
+	emitCaptureWarnings(context.reporter, parsed.capture?.warnings ?? []);
 	const { input, project } = parsed;
 	return {
 		data: { ...parsed, hooks: parseHookResults(parsed.hooks) },

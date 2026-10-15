@@ -10,6 +10,7 @@ import {
 } from "../../test/helpers/seams.ts";
 import { ForgeError } from "../errors.ts";
 import type { IpcTransport } from "../ipc/transport.ts";
+import { createJsonReporter } from "../output/reporters.ts";
 import type { CommandContext } from "./context.ts";
 import { runSyncAsync, SYNC_WAIT_MS } from "./sync.ts";
 
@@ -55,6 +56,51 @@ describe(runSyncAsync, () => {
 		session.sync = () => ({ ...SYNCED, capture });
 
 		await expect(runSyncAsync(context)).resolves.toMatchObject({ data: { capture } });
+	});
+
+	it("should retain capture warnings and emit their named NDJSON warning", async ({ expect }) => {
+		expect.assertions(2);
+
+		const ipc = createMemoryTransport();
+		const { context, memory } = makeContext(ipc);
+		const session = await serveFakeSessionAsync(memory, ipc);
+		const warning = {
+			property: "PhysicsSteppingMethod",
+			reason: "unreadable",
+			service: "Workspace",
+		};
+		const capture = {
+			bytes: 1024,
+			desktop: "user",
+			durationMs: 25,
+			method: "capture",
+			mtime: "2026-10-15T12:00:00.000Z",
+			pid: 500,
+			place: `${PROJECT}/game.rbxl`,
+			warnings: [warning],
+		};
+		session.sync = () => ({ ...SYNCED, capture });
+		const events: Array<unknown> = [];
+
+		const synced = await runSyncAsync({
+			...context,
+			reporter: createJsonReporter({
+				stderr: () => {},
+				stdout: (line) => {
+					events.push(JSON.parse(line));
+				},
+			}),
+		});
+
+		expect(synced.data["capture"]).toStrictEqual(capture);
+		expect(events).toStrictEqual([
+			{
+				...warning,
+				message:
+					"Workspace.PhysicsSteppingMethod cannot be captured; set it in the project file.",
+				type: "warning",
+			},
+		]);
 	});
 
 	it("should reject malformed capture metadata from the session", async ({ expect }) => {
