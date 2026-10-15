@@ -81,7 +81,10 @@ describe("snapshot capture saves", () => {
 
 		await expect(
 			runSaveAsync(save.context, { config: {}, flags: { place: PLACE } }),
-		).rejects.toMatchObject({ code: "studio_not_open" });
+		).rejects.toMatchObject({
+			code: "studio_not_open",
+			message: `Roblox Studio does not have ${PLACE} open.`,
+		});
 	});
 
 	it("requires the launch credentials without changing the snapshot", async ({ expect }) => {
@@ -92,7 +95,12 @@ describe("snapshot capture saves", () => {
 
 		await expect(
 			runSaveAsync(save.context, { config: {}, flags: { place: PLACE } }),
-		).rejects.toMatchObject({ code: "capture_not_connected" });
+		).rejects.toMatchObject({
+			cause: { code: "ENOENT" },
+			code: "capture_not_connected",
+			hint: 'Open a new snapshot with studio.saveMethod set to "capture".',
+			message: "This snapshot has no valid capture marker.",
+		});
 		expect(save.memory.files()["snapshot.rbxl"]).toBe("original");
 	});
 
@@ -100,7 +108,7 @@ describe("snapshot capture saves", () => {
 		expect.assertions(1);
 
 		const save = snapshotSave();
-		const failure = new Error("cannot bind");
+		const failure = Object.assign(new Error("cannot bind"), { code: "EACCES" });
 		save.listen.mockRejectedValueOnce(failure);
 
 		await expect(
@@ -138,14 +146,29 @@ describe("snapshot capture saves", () => {
 		expect.assertions(2);
 
 		const save = snapshotSave();
-		save.listen.mockRejectedValueOnce(
-			Object.assign(new Error("occupied"), { code: "EADDRINUSE" }),
-		);
+		const failure = Object.assign(new Error("occupied"), { code: "EADDRINUSE" });
+		save.listen.mockRejectedValueOnce(failure);
 
 		await expect(
 			runSaveAsync(save.context, { config: {}, flags: { place: PLACE } }),
-		).rejects.toMatchObject({ code: "capture_port_in_use" });
+		).rejects.toMatchObject({
+			cause: failure,
+			code: "capture_port_in_use",
+			hint: "Release the port or open a new snapshot.",
+			message: "Snapshot capture port 49152 is occupied.",
+		});
 		expect(save.memory.files()["snapshot.rbxl"]).toBe("original");
+	});
+
+	it("bounds the capture base build with the requested save timeout", async ({ expect }) => {
+		expect.assertions(1);
+
+		const save = snapshotSave();
+		const processRunner = vi.spyOn(save.context.seams, "processRunner");
+
+		await runSaveAsync(save.context, { config: {}, flags: { place: PLACE, timeout: "2.5" } });
+
+		expect(processRunner).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 2500 }));
 	});
 
 	it("binds the recorded endpoint and writes the requested snapshot", async ({ expect }) => {
