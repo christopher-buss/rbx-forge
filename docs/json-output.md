@@ -280,15 +280,15 @@ With the default `"menu"` method, run `forge save --json`, then
 ```
 
 `place` is absolute; `bytes` and the ISO `mtime` describe the saved file after
-the write completes. `method` is `"menu"` or `"capture"`. `warnings` lists
-edited properties that could not reach syncback; a capture without warnings
-returns an empty list. `desktop` is `user` or `hidden`. On Windows, `desktop`
-reports the physical desktop, so a hidden session Studio returns `user` even
-when `services.studio.desktop` is `hidden`. A menu save of that Studio briefly
-shows the File menu and moves keyboard focus. Capture leaves Studio's focus and
-visibility intact. A hidden snapshot returns `hidden` and leaves the user's
-focus unchanged. `durationMs` includes waiting for an opening Studio.
-`--timeout <s>` defaults to 30 seconds.
+the write completes. `method` is `"menu"` or `"capture"`. Capture results
+include `warnings`, a list of newly reported edits that could not reach
+syncback; a capture without warnings returns an empty list. `desktop` is `user`
+or `hidden`. On Windows, `desktop` reports the physical desktop, so a hidden
+session Studio returns `user` even when `services.studio.desktop` is `hidden`. A
+menu save of that Studio briefly shows the File menu and moves keyboard focus.
+Capture leaves Studio's focus and visibility intact. A hidden snapshot returns
+`hidden` and leaves the user's focus unchanged. `durationMs` includes waiting
+for an opening Studio. `--timeout <s>` defaults to 30 seconds.
 
 Each warning is `{ service, property, reason }`, and produces a structured
 warning event before the result:
@@ -303,23 +303,37 @@ warning event before the result:
 }
 ```
 
-Reasons are `unreadable`, `collision_groups`, and `material_override`. Each
-property is reported once per forge session. A capture-based `forge sync`
-returns its save metadata under `data.capture` and emits the same warnings.
+Reasons are `unreadable` for service properties, `collision_groups` for
+collision group changes, and `material_override` for base-material override
+changes. Each service/property pair is reported once per forge session,
+including across repeated `forge save` and `forge sync` commands.
 
-| Code                      | Exit | Meaning                                                                                                       |
-| ------------------------- | ---- | ------------------------------------------------------------------------------------------------------------- |
-| `studio_not_open`         | 3    | No Studio has the target place open.                                                                          |
-| `studio_busy`             | 1    | A modal blocks Studio before the save.                                                                        |
-| `save_failed`             | 1    | `error.details.reason` is `timeout`, `studio_error`, `no_menu_item`, `menu_disabled`, or `permission_denied`. |
-| `capture_not_connected`   | 1    | The session's Rojo connection is missing, or a snapshot has no valid capture marker.                          |
+The optional `data.capture` field in a `forge sync` response appears when that
+command captures Studio before syncback. It contains the same metadata as a
+capture save result. The command emits the same warning events. Other sync
+responses omit this field.
+
+| Code                      | Exit | Meaning                                                                                                                                      |
+| ------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `studio_not_open`         | 3    | No Studio has the target place open.                                                                                                         |
+| `studio_busy`             | 1    | A modal blocks Studio before the save.                                                                                                       |
+| `save_failed`             | 1    | `error.details.reason` is `timeout`, `studio_error`, `no_menu_item`, `menu_disabled`, or `permission_denied`.                                |
+| `capture_not_connected`   | 1    | The session's Rojo connection is missing, or a snapshot has no valid capture marker.                                                         |
 | `capture_rejected`        | 1    | Studio rejected the capture. `error.details.reason` is `play_mode`, `busy`, or `serialize_failed`; invalid capture data also uses this code. |
-| `capture_timeout`         | 1    | The capture or base build exceeded the deadline.                                                              |
-| `capture_assembly_failed` | 1    | The native addon could not assemble the place; the existing place is preserved. |
-| `capture_port_in_use`     | 1    | Another listener occupies the snapshot's recorded port.                                                       |
+| `capture_timeout`         | 1    | The capture or base build exceeded the deadline.                                                                                             |
+| `capture_assembly_failed` | 1    | The native addon could not assemble the place; the existing place is preserved.                                                              |
+| `capture_port_in_use`     | 1    | Another listener occupies the snapshot's recorded port.                                                                                      |
 
-The writable check runs before the save request; a read-only place returns
-`save_failed` with `permission_denied` without triggering a Studio save dialog.
+Unsupported reference attributes fail capture; they are not warnings. A service
+attribute returns `capture_rejected` with `error.details.reason` set to
+`serialize_failed`; unsupported attributes in captured content return
+`capture_assembly_failed`. In either case, `error.details.message` names the
+affected service attribute or instance, and the previous place stays unchanged.
+See [capture limits](./studio.md#capture-saves).
+
+For menu saves, the writable check runs before the save request; a read-only
+place returns `save_failed` with `permission_denied` without triggering a Studio
+save dialog.
 
 ## The `show` and `hide` result
 
