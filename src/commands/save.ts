@@ -1,6 +1,7 @@
 import { type } from "arktype";
 import path from "node:path";
 
+import { emitCaptureWarnings } from "../capture/warnings.ts";
 import type { FlagDefinition } from "../cli/flags.ts";
 import { findSession } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
@@ -49,6 +50,7 @@ export async function runSaveAsync(
 					timeoutMs,
 				)
 			: await saveSessionAsync(context, timeoutMs);
+	emitCaptureWarnings(context.reporter, saved.warnings ?? []);
 	return saveResultOf(saved);
 }
 
