@@ -12,7 +12,7 @@ import {
 } from "../../test/helpers/seams.ts";
 import { resolveConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
-import type { CaptureListener } from "./protocol.ts";
+import type { CaptureListener, CaptureWarning } from "./protocol.ts";
 import { saveCaptureAsync } from "./save.ts";
 import type { CaptureSaveOptions } from "./save.ts";
 
@@ -128,16 +128,26 @@ describe(saveCaptureAsync, () => {
 		expect.assertions(3);
 
 		const cause = new Error("invalid model");
+		const warning = {
+			property: "StreamingTargetRadius",
+			reason: "unreadable",
+			service: "Workspace",
+		} satisfies CaptureWarning;
 		const save = captureSave({
 			assemble: () => {
 				throw cause;
 			},
+			capture: createFakeCapture({
+				model: new Uint8Array(),
+				services: [],
+				warnings: [warning],
+			}),
 		});
 
 		await expect(save.run()).rejects.toMatchObject({
 			cause,
 			code: "capture_assembly_failed",
-			details: { message: "invalid model" },
+			details: { captureWarnings: [warning], message: "invalid model" },
 			message: `Could not assemble the captured place ${path.join(PROJECT, "game.rbxl")}.`,
 		});
 		expect(save.memory.files()["game.rbxl"]).toBe("original");
@@ -212,6 +222,36 @@ describe(saveCaptureAsync, () => {
 		const save = captureSave({ capture, controller });
 
 		await expect(save.run()).rejects.toMatchObject({ name: "AbortError" });
+		expect(save.memory.files()["game.rbxl"]).toBe("original");
+	});
+
+	it("keeps received warnings when cancellation prevents assembly", async ({ expect }) => {
+		expect.assertions(2);
+
+		const controller = new AbortController();
+		const warning = {
+			property: "StreamingTargetRadius",
+			reason: "unreadable",
+			service: "Workspace",
+		} satisfies CaptureWarning;
+		const failure = new ForgeError("capture_timeout", "Capture expired.", {
+			details: { reason: "timeout" },
+			hint: "Try a fresh capture.",
+		});
+		const capture = createFakeCapture({ model: new Uint8Array(), services: [] });
+		capture.captureAsync = async () => {
+			controller.abort(failure);
+			return { model: new Uint8Array(), services: [], warnings: [warning] };
+		};
+
+		const save = captureSave({ capture, controller });
+
+		await expect(save.run()).rejects.toMatchObject({
+			code: "capture_timeout",
+			details: { captureWarnings: [warning], reason: "timeout" },
+			hint: "Try a fresh capture.",
+			message: "Capture expired.",
+		});
 		expect(save.memory.files()["game.rbxl"]).toBe("original");
 	});
 
