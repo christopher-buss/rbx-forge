@@ -42,7 +42,7 @@ describe("forge config", () => {
 						rojoPort: 4000,
 						rojoProjectPath: "default.project.json",
 						session: { idleTimeout: 30 },
-						studio: { autoRecovery: "move" },
+						studio: { autoRecovery: "move", saveMethod: "menu" },
 						syncback: { runOnStart: false },
 						typegen: {
 							exclude: ["**/node_modules/**"],

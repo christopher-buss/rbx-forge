@@ -42,6 +42,7 @@ import type { PinnedProcess } from "../../src/native/addon.ts";
 import { readVariable } from "../../src/process/environment.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import { SCRIPTS, VERSION } from "../../src/studio/rojo-plugin.ts";
+import { captureRealStudioFixtureAsync } from "../helpers/capture-real-studio-fixture.ts";
 import { parseOpened } from "../helpers/output.ts";
 import { loadRealNative } from "../helpers/real-native.ts";
 import { studioCleanup } from "../helpers/real-studio-cleanup.ts";
@@ -185,7 +186,14 @@ async function upStudioAsync(
 		["up", "--studio", "--desktop", desktop, "--json"],
 		realVariables(),
 	);
-	const sessionId = String(up.result.data!["sessionId"]);
+	note({
+		command: "up --studio",
+		project: fixture.project,
+		stderr: up.stderr,
+		stdout: up.stdout,
+	});
+	assert(up.status === 0 && up.result.data !== undefined, up.stdout);
+	const sessionId = String(up.result.data["sessionId"]);
 	const state = parseStatus(
 		JSON.parse(
 			readFileSync(
@@ -206,12 +214,14 @@ async function upStudioAsync(
  *
  * @param fixture - The project.
  * @param sessionId - The session that opens Studio.
+ * @param quietMs - Time without modal dialogs; capture needs no menu readiness.
  * @returns The PID the session recorded, the lock PID and its verified pin.
  * @rejects When Studio does not open the place in time.
  */
 async function waitForLoadedAsync(
 	fixture: Fixture,
 	sessionId: string,
+	quietMs = QUIET_MS,
 ): Promise<[unknown, number, PinnedProcess]> {
 	const state = path.join(fixture.project, ".forge", "sessions", sessionId, "state.json");
 	const deadline = Date.now() + OPEN_MS;
@@ -232,7 +242,7 @@ async function waitForLoadedAsync(
 	const pinned = pinNow(lockPid);
 	assert(pinned !== undefined && pinned.startTime === status.services.studio.startTime);
 	let quietSince = Date.now();
-	while (Date.now() - quietSince < QUIET_MS) {
+	while (Date.now() - quietSince < quietMs) {
 		if (Date.now() > deadline) {
 			throw new Error(`Studio did not open ${fixture.place} in time`);
 		}
@@ -347,7 +357,129 @@ function saveOutcome(run: UpRun): string {
 	return run.status === 0 ? "saved" : JSON.stringify(run.result);
 }
 
+async function captureForgeAsync(fixture: Fixture, argv: Array<string>): Promise<UpRun> {
+	const run = await runForgeAsync(fixture, argv, realVariables());
+	note({ command: argv, project: fixture.project, stderr: run.stderr, stdout: run.stdout });
+	return run;
+}
+
 describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
+	it(
+		"captures Studio edits and reconnects a Found Studio after a session restart",
+		{ timeout: 360_000 },
+		async ({ expect, onTestFinished }) => {
+			expect.assertions(13);
+
+			const fixture = await makeFixtureAsync({
+				studio: { saveMethod: "capture" },
+			});
+			const editor = await captureRealStudioFixtureAsync({
+				actions: {
+					first: `local capture = game:GetService("ServerStorage"):FindFirstChild("ForgeCapture")
+assert(capture and not capture.Archivable, "Session capture instance must be non-Archivable")
+local part = Instance.new("Part")
+part.Name = "ForgeCapturedFirstPart"
+part.Anchored = true
+part.Parent = workspace
+game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured first edit")\\n'`,
+					second: `local part = Instance.new("Part")
+part.Name = "ForgeCapturedAfterRestartPart"
+part.Anchored = true
+part.Parent = workspace
+game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured after restart")\\n'`,
+				},
+				directory: fixture.project,
+				native: loadRealNative(),
+				pluginsDirectory: path.dirname(installedPlugin()),
+			});
+			onTestFinished(editor.closeAsync);
+			mkdirSync(path.join(fixture.project, "workspace"));
+			mkdirSync(path.join(fixture.project, "scripts"));
+			const script = path.join(fixture.project, "scripts", "CaptureScript.server.luau");
+			writeFileSync(script, 'print("original capture script")\n');
+			writeFileSync(
+				path.join(fixture.project, "default.project.json"),
+				JSON.stringify({
+					name: "forge-real-capture",
+					tree: {
+						$attributes: editor.launchAttributes,
+						$className: "DataModel",
+						Lighting: { $properties: { Technology: "ShadowMap" } },
+						ServerScriptService: { $path: "scripts" },
+						Workspace: { $path: "workspace" },
+					},
+				}),
+			);
+			const sessionId = await upStudioAsync({ onTestFinished }, fixture, "hidden");
+			const [, pid, pinned] = await waitForLoadedAsync(fixture, sessionId, 0);
+			editor.own(pinned);
+			const initial = await editor.runAsync("first");
+			note({
+				command: "capture-edit",
+				pid,
+				sequence: initial.sequence,
+				studioVersion: initial.version,
+			});
+
+			const saved = await captureForgeAsync(fixture, ["save", "--json"]);
+
+			expect(saved).toMatchObject({
+				result: { data: { desktop: "user", pid, place: fixture.place } },
+				status: 0,
+			});
+
+			const synced = await captureForgeAsync(fixture, ["syncback", "--json"]);
+
+			expect(synced.status).toBe(0);
+			expect(readFileSync(script, "utf8")).toContain('print("captured first edit")');
+			expect(
+				existsSync(path.join(fixture.project, "workspace/ForgeCapturedFirstPart.rbxm")),
+			).toBeTrue();
+
+			const down = await captureForgeAsync(fixture, ["down", "--keep-studio", "--json"]);
+
+			expect(down.status).toBe(0);
+			expect(pinned.isAlive()).toBeTrue();
+
+			const restarted = await upStudioAsync({ onTestFinished }, fixture, "hidden");
+			const [, foundPid] = await waitForLoadedAsync(fixture, restarted, 0);
+
+			expect(restarted).not.toBe(sessionId);
+			expect(foundPid).toBe(pid);
+
+			const foundStatus = await captureForgeAsync(fixture, ["status", "--json"]);
+
+			expect(foundStatus.result.data).toMatchObject({
+				services: { studio: { origin: "found", pid } },
+			});
+
+			await editor.waitForCaptureUrlAsync(initial.captureUrl);
+			await editor.runAsync("second");
+			const savedAgain = await captureForgeAsync(fixture, ["save", "--json"]);
+
+			expect(savedAgain.status).toBe(0);
+
+			const syncedAgain = await captureForgeAsync(fixture, ["syncback", "--json"]);
+
+			expect(syncedAgain.status).toBe(0);
+			expect(readFileSync(script, "utf8")).toContain('print("captured after restart")');
+			expect(
+				existsSync(
+					path.join(fixture.project, "workspace/ForgeCapturedAfterRestartPart.rbxm"),
+				),
+			).toBeTrue();
+
+			note({
+				command: "capture-files",
+				files: readdirSync(path.join(fixture.project, "workspace")),
+				pid,
+				project: fixture.project,
+				script: readFileSync(script, "utf8"),
+				startTime: pinned.startTime,
+			});
+		},
+	);
+
 	it(
 		"dismisses hidden snapshot Compatibility lighting after the open CLI exits",
 		{ timeout: 150_000 },

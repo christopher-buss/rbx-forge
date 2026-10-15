@@ -131,6 +131,11 @@ The Studio plugin forge ships (`ForgePlugin.rbxm`) and installs before a direct
 Studio launch. It is inert in a Studio without a forge capture URL.\
 _Avoid_: capture plugin, helper plugin
 
+**Capture**:\
+A copy of Studio's service children, readable service properties, attributes,
+and tags, with the names of changed properties that cannot sync back.\
+_Avoid_: Studio save, save file
+
 **Found Studio**:\
 A Studio that already had the place open when the session attached it. Its
 origin remains found until forge replaces it.\
