@@ -43,10 +43,32 @@ describe(runSyncAsync, () => {
 		const ipc = createMemoryTransport();
 		const { context, memory } = makeContext(ipc);
 		const session = await serveFakeSessionAsync(memory, ipc);
-		const capture = { method: "capture", place: `${PROJECT}/game.rbxl` };
+		const capture = {
+			bytes: 1024,
+			desktop: "user",
+			durationMs: 25,
+			method: "capture",
+			mtime: "2026-10-15T12:00:00.000Z",
+			pid: 500,
+			place: `${PROJECT}/game.rbxl`,
+		};
 		session.sync = () => ({ ...SYNCED, capture });
 
 		await expect(runSyncAsync(context)).resolves.toMatchObject({ data: { capture } });
+	});
+
+	it("should reject malformed capture metadata from the session", async ({ expect }) => {
+		expect.assertions(1);
+
+		const ipc = createMemoryTransport();
+		const { context, memory } = makeContext(ipc);
+		const session = await serveFakeSessionAsync(memory, ipc);
+		session.sync = () => ({ ...SYNCED, capture: { method: "capture" } });
+
+		await expect(runSyncAsync(context)).rejects.toMatchObject({
+			code: "internal_error",
+			message: "The session answered sync with something else.",
+		});
 	});
 
 	it("should return what the session synced, with its hooks", async ({ expect }) => {
