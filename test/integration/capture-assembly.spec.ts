@@ -166,4 +166,27 @@ describe("native capture assembly", () => {
 		}).toThrow(/assemble place/u);
 		expect(readFileSync(base)).toStrictEqual(original);
 	});
+
+	it("should name an unsupported engine-produced reference attribute and preserve the place", ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const { base, output } = makeAssembly();
+		copyFileSync(base, output);
+		const original = readFileSync(output);
+		const model = readFileSync(
+			path.join(import.meta.dirname, "../fixtures/models/reference-attribute.rbxm"),
+		);
+
+		expect(() => {
+			native.assemblePlace(
+				base,
+				model,
+				JSON.stringify([{ name: "Workspace", roots: [0, 1] }]),
+				output,
+			);
+		}).toThrow(/ForgeReferenceAttributeFixture\.Attributes/u);
+		expect(readFileSync(output)).toStrictEqual(original);
+	});
 });

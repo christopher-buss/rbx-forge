@@ -99,6 +99,24 @@ fn invalid_data(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> i
     io::Error::new(io::ErrorKind::InvalidData, error)
 }
 
+fn validate_attributes(dom: &WeakDom) -> io::Result<()> {
+    for instance in dom.descendants() {
+        for name in ["Attributes", "AttributesSerialize"] {
+            if let Some(Variant::BinaryString(data)) = instance.properties.get(&name.into()) {
+                // Opaque attribute blobs may contain file-local references that DOM remapping invalidates.
+                let bytes: &[u8] = data.as_ref();
+                Attributes::from_reader(bytes).map_err(|error| {
+                    invalid_data(format!(
+                        "{}.Attributes cannot be decoded: {error}",
+                        instance.name
+                    ))
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn clock_time(time_of_day: &str) -> io::Result<f32> {
     let parts = time_of_day
         .split(':')
@@ -308,6 +326,7 @@ pub fn assemble_place(
             }
         }
     }
+    validate_attributes(&dom)?;
     // The temporary file shares the target's filesystem, so replacement is atomic.
     let directory = output_path
         .parent()
@@ -356,6 +375,33 @@ mod tests {
             .iter()
             .find(|referent| dom.get_by_ref(**referent).unwrap().name == name)
             .unwrap()
+    }
+
+    #[test]
+    fn rejects_opaque_reference_attributes_without_replacing_the_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let base_path = directory.path().join("base.rbxl");
+        let output_path = directory.path().join("place.rbxl");
+        let base = WeakDom::new(
+            InstanceBuilder::new("DataModel").with_child(InstanceBuilder::new("Workspace")),
+        );
+        write_model(&base_path, &base);
+        std::fs::copy(&base_path, &output_path).unwrap();
+        let original = std::fs::read(&output_path).unwrap();
+        let error = assemble_place(
+            &base_path,
+            include_bytes!("../../test/fixtures/models/reference-attribute.rbxm"),
+            r#"[{"name":"Workspace","roots":[0,1]}]"#,
+            &output_path,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("ForgeReferenceAttributeFixture.Attributes")
+        );
+        assert_eq!(std::fs::read(&output_path).unwrap(), original);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
     }
 
     #[test]

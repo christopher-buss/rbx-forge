@@ -8,7 +8,7 @@
 //! FIXTURE_STUDIO_CAPTURE_MODEL posts that binary model with CAPTURE_SERVICES JSON.
 //! FIXTURE_STUDIO_CAPTURE_ROJO_PORT overrides the marker's Rojo Port.
 //! FIXTURE_STUDIO_CAPTURE=timeout polls without posting; disconnect omits polling.
-//! FIXTURE_STUDIO_CAPTURE_DELAY_MS delays posts; CAPTURE_ERROR posts an error code.
+//! FIXTURE_STUDIO_CAPTURE_DELAY_MS delays posts; CAPTURE_ERROR posts a code or JSON error.
 
 #[allow(
     dead_code,
@@ -263,9 +263,11 @@ fn poll_capture(
         .ok_or_else(|| io::Error::other("capture request id is missing"))?;
     thread::sleep(delay);
     let (content_type, body) = if let Some(error) = error {
+        let rejection =
+            serde_json::from_str(error).unwrap_or_else(|_| serde_json::json!({ "error": error }));
         (
             "application/json",
-            serde_json::to_vec(&serde_json::json!({ "error": error })).map_err(io::Error::other)?,
+            serde_json::to_vec(&rejection).map_err(io::Error::other)?,
         )
     } else {
         let metadata = serde_json::to_vec(&serde_json::json!({ "services": services }))
