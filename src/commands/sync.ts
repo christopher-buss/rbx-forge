@@ -5,6 +5,7 @@ import { ForgeError } from "../errors.ts";
 import { callSessionAsync } from "../ipc/client.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { parseHookResults } from "../session/status.ts";
+import { studioSaveResult } from "../studio/save-contract.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext } from "./context.ts";
 
@@ -17,10 +18,11 @@ import type { CommandContext } from "./context.ts";
 export const SYNC_WAIT_MS: number = 30 * 60_000;
 
 const syncResult = type({
-	durationMs: "number",
-	hooks: "unknown",
-	input: "string",
-	project: "string",
+	"capture?": studioSaveResult,
+	"durationMs": "number",
+	"hooks": "unknown",
+	"input": "string",
+	"project": "string",
 });
 
 /**
