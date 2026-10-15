@@ -331,6 +331,12 @@ attribute returns `capture_rejected` with `error.details.reason` set to
 affected service attribute or instance, and the previous place stays unchanged.
 See [capture limits](./studio.md#capture-saves).
 
+If saving or syncback fails after Studio returned warnings, forge emits those
+warning events before the failed result and includes the same list in
+`error.details.captureWarnings`. The original error code and other details
+remain available; a failed operation does not silently consume the session's
+only notification for an unsyncable edit.
+
 For menu saves, the writable check runs before the save request; a read-only
 place returns `save_failed` with `permission_denied` without triggering a Studio
 save dialog.
