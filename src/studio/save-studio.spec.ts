@@ -125,7 +125,10 @@ describe(saveStudioAsync, () => {
 
 		const run = priming();
 
-		await expect(run.save()).resolves.toMatchObject({ mtime: "1970-01-01T00:00:02.000Z" });
+		await expect(run.save()).resolves.toMatchObject({
+			mtime: "1970-01-01T00:00:02.000Z",
+			warnings: [],
+		});
 		expect(run.entry.activations).toBe(1);
 		expect(run.entry.appHidden).toBeTrue();
 		expect(run.editor.appActive).toBeTrue();

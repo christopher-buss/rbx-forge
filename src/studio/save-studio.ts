@@ -1,5 +1,6 @@
 import type { Stats } from "node:fs";
 
+import type { CaptureWarning } from "../capture/protocol.ts";
 import { ForgeError } from "../errors.ts";
 import type { PinnedProcess, SaveOutcome } from "../native/addon.ts";
 import type { StudioSeams, StudioTarget } from "./close-studio.ts";
@@ -13,6 +14,7 @@ export interface StudioSave {
 	mtime: string;
 	pid: number;
 	place: string;
+	warnings?: Array<CaptureWarning>;
 }
 
 export const STUDIO_SAVE_TIMEOUT_MS = 30_000;
@@ -187,6 +189,7 @@ function savedResult(
 		mtime: stat.mtime.toISOString(),
 		pid: pinned.pid,
 		place: target.place,
+		warnings: [],
 	};
 }
 

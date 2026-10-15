@@ -45,7 +45,10 @@ export async function saveCaptureAsync(
 		const capture = await listener.captureAsync(signal);
 		signal.throwIfAborted();
 		assembleCapture(context, { base, capture, output });
-		return captureResult(context, studio, output, started);
+		return {
+			...captureResult(context, studio, output, started),
+			warnings: capture.warnings ?? [],
+		};
 	} finally {
 		seams.fileSystem.rmSync(base, { force: true });
 	}

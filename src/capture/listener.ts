@@ -6,9 +6,11 @@ import type { AddressInfo } from "node:net";
 import { ForgeError } from "../errors.ts";
 import type { NetworkBackend, RojoServerInfo } from "../seams/network.ts";
 import type { Capture, CaptureAddress, CaptureListener } from "./protocol.ts";
+import { captureWarnings } from "./warnings.ts";
 
 const metadataSchema = type({
-	services: type({ name: "string > 0", roots: "number.integer >= 0[]" }).array(),
+	"services": type({ name: "string > 0", roots: "number.integer >= 0[]" }).array(),
+	"warnings?": captureWarnings,
 });
 const rejectionSchema = type({ "error": "string", "message?": "string" });
 const MAX_BODY_BYTES = 128 * 1024 * 1024;

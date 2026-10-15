@@ -1,3 +1,4 @@
+import type { CaptureWarning } from "../capture/protocol.ts";
 import type { Diagnostic } from "../compiler/diagnostics.ts";
 import type { ForgeErrorCode } from "../errors.ts";
 import type { ExitCode } from "../exit-codes.ts";
@@ -16,12 +17,12 @@ export interface OutputStreams {
  * command needs a new kind; both reporters must then render it.
  */
 export type ReporterEvent =
+	| (Partial<CaptureWarning> & { message: string; type: "warning" })
 	/** The watch-mode compiler finished one compile. */
 	| { diagnostics: Array<Diagnostic>; errors: number; type: "compiled" }
 	/** One line of a service's log (`forge logs`). */
 	| { line: string; service: string; type: "log" }
 	| { message: string; type: "info" }
-	| { message: string; type: "warning" }
 	| { name: string; status: "failed" | "started" | "succeeded"; type: "step" };
 
 /** What a command returns when it succeeds. */

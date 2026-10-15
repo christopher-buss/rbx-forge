@@ -390,6 +390,25 @@ describe("capture listener", () => {
 		});
 	});
 
+	it("should preserve named warnings beside the model", async ({ expect, onTestFinished }) => {
+		expect.assertions(2);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const capturing = fixture.listener.captureAsync(AbortSignal.any([]));
+		const url = await dispatchedUrlAsync(fixture);
+		const warnings = [
+			{ property: "StreamingTargetRadius", reason: "unreadable", service: "Workspace" },
+			{ property: "CollisionGroups", reason: "collision_groups", service: "Workspace" },
+			{ property: "GrassName", reason: "material_override", service: "MaterialService" },
+		];
+		const reply = await fixture.request(url, "POST", [
+			frame(JSON.stringify({ services: [], warnings })),
+		]).finished;
+
+		expect(reply.status).toBe(204);
+		await expect(capturing).resolves.toMatchObject({ warnings });
+	});
+
 	it("should reject invalid metadata with a stable capture error", async ({
 		expect,
 		onTestFinished,
@@ -431,6 +450,20 @@ describe("capture listener", () => {
 		{
 			name: "wrong service shape",
 			body: frame('{"services":[{"name":"","roots":[-1]}]}'),
+			message: "Studio sent an invalid capture.",
+		},
+		{
+			name: "invalid warning reason",
+			body: frame(
+				'{"services":[],"warnings":[{"service":"Workspace","property":"Edited","reason":"unknown"}]}',
+			),
+			message: "Studio sent an invalid capture.",
+		},
+		{
+			name: "empty warning property",
+			body: frame(
+				'{"services":[],"warnings":[{"service":"Workspace","property":"","reason":"unreadable"}]}',
+			),
 			message: "Studio sent an invalid capture.",
 		},
 	])(
