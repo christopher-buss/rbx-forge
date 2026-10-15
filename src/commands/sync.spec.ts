@@ -37,6 +37,18 @@ function makeContext(ipc: IpcTransport = createMemoryTransport()): {
 }
 
 describe(runSyncAsync, () => {
+	it("should preserve capture metadata from the session", async ({ expect }) => {
+		expect.assertions(1);
+
+		const ipc = createMemoryTransport();
+		const { context, memory } = makeContext(ipc);
+		const session = await serveFakeSessionAsync(memory, ipc);
+		const capture = { method: "capture", place: `${PROJECT}/game.rbxl` };
+		session.sync = () => ({ ...SYNCED, capture });
+
+		await expect(runSyncAsync(context)).resolves.toMatchObject({ data: { capture } });
+	});
+
 	it("should return what the session synced, with its hooks", async ({ expect }) => {
 		expect.assertions(1);
 

@@ -12,7 +12,16 @@ const metadataSchema = type({
 	"services": type({ name: "string > 0", roots: "number.integer >= 0[]" }).array(),
 	"warnings?": captureWarnings,
 });
-const rejectionSchema = type({ "error": "string", "message?": "string" });
+const rejectionSchema = type({
+	"error": "'play_mode' | 'busy' | 'serialize_failed' | 'not_connected'",
+	"message?": "string",
+});
+const rejectionMessages = {
+	busy: "Studio is busy capturing; wait for that capture to finish.",
+	not_connected: "The forge plugin is not connected; connect Studio to the session's Rojo.",
+	play_mode: "Studio is in Play mode; stop Play mode before capturing.",
+	serialize_failed: "Studio could not serialize the capture; check Studio's Output window.",
+};
 const MAX_BODY_BYTES = 128 * 1024 * 1024;
 const POLL_MS = 20_000;
 
@@ -30,7 +39,6 @@ class CaptureEndpoint implements CaptureListener {
 	private readonly signal: AbortSignal | undefined;
 
 	private isClosed = false;
-	private isConnected = false;
 	private isDispatched!: boolean;
 	private pending: PendingCapture | undefined;
 	private route!: string;
@@ -121,8 +129,8 @@ class CaptureEndpoint implements CaptureListener {
 
 		request.reject(
 			new ForgeError(
-				this.isConnected ? "capture_timeout" : "capture_not_connected",
-				this.isConnected
+				this.isDispatched ? "capture_timeout" : "capture_not_connected",
+				this.isDispatched
 					? "Studio did not finish the capture before the timeout."
 					: "The forge plugin is not connected; connect Studio to the session's Rojo.",
 			),
@@ -176,7 +184,6 @@ class CaptureEndpoint implements CaptureListener {
 	}
 
 	private poll(response: ServerResponse): void {
-		this.isConnected = true;
 		this.polls.add(response);
 		const timer = setTimeout(() => {
 			this.polls.delete(response);
@@ -283,14 +290,22 @@ async function readBodyAsync(incoming: IncomingMessage): Promise<Buffer> {
 	return Buffer.concat(chunks);
 }
 
+function studioRejection(body: Buffer): ForgeError {
+	const response = body.toString("utf8");
+	const { error: reason, message } = rejectionSchema.assert(JSON.parse(response));
+	return new ForgeError(
+		reason === "not_connected" ? "capture_not_connected" : "capture_rejected",
+		rejectionMessages[reason],
+		{
+			details: { message, reason, response },
+		},
+	);
+}
+
 async function readCaptureAsync(incoming: IncomingMessage): Promise<Capture> {
 	const body = await readBodyAsync(incoming);
 	if (incoming.headers["content-type"] === "application/json") {
-		const response = body.toString("utf8");
-		const rejection = rejectionSchema.assert(JSON.parse(response));
-		throw new ForgeError("capture_rejected", "Studio rejected the capture.", {
-			details: { message: rejection.message, response },
-		});
+		throw studioRejection(body);
 	}
 
 	if (body.length < 4) {

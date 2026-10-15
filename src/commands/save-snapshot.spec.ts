@@ -155,6 +155,7 @@ describe("saving snapshot Studios", () => {
 			bytes: 14,
 			desktop: "user",
 			durationMs: 300,
+			method: "menu",
 			mtime: "1970-01-01T00:00:02.000Z",
 			pid: 42,
 			place: PLACE,

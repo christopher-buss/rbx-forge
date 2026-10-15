@@ -56,9 +56,9 @@ export async function runSyncAsync(context: CommandContext): Promise<CommandResu
 		});
 	}
 
-	const { durationMs, input, project } = parsed;
+	const { input, project } = parsed;
 	return {
-		data: { durationMs, hooks: parseHookResults(parsed.hooks), input, project },
+		data: { ...parsed, hooks: parseHookResults(parsed.hooks) },
 		summary: `Synced ${input} into ${project} through session ${session.identity.sessionId}.`,
 	};
 }
