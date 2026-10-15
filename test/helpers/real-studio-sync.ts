@@ -8,6 +8,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { onTestFinished } from "vitest";
 
 import type { CommandContext } from "../../src/commands/context.ts";
+import { DEFAULT_CONFIG } from "../../src/config/resolve.ts";
 import type { PinnedProcess } from "../../src/native/addon.ts";
 import { readVariable } from "../../src/process/environment.ts";
 import { rojoWrapperPath, writeRojoWrapper } from "../../src/rojo/wrapper-project.ts";
@@ -158,7 +159,7 @@ async function cleanupAsync(runtime: Runtime): Promise<void> {
 
 function writeProbe({ context, directory }: Runtime, value: string): void {
 	const project = path.join(directory, "default.project.json");
-	const config = { buildOutputPath: "probe.rbxl", rojoProjectPath: project };
+	const config = { ...DEFAULT_CONFIG, buildOutputPath: "probe.rbxl", rojoProjectPath: project };
 	writeFileSync(
 		project,
 		JSON.stringify({

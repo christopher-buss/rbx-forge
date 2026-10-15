@@ -27,14 +27,16 @@ export interface BinRun {
  * @param cwd - Working directory of the run.
  * @param environment - The run's variables; defaults to this process's,
  *   without `CI`.
+ * @param bin - The built CLI entry, optionally isolated for one fixture.
  * @returns Exit status and output.
  */
 export async function runBinAsync(
 	argv: Array<string>,
 	cwd = REPOSITORY,
 	environment?: NodeJS.ProcessEnv,
+	bin = BIN,
 ): Promise<BinRun> {
-	const child = spawn(process.execPath, [BIN, ...argv], {
+	const child = spawn(process.execPath, [bin, ...argv], {
 		cwd,
 		env: environment ?? { ...process.env, CI: undefined },
 		stdio: ["pipe", "pipe", "pipe"],
