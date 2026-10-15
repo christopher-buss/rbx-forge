@@ -1,7 +1,7 @@
 import { type } from "arktype";
 import path from "node:path";
 
-import { emitCaptureWarnings } from "../capture/warnings.ts";
+import { emitCaptureFailureWarnings, emitCaptureWarnings } from "../capture/warnings.ts";
 import type { FlagDefinition } from "../cli/flags.ts";
 import { findSession } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
@@ -39,19 +39,12 @@ export async function runSaveAsync(
 	context: CommandContext,
 	input: CommandInput,
 ): Promise<CommandResult> {
-	const timeoutMs = saveTimeoutMs(input.flags["timeout"]);
-
-	const { place } = input.flags;
-	const saved =
-		typeof place === "string"
-			? await saveStudioAsync(
-					context.seams,
-					{ place: path.resolve(context.cwd, place) },
-					timeoutMs,
-				)
-			: await saveSessionAsync(context, timeoutMs);
-	emitCaptureWarnings(context.reporter, saved.warnings ?? []);
-	return saveResultOf(saved);
+	try {
+		return await saveAsync(context, input);
+	} catch (err) {
+		emitCaptureFailureWarnings(context.reporter, err);
+		throw err;
+	}
 }
 
 async function saveSessionAsync(context: CommandContext, timeoutMs: number): Promise<StudioSave> {
@@ -84,4 +77,20 @@ function saveResultOf(saved: StudioSave): CommandResult {
 		data: { ...saved },
 		summary: `Saved ${saved.place} in Roblox Studio (PID ${saved.pid}, desktop ${saved.desktop}).`,
 	};
+}
+
+async function saveAsync(context: CommandContext, input: CommandInput): Promise<CommandResult> {
+	const timeoutMs = saveTimeoutMs(input.flags["timeout"]);
+
+	const { place } = input.flags;
+	const saved =
+		typeof place === "string"
+			? await saveStudioAsync(
+					context.seams,
+					{ place: path.resolve(context.cwd, place) },
+					timeoutMs,
+				)
+			: await saveSessionAsync(context, timeoutMs);
+	emitCaptureWarnings(context.reporter, saved.warnings ?? []);
+	return saveResultOf(saved);
 }
