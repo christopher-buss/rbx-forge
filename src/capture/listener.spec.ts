@@ -18,20 +18,23 @@ type Chunks = AsyncIterable<Buffer | string> | Iterable<Buffer | string>;
 
 interface Reply {
 	body: string;
+	headers: Record<string, number | string>;
 	status: number;
 }
 
 interface ResponseDriver extends EventEmitter {
 	end: (body?: string) => ResponseDriver;
+	headers: Record<string, number | string>;
 	statusCode: number;
-	writeHead: (status: number) => ResponseDriver;
+	writeHead: (status: number, headers?: Record<string, number | string>) => ResponseDriver;
 }
 
 /**
  * Drive HTTP requests at the Network seam without a socket.
+ * @param closesOnEnd - Whether response end immediately emits transport close.
  * @returns The fake network and its HTTP request driver.
  */
-function createCaptureBackend() {
+function createCaptureBackend(closesOnEnd = true) {
 	const fake = createFakeNetworkBackend();
 	function unbound(): never {
 		assert.fail("The listener has not bound");
@@ -55,21 +58,37 @@ function createCaptureBackend() {
 			headers: Record<string, string> = {},
 		) => {
 			const finished = Promise.withResolvers<Reply>();
+			const ends = new Array<string>();
 			const response: ResponseDriver = Object.assign(new EventEmitter(), {
 				end: (body = "") => {
-					finished.resolve({ body, status: response.statusCode });
-					response.emit("close");
+					ends.push(body);
+					finished.resolve({
+						body,
+						headers: response.headers,
+						status: response.statusCode,
+					});
+					if (closesOnEnd) {
+						response.emit("close");
+					}
+
 					return response;
 				},
+				headers: {},
 				statusCode: 0,
-				writeHead: (status: number) => {
+				writeHead: (status: number, responseHeaders = {}) => {
+					response.headers = responseHeaders;
 					response.statusCode = status;
 					return response;
 				},
 			});
-			const incoming = Object.assign(Readable.from(chunks), { headers, method, url });
+			const location = URL.parse(url ?? "");
+			const incoming = Object.assign(Readable.from(chunks), {
+				headers,
+				method,
+				url: location === null ? url : location.pathname + location.search,
+			});
 			handler(fromAny(incoming), fromAny(response));
-			return { close: () => response.emit("close"), finished: finished.promise };
+			return { close: () => response.emit("close"), ends, finished: finished.promise };
 		},
 	};
 }
@@ -82,9 +101,9 @@ function createCaptureBackend() {
  */
 async function fixtureAsync(
 	{ onTestFinished }: Pick<TestContext, "onTestFinished">,
-	options: { address?: CaptureAddress; signal?: AbortSignal } = {},
+	options: { address?: CaptureAddress; closesOnEnd?: boolean; signal?: AbortSignal } = {},
 ) {
-	const fake = createCaptureBackend();
+	const fake = createCaptureBackend(options.closesOnEnd);
 	const listener = await createNodeNetwork(fake.backend).listenForCaptureAsync(
 		IDENTITY,
 		options.signal,
@@ -123,6 +142,132 @@ async function dispatchedUrlAsync(
 }
 
 describe("capture listener", () => {
+	it.for([
+		{ options: {}, port: 0, secret: "ab".repeat(32) },
+		{ options: { address: { port: 50123, secret: "saved" } }, port: 50123, secret: "saved" },
+	])(
+		"should bind the authenticated loopback address ($port)",
+		async ({ options, port, secret }, { expect, onTestFinished }) => {
+			expect.assertions(2);
+
+			const fixture = await fixtureAsync({ onTestFinished }, options);
+			const url = new URL(fixture.listener.url);
+
+			expect(fixture.server.listen).toHaveBeenCalledExactlyOnceWith(
+				{ host: "127.0.0.1", port },
+				expect.any(Function),
+			);
+			expect(url.pathname).toBe(`/capture/${secret}`);
+		},
+	);
+
+	it("should close the HTTP server exactly once", async ({ expect, onTestFinished }) => {
+		expect.assertions(2);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		fixture.listener.close();
+		fixture.listener.close();
+
+		expect(fixture.server.close).toHaveBeenCalledTimes(1);
+		expect(fixture.server.closeAllConnections).toHaveBeenCalledTimes(1);
+	});
+
+	it("should remove successful capture cancellation listeners", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const abort = new AbortController();
+		const capturing = fixture.listener.captureAsync(abort.signal);
+
+		expect(getEventListeners(abort.signal, "abort")).toHaveLength(1);
+
+		const url = await dispatchedUrlAsync(fixture);
+		await fixture.request(url, "POST", [frame('{"services":[]}', Buffer.alloc(0))]).finished;
+		await capturing;
+
+		expect(getEventListeners(abort.signal, "abort")).toStrictEqual([]);
+	});
+
+	it("should not dispatch a consumed poll again before its close event", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const fixture = await fixtureAsync({ onTestFinished }, { closesOnEnd: false });
+		const poll = fixture.request(fixture.listener.url);
+		const capturing = fixture.listener.captureAsync(AbortSignal.any([]));
+		await poll.finished;
+		await fixture.request(`${fixture.listener.url}&requestId=${"ab".repeat(16)}`, "POST", [
+			frame('{"services":[]}'),
+		]).finished;
+		await capturing;
+		const abort = new AbortController();
+		const next = fixture.listener.captureAsync(abort.signal).catch((err: unknown) => err);
+
+		abort.abort();
+		await next;
+
+		expect(poll.ends).toHaveLength(1);
+	});
+
+	it("should forget an expired poll before the transport emits close", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		vi.useFakeTimers();
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+		const fixture = await fixtureAsync({ onTestFinished }, { closesOnEnd: false });
+		const poll = fixture.request(fixture.listener.url);
+		await vi.advanceTimersByTimeAsync(20_000);
+		const abort = new AbortController();
+		const capturing = fixture.listener.captureAsync(abort.signal).catch((err: unknown) => err);
+
+		abort.abort();
+		await capturing;
+
+		expect(poll.ends).toHaveLength(1);
+	});
+
+	it("should cancel a disconnected poll's expiry timer", async ({ expect, onTestFinished }) => {
+		expect.assertions(1);
+
+		vi.useFakeTimers();
+		onTestFinished(() => {
+			vi.useRealTimers();
+		});
+		const fixture = await fixtureAsync({ onTestFinished });
+		const poll = fixture.request(fixture.listener.url);
+		poll.close();
+		await vi.advanceTimersByTimeAsync(20_000);
+
+		expect(poll.ends).toStrictEqual([]);
+	});
+
+	it("should accept the maximum capture body size", async ({ expect, onTestFinished }) => {
+		expect.assertions(1);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const capturing = fixture.listener.captureAsync(AbortSignal.any([]));
+		const url = await dispatchedUrlAsync(fixture);
+		const metadata = '{"services":[]}';
+		const body = Buffer.alloc(128 * 1024 * 1024);
+		body.writeUInt32LE(Buffer.byteLength(metadata));
+		body.write(metadata, 4);
+		await fixture.request(url, "POST", [body]).finished;
+
+		const capture = await capturing;
+
+		expect(capture.model.length).toBe(body.length - 4 - metadata.length);
+	});
+
 	it("should publish only the capture interface and project a full Rojo identity", async ({
 		expect,
 		onTestFinished,
@@ -146,12 +291,17 @@ describe("capture listener", () => {
 		expect,
 		onTestFinished,
 	}) => {
-		expect.assertions(5);
+		expect.assertions(7);
 
 		const fixture = await fixtureAsync({ onTestFinished });
 		const poll = fixture.request(fixture.listener.url);
 		const capturing = fixture.listener.captureAsync(AbortSignal.any([]));
 		const reply = await poll.finished;
+
+		expect(reply.headers).toStrictEqual({
+			"content-length": Buffer.byteLength(reply.body),
+			"content-type": "application/json",
+		});
 
 		expect(JSON.parse(reply.body)).toStrictEqual({
 			...IDENTITY,
@@ -159,6 +309,10 @@ describe("capture listener", () => {
 		});
 		await expect(
 			fixture.request(fixture.listener.url, "DELETE").finished,
+		).resolves.toMatchObject({ status: 404 });
+		await expect(
+			fixture.request(`${fixture.listener.url}&requestId=${"ab".repeat(16)}`, "DELETE")
+				.finished,
 		).resolves.toMatchObject({ status: 404 });
 
 		const response = await fixture.request(
@@ -216,7 +370,11 @@ describe("capture listener", () => {
 		const fixture = await fixtureAsync({ onTestFinished });
 		const rejected = expect(
 			fixture.listener.captureAsync(AbortSignal.any([])),
-		).rejects.toMatchObject({ code: "capture_rejected" });
+		).rejects.toMatchObject({
+			cause: { name: "SyntaxError" },
+			code: "capture_rejected",
+			message: "Studio sent an invalid capture.",
+		});
 		const url = await dispatchedUrlAsync(fixture);
 		const reply = await fixture.request(url, "POST", [frame("{")]).finished;
 
@@ -226,18 +384,35 @@ describe("capture listener", () => {
 	});
 
 	it.for([
-		{ name: "missing frame", body: Buffer.from([0]) },
-		{ name: "truncated metadata", body: Buffer.from([10, 0, 0, 0, 123]) },
-		{ name: "wrong service shape", body: frame('{"services":[{"name":"","roots":[-1]}]}') },
+		{
+			name: "missing frame",
+			body: Buffer.from([0]),
+			message: "The capture frame is incomplete.",
+		},
+		{
+			name: "empty metadata",
+			body: Buffer.alloc(4),
+			message: "Studio sent an invalid capture.",
+		},
+		{
+			name: "truncated metadata",
+			body: Buffer.from([5, 0, 0, 0, 123, 125]),
+			message: "The capture metadata is incomplete.",
+		},
+		{
+			name: "wrong service shape",
+			body: frame('{"services":[{"name":"","roots":[-1]}]}'),
+			message: "Studio sent an invalid capture.",
+		},
 	])(
 		"should reject $name without accepting a capture",
-		async ({ body }, { expect, onTestFinished }) => {
+		async ({ body, message }, { expect, onTestFinished }) => {
 			expect.assertions(2);
 
 			const fixture = await fixtureAsync({ onTestFinished });
 			const rejected = expect(
 				fixture.listener.captureAsync(AbortSignal.any([])),
-			).rejects.toMatchObject({ code: "capture_rejected" });
+			).rejects.toMatchObject({ code: "capture_rejected", message });
 			const url = await dispatchedUrlAsync(fixture);
 			const reply = await fixture.request(url, "POST", [body]).finished;
 
@@ -259,6 +434,7 @@ describe("capture listener", () => {
 		).rejects.toMatchObject({
 			code: "capture_rejected",
 			details: { response: '{"error":"play_mode"}' },
+			message: "Studio rejected the capture.",
 		});
 		const url = await dispatchedUrlAsync(fixture);
 		const reply = await fixture.request(url, "POST", ['{"error":"play_mode"}'], {
@@ -375,7 +551,10 @@ describe("capture listener", () => {
 		await dispatchedUrlAsync(fixture);
 		busy.abort();
 
-		await expect(busyResult).rejects.toMatchObject({ code: "capture_timeout" });
+		await expect(busyResult).rejects.toMatchObject({
+			code: "capture_timeout",
+			message: "Studio did not finish the capture before the timeout.",
+		});
 	});
 
 	it("should reject overlapping captures and release cancellation listeners", async ({
@@ -392,6 +571,7 @@ describe("capture listener", () => {
 
 		await expect(fixture.listener.captureAsync(AbortSignal.any([]))).rejects.toMatchObject({
 			code: "capture_rejected",
+			message: "A capture is already running or its listener has closed.",
 		});
 
 		abort.abort();
@@ -411,7 +591,10 @@ describe("capture listener", () => {
 		const captureAbort = new AbortController();
 		const rejected = expect(
 			fixture.listener.captureAsync(captureAbort.signal),
-		).rejects.toMatchObject({ code: "capture_timeout" });
+		).rejects.toMatchObject({
+			code: "capture_timeout",
+			message: "The capture listener closed.",
+		});
 		await dispatchedUrlAsync(fixture);
 		const poll = fixture.request(fixture.listener.url);
 		session.abort();
@@ -490,7 +673,7 @@ describe("capture listener", () => {
 	it("should reject a cancelled bind and a failed bind without leaving a listener", async ({
 		expect,
 	}) => {
-		expect.assertions(3);
+		expect.assertions(7);
 
 		const fake = createCaptureBackend();
 
@@ -508,6 +691,8 @@ describe("capture listener", () => {
 		fake.bind();
 
 		await expect(binding).rejects.toMatchObject({ name: "AbortError" });
+		expect(fake.server.close).toHaveBeenCalledTimes(1);
+		expect(fake.server.closeAllConnections).toHaveBeenCalledTimes(1);
 
 		const failure = createCaptureBackend();
 		failure.delayBind();
@@ -515,6 +700,58 @@ describe("capture listener", () => {
 		failure.failBind();
 
 		await expect(failedBind).rejects.toThrow("bind denied");
+		expect(failure.server.close).toHaveBeenCalledTimes(1);
+		expect(failure.server.closeAllConnections).toHaveBeenCalledTimes(1);
+	});
+
+	it("should preserve a new capture when the previous signal aborts before its continuation", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const previous = new AbortController();
+		const first = fixture.listener.captureAsync(previous.signal);
+		const firstUrl = await dispatchedUrlAsync(fixture);
+		await fixture.request(firstUrl, "POST", [frame('{"services":[]}')]).finished;
+		const current = new AbortController();
+		const second = fixture.listener.captureAsync(current.signal);
+		previous.abort();
+		await first;
+		const secondUrl = await dispatchedUrlAsync(fixture);
+		await fixture.request(secondUrl, "POST", [frame('{"services":[]}')]).finished;
+
+		await expect(second).resolves.toMatchObject({ services: [] });
+	});
+
+	it("should keep a new capture pending when a previous late post is invalid", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const abort = new AbortController();
+		const previous = fixture.listener.captureAsync(abort.signal).catch((err: unknown) => err);
+		const previousUrl = await dispatchedUrlAsync(fixture);
+		const chunk = Promise.withResolvers<Buffer>();
+		const posting = fixture.request(
+			previousUrl,
+			"POST",
+			(async function* () {
+				yield await chunk.promise;
+			})(),
+		);
+		abort.abort();
+		await previous;
+		const current = fixture.listener.captureAsync(AbortSignal.any([]));
+		chunk.resolve(Buffer.from([0]));
+		await posting.finished;
+		const url = await dispatchedUrlAsync(fixture);
+		await fixture.request(url, "POST", [frame('{"services":[]}')]).finished;
+
+		await expect(current).resolves.toMatchObject({ services: [] });
 	});
 
 	it.for([
