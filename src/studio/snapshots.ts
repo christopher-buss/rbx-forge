@@ -77,6 +77,8 @@ export function pruneSnapshots(
 		}
 
 		try {
+			fileSystem.rmSync(`${snapshot}.capture.json`, { force: true });
+			fileSystem.rmSync(`${snapshot}.capture.lua`, { force: true });
 			fileSystem.rmSync(snapshot);
 			result.pruned.push(snapshot);
 		} catch (err) {

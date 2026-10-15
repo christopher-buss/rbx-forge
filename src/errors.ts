@@ -20,6 +20,7 @@ import {
 export type ForgeErrorCode =
 	| "capture_assembly_failed"
 	| "capture_not_connected"
+	| "capture_port_in_use"
 	| "capture_rejected"
 	| "capture_timeout"
 	| "cleanup_in_progress"
@@ -88,6 +89,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	capture_not_connected: {
 		exitCode: EXIT_FAILURE,
 		text: "The forge plugin is not connected to the session's Rojo.",
+	},
+	capture_port_in_use: {
+		exitCode: EXIT_FAILURE,
+		text: "The snapshot's recorded capture port is occupied.",
 	},
 	capture_rejected: {
 		exitCode: EXIT_FAILURE,

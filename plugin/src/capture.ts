@@ -77,9 +77,11 @@ export function startPlugin(root: Instance, io: PluginIo): ActivePlugin | undefi
 		return undefined;
 	}
 
+	const isSnapshot = capture.GetAttribute("Snapshot") === true && !capture.Archivable;
 	if (
-		capture.GetAttribute("ConnectedProjectName") !== project ||
-		capture.GetAttribute("ConnectedSessionId") !== session
+		!isSnapshot &&
+		(capture.GetAttribute("ConnectedProjectName") !== project ||
+			capture.GetAttribute("ConnectedSessionId") !== session)
 	) {
 		return undefined;
 	}

@@ -310,7 +310,8 @@ function hasRunForgePlugin(place: string, plugin: string): boolean {
 }
 
 /**
- * Open a saved snapshot on the hidden desktop; the test's end stops its Studio.
+ * Open a saved snapshot on the hidden desktop; the test's end stops its
+ * Studio.
  *
  * @param sharedCli - The private installation reused by the second launch.
  * @returns The snapshot, and the installed forge plugin's modification time.
@@ -452,6 +453,85 @@ task.wait(0.1)`,
 			expect(parseLines(repeated.stdout)).not.toContainEqual(
 				expect.objectContaining({ type: "warning" }),
 			);
+		},
+	);
+
+	it(
+		"captures an edited snapshot without Rojo and syncs it back",
+		{ timeout: 240_000 },
+		async ({ expect, onTestFinished }) => {
+			expect.assertions(5);
+
+			const fixture = await makeRealFixtureAsync({ studio: { saveMethod: "capture" } });
+			const editor = await captureRealStudioFixtureAsync({
+				actions: {
+					edit: `local capture = game:GetService("ServerStorage"):FindFirstChild("ForgeCapture")
+assert(capture and not capture.Archivable and capture:GetAttribute("Snapshot") == true)
+assert(capture:GetAttribute("ConnectedSessionId") == nil, "Snapshots have no Rojo connection")
+local part = Instance.new("Part")
+part.Name = "ForgeCapturedSnapshotPart"
+part.Anchored = true
+part.Parent = workspace`,
+				},
+				captureName: fixture.cli.captureName,
+				directory: fixture.project,
+				native: loadRealNative(),
+				pluginsDirectory: realPluginsDirectory(),
+			});
+			onTestFinished(editor.closeAsync);
+			mkdirSync(path.join(fixture.project, "workspace"));
+			writeFileSync(
+				path.join(fixture.project, "default.project.json"),
+				JSON.stringify({
+					name: "forge-real-snapshot-capture",
+					tree: {
+						$attributes: {
+							...editor.launchAttributes,
+							...fixture.cli.launchAttributes,
+						},
+						$className: "DataModel",
+						Lighting: { $properties: { Technology: "ShadowMap" } },
+						Workspace: { $path: "workspace" },
+					},
+				}),
+			);
+			const own = studioCleanup();
+			const opened = await captureForgeAsync(fixture, [
+				"open",
+				"--desktop",
+				"hidden",
+				"--json",
+			]);
+
+			expect(opened.status).toBe(0);
+
+			const { place, studio } = parseOpened(opened.result.data);
+			assert(studio !== null);
+			const pinned = own(studio);
+			editor.own(pinned);
+			await editor.waitForCaptureUrlAsync();
+			const edited = await editor.runAsync("edit");
+			note({ command: "snapshot-edit", pid: studio.pid, studioVersion: edited.version });
+
+			const saved = await captureForgeAsync(fixture, ["save", "--place", place, "--json"]);
+
+			expect(saved).toMatchObject({
+				result: { data: { method: "capture", pid: studio.pid, place } },
+				status: 0,
+			});
+
+			const synced = await captureForgeAsync(fixture, [
+				"syncback",
+				"--input",
+				place,
+				"--json",
+			]);
+
+			expect(synced.status).toBe(0);
+			expect(
+				existsSync(path.join(fixture.project, "workspace/ForgeCapturedSnapshotPart.rbxm")),
+			).toBeTrue();
+			expect(pinned.isAlive()).toBeTrue();
 		},
 	);
 

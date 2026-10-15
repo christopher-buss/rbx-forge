@@ -90,6 +90,12 @@ function saveProject() {
 				now += ms;
 			},
 		},
+		configLoader: async () => {
+			return {
+				path: path.join(PROJECT, "rbx-forge.config.ts"),
+				value: { projectType: "luau" },
+			};
+		},
 		fileSystem: memory.fileSystem,
 		native: () => native.addon,
 	});
