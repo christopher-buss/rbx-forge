@@ -11,9 +11,9 @@
  *
  * Places (`test/fixtures/studio/`):
  *
- * - `saved.rbxl`: Studio saved it, so it has no unsaved changes and closes
- *   without a dialog. Made by opening the `rojo build` of
- *   `unsaved.project.json` in Studio and saving it.
+ * - `saved.rbxl`: Studio saved the `rojo build` of `unsaved.project.json`.
+ *   Current Studio and plugins may update it on load; graceful-close cases
+ *   save their owned copy after readiness to establish a clean baseline.
  * - `unsaved.rbxl`: `rojo build unsaved.project.json`. Studio always takes a
  *   place fresh from Rojo as changed, so it asks to save on close.
  *   `Lighting.Technology` is set, so no Lighting migration dialog shows.
@@ -475,7 +475,7 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured a
 		"dismisses hidden snapshot Compatibility lighting after the open CLI exits",
 		{ timeout: 150_000 },
 		async ({ expect }) => {
-			expect.assertions(6);
+			expect.assertions(5);
 
 			const fixture = await compatibilitySnapshotAsync();
 			const pinSnapshot = studioCleanup();
@@ -498,11 +498,11 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured a
 			});
 
 			await expect
-				.poll(() => existsSync(`${place}.lock`), { interval: 100, timeout: OPEN_MS })
-				.toBeTrue();
-			expect(Number(readFileSync(`${place}.lock`, "utf8").split(/\r?\n/, 1)[0])).toBe(
-				studio.pid,
-			);
+				.poll(() => Number(readFileSync(`${place}.lock`, "utf8").split(/\r?\n/, 1)[0]), {
+					interval: 100,
+					timeout: OPEN_MS,
+				})
+				.toBe(studio.pid);
 
 			await sleep(10_000);
 
@@ -638,6 +638,7 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured a
 				["save", "--timeout", "30", "--json"],
 				realVariables(),
 			);
+			note({ command: "save", result: save.result, status: save.status });
 			const after = foregroundOwner();
 
 			expect(saveOutcome(save)).toBe("saved");
@@ -653,6 +654,7 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured a
 
 			const firstSavedAt = statSync(fixture.place).mtimeMs;
 			const again = await runForgeAsync(fixture, ["save", "--json"], realVariables());
+			note({ command: "save-again", result: again.result, status: again.status });
 
 			expect({
 				changed: statSync(fixture.place).mtimeMs > firstSavedAt,
@@ -683,15 +685,21 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured a
 		"should open Studio directly with up --studio, and close it with down",
 		{ timeout: 240_000 },
 		async ({ expect }) => {
-			expect.assertions(4);
+			expect.assertions(5);
 
 			const fixture = await makeRealProjectAsync("saved.rbxl");
 			const started = Date.now();
 			const sessionId = await upStudioAsync(fixture);
 			const [recorded, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 			const opened = Date.now();
+			const saved = await runForgeAsync(fixture, ["save", "--json"], realVariables());
+			note({ command: "prepare-down", result: saved.result, status: saved.status });
+
+			expect(saveOutcome(saved)).toBe("saved");
+
+			const closing = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables());
-			note({ closeMs: Date.now() - opened, openMs: opened - started, test: "down" });
+			note({ closeMs: Date.now() - closing, openMs: opened - started, test: "down" });
 
 			expect(recorded).toBe(lockPid);
 			expect(down.result.data).toMatchObject({
@@ -703,11 +711,16 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured a
 	);
 
 	it("should close the session's Studio with stop", { timeout: 240_000 }, async ({ expect }) => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const fixture = await makeRealProjectAsync("saved.rbxl");
 		const sessionId = await upStudioAsync(fixture);
 		const [, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
+		const saved = await runForgeAsync(fixture, ["save", "--json"], realVariables());
+		note({ command: "prepare-stop", result: saved.result, status: saved.status });
+
+		expect(saveOutcome(saved)).toBe("saved");
+
 		const loaded = Date.now();
 		const stop = await runForgeAsync(fixture, ["stop", "--json"], realVariables());
 		note({ closeMs: Date.now() - loaded, test: "stop" });

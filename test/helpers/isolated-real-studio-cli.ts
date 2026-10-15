@@ -221,7 +221,13 @@ function isolateForgeModel(
 	]);
 }
 
-function isolateRojoModel(native: NativeAddon, model: string, bootstrap: string): void {
+function isolateRojoModel(
+	native: NativeAddon,
+	plugin: string,
+	bootstrap: string,
+	directory: string,
+): void {
+	const model = path.join(directory, path.basename(plugin));
 	writeFileSync(
 		model,
 		gunzipSync(readFileSync(path.join(REPOSITORY, "test/fixtures/models/rojo-7.7.1.rbxm.gz"))),
@@ -241,6 +247,9 @@ function isolateRojoModel(native: NativeAddon, model: string, bootstrap: string)
 		{ path: ["Rojo", "Plugin"], source: bootstrap + main },
 		{ path: ["Rojo", "Plugin", "Settings"], source: `${proxy}\n${settings}` },
 	]);
+	mkdirSync(path.dirname(plugin), { recursive: true });
+	// Published plugins already contain their owned launch gate.
+	copyFileSync(model, plugin);
 }
 
 function prepareIsolation(
@@ -272,8 +281,7 @@ function prepareIsolation(
 	const bundledPlugin = path.join(bundle, "dist/forge-plugin", forgeName);
 	copyFileSync(path.join(bundle, "dist/forge-plugin/ForgePlugin.rbxm"), bundledPlugin);
 	isolateForgeModel(native, bundledPlugin, bootstrap, captureName);
-	mkdirSync(path.dirname(managedPlugin), { recursive: true });
-	isolateRojoModel(native, managedPlugin, bootstrap);
+	isolateRojoModel(native, managedPlugin, bootstrap, bundle);
 	return {
 		bin: path.join(bundle, "bin/rbx-forge.js"),
 		bundledPlugin,
@@ -287,7 +295,7 @@ function prepareIsolation(
 function assertCanonicalModel({ bytes, file, modified }: CanonicalModel): void {
 	assert.equal(existsSync(file), bytes !== undefined, `Canonical plugin changed: ${file}`);
 	if (bytes !== undefined) {
-		assert.deepEqual(readFileSync(file), bytes, `Canonical plugin changed: ${file}`);
+		assert(readFileSync(file).equals(bytes), `Canonical plugin changed: ${file}`);
 		assert.equal(statSync(file).mtimeMs, modified, `Canonical plugin was rewritten: ${file}`);
 	}
 }
