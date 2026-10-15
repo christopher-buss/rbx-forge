@@ -1,4 +1,7 @@
 /* cspell:words pcall rawget fromstring writeu */
+import { captureServiceMetadata } from "./service-metadata";
+import type { CaptureValue, ServiceMetadata, ServiceMetadataIo } from "./service-metadata";
+
 /** The instance a forge session or snapshot fills with its capture URL. */
 export const CAPTURE_INSTANCE = "ForgeCapture";
 /** The attribute of {@link CAPTURE_INSTANCE} that holds the URL. */
@@ -12,7 +15,7 @@ export interface PluginIo {
 		request: (request: RequestAsyncRequest) => RequestAsyncResponse;
 	};
 	output: (message: string) => void;
-	services: {
+	services: ServiceMetadataIo & {
 		history: ChangeHistoryService;
 		isRunning: () => boolean;
 		isSerialized: (name: string) => boolean;
@@ -30,7 +33,12 @@ export interface ActivePlugin {
 /** The one model and its service root indices. */
 export interface CapturePayload {
 	model: buffer;
-	services: Array<{ name: string; roots: Array<number> }>;
+	services: Array<ServiceMetadata & { name: string; roots: Array<number> }>;
+}
+
+interface ServiceRoots {
+	roots: Array<number>;
+	service: Instance;
 }
 
 /**
@@ -81,23 +89,29 @@ export function startPlugin(root: Instance, io: PluginIo): ActivePlugin | undefi
  * @returns One model and the roots belonging to each service.
  */
 export function captureInstances(root: Instance, active: ActivePlugin): CapturePayload {
-	const instances = new Array<Instance>();
-	const services = new Array<{ name: string; roots: Array<number> }>();
-	for (const service of root.GetChildren()) {
-		if (!active.io.services.isSerialized(service.ClassName)) {
-			continue;
+	const { captured, instances } = captureRoots(root, active);
+	const { carriers, reference } = captureReferences(instances, captured);
+	const [isCaptured, result] = pcall(() => {
+		const services = new Array<ServiceMetadata & { name: string; roots: Array<number> }>();
+		for (const { roots, service } of captured) {
+			services.push({
+				...captureServiceMetadata(service, active.io.services, reference),
+				name: service.ClassName,
+				roots,
+			});
 		}
 
-		const roots = new Array<number>();
-		for (const child of captureChildren(service, active.capture)) {
-			roots.push(instances.size());
-			instances.push(child);
-		}
-
-		services.push({ name: service.ClassName, roots });
+		return { model: active.io.services.serialize(instances), services };
+	});
+	for (const carrier of carriers) {
+		carrier.Destroy();
 	}
 
-	return { model: active.io.services.serialize(instances), services };
+	if (!isCaptured) {
+		error(result);
+	}
+
+	return result;
 }
 
 /**
@@ -123,6 +137,56 @@ function captureChildren(service: Instance, capture: Instance): Array<Instance> 
 			child !== capture && child !== currentCamera && child.Archivable && !child.IsA("Player")
 		);
 	});
+}
+
+function captureRoots(
+	root: Instance,
+	active: ActivePlugin,
+): { captured: Array<ServiceRoots>; instances: Array<Instance> } {
+	const instances = new Array<Instance>();
+	const captured = new Array<ServiceRoots>();
+	for (const service of root.GetChildren()) {
+		if (!active.io.services.isSerialized(service.ClassName)) {
+			continue;
+		}
+
+		const roots = new Array<number>();
+		for (const child of captureChildren(service, active.capture)) {
+			roots.push(instances.size());
+			instances.push(child);
+		}
+
+		captured.push({ roots, service });
+	}
+
+	return { captured, instances };
+}
+
+function captureReferences(
+	instances: Array<Instance>,
+	captured: Array<ServiceRoots>,
+): { carriers: Array<ObjectValue>; reference: (target: Instance) => CaptureValue } {
+	const roots = [...instances];
+	const carriers = new Array<ObjectValue>();
+	function reference(target: Instance): CaptureValue {
+		const service = captured.find((entry) => entry.service === target);
+		if (service !== undefined) {
+			return { ServiceRef: service.service.ClassName };
+		}
+
+		if (roots.every((child) => child !== target && !target.IsDescendantOf(child))) {
+			return { Ref: "00000000000000000000000000000000" };
+		}
+
+		const carrier = new Instance("ObjectValue");
+		carrier.Value = target;
+		const index = instances.size();
+		instances.push(carrier);
+		carriers.push(carrier);
+		return { InstanceRef: index };
+	}
+
+	return { carriers, reference };
 }
 
 function postError(active: ActivePlugin, url: string, reason: string): void {
