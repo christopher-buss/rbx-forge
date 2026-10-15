@@ -1,5 +1,4 @@
-/* cspell:words fromstring readu readstring rbxassetid keypoints pcall */
-/* cspell:words rawget */
+// cspell:words fromstring rawget readu readstring rbxassetid keypoints pcall
 import { describe, expect, it, jest } from "@rbxts/jest-globals";
 
 import {
@@ -31,6 +30,7 @@ function playPoll(
 	options: {
 		disconnectOnGet?: boolean;
 		failure?: "network" | "serialize";
+		overlapping?: boolean;
 		project?: string;
 		replaceUrl?: string;
 		requestId?: number | string;
@@ -44,12 +44,17 @@ function playPoll(
 	const capture = makeCapture(root);
 	const posts = new Array<RequestAsyncRequest>();
 	const messages = new Array<string>();
+	let polls = 0;
 	const http = game.GetService("HttpService");
 	const io: PluginIo = {
 		http: {
 			decode: (value) => http.JSONDecode(value),
 			encode: (value) => http.JSONEncode(value),
 			request: (request) => {
+				if (request.Method === "GET") {
+					polls += 1;
+				}
+
 				if (
 					request.Method === "POST" ||
 					options.status === 204 ||
@@ -57,7 +62,8 @@ function playPoll(
 					options.requestId !== undefined ||
 					options.session !== undefined ||
 					options.disconnectOnGet === true ||
-					options.failure === "network"
+					options.failure === "network" ||
+					(polls === 3 && options.overlapping === true)
 				) {
 					capture.SetAttribute("ConnectedSessionId", "ended");
 				}
@@ -98,6 +104,10 @@ function playPoll(
 			properties: () => [],
 			readProperty: () => error("unexpected property read"),
 			serialize: () => {
+				if (options.overlapping === true) {
+					task.wait();
+				}
+
 				if (options.failure === "serialize") {
 					error("serialization unavailable");
 				}
@@ -112,6 +122,10 @@ function playPoll(
 		root,
 		options.warnings === undefined ? active : { ...active, warnings: options.warnings },
 	);
+	if (options.overlapping === true) {
+		task.wait();
+	}
+
 	return { messages, posts };
 }
 
@@ -565,6 +579,20 @@ describe("startPlugin", () => {
 		).toBe("1|Folder|0|1|Brightness|3.5|1|Edited|from Studio|1|capture-tag|1|Technology");
 	});
 
+	it("should reject an overlapping capture while an earlier serialization is still running", () => {
+		expect.assertions(3);
+
+		const { posts } = playPoll({ overlapping: true });
+		const rejected = posts[0];
+		assert(rejected !== undefined);
+		const headers = rejected.Headers;
+		assert(headers !== undefined);
+
+		expect(rawget(headers, "Content-Type")).toBe("application/json");
+		expect(rejected.Body).toBe('{"error":"busy"}');
+		expect(posts.size()).toBe(2);
+	});
+
 	it("should ignore a malformed capture request identifier", () => {
 		expect.assertions(1);
 
@@ -587,10 +615,13 @@ describe("startPlugin", () => {
 		expect(startPlugin(root, createIo().io)).toBeUndefined();
 	});
 
-	it("should discard a request after Rojo disconnected during the long poll", () => {
+	it("should report a Rojo disconnection that occurred during the long poll", () => {
 		expect.assertions(1);
 
-		expect(playPoll({ disconnectOnGet: true }).posts).toStrictEqual([]);
+		const rejected = playPoll({ disconnectOnGet: true }).posts[0];
+		assert(rejected !== undefined);
+
+		expect(rejected.Body).toBe('{"error":"not_connected"}');
 	});
 
 	it("should discard a request after a new session replaced the URL", () => {

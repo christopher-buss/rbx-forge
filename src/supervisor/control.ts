@@ -10,6 +10,7 @@ import { parseRestartRequest, parseStopRequest } from "../session/part-stop-sche
 import type { SessionSync } from "../session/session-sync.ts";
 import type { StatusStore } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
+import { STUDIO_SAVE_TIMEOUT_MS } from "../studio/save-studio.ts";
 
 /** What the control channel of one session reaches. */
 export interface ControlTarget {
@@ -96,7 +97,7 @@ export function controlHandlers(target: ControlTarget): IpcServerOptions["handle
 			requireSession(target, parameters);
 			return { ...(await target.parts.stopAsync(parseStopRequest(parameters))) };
 		},
-		sync: async () => target.sync.runAsync(),
+		sync: async () => syncAsync(target),
 	};
 }
 
@@ -141,6 +142,61 @@ function requireSession(target: ControlTarget, parameters: Record<string, unknow
 	}
 }
 
+async function saveDeadlineAsync(
+	target: ControlTarget,
+	timeoutMs: number,
+	{ request, timer }: { request: AbortController; timer: AbortController },
+): Promise<never> {
+	await target.clock.sleep(timeoutMs, timer.signal);
+	const error = new ForgeError(
+		target.saveMethod === "capture" ? "capture_timeout" : "save_failed",
+		"Studio did not save before the timeout.",
+		{ details: { reason: "timeout" } },
+	);
+	request.abort(error);
+	if (target.saveMethod === "capture") {
+		// Let the aborted listener explain whether Studio connected before the
+		// watchdog wins.
+		await target.clock.sleep(0, timer.signal);
+	}
+
+	throw error;
+}
+
+async function saveAsync(
+	target: ControlTarget,
+	parameters: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+	requireSession(target, parameters);
+	const { timeoutMs } = parameters;
+	if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+		throw new ForgeError("usage", "save takes a positive timeoutMs.");
+	}
+
+	const timer = new AbortController();
+	const request = new AbortController();
+	try {
+		return await Promise.race([
+			target.parts.saveAsync(timeoutMs, request.signal).then((result) => {
+				request.signal.throwIfAborted();
+				return { ...result };
+			}),
+			saveDeadlineAsync(target, timeoutMs, { request, timer }),
+		]);
+	} finally {
+		timer.abort();
+	}
+}
+
+async function syncAsync(target: ControlTarget): Promise<Record<string, unknown>> {
+	if (target.saveMethod !== "capture") {
+		return target.sync.runAsync();
+	}
+
+	const capture = await saveAsync(target, { timeoutMs: STUDIO_SAVE_TIMEOUT_MS });
+	return { ...(await target.sync.runAsync()), capture };
+}
+
 async function addPartsAsync(
 	target: ControlTarget,
 	parameters: Record<string, unknown>,
@@ -161,37 +217,6 @@ function snapshot({ builds, status }: ControlTarget): Record<string, unknown> {
 	// Start lines that one summary line ended may have settled meanwhile.
 	builds.tick();
 	return { ...status.snapshot() };
-}
-
-async function saveAsync(
-	target: ControlTarget,
-	parameters: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-	requireSession(target, parameters);
-	const { timeoutMs } = parameters;
-	if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-		throw new ForgeError("usage", "save takes a positive timeoutMs.");
-	}
-
-	const timer = new AbortController();
-	const request = new AbortController();
-	try {
-		return await Promise.race([
-			target.parts.saveAsync(timeoutMs, request.signal).then((result) => ({ ...result })),
-			target.clock.sleep(timeoutMs, timer.signal).then(() => {
-				request.abort();
-				throw new ForgeError(
-					target.saveMethod === "capture" ? "capture_timeout" : "save_failed",
-					"Studio did not save before the timeout.",
-					{
-						details: { reason: "timeout" },
-					},
-				);
-			}),
-		]);
-	} finally {
-		timer.abort();
-	}
 }
 
 async function moveStudioAsync(

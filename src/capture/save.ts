@@ -109,6 +109,7 @@ function captureResult(
 		bytes: stat.size,
 		desktop: studio.desktop ?? "user",
 		durationMs: seams.clock.now() - started,
+		method: "capture",
 		mtime: stat.mtime.toISOString(),
 		pid: studio.pid ?? 0,
 		place: output,

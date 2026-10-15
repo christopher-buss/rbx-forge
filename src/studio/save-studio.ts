@@ -1,6 +1,7 @@
 import type { Stats } from "node:fs";
 
 import type { CaptureWarning } from "../capture/protocol.ts";
+import type { SaveMethod } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import type { PinnedProcess, SaveOutcome } from "../native/addon.ts";
 import type { StudioSeams, StudioTarget } from "./close-studio.ts";
@@ -11,6 +12,7 @@ export interface StudioSave {
 	bytes: number;
 	desktop: "hidden" | "user";
 	durationMs: number;
+	method: SaveMethod;
 	mtime: string;
 	pid: number;
 	place: string;
@@ -186,6 +188,7 @@ function savedResult(
 		bytes: stat.size,
 		desktop: pinned.desktop(),
 		durationMs,
+		method: "menu",
 		mtime: stat.mtime.toISOString(),
 		pid: pinned.pid,
 		place: target.place,

@@ -5584,6 +5584,47 @@ async function jumpAsync(run: StartRun, ms: number): Promise<void> {
 }
 
 describe("idle timeout", () => {
+	it("should keep a capture-based sync active after it crosses the idle deadline", async ({
+		expect,
+	}) => {
+		expect.assertions(3);
+
+		const released = Promise.withResolvers<void>();
+		const run = startCommand({
+			...ATTACHED,
+			file: { session: { idleTimeout: 0.1 }, studio: { saveMethod: "capture" } },
+			files: { ...ATTACHED.files, "game.rbxl": "old place" },
+			listenForCapture: async () => {
+				return {
+					captureAsync: async () => {
+						await released.promise;
+						return { model: new Uint8Array([1]), services: [] };
+					},
+					close: () => {},
+					url: "http://127.0.0.1:12345/capture/test?projectName=p&sessionId=s",
+				};
+			},
+		});
+		run.native.addon.assemblePlace = (_base, _model, _services, output) => {
+			run.memory.fileSystem.writeFileSync(output, "captured place");
+		};
+
+		await flushAsync();
+		const syncing = callSessionAsync(run.ipc, CONTROL_TARGET, "sync", SYNC_CALL);
+		await flushAsync();
+		await jumpAsync(run, 7000);
+		released.resolve();
+		await passAsync(run, FILE_POLL_MS);
+		const answer = await syncing;
+		const status = await callSessionAsync(run.ipc, CONTROL_TARGET, "status");
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(answer).toMatchObject({ capture: { method: "capture", place: PLACE } });
+		expect(status).toMatchObject({ phase: "ready", services: { studio: { status: "open" } } });
+		expect(run.memory.files()["game.rbxl"]).toBe("captured place");
+	});
+
 	it.for([
 		{ owned: true, studioStatus: "opening" },
 		{ owned: false, studioStatus: "closed" },
