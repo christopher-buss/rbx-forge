@@ -1,3 +1,4 @@
+import { withCaptureWarnings } from "../capture/warnings.ts";
 import type { SaveMethod } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import type { IpcOwner, IpcServerOptions } from "../ipc/server.ts";
@@ -11,6 +12,7 @@ import type { SessionSync } from "../session/session-sync.ts";
 import type { StatusStore } from "../session/status.ts";
 import type { StopSource } from "../session/stop-source.ts";
 import { STUDIO_SAVE_TIMEOUT_MS } from "../studio/save-studio.ts";
+import type { StudioSave } from "../studio/save-studio.ts";
 
 /** What the control channel of one session reaches. */
 export interface ControlTarget {
@@ -166,7 +168,7 @@ async function saveDeadlineAsync(
 async function saveAsync(
 	target: ControlTarget,
 	parameters: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, unknown> & StudioSave> {
 	requireSession(target, parameters);
 	const { timeoutMs } = parameters;
 	if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -178,7 +180,10 @@ async function saveAsync(
 	try {
 		return await Promise.race([
 			target.parts.saveAsync(timeoutMs, request.signal).then((result) => {
-				request.signal.throwIfAborted();
+				if (request.signal.aborted) {
+					throw withCaptureWarnings(request.signal.reason, result.warnings ?? []);
+				}
+
 				return { ...result };
 			}),
 			saveDeadlineAsync(target, timeoutMs, { request, timer }),
@@ -194,7 +199,11 @@ async function syncAsync(target: ControlTarget): Promise<Record<string, unknown>
 	}
 
 	const capture = await saveAsync(target, { timeoutMs: STUDIO_SAVE_TIMEOUT_MS });
-	return { ...(await target.sync.runAsync()), capture };
+	try {
+		return { ...(await target.sync.runAsync()), capture };
+	} catch (err) {
+		throw withCaptureWarnings(err, capture.warnings ?? []);
+	}
 }
 
 async function addPartsAsync(

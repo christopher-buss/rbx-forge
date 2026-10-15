@@ -110,6 +110,36 @@ describe("session save control", () => {
 		});
 	});
 
+	it("keeps returned capture warnings when the control deadline expires", async ({ expect }) => {
+		expect.assertions(1);
+
+		const pending = Promise.withResolvers<StudioSave>();
+		const { manual, save } = saveControl(async () => pending.promise, "capture");
+		const rejected = Promise.resolve(save({ timeoutMs: 1000 })).catch((err: unknown) => err);
+		manual.advance(1000);
+		pending.resolve({
+			...SAVED,
+			warnings: [
+				{ property: "StreamingTargetRadius", reason: "unreadable", service: "Workspace" },
+			],
+		});
+
+		await expect(rejected).resolves.toMatchObject({
+			code: "capture_timeout",
+			details: {
+				captureWarnings: [
+					{
+						property: "StreamingTargetRadius",
+						reason: "unreadable",
+						service: "Workspace",
+					},
+				],
+				reason: "timeout",
+			},
+			message: "Studio did not save before the timeout.",
+		});
+	});
+
 	it.for([undefined, "100", NaN, Infinity, 0, -1])(
 		"rejects the invalid save deadline %s before saving",
 		async (timeoutMs, { expect }) => {
