@@ -249,7 +249,12 @@ async function listenAsync(server: Server, token: string): Promise<string> {
 // cspell:ignore pcall gsub
 const EDITOR_SOURCE = `-- This plugin acts only in its token-marked fixture place.
 local deadline = os.clock() + 600
-while game:GetAttribute("__ForgeCaptureTestLaunch") ~= __FORGE_EDITOR_TOKEN__ do
+local function ownedSnapshot()
+	local capture = game:GetService("ServerStorage"):FindFirstChild("ForgeCapture")
+	return capture and capture:IsA("Configuration") and not capture.Archivable
+		and capture:GetAttribute("Snapshot") == true
+end
+while game:GetAttribute("__ForgeCaptureTestLaunch") ~= __FORGE_EDITOR_TOKEN__ and not ownedSnapshot() do
 	if os.clock() >= deadline then return end
 	task.wait(0.1)
 end
