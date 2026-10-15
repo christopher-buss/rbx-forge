@@ -333,11 +333,13 @@ session before capturing. With `capture`, `forge sync` captures before syncback
 too, and snapshots opened with `forge open` support capture saves through
 `forge save --place <snapshot>` without Rojo.
 
-The capture includes readable service properties, attributes and tags. Edited
-unreadable properties, collision groups and material overrides produce named
-warnings; the base project's unreadable property values stay intact. See
-[Saving](./studio.md#saving) for the workflow and limits, and
-[JSON output](./json-output.md#the-save-result) for warnings and error codes.
+The capture includes readable serialized service properties, attributes and
+tags. Detected changes to unreadable properties, collision groups and material
+overrides produce named warnings; the base project's unreadable property values
+stay intact. Unsupported reference attributes fail capture and leave the
+previous place unchanged. See [Saving](./studio.md#saving) for the workflow and
+limits, and [JSON output](./json-output.md#the-save-result) for warnings and
+error codes.
 
 ```ts
 defineConfig({

@@ -156,9 +156,11 @@ the syncback project, and replaces the syncback input atomically. Connect Studio
 to the session's Rojo first; a Studio kept open across sessions receives its new
 capture URL when Rojo reconnects. Snapshot saves use capture too, without Rojo:
 `forge open`, edit, `forge save --place <snapshot>`, then
-`forge syncback --input <snapshot>`. Unreadable service edits, collision groups,
-and material overrides produce named warnings. The default method is `"menu"`.
-See [Saving](./docs/studio.md#saving) for capture limits and errors.
+`forge syncback --input <snapshot>`. Detected changes to unreadable service
+properties, collision groups, and material overrides produce named warnings.
+Unsupported reference attributes fail the capture with a named error and leave
+the previous place unchanged. The default method is `"menu"`. See
+[Saving](./docs/studio.md#saving) for capture limits and errors.
 
 Captures include readable service properties, attributes, and tags. Service
 properties that Studio prevents the plugin from reading keep their project

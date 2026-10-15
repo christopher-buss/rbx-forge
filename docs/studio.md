@@ -121,15 +121,6 @@ does nothing (no requests, no output, no UI) unless the place holds a forge
 capture URL. A write failure fails the launch with `forge_plugin_write_failed`
 (exit 8).
 
-Captures read serialized service properties through Studio's runtime reflection.
-Readable properties, service attributes, and tags reach the saved place; properties
-Studio prevents the plugin from reading keep their project values.
-
-Reference attributes (`InstanceHandle`) currently fail capture because the pinned
-native and Rojo attribute codecs cannot preserve them. The diagnostic names the
-affected service attribute or instance, including in CLI JSON. The previous place
-file stays unchanged.
-
 ## Managed Rojo plugin
 
 After a successful place build, immediately before attempting a new direct
@@ -305,12 +296,22 @@ class, and atomically replaces the syncback input with the assembled place.
 References across services remain intact. Capturing does not show Studio or
 move focus; serialization blocks Studio for the duration of that operation.
 
-Captures do not carry `UniqueId` or `HistoryId`, or service properties the
-plugin cannot read. The project's own values for unreadable properties remain
-in the base. When an edit cannot reach syncback, the save result names its
-service and property and tells you to set it in the project file. Collision
-group and material override changes also produce warnings. Each property is
-reported once per forge session. See [the structured warning fields](./json-output.md#the-save-result).
+Studio's runtime reflection determines which service properties are serialized.
+The plugin attempts to read each one. Properties it cannot read, including
+`UniqueId` and `HistoryId`, keep their base project values.
+
+Reference attributes (`InstanceHandle`) are unsupported by the pinned native
+and Rojo attribute codecs. Updating the public reflection database alone does
+not add this decoding support. An unsupported service attribute fails with
+`capture_rejected` and reason `serialize_failed`; one in captured content fails
+with `capture_assembly_failed`. The diagnostic in `error.details.message` names
+the service attribute or instance, and the previous place file stays unchanged.
+
+Detected changes to unreadable service properties, collision groups, and
+base-material overrides produce warnings naming the affected service and
+property. Set those values in the project file. Each service/property pair is
+reported once per forge session, including across repeated saves and syncs. See
+[the structured warning fields](./json-output.md#the-save-result).
 
 Studio's own syncback churn, including empty `SerializedOverrides` and defaults
 of new engine properties, affects capture and menu saves equally.
