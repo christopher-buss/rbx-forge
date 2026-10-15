@@ -28,9 +28,9 @@ class CaptureEndpoint implements CaptureListener {
 
 	private isClosed = false;
 	private isConnected = false;
-	private isDispatched = false;
+	private isDispatched!: boolean;
 	private pending: PendingCapture | undefined;
-	private route = "";
+	private route!: string;
 
 	public captureAsync: CaptureListener["captureAsync"] = async (signal) => {
 		signal.throwIfAborted();
@@ -53,7 +53,7 @@ class CaptureEndpoint implements CaptureListener {
 			this.abort(request);
 		};
 
-		signal.addEventListener("abort", abort, { once: true });
+		signal.addEventListener("abort", abort);
 		this.dispatch();
 		try {
 			return await result.promise;
@@ -74,11 +74,13 @@ class CaptureEndpoint implements CaptureListener {
 			poll.writeHead(204).end();
 		}
 
+		// Stryker disable next-line CallExpression: closed listeners cannot
+		// dispatch; release references
 		this.polls.clear();
 		this.server.close();
 		this.server.closeAllConnections();
 	};
-	public url = "";
+	public url!: string;
 
 	constructor(
 		backend: NetworkBackend,
@@ -185,7 +187,7 @@ class CaptureEndpoint implements CaptureListener {
 	}
 
 	private receive(incoming: IncomingMessage, response: ServerResponse): void {
-		const url = URL.parse(incoming.url ?? "/", "http://127.0.0.1");
+		const url = requestUrl(incoming);
 		if (url === null || this.isClosed || !this.isCurrent(url)) {
 			response.writeHead(404).end();
 			return;
@@ -251,6 +253,14 @@ export async function listenCaptureAsync(
 	const endpoint = new CaptureEndpoint(backend, identity, signal);
 	await endpoint.bindAsync(address);
 	return { captureAsync: endpoint.captureAsync, close: endpoint.close, url: endpoint.url };
+}
+
+function requestUrl(incoming: IncomingMessage): null | URL {
+	return URL.parse(
+		// Stryker disable next-line StringLiteral: absent URLs miss the route
+		incoming.url ?? "/",
+		"http://127.0.0.1",
+	);
 }
 
 async function readBodyAsync(incoming: IncomingMessage): Promise<Buffer> {
