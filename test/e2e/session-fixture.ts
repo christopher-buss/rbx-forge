@@ -224,7 +224,7 @@ export function startSession(
 	argv: Array<string>,
 	variables: Record<string, string> = {},
 ): Session {
-	const child = spawn(process.execPath, [BIN, ...argv], {
+	const child = spawn(process.execPath, [fixture.bin ?? BIN, ...argv], {
 		cwd: fixture.project,
 		env: fixture.environment(variables),
 		stdio: ["pipe", "pipe", "pipe"],
