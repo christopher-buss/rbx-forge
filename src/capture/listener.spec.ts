@@ -361,6 +361,35 @@ describe("capture listener", () => {
 		});
 	});
 
+	it("should preserve typed service metadata and the runtime unreadable property names", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const capturing = fixture.listener.captureAsync(AbortSignal.any([]));
+		const url = await dispatchedUrlAsync(fixture);
+		await fixture.request(url, "POST", [
+			frame(
+				'{"services":[{"name":"Lighting","roots":[],"properties":[{"name":"TimeOfDay","value":{"String":"13:30:00"}}],"attributes":[{"name":"Edited","value":{"Bool":true}}],"tags":["edited"],"unreadableProperties":["Technology"]}]}',
+			),
+		]).finished;
+
+		await expect(capturing).resolves.toMatchObject({
+			services: [
+				{
+					name: "Lighting",
+					attributes: [{ name: "Edited", value: { Bool: true } }],
+					properties: [{ name: "TimeOfDay", value: { String: "13:30:00" } }],
+					roots: [],
+					tags: ["edited"],
+					unreadableProperties: ["Technology"],
+				},
+			],
+		});
+	});
+
 	it("should reject invalid metadata with a stable capture error", async ({
 		expect,
 		onTestFinished,

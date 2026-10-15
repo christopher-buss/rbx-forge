@@ -155,6 +155,9 @@ content without showing or focusing Studio, builds a base from the syncback
 project, and replaces the syncback input atomically. Connect Studio to the
 session's Rojo first; a Studio kept open across sessions receives its new
 capture URL when Rojo reconnects. The default `"menu"` method remains available.
+Captures include readable service properties, attributes, and tags. Service
+properties that Studio prevents the plugin from reading keep their project
+values.
 
 A Studio that already had the place open when the session attached it is a found
 Studio (`origin: "found"` in `status`; a Studio the session opened is `forge`).
