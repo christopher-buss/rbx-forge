@@ -1407,6 +1407,32 @@ function spawnedIds(fake: FakeReaper): Array<string> {
 }
 
 describe(runSupervisorAsync, () => {
+	it("should declare an inert capture instance before Rojo starts serving", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			file: { studio: { saveMethod: "capture" } },
+			isListening: async () => false,
+		});
+		onTestFinished(async () => {
+			run.signals.fire("SIGINT");
+			await run.result;
+		});
+		await flushAsync();
+		const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		assert(typeof wrapper === "string");
+
+		expect(JSON.parse(wrapper)).toHaveProperty("tree.ServerStorage.ForgeCapture", {
+			$attributes: { CaptureUrl: "", ProjectName: "", RojoPort: 0, SessionId: "" },
+			$className: "Configuration",
+			$properties: { Archivable: false },
+		});
+		expect(stateOf(run)).toMatchObject({ services: { rojo: { status: "starting" } } });
+	});
+
 	it("should expose a non-Archivable capture instance with the connected Rojo identity", async ({
 		expect,
 		onTestFinished,

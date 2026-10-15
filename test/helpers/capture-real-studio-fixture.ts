@@ -49,11 +49,13 @@ interface Runtime {
  */
 export async function captureRealStudioFixtureAsync({
 	actions,
+	captureName = "ForgeCapture",
 	directory,
 	native,
 	pluginsDirectory,
 }: {
 	actions: Record<string, string>;
+	captureName?: string;
 	directory: string;
 	native: NativeAddon;
 	pluginsDirectory: string;
@@ -64,7 +66,7 @@ export async function captureRealStudioFixtureAsync({
 	const url = await listenAsync(server, token);
 	const plugin = path.join(pluginsDirectory, `ForgeCaptureTest-${token}.rbxm`);
 	try {
-		installModel({ actions, directory, native, plugin, token, url });
+		installModel({ actions, captureName, directory, native, plugin, token, url });
 	} catch (err) {
 		await closeServerAsync(server);
 		rmSync(plugin, { force: true });
@@ -197,6 +199,7 @@ function controls(
 
 function installModel({
 	actions,
+	captureName,
 	directory,
 	native,
 	plugin,
@@ -204,6 +207,7 @@ function installModel({
 	url,
 }: {
 	actions: Record<string, string>;
+	captureName: string;
 	directory: string;
 	native: NativeAddon;
 	plugin: string;
@@ -218,7 +222,7 @@ function installModel({
 		),
 	);
 	native.writeModelScriptSources(model, [
-		{ path: ["Rojo", "Plugin"], source: pluginSource(actions, token, url) },
+		{ path: ["Rojo", "Plugin"], source: pluginSource(actions, captureName, token, url) },
 	]);
 	mkdirSync(path.dirname(plugin), { recursive: true });
 	copyFileSync(model, plugin);
@@ -282,11 +286,17 @@ while os.clock() < deadline do
 	task.wait(0.1)
 end`;
 
-function pluginSource(actions: Record<string, string>, token: string, url: string): string {
+function pluginSource(
+	actions: Record<string, string>,
+	captureName: string,
+	token: string,
+	url: string,
+): string {
 	const callbacks = Object.entries(actions)
 		.map(([name, source]) => `[${JSON.stringify(name)}] = function()\n${source}\nend`)
 		.join(",\n");
 	return EDITOR_SOURCE.replace("%FORGE_EDITOR_ACTIONS%", () => callbacks)
+		.replaceAll('"ForgeCapture"', () => JSON.stringify(captureName))
 		.replace("__FORGE_EDITOR_TOKEN__", () => JSON.stringify(token))
 		.replace("__FORGE_EDITOR_URL__", () => JSON.stringify(url));
 }

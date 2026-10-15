@@ -97,6 +97,8 @@ export interface FixtureOptions {
 }
 
 export interface Fixture {
+	/** A private built CLI for a fixture that owns its plugin installation. */
+	bin?: string;
 	environment: (variables?: Record<string, string>) => NodeJS.ProcessEnv;
 	log: string;
 	/** The absolute path of {@link PLACE}. */

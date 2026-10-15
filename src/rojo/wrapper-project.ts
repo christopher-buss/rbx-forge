@@ -28,7 +28,7 @@ export function rojoWrapperPath(directory: string): string {
  */
 export function writeRojoWrapper(
 	{ cwd, seams }: CommandContext,
-	config: Pick<ResolvedConfig, "buildOutputPath" | "rojoProjectPath">,
+	config: Pick<ResolvedConfig, "buildOutputPath" | "rojoProjectPath" | "studio">,
 	directory: string,
 	capture?: CaptureListener & { rojoPort: number },
 ): void {
@@ -42,7 +42,7 @@ export function writeRojoWrapper(
 	const project = JSON.parse(content) as Record<string, unknown> & { name?: string };
 	const wrapper: Record<string, unknown> = {
 		name: `${project.name ?? inferProjectName(projectPath)}@${endpointKey(cwd, config.buildOutputPath)}`,
-		tree: wrapperTree(projectPath, capture),
+		tree: wrapperTree(projectPath, config.studio.saveMethod === "capture", capture),
 	};
 
 	// Rojo reads these fields from the root project only.
@@ -60,26 +60,39 @@ export function writeRojoWrapper(
 	);
 }
 
-function wrapperTree(
-	projectPath: string,
+function captureAttributes(
 	capture?: CaptureListener & { rojoPort: number },
 ): Record<string, unknown> {
 	if (capture === undefined) {
-		return { $path: projectPath };
+		// Hydration must map the existing singleton and config before endpoint
+		// updates arrive.
+		return { CaptureUrl: "", ProjectName: "", RojoPort: 0, SessionId: "" };
 	}
 
 	const url = new URL(capture.url);
+	return {
+		CaptureUrl: capture.url,
+		ProjectName: url.searchParams.get("projectName"),
+		RojoPort: capture.rojoPort,
+		SessionId: url.searchParams.get("sessionId"),
+	};
+}
+
+function wrapperTree(
+	projectPath: string,
+	isCaptureEnabled: boolean,
+	capture?: CaptureListener & { rojoPort: number },
+): Record<string, unknown> {
+	if (!isCaptureEnabled) {
+		return { $path: projectPath };
+	}
+
 	return {
 		$path: projectPath,
 		ServerStorage: {
 			$className: "ServerStorage",
 			ForgeCapture: {
-				$attributes: {
-					CaptureUrl: capture.url,
-					ProjectName: url.searchParams.get("projectName"),
-					RojoPort: capture.rojoPort,
-					SessionId: url.searchParams.get("sessionId"),
-				},
+				$attributes: captureAttributes(capture),
 				$className: "Configuration",
 				$properties: { Archivable: false },
 			},

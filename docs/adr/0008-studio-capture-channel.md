@@ -18,6 +18,11 @@ wrapper, and the plugin verifies its identity against the connected Rojo project
 and session before polling. This also serves a found Studio when its Rojo
 reconnects.
 
+The initial wrapper declares the capture instance before Rojo serves it. Its
+empty endpoint keeps the plugin inert until the listener binds. Rojo hydrates
+the existing service and instance before their capture attributes change; a
+later patch cannot create a service and its descendants with `Instance.new`.
+
 The wrapper's capture instance is non-Archivable: Rojo supports setting
 `Archivable` to `false`. The plugin excludes it from every capture too. Base
 places come from the original project, so the capture instance and its secret do

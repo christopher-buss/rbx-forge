@@ -18,6 +18,8 @@ const CLEANUP_TIMEOUT_MS = 1000;
 const DIAGNOSTIC_CHARACTERS = 16_384;
 
 export interface BinRunOptions {
+	/** The built CLI entry, optionally isolated for one fixture. */
+	bin?: string | undefined;
 	/** Cleanup hooks cannot register more test cleanup. */
 	registerCleanup?: boolean;
 	/**
@@ -57,9 +59,9 @@ export async function runBinAsync(
 	argv: Array<string>,
 	cwd = REPOSITORY,
 	environment?: NodeJS.ProcessEnv,
-	{ registerCleanup = true, timeoutMs }: BinRunOptions = {},
+	{ bin = BIN, registerCleanup = true, timeoutMs }: BinRunOptions = {},
 ): Promise<BinRun> {
-	const child = spawn(process.execPath, [BIN, ...argv], {
+	const child = spawn(process.execPath, [bin, ...argv], {
 		cwd,
 		env: environment ?? { ...process.env, CI: undefined },
 		stdio: ["pipe", "pipe", "pipe"],
