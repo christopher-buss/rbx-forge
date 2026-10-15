@@ -117,9 +117,10 @@ export function pollCaptures(root: Instance, active: ActivePlugin): void {
 }
 
 function captureChildren(service: Instance, capture: Instance): Array<Instance> {
+	const currentCamera = service.IsA("Workspace") ? service.CurrentCamera : undefined;
 	return service.GetChildren().filter((child) => {
 		return (
-			child !== capture && child.Archivable && !child.IsA("Camera") && !child.IsA("Player")
+			child !== capture && child !== currentCamera && child.Archivable && !child.IsA("Player")
 		);
 	});
 }

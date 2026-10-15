@@ -323,7 +323,7 @@ describe("startPlugin", () => {
 		const part = new Instance("Part", first);
 		part.Name = "EditedPart";
 		const camera = new Instance("Camera", first);
-		camera.Name = "SessionCamera";
+		camera.Name = "StoredCamera";
 		const omitted = new Instance("Part", first);
 		omitted.Archivable = false;
 		const module = new Instance("ModuleScript", second);
@@ -341,10 +341,42 @@ describe("startPlugin", () => {
 			url: "",
 		});
 
-		expect(buffer.tostring(payload.model)).toBe("EditedPart,EditedScript");
+		expect(buffer.tostring(payload.model)).toBe("EditedPart,StoredCamera,EditedScript");
 		expect(game.GetService("HttpService").JSONEncode(payload.services)).toBe(
-			'[{"name":"Folder","roots":[0]},{"name":"Folder","roots":[1]}]',
+			'[{"name":"Folder","roots":[0,1]},{"name":"Folder","roots":[2]}]',
 		);
 		expect(serialized.mock.calls.size()).toBe(1);
+	});
+
+	it("should exclude only Workspace's current camera from authored cameras", () => {
+		expect.assertions(2);
+
+		const { io } = createIo();
+		const workspace = game.GetService("Workspace");
+		const current = workspace.CurrentCamera;
+		assert(current !== undefined);
+		const stored = new Instance("Camera", workspace);
+		const capture = new Instance("Configuration");
+		let serialized = new Array<Instance>();
+		captureInstances(game, {
+			capture,
+			io: {
+				...io,
+				services: {
+					...io.services,
+					isSerialized: (name) => name === "Workspace",
+					serialize: (instances) => {
+						serialized = instances;
+						return buffer.create(0);
+					},
+				},
+			},
+			url: "",
+		});
+		stored.Destroy();
+		capture.Destroy();
+
+		expect(serialized).toContain(stored);
+		expect(serialized).never.toContain(current);
 	});
 });
