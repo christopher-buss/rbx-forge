@@ -169,6 +169,37 @@ function oldSnapshots(count: number): Record<string, string> {
 }
 
 describe(runOpenAsync, () => {
+	it("prepares a snapshot capture marker and retains its endpoint for later saves", async ({
+		expect,
+	}) => {
+		expect.assertions(6);
+
+		const run = makeOpen({ file: { studio: { saveMethod: "capture" } } });
+		const secret = "a".repeat(64);
+		const close = vi.fn<() => void>();
+		run.context.seams.randomId = () => "snapshot-id";
+		vi.spyOn(run.context.seams.network, "listenForCaptureAsync").mockResolvedValue({
+			captureAsync: async () => ({ model: new Uint8Array(), services: [] }),
+			close,
+			url: `http://127.0.0.1:49152/capture/${secret}?projectName=snapshot&sessionId=snapshot-id`,
+		});
+
+		await runOpenAsync(run.context, input());
+
+		expect(run.launcher).toHaveBeenCalledWith(
+			expect.objectContaining({ runScript: `${SNAPSHOT}.capture.lua` }),
+		);
+		expect(
+			JSON.parse(run.memory.fileSystem.readFileSync(`${SNAPSHOT}.capture.json`, "utf8")),
+		).toStrictEqual({ port: 49152, projectName: "snapshot", secret, sessionId: "snapshot-id" });
+		expect(run.memory.fileSystem.statSync(`${SNAPSHOT}.capture.json`).mode & 0o777).toBe(0o600);
+		expect(run.memory.fileSystem.statSync(`${SNAPSHOT}.capture.lua`).mode & 0o777).toBe(0o600);
+		expect(run.memory.fileSystem.readFileSync(`${SNAPSHOT}.capture.lua`, "utf8")).toBe(
+			`local m=Instance.new("Configuration");m.Name="ForgeCapture";m.Archivable=false;m:SetAttribute("CaptureUrl","http://127.0.0.1:49152/capture/${secret}?projectName=snapshot&sessionId=snapshot-id");m:SetAttribute("ProjectName","snapshot");m:SetAttribute("SessionId","snapshot-id");m:SetAttribute("Snapshot",true);m.Parent=game:GetService("ServerStorage")\n`,
+		);
+		expect(close).toHaveBeenCalledExactlyOnceWith();
+	});
+
 	it("should let the desktop flag override the snapshot's configured hidden desktop", async ({
 		expect,
 	}) => {

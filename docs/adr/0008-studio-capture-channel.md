@@ -23,6 +23,11 @@ empty endpoint keeps the plugin inert until the listener binds. Rojo hydrates
 the existing service and instance before their capture attributes change; a
 later patch cannot create a service and its descendants with `Instance.new`.
 
+Snapshots keep their port and secret beside the place. Their non-Archivable
+launch marker identifies the capture without a Rojo connection. Each save binds
+the recorded endpoint for its own duration; an occupied port fails the save.
+Pruning a snapshot removes its credentials and launch script too.
+
 The wrapper's capture instance is non-Archivable: Rojo supports setting
 `Archivable` to `false`. The plugin excludes it from every capture too. Base
 places come from the original project, so the capture instance and its secret do

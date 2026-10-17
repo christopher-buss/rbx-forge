@@ -1,9 +1,11 @@
 import { type } from "arktype";
 import path from "node:path";
 
+import { saveSnapshotCaptureAsync } from "../capture/snapshot.ts";
 import { emitCaptureFailureWarnings, emitCaptureWarnings } from "../capture/warnings.ts";
 import type { FlagDefinition } from "../cli/flags.ts";
 import { findSession } from "../client/session.ts";
+import { loadProjectConfigAsync } from "../config/load.ts";
 import { ForgeError } from "../errors.ts";
 import { callSessionAsync } from "../ipc/client.ts";
 import type { CommandResult } from "../seams/reporter.ts";
@@ -47,6 +49,30 @@ export async function runSaveAsync(
 	}
 }
 
+async function savePlaceAsync(
+	context: CommandContext,
+	input: CommandInput,
+	place: string,
+	timeoutMs: number,
+): Promise<StudioSave> {
+	try {
+		const { config } = await loadProjectConfigAsync(
+			context.cwd,
+			context.seams.configLoader,
+			input.config,
+		);
+		if (config.studio.saveMethod === "capture") {
+			return await saveSnapshotCaptureAsync(context, config, place, timeoutMs);
+		}
+	} catch (err) {
+		if (!(err instanceof ForgeError) || err.code !== "config_not_found") {
+			throw err;
+		}
+	}
+
+	return saveStudioAsync(context.seams, { place }, timeoutMs);
+}
+
 async function saveSessionAsync(context: CommandContext, timeoutMs: number): Promise<StudioSave> {
 	const session = findSession(context.seams.fileSystem, forgeFiles(context.cwd));
 	if (session === undefined) {
@@ -85,11 +111,7 @@ async function saveAsync(context: CommandContext, input: CommandInput): Promise<
 	const { place } = input.flags;
 	const saved =
 		typeof place === "string"
-			? await saveStudioAsync(
-					context.seams,
-					{ place: path.resolve(context.cwd, place) },
-					timeoutMs,
-				)
+			? await savePlaceAsync(context, input, path.resolve(context.cwd, place), timeoutMs)
 			: await saveSessionAsync(context, timeoutMs);
 	emitCaptureWarnings(context.reporter, saved.warnings ?? []);
 	return saveResultOf(saved);

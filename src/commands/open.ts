@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { prepareSnapshotCaptureAsync } from "../capture/snapshot.ts";
 import type { FlagDefinition } from "../cli/flags.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
@@ -176,6 +177,9 @@ export async function runOpenAsync(
 
 		const launched = await launchAsync(context, place, {
 			desktop,
+			...(config.studio.saveMethod === "capture"
+				? { runScript: await prepareSnapshotCaptureAsync(context, place) }
+				: {}),
 			studioPath: typeof studioPath === "string" ? path.resolve(cwd, studioPath) : undefined,
 			watchHiddenLighting: seams.host.platform === "win32" && desktop === "hidden",
 		});
