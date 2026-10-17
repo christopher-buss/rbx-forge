@@ -36,8 +36,9 @@
  * - `FIXTURE_HANG_ROLE`: a one-shot run of this role (such as `rbxtsc` for a
  *   compile, `rojo` for a build) stays alive instead of exiting.
  * - `FIXTURE_EXIT_AFTER_MS`: a long-running role prints a line to stderr and
- *   exits on its own after this long, with `FIXTURE_EXIT_AFTER_CODE` (else
- *   `FIXTURE_EXIT_CODE`). Its grandchildren stay alive.
+ *   exits on its own this long after its grandchildren recorded their start,
+ *   with `FIXTURE_EXIT_AFTER_CODE` (else `FIXTURE_EXIT_CODE`). Its
+ *   grandchildren stay alive.
  * - `FIXTURE_EXIT_ROLE`: only this role exits after `FIXTURE_EXIT_AFTER_MS`.
  * - `FIXTURE_ROJO_NO_SYNCBACK=1`: rojo has no `syncback` command.
  * - `rojo serve --port <port>` listens on that port of `127.0.0.1`, as Rojo
@@ -81,6 +82,7 @@ import {
 import path from "node:path";
 import process from "node:process";
 
+import { exitOnItsOwn } from "./exit-on-its-own.ts";
 import { listenFixtureRojo } from "./rojo-info.ts";
 import { launchStudio, runStudio } from "./studio-stand-in.ts";
 import { runWatchCompiler } from "./watch-compiler.ts";
@@ -271,14 +273,7 @@ function stayAlive(): void {
 	spawnGrandchildren();
 	setInterval(doNothing, KEEP_ALIVE_MS);
 	beat();
-	const exitAfter = env["FIXTURE_EXIT_AFTER_MS"];
-	const exitRole = env["FIXTURE_EXIT_ROLE"];
-	if (exitAfter !== undefined && (exitRole === undefined || exitRole === ROLE)) {
-		setTimeout(() => {
-			process.stderr.write(`${ROLE} exits on its own\n`);
-			process.exit(Number(env["FIXTURE_EXIT_AFTER_CODE"] ?? env["FIXTURE_EXIT_CODE"] ?? "0"));
-		}, Number(exitAfter));
-	}
+	exitOnItsOwn(ROLE, env);
 }
 
 function exitOnce(): void {
