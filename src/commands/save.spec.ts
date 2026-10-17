@@ -491,6 +491,7 @@ describe(runSaveAsync, () => {
 			bytes: 5,
 			desktop: "user",
 			durationMs: 500,
+			method: "menu",
 			mtime: "1970-01-01T00:00:02.000Z",
 			pid: 42,
 			place: path.join(PROJECT, "game.rbxl"),

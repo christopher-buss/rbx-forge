@@ -32,6 +32,7 @@ export interface CaptureStudioFixture {
 	runAsync: (action: string) => Promise<CaptureStudioObservation>;
 	sample: () => CaptureStudioObservation | undefined;
 	waitForCaptureUrlAsync: (previous?: string) => Promise<CaptureStudioObservation>;
+	waitForDisconnectedAsync: () => Promise<CaptureStudioObservation>;
 }
 
 interface Runtime {
@@ -192,6 +193,13 @@ function controls(
 				runtime,
 				(entry) => entry.captureUrl !== "" && entry.captureUrl !== previous,
 				"new session capture URL",
+			);
+		},
+		waitForDisconnectedAsync: async () => {
+			return waitForAsync(
+				runtime,
+				(entry) => entry.connectedSessionId === "",
+				"Rojo disconnection",
 			);
 		},
 	};

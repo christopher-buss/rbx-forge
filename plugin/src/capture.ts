@@ -8,6 +8,8 @@ export const CAPTURE_INSTANCE = "ForgeCapture";
 /** The attribute of {@link CAPTURE_INSTANCE} that holds the URL. */
 export const CAPTURE_URL_ATTRIBUTE = "CaptureUrl";
 
+let isCapturing = false;
+
 /** Engine adapters; specs provide functions at the same boundary. */
 export interface PluginIo {
 	http: {
@@ -231,13 +233,28 @@ function serializeCapture(active: ActivePlugin, postUrl: string): void {
 	});
 }
 
-function receiveCapture(root: Instance, active: ActivePlugin): void {
-	const response = active.io.http.request({ Method: "GET", Url: active.url });
-	if (response.StatusCode !== 200) {
+function beginCapture(active: ActivePlugin, postUrl: string): void {
+	if (active.io.services.isRunning()) {
+		postError(active, postUrl, "play_mode");
 		return;
 	}
 
-	const request = active.io.http.decode(response.Body);
+	if (isCapturing) {
+		postError(active, postUrl, "busy");
+		return;
+	}
+
+	isCapturing = true;
+	task.spawn(() => {
+		pcall(() => {
+			serializeCapture(active, postUrl);
+		});
+		isCapturing = false;
+	});
+}
+
+function currentRequestId(active: ActivePlugin, body: string): string | undefined {
+	const request = active.io.http.decode(body);
 	if (
 		rawget(request, "projectName") !== active.capture.GetAttribute("ProjectName") ||
 		rawget(request, "sessionId") !== active.capture.GetAttribute("SessionId")
@@ -246,21 +263,30 @@ function receiveCapture(root: Instance, active: ActivePlugin): void {
 	}
 
 	const requestId = rawget(request, "requestId");
-	if (!typeIs(requestId, "string")) {
+	return typeIs(requestId, "string") ? requestId : undefined;
+}
+
+function receiveCapture(root: Instance, active: ActivePlugin): void {
+	const response = active.io.http.request({ Method: "GET", Url: active.url });
+	if (response.StatusCode !== 200) {
 		return;
 	}
 
-	if (startPlugin(root, active.io)?.url !== active.url) {
+	const requestId = currentRequestId(active, response.Body);
+	if (requestId === undefined) {
 		return;
 	}
 
 	const postUrl = `${active.url}&requestId=${requestId}`;
-	if (active.io.services.isRunning()) {
-		postError(active, postUrl, "play_mode");
+	const current = startPlugin(root, active.io);
+	if (current === undefined) {
+		postError(active, postUrl, "not_connected");
 		return;
 	}
 
-	task.spawn(() => {
-		serializeCapture(active, postUrl);
-	});
+	if (current.url !== active.url) {
+		return;
+	}
+
+	beginCapture(active, postUrl);
 }

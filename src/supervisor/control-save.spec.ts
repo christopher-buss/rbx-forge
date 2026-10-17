@@ -15,6 +15,7 @@ const SAVED: StudioSave = {
 	bytes: 12,
 	desktop: "hidden",
 	durationMs: 300,
+	method: "menu",
 	mtime: "2026-01-01T00:00:00.000Z",
 	pid: 42,
 	place: "/project/game.rbxl",
@@ -38,6 +39,61 @@ function saveControl(save?: PartHandlers["save"], saveMethod?: SaveMethod) {
 }
 
 describe("session save control", () => {
+	it("bounds a capture whose handler does not settle after cancellation", async ({ expect }) => {
+		expect.assertions(3);
+
+		let isAborted = false;
+		const { manual, save } = saveControl(async (_timeoutMs, signal) => {
+			return new Promise(() => {
+				signal!.addEventListener("abort", () => {
+					isAborted = true;
+				});
+			});
+		}, "capture");
+		const rejected = Promise.resolve(save({ timeoutMs: 1000 })).catch((err: unknown) => err);
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
+		manual.advance(1000);
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
+
+		expect(isAborted).toBeTrue();
+
+		manual.advance(0);
+
+		await expect(rejected).resolves.toMatchObject({ code: "capture_timeout" });
+		expect(manual.pending()).toBe(0);
+	});
+
+	it("keeps the listener's disconnected error when the capture deadline aborts it", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const { manual, save } = saveControl(async (_timeoutMs, signal) => {
+			return new Promise((_resolve, reject) => {
+				signal!.addEventListener("abort", () => {
+					reject(
+						new ForgeError(
+							"capture_not_connected",
+							"Connect Studio to the session's Rojo.",
+						),
+					);
+				});
+			});
+		}, "capture");
+		const rejected = Promise.resolve(save({ timeoutMs: 1000 })).catch((err: unknown) => err);
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
+		manual.advance(1000);
+
+		await expect(rejected).resolves.toMatchObject({ code: "capture_not_connected" });
+		expect(manual.pending()).toBe(0);
+	});
+
 	it("reports a capture deadline without using the menu save error code", async ({ expect }) => {
 		expect.assertions(1);
 
@@ -51,6 +107,36 @@ describe("session save control", () => {
 		await expect(rejected).resolves.toMatchObject({
 			code: "capture_timeout",
 			details: { reason: "timeout" },
+		});
+	});
+
+	it("keeps returned capture warnings when the control deadline expires", async ({ expect }) => {
+		expect.assertions(1);
+
+		const pending = Promise.withResolvers<StudioSave>();
+		const { manual, save } = saveControl(async () => pending.promise, "capture");
+		const rejected = Promise.resolve(save({ timeoutMs: 1000 })).catch((err: unknown) => err);
+		manual.advance(1000);
+		pending.resolve({
+			...SAVED,
+			warnings: [
+				{ property: "StreamingTargetRadius", reason: "unreadable", service: "Workspace" },
+			],
+		});
+
+		await expect(rejected).resolves.toMatchObject({
+			code: "capture_timeout",
+			details: {
+				captureWarnings: [
+					{
+						property: "StreamingTargetRadius",
+						reason: "unreadable",
+						service: "Workspace",
+					},
+				],
+				reason: "timeout",
+			},
+			message: "Studio did not save before the timeout.",
 		});
 	});
 

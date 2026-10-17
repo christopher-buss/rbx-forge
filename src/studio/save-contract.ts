@@ -11,6 +11,7 @@ export const studioSaveResult: Type<StudioSave> = type({
 	"bytes": "number",
 	"desktop": "'user' | 'hidden'",
 	"durationMs": "number",
+	"method": "'capture' | 'menu'",
 	"mtime": "string",
 	"pid": "number",
 	"place": "string",
