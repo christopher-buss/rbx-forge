@@ -2,25 +2,30 @@
  * The idle timeout against a real supervisor on the real clock. The config
  * takes a fraction of a minute, so each test waits a few seconds.
  */
-import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import nodeFs, { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { TestContext } from "vitest";
 import { assert, describe, it } from "vitest";
 
+import type { KnownSession } from "../../src/client/session.ts";
+import { findSession } from "../../src/client/session.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
 import type { ReporterEvent } from "../../src/seams/reporter.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
+import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
-import { openStudioStandInAsync, pidOf } from "../helpers/real-native.ts";
+import { openStudioStandInAsync, pidOf, waitForFileAsync } from "../helpers/real-native.ts";
 import { isProcessAlive, readWorkerLog } from "../helpers/worker-log.ts";
-import type { Launched, Project } from "./session-harness.ts";
+import type { Launched, Project, Settled } from "./session-harness.ts";
 import {
 	COMPILER_ONLY,
+	currentIdentity,
 	launch,
 	launchUnowned,
 	makeProjectAsync,
+	native,
 	settledWithinAsync,
 	START_STUDIO,
 	studioEnvironment,
@@ -61,27 +66,78 @@ function isIdleStop(event: ReporterEvent): boolean {
 	return event.type === "info" && event.message.startsWith("No activity for");
 }
 
+function savedStatus(session: KnownSession | undefined): SessionStatus | undefined {
+	try {
+		return session === undefined
+			? undefined
+			: parseStatus(JSON.parse(readFileSync(session.files.state, "utf8")));
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Ask the project's session for its status until `isDone` holds.
  *
  * @param project - Where it runs.
+ * @param run - The supervisor being observed.
  * @param isDone - The condition.
  * @returns That status.
+ * @rejects When the observation fails, with status and lifecycle evidence.
  */
 async function waitForStatusAsync(
 	project: Project,
+	run: Launched,
 	isDone: (status: SessionStatus) => boolean,
 ): Promise<SessionStatus> {
-	const session = await waitForSessionAsync(project);
-	const target = { endpoint: session.identity.endpoint, token: session.token };
-	const transport = realTransport();
-	for (;;) {
-		const status = parseStatus(await callSessionAsync(transport, target, "status"));
-		if (status !== undefined && isDone(status)) {
-			return status;
-		}
+	const started = Date.now();
+	let session = findSession(nodeFs, forgeFiles(project.project));
+	let lastStatus: SessionStatus | undefined;
+	let outcome: Settled | undefined;
+	let eventsBeforeRequest = run.events.length;
+	void run.settled.then((settled) => {
+		outcome = settled;
+	});
+	try {
+		session = await waitForSessionAsync(project);
+		const target = { endpoint: session.identity.endpoint, token: session.token };
+		const transport = realTransport();
+		for (;;) {
+			if (outcome !== undefined) {
+				throw new Error("The supervisor exited before the expected status.");
+			}
 
-		await sleep(100);
+			if (Date.now() - started > SETTLE_MS) {
+				throw new Error("The expected status was not observed in time.");
+			}
+
+			eventsBeforeRequest = run.events.length;
+			lastStatus = parseStatus(await callSessionAsync(transport, target, "status"));
+			if (lastStatus !== undefined && isDone(lastStatus)) {
+				return lastStatus;
+			}
+
+			await sleep(100);
+		}
+	} catch (err) {
+		session ??= findSession(nodeFs, forgeFiles(project.project));
+		const pin = session === undefined ? null : native.pinProcess(session.identity.pid);
+		const evidence = {
+			elapsedMs: Date.now() - started,
+			events: run.events,
+			eventsBeforeRequest,
+			identity: session?.identity,
+			lastStatus,
+			outcome: outcome ?? "pending",
+			savedStatus: savedStatus(session),
+			supervisorAlive:
+				pin !== null &&
+				pin.startTime === session?.identity.processStartTime &&
+				pin.isAlive(),
+		};
+		throw new Error(`Idle status observation failed: ${JSON.stringify(evidence)}`, {
+			cause: err,
+		});
 	}
 }
 
@@ -179,7 +235,11 @@ describe("idle timeout", () => {
 			});
 			const place = path.join(project.project, "game.rbxl");
 			const run = launchUnowned(project, START_STUDIO, studioEnvironment(project));
-			await waitForStatusAsync(project, ({ services }) => services.studio.status === "open");
+			await waitForStatusAsync(
+				project,
+				run,
+				({ services }) => services.studio.status === "open",
+			);
 			const opened = Date.now();
 			await keepActiveAsync({ expect }, run, () => {
 				const now = new Date();
@@ -196,28 +256,45 @@ describe("idle timeout", () => {
 	it("should stop the Rojo of a found Studio, let it go open, and end an up session", async ({
 		expect,
 	}) => {
-		expect.assertions(4);
+		expect.assertions(6);
 
 		const project = await makeProjectAsync({ session: { idleTimeout: SHORT_TIMEOUT } });
-		const environment = studioEnvironment(project);
+		const environment: Record<string, string> = {
+			...studioEnvironment(project),
+			FIXTURE_LOG: project.log,
+		};
 		const place = path.join(project.project, "game.rbxl");
 		writeFileSync(place, environment["FIXTURE_PLACE_CONTENT"]!);
 		const studio = pidOf(await openStudioStandInAsync(place, environment));
+		const originalLock = readFileSync(`${place}.lock`, "utf8");
 		const run = launchUnowned(project, START_STUDIO, environment);
-		const attached = await waitForStatusAsync(project, ({ services }) => {
-			return services.studio.status === "open";
-		});
 
+		// Retained events survive idle exit; status requests are activity.
 		await expect(idleEndAsync(run)).resolves.toBe("shutdown");
-		expect(run.events).toContainEqual({
-			message: `No activity for ${SHORT_TIMEOUT} min: stopped rojo.`,
-			type: "info",
-		});
-		expect(attached.services.studio).toMatchObject({ origin: "found", pid: studio });
+
+		const info = run.events.filter((event) => event.type === "info");
+
+		expect(info[0]!.message).toStartWith("Rojo serves ");
+		expect(info.slice(1)).toStrictEqual([
+			{
+				message: `No activity for ${SHORT_TIMEOUT} min: stopped rojo.`,
+				type: "info",
+			},
+		]);
+
+		const workers = readWorkerLog(project.log);
+		const rojo = workers
+			.filter(({ role }) => role === "rojo")
+			.filter(({ args }) => args.includes("serve"));
+
+		expect(rojo.map(({ pid }) => isProcessAlive(pid))).toStrictEqual([false]);
+		expect(workers.filter(({ role }) => role === "studio").map(({ pid }) => pid)).toStrictEqual(
+			[studio],
+		);
 		expect({
-			lock: existsSync(`${place}.lock`),
+			lock: readFileSync(`${place}.lock`, "utf8"),
 			running: isProcessAlive(studio),
-		}).toStrictEqual({ lock: true, running: true });
+		}).toStrictEqual({ lock: originalLock, running: true });
 	});
 
 	it("should never stop a part a start owns, nor end its session", async ({ expect }) => {
@@ -242,7 +319,7 @@ describe("idle timeout", () => {
 		await waitForAsync(() => run.events.find(isIdleStop));
 		// Longer than two more timeouts.
 		await sleep(3000);
-		const idle = await waitForStatusAsync(project, () => true);
+		const idle = await waitForStatusAsync(project, run, () => true);
 		const rojo = workersOf(project, session.identity.sessionId)
 			.filter(({ role }) => role === "rojo")
 			.find(({ args }) => args.includes("serve"));
@@ -259,6 +336,49 @@ describe("idle timeout", () => {
 		expect({ running: isProcessAlive(rojo!.pid), settled: isSettled }).toStrictEqual({
 			running: true,
 			settled: false,
+		});
+	});
+});
+
+describe("idle status observation", () => {
+	it("should retain the IPC failure and live supervisor evidence when status gets no answer", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const project = await makeProjectAsync();
+		const run = launch(project, COMPILER_ONLY, { RBX_FORGE_TEST_PAUSE: "block" });
+		await waitForStatusAsync(
+			project,
+			run,
+			({ services }) => services.compiler.status === "ready",
+		);
+		const identity = currentIdentity(project);
+		const pin = native.pinProcess(identity.pid);
+		assert(pin !== null && pin.startTime === identity.processStartTime);
+		onTestFinished(() => {
+			pin.kill();
+		});
+		mkdirSync(project.pauses, { recursive: true });
+		writeFileSync(path.join(project.pauses, "block.request"), "");
+		await waitForFileAsync(path.join(project.pauses, "block.blocked"));
+
+		const failure: unknown = await waitForStatusAsync(project, run, () => true).catch(
+			(err: unknown) => err,
+		);
+		assert(failure instanceof Error);
+
+		expect(failure).toMatchObject({
+			cause: { code: "supervisor_unresponsive" },
+		});
+		expect(
+			JSON.parse(failure.message.slice("Idle status observation failed: ".length)),
+		).toMatchObject({
+			identity,
+			outcome: "pending",
+			savedStatus: { phase: "ready", services: { compiler: { status: "ready" } } },
+			supervisorAlive: true,
 		});
 	});
 });
