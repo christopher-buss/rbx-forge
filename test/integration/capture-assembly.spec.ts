@@ -10,7 +10,12 @@ const native = loadRealNative();
 const FIXTURE = path.join(import.meta.dirname, "../fixtures/models/scripts.rbxm");
 const SERVICES = JSON.stringify([{ name: "ServerScriptService", roots: [0] }]);
 
-function makeAssembly(): { base: string; capture: Uint8Array; directory: string; output: string } {
+function makeAssembly(extraTree: Record<string, unknown> = {}): {
+	base: string;
+	capture: Uint8Array;
+	directory: string;
+	output: string;
+} {
 	const directory = makeTemporaryDirectory({
 		"base.project.json": JSON.stringify({
 			name: "CaptureAssembly",
@@ -30,6 +35,7 @@ function makeAssembly(): { base: string; capture: Uint8Array; directory: string;
 						},
 					},
 				},
+				...extraTree,
 			},
 		}),
 	});
@@ -46,6 +52,66 @@ function makeAssembly(): { base: string; capture: Uint8Array; directory: string;
 }
 
 describe("native capture assembly", () => {
+	it.for([
+		{
+			name: "a runtime time alias",
+			property: { name: "TimeOfDay", value: { String: "13:30:00" } },
+		},
+		{
+			name: "a canonical clock value",
+			property: { name: "ClockTime", value: { Float32: 13.5 } },
+		},
+	])(
+		"should sync $name through genuine Rojo and preserve unreadable project properties",
+		({ property }, { expect }) => {
+			expect.assertions(5);
+
+			const { base, capture, directory, output } = makeAssembly({
+				Lighting: {
+					$attributes: { Removed: true },
+					$className: "Lighting",
+					$properties: { ClockTime: 9, Technology: "ShadowMap" },
+				},
+			});
+			native.assemblePlace(
+				base,
+				capture,
+				JSON.stringify([
+					{ name: "ServerScriptService", roots: [0] },
+					{
+						name: "Lighting",
+						attributes: [{ name: "Edited", value: { String: "from Studio" } }],
+						properties: [property],
+						roots: [],
+						tags: ["edited"],
+						unreadableProperties: ["Technology"],
+					},
+				]),
+				output,
+			);
+			const projectPath = path.join(directory, "base.project.json");
+			const syncback = spawnSync(
+				"rojo",
+				["syncback", projectPath, "--input", output, "--non-interactive"],
+				{
+					cwd: directory,
+					encoding: "utf8",
+					timeout: 10_000,
+					windowsHide: true,
+				},
+			);
+			assert(syncback.error === undefined);
+			assert(syncback.status === 0, syncback.stderr);
+			const project: unknown = JSON.parse(readFileSync(projectPath, "utf8"));
+
+			expect(project).toHaveProperty("tree.Lighting.$properties.ClockTime", 13.5);
+			expect(project).toHaveProperty("tree.Lighting.$properties.Technology", "ShadowMap");
+			expect(project).toHaveProperty("tree.Lighting.$attributes.Edited", "from Studio");
+			expect(project).not.toHaveProperty("tree.Lighting.$attributes.Removed");
+			expect(project).toHaveProperty("tree.Lighting.$properties.Tags", ["edited"]);
+		},
+	);
+
 	it("should save captured script edits and restore a missing declared script", ({ expect }) => {
 		expect.assertions(2);
 
@@ -99,5 +165,28 @@ describe("native capture assembly", () => {
 			native.assemblePlace(base, new Uint8Array([1, 2, 3]), SERVICES, base);
 		}).toThrow(/assemble place/u);
 		expect(readFileSync(base)).toStrictEqual(original);
+	});
+
+	it("should name an unsupported engine-produced reference attribute and preserve the place", ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const { base, output } = makeAssembly();
+		copyFileSync(base, output);
+		const original = readFileSync(output);
+		const model = readFileSync(
+			path.join(import.meta.dirname, "../fixtures/models/reference-attribute.rbxm"),
+		);
+
+		expect(() => {
+			native.assemblePlace(
+				base,
+				model,
+				JSON.stringify([{ name: "Workspace", roots: [0, 1] }]),
+				output,
+			);
+		}).toThrow(/ForgeReferenceAttributeFixture\.Attributes/u);
+		expect(readFileSync(output)).toStrictEqual(original);
 	});
 });

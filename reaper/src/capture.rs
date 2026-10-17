@@ -7,7 +7,7 @@ use std::path::Path;
 
 use rbx_dom_weak::{
     InstanceBuilder, WeakDom,
-    types::{Ref, Variant},
+    types::{Attributes, Ref, Tags, Variant},
 };
 use serde::Deserialize;
 
@@ -15,10 +15,126 @@ use serde::Deserialize;
 struct CaptureService {
     name: String,
     roots: Vec<usize>,
+    #[serde(default)]
+    properties: Vec<CaptureProperty>,
+    attributes: Option<Vec<CaptureProperty>>,
+    tags: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct CaptureProperty {
+    name: String,
+    value: CaptureValue,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum CaptureValue {
+    Value(Variant),
+    Encoded(EncodedValue),
+}
+
+#[derive(Deserialize)]
+enum EncodedValue {
+    InstanceRef(usize),
+    ServiceRef(String),
+    CapabilityBits(Vec<u8>),
+}
+
+fn resolve_value(
+    value: &CaptureValue,
+    dom: &WeakDom,
+    capture: &WeakDom,
+    roots: &[Ref],
+) -> io::Result<Variant> {
+    match value {
+        CaptureValue::Value(value) => Ok(value.clone()),
+        CaptureValue::Encoded(EncodedValue::InstanceRef(index)) => {
+            let carrier = capture
+                .get_by_ref(roots[*index])
+                .ok_or_else(|| invalid_data("capture reference carrier is missing"))?;
+            if carrier.class != "ObjectValue" || !carrier.children().is_empty() {
+                return Err(invalid_data(
+                    "capture reference carrier must be an ObjectValue without children",
+                ));
+            }
+            let Some(Variant::Ref(target)) = carrier.properties.get(&"Value".into()) else {
+                return Err(invalid_data("capture reference carrier has no Value"));
+            };
+            if target.is_some() && dom.get_by_ref(*target).is_none() {
+                return Err(invalid_data(
+                    "capture reference target is not in the assembled place",
+                ));
+            }
+            Ok(Variant::Ref(*target))
+        }
+        CaptureValue::Encoded(EncodedValue::ServiceRef(class)) => {
+            let service = dom.root().children().iter().find(|referent| {
+                dom.get_by_ref(**referent)
+                    .expect("the service exists")
+                    .class
+                    .as_str()
+                    == class
+            });
+            service
+                .copied()
+                .map(Variant::Ref)
+                .ok_or_else(|| invalid_data("capture service reference is missing"))
+        }
+        CaptureValue::Encoded(EncodedValue::CapabilityBits(bits)) => {
+            let value = bits.iter().try_fold(0_u64, |value, bit| {
+                1_u64
+                    .checked_shl(u32::from(*bit))
+                    .map(|flag| value | flag)
+                    .ok_or_else(|| invalid_data("capture capability bit exceeds 63"))
+            })?;
+            Ok(Variant::SecurityCapabilities(
+                rbx_dom_weak::types::SecurityCapabilities::from_bits(value),
+            ))
+        }
+    }
 }
 
 fn invalid_data(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)
+}
+
+fn validate_attributes(dom: &WeakDom) -> io::Result<()> {
+    for instance in dom.descendants() {
+        for name in ["Attributes", "AttributesSerialize"] {
+            if let Some(Variant::BinaryString(data)) = instance.properties.get(&name.into()) {
+                // Opaque attribute blobs may contain file-local references that DOM remapping invalidates.
+                let bytes: &[u8] = data.as_ref();
+                Attributes::from_reader(bytes).map_err(|error| {
+                    invalid_data(format!(
+                        "{}.Attributes cannot be decoded: {error}",
+                        instance.name
+                    ))
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn clock_time(time_of_day: &str) -> io::Result<f32> {
+    let parts = time_of_day
+        .split(':')
+        .map(str::parse::<f64>)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(invalid_data)?;
+    let [hours, minutes, seconds] = parts.as_slice() else {
+        return Err(invalid_data(
+            "Lighting.TimeOfDay must contain hours, minutes, and seconds",
+        ));
+    };
+    if !(0.0..24.0).contains(hours)
+        || !(0.0..60.0).contains(minutes)
+        || !(0.0..60.0).contains(seconds)
+    {
+        return Err(invalid_data("Lighting.TimeOfDay is outside one day"));
+    }
+    Ok((hours + minutes / 60.0 + seconds / 3600.0) as f32)
 }
 
 fn validate_services(services: &[CaptureService], root_count: usize) -> io::Result<()> {
@@ -30,7 +146,14 @@ fn validate_services(services: &[CaptureService], root_count: usize) -> io::Resu
                 "capture service names must be nonempty and unique",
             ));
         }
-        for index in &service.roots {
+        let carriers = service
+            .properties
+            .iter()
+            .filter_map(|property| match &property.value {
+                CaptureValue::Encoded(EncodedValue::InstanceRef(index)) => Some(index),
+                _ => None,
+            });
+        for index in service.roots.iter().chain(carriers) {
             let assigned = assigned
                 .get_mut(*index)
                 .ok_or_else(|| invalid_data("capture root index is out of range"))?;
@@ -97,14 +220,21 @@ pub fn assemble_place(
         serde_json::from_str(services_json).map_err(invalid_data)?;
     validate_services(&services, roots.len())?;
     let mut replacements = HashMap::new();
-    for service in services {
+    let mut parents = Vec::new();
+    for service in &services {
         let parent = dom
             .root()
             .children()
             .iter()
             .copied()
-            .find(|child| dom.get_by_ref(*child).expect("the service exists").name == service.name)
-            .unwrap_or_else(|| dom.insert(dom.root_ref(), InstanceBuilder::new(service.name)));
+            .find(|child| {
+                dom.get_by_ref(*child)
+                    .expect("the service exists")
+                    .class
+                    .as_str()
+                    == service.name
+            })
+            .unwrap_or_else(|| dom.insert(dom.root_ref(), InstanceBuilder::new(&service.name)));
         let declared = dom
             .get_by_ref(parent)
             .expect("the service exists")
@@ -113,11 +243,69 @@ pub fn assemble_place(
         for child in &declared {
             dom.transfer_within(*child, Ref::none());
         }
-        for index in service.roots {
-            capture.transfer(roots[index], &mut dom, parent);
+        for index in &service.roots {
+            capture.transfer(roots[*index], &mut dom, parent);
         }
         for child in declared {
             restore_declared(&mut dom, child, parent, &mut replacements);
+        }
+        parents.push(parent);
+    }
+    for (service, parent) in services.iter().zip(parents) {
+        let properties = service
+            .properties
+            .iter()
+            .map(|property| {
+                Ok((
+                    &property.name,
+                    resolve_value(&property.value, &dom, &capture, &roots)?,
+                ))
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        let attributes = service
+            .attributes
+            .as_ref()
+            .map(|attributes| {
+                attributes
+                    .iter()
+                    .map(|entry| match &entry.value {
+                        CaptureValue::Value(value) => Ok((entry.name.clone(), value.clone())),
+                        CaptureValue::Encoded(_) => {
+                            Err(invalid_data("capture attributes cannot contain references"))
+                        }
+                    })
+                    .collect::<io::Result<Attributes>>()
+            })
+            .transpose()?;
+        let instance = dom.get_by_ref_mut(parent).expect("the service exists");
+        for (name, value) in properties {
+            if name == "Name" {
+                let Variant::String(name) = value else {
+                    return Err(invalid_data("capture service Name must be a string"));
+                };
+                instance.name = name;
+            } else {
+                // Lighting's serialized TimeOfDay and Rojo's ClockTime describe one value.
+                if instance.class == "Lighting"
+                    && name == "TimeOfDay"
+                    && let Variant::String(time) = &value
+                {
+                    instance
+                        .properties
+                        .insert("ClockTime".into(), Variant::Float32(clock_time(time)?));
+                }
+                instance.properties.insert(name.as_str().into(), value);
+            }
+        }
+        if let Some(attributes) = attributes {
+            instance
+                .properties
+                .insert("Attributes".into(), Variant::Attributes(attributes));
+        }
+        if let Some(tags) = &service.tags {
+            instance
+                .properties
+                .insert("Tags".into(), Variant::Tags(Tags::from(tags.clone())));
         }
     }
     let referents: Vec<_> = dom
@@ -138,6 +326,7 @@ pub fn assemble_place(
             }
         }
     }
+    validate_attributes(&dom)?;
     // The temporary file shares the target's filesystem, so replacement is atomic.
     let directory = output_path
         .parent()
@@ -186,6 +375,343 @@ mod tests {
             .iter()
             .find(|referent| dom.get_by_ref(**referent).unwrap().name == name)
             .unwrap()
+    }
+
+    #[test]
+    fn rejects_opaque_reference_attributes_without_replacing_the_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let base_path = directory.path().join("base.rbxl");
+        let output_path = directory.path().join("place.rbxl");
+        let base = WeakDom::new(
+            InstanceBuilder::new("DataModel").with_child(InstanceBuilder::new("Workspace")),
+        );
+        write_model(&base_path, &base);
+        std::fs::copy(&base_path, &output_path).unwrap();
+        let original = std::fs::read(&output_path).unwrap();
+        let error = assemble_place(
+            &base_path,
+            include_bytes!("../../test/fixtures/models/reference-attribute.rbxm"),
+            r#"[{"name":"Workspace","roots":[0,1]}]"#,
+            &output_path,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("ForgeReferenceAttributeFixture.Attributes")
+        );
+        assert_eq!(std::fs::read(&output_path).unwrap(), original);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn applies_a_runtime_serialized_service_frame_and_structured_attributes() {
+        let directory = tempfile::tempdir().unwrap();
+        let base_path = directory.path().join("base.rbxl");
+        let output_path = directory.path().join("place.rbxl");
+        let base = WeakDom::new(
+            InstanceBuilder::new("DataModel").with_child(InstanceBuilder::new("SoundService")),
+        );
+        write_model(&base_path, &base);
+        let capture = model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel")));
+        assemble_place(&base_path, &capture,
+            r#"[{"name":"SoundService","roots":[],"properties":[{"name":"ListenerCFrame","value":{"CFrame":{"position":[1,2,3],"orientation":[[1,0,0],[0,1,0],[0,0,1]]}}}],"attributes":[{"name":"Wind","value":{"Vector3":[1,-2,3]}},{"name":"Frame","value":{"CFrame":{"position":[1,2,3],"orientation":[[1,0,0],[0,1,0],[0,0,1]]}}}]}]"#,
+            &output_path).unwrap();
+        let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
+        let sound = assembled
+            .get_by_ref(child(&assembled, assembled.root_ref(), "SoundService"))
+            .unwrap();
+        let frame = rbx_dom_weak::types::CFrame::new(
+            rbx_dom_weak::types::Vector3::new(1.0, 2.0, 3.0),
+            rbx_dom_weak::types::Matrix3::identity(),
+        );
+        assert_eq!(
+            sound.properties[&"ListenerCFrame".into()],
+            Variant::CFrame(frame)
+        );
+        assert_eq!(
+            sound.properties[&"Attributes".into()],
+            Variant::Attributes(
+                Attributes::new()
+                    .with("Wind", rbx_dom_weak::types::Vector3::new(1.0, -2.0, 3.0))
+                    .with("Frame", frame)
+            )
+        );
+    }
+
+    #[test]
+    fn applies_readable_service_metadata_and_keeps_unreadable_base_properties() {
+        let directory = tempfile::tempdir().unwrap();
+        let base_path = directory.path().join("base.rbxl");
+        let output_path = directory.path().join("place.rbxl");
+        let base = WeakDom::new(
+            InstanceBuilder::new("DataModel")
+                .with_child(
+                    InstanceBuilder::new("Lighting")
+                        .with_property("ClockTime", 9.0_f32)
+                        .with_property("Technology", rbx_dom_weak::types::Enum::from_u32(3))
+                        .with_property(
+                            "Attributes",
+                            rbx_dom_weak::types::Attributes::new().with("Removed", true),
+                        )
+                        .with_property(
+                            "Tags",
+                            rbx_dom_weak::types::Tags::from(vec!["old".to_owned()]),
+                        ),
+                )
+                .with_child(
+                    InstanceBuilder::new("Workspace")
+                        .with_property("StreamingTargetRadius", 512_i32),
+                ),
+        );
+        write_model(&base_path, &base);
+        let capture = model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel")));
+
+        assemble_place(
+            &base_path,
+            &capture,
+            r#"[{"name":"Lighting","roots":[],"properties":[{"name":"ClockTime","value":{"Float32":13.5}},{"name":"Ambient","value":{"Color3":[0.25,0.5,0.75]}}],"attributes":[{"name":"Edited","value":{"String":"from Studio"}}],"tags":["new"],"unreadableProperties":["Technology"]},{"name":"Workspace","roots":[],"properties":[],"unreadableProperties":["StreamingTargetRadius"]}]"#,
+            &output_path,
+        ).unwrap();
+
+        let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
+        let lighting = assembled
+            .get_by_ref(child(&assembled, assembled.root_ref(), "Lighting"))
+            .unwrap();
+        let workspace = assembled
+            .get_by_ref(child(&assembled, assembled.root_ref(), "Workspace"))
+            .unwrap();
+        assert_eq!(
+            lighting.properties[&"ClockTime".into()],
+            Variant::Float32(13.5)
+        );
+        assert_eq!(
+            lighting.properties[&"Ambient".into()],
+            Variant::Color3(rbx_dom_weak::types::Color3::new(0.25, 0.5, 0.75))
+        );
+        assert_eq!(
+            lighting.properties[&"Technology".into()],
+            Variant::Enum(rbx_dom_weak::types::Enum::from_u32(3))
+        );
+        assert_eq!(
+            lighting.properties[&"Attributes".into()],
+            Variant::Attributes(rbx_dom_weak::types::Attributes::new().with(
+                "Edited",
+                rbx_dom_weak::types::BinaryString::from(b"from Studio".as_slice())
+            ))
+        );
+        assert_eq!(
+            lighting.properties[&"Tags".into()],
+            Variant::Tags(rbx_dom_weak::types::Tags::from(vec!["new".to_owned()]))
+        );
+        assert_eq!(
+            workspace.properties[&"StreamingTargetRadius".into()],
+            Variant::Int32(512)
+        );
+    }
+
+    #[test]
+    fn consumes_reference_carriers_without_persisting_them_and_can_clear_service_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        let base_path = directory.path().join("base.rbxl");
+        let output_path = directory.path().join("place.rbxl");
+        let base = WeakDom::new(
+            InstanceBuilder::new("DataModel")
+                .with_child(InstanceBuilder::new("Workspace"))
+                .with_child(
+                    InstanceBuilder::new("SoundService")
+                        .with_property("Tags", Tags::from(vec!["old".to_owned()]))
+                        .with_property("Attributes", Attributes::new().with("Old", true)),
+                ),
+        );
+        write_model(&base_path, &base);
+        let target = InstanceBuilder::new("Part").with_name("Target");
+        let target_ref = target.referent();
+        let capture = model_bytes(&WeakDom::new(
+            InstanceBuilder::new("DataModel")
+                .with_child(target)
+                .with_child(
+                    InstanceBuilder::new("ObjectValue")
+                        .with_name("ReferenceCarrier")
+                        .with_property("Value", target_ref),
+                ),
+        ));
+
+        assemble_place(
+            &base_path,
+            &capture,
+            r#"[{"name":"Workspace","roots":[0]},{"name":"SoundService","roots":[],"properties":[{"name":"ListenerObject","value":{"InstanceRef":1}}],"attributes":[],"tags":[]}]"#,
+            &output_path,
+        ).unwrap();
+
+        let assembled = rbx_binary::from_reader(File::open(&output_path).unwrap()).unwrap();
+        let workspace = child(&assembled, assembled.root_ref(), "Workspace");
+        let sound = assembled
+            .get_by_ref(child(&assembled, assembled.root_ref(), "SoundService"))
+            .unwrap();
+        assert_eq!(
+            sound.properties[&"ListenerObject".into()],
+            Variant::Ref(child(&assembled, workspace, "Target"))
+        );
+        assert_eq!(sound.children().len(), 0);
+        assert_eq!(
+            sound.properties[&"Attributes".into()],
+            Variant::Attributes(Attributes::new())
+        );
+        assert_eq!(sound.properties[&"Tags".into()], Variant::Tags(Tags::new()));
+        assert!(
+            !assembled
+                .descendants()
+                .any(|instance| instance.name == "ReferenceCarrier")
+        );
+
+        assemble_place(
+            &output_path,
+            &model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel"))),
+            r#"[{"name":"SoundService","roots":[],"properties":[{"name":"ListenerObject","value":{"Ref":"00000000000000000000000000000000"}}]}]"#,
+            &output_path,
+        ).unwrap();
+        let cleared = rbx_binary::from_reader(File::open(&output_path).unwrap()).unwrap();
+        let sound = cleared
+            .get_by_ref(child(&cleared, cleared.root_ref(), "SoundService"))
+            .unwrap();
+        assert_eq!(
+            sound.properties[&"ListenerObject".into()],
+            Variant::Ref(Ref::none())
+        );
+    }
+
+    #[test]
+    fn applies_metadata_to_a_project_service_with_a_custom_name() {
+        let directory = tempfile::tempdir().unwrap();
+        let base_path = directory.path().join("base.rbxl");
+        let output_path = directory.path().join("place.rbxl");
+        write_model(
+            &base_path,
+            &WeakDom::new(
+                InstanceBuilder::new("DataModel").with_child(
+                    InstanceBuilder::new("Lighting")
+                        .with_name("Environment")
+                        .with_property("Brightness", 1.0_f32),
+                ),
+            ),
+        );
+
+        assemble_place(
+            &base_path,
+            &model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel"))),
+            r#"[{"name":"Lighting","roots":[],"properties":[{"name":"Name","value":{"String":"Environment"}},{"name":"Brightness","value":{"Float32":3.5}}]}]"#,
+            &output_path,
+        ).unwrap();
+
+        let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
+        assert_eq!(assembled.root().children().len(), 1);
+        let lighting = assembled
+            .get_by_ref(child(&assembled, assembled.root_ref(), "Environment"))
+            .unwrap();
+        assert_eq!(lighting.class, "Lighting");
+        assert_eq!(
+            lighting.properties[&"Brightness".into()],
+            Variant::Float32(3.5)
+        );
+    }
+
+    #[test]
+    fn invalid_service_metadata_preserves_the_existing_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let base_path = directory.path().join("base.rbxl");
+        let output_path = directory.path().join("place.rbxl");
+        write_model(&base_path, &WeakDom::new(InstanceBuilder::new("DataModel")));
+        std::fs::write(&output_path, b"original output").unwrap();
+        let capture = model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel")));
+        for metadata in [
+            r#"[{"name":"Lighting","roots":[],"properties":[{"name":"TimeOfDay","value":{"String":"invalid"}}]}]"#,
+            r#"[{"name":"Lighting","roots":[],"properties":[{"name":"TimeOfDay","value":{"String":"24:00:00"}}]}]"#,
+            r#"[{"name":"Lighting","roots":[],"properties":[{"name":"Name","value":{"Bool":false}}]}]"#,
+            r#"[{"name":"Lighting","roots":[],"properties":[{"name":"Capabilities","value":{"CapabilityBits":[64]}}]}]"#,
+            r#"[{"name":"Lighting","roots":[],"properties":[{"name":"Target","value":{"ServiceRef":"Missing"}}]}]"#,
+            r#"[{"name":"Lighting","roots":[],"attributes":[{"name":"Invalid","value":{"ServiceRef":"Lighting"}}]}]"#,
+            r#"[{"name":"Lighting","roots":[],"tags":"invalid"}]"#,
+        ] {
+            assert!(assemble_place(&base_path, &capture, metadata, &output_path).is_err());
+            assert_eq!(std::fs::read(&output_path).unwrap(), b"original output");
+        }
+    }
+
+    #[test]
+    fn updates_a_project_clock_time_from_its_runtime_serialized_time_of_day() {
+        let directory = tempfile::tempdir().unwrap();
+        let base_path = directory.path().join("base.rbxl");
+        let output_path = directory.path().join("place.rbxl");
+        write_model(
+            &base_path,
+            &WeakDom::new(
+                InstanceBuilder::new("DataModel").with_child(
+                    InstanceBuilder::new("Lighting").with_property("ClockTime", 9.0_f32),
+                ),
+            ),
+        );
+
+        assemble_place(
+            &base_path,
+            &model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel"))),
+            r#"[{"name":"Lighting","roots":[],"properties":[{"name":"TimeOfDay","value":{"String":"13:30:00"}}]}]"#,
+            &output_path,
+        ).unwrap();
+
+        let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
+        let lighting = assembled
+            .get_by_ref(child(&assembled, assembled.root_ref(), "Lighting"))
+            .unwrap();
+        assert_eq!(
+            lighting.properties[&"ClockTime".into()],
+            Variant::Float32(13.5)
+        );
+        assert_eq!(
+            lighting.properties[&"TimeOfDay".into()],
+            Variant::String("13:30:00".to_owned())
+        );
+    }
+
+    #[test]
+    fn retains_integer_and_capability_precision_and_resolves_service_references() {
+        let directory = tempfile::tempdir().unwrap();
+        let base_path = directory.path().join("base.rbxl");
+        let output_path = directory.path().join("place.rbxl");
+        write_model(&base_path, &WeakDom::new(InstanceBuilder::new("DataModel")));
+        let capture = model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel")));
+
+        assemble_place(
+            &base_path,
+            &capture,
+            r#"[{"name":"SoundService","roots":[],"properties":[{"name":"ListenerObject","value":{"ServiceRef":"Lighting"}}]},{"name":"Lighting","roots":[],"properties":[{"name":"Name","value":{"String":"Lighting"}},{"name":"SourceAssetId","value":{"Int64":9007199254740991}},{"name":"Capabilities","value":{"CapabilityBits":[0,31,63]}},{"name":"GlobalShadows","value":{"Bool":false}}]}]"#,
+            &output_path,
+        ).unwrap();
+
+        let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
+        let lighting_ref = child(&assembled, assembled.root_ref(), "Lighting");
+        let lighting = assembled.get_by_ref(lighting_ref).unwrap();
+        let sound = assembled
+            .get_by_ref(child(&assembled, assembled.root_ref(), "SoundService"))
+            .unwrap();
+        assert_eq!(
+            lighting.properties[&"SourceAssetId".into()],
+            Variant::Int64(9_007_199_254_740_991)
+        );
+        assert_eq!(
+            lighting.properties[&"Capabilities".into()],
+            Variant::SecurityCapabilities(rbx_dom_weak::types::SecurityCapabilities::from_bits(
+                0x8000_0000_8000_0001
+            ))
+        );
+        assert_eq!(
+            lighting.properties[&"GlobalShadows".into()],
+            Variant::Bool(false)
+        );
+        assert_eq!(
+            sound.properties[&"ListenerObject".into()],
+            Variant::Ref(lighting_ref)
+        );
     }
 
     #[test]

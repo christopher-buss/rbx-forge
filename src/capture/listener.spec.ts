@@ -361,6 +361,35 @@ describe("capture listener", () => {
 		});
 	});
 
+	it("should preserve typed service metadata and the runtime unreadable property names", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const capturing = fixture.listener.captureAsync(AbortSignal.any([]));
+		const url = await dispatchedUrlAsync(fixture);
+		await fixture.request(url, "POST", [
+			frame(
+				'{"services":[{"name":"Lighting","roots":[],"properties":[{"name":"TimeOfDay","value":{"String":"13:30:00"}}],"attributes":[{"name":"Edited","value":{"Bool":true}}],"tags":["edited"],"unreadableProperties":["Technology"]}]}',
+			),
+		]).finished;
+
+		await expect(capturing).resolves.toMatchObject({
+			services: [
+				{
+					name: "Lighting",
+					attributes: [{ name: "Edited", value: { Bool: true } }],
+					properties: [{ name: "TimeOfDay", value: { String: "13:30:00" } }],
+					roots: [],
+					tags: ["edited"],
+					unreadableProperties: ["Technology"],
+				},
+			],
+		});
+	});
+
 	it("should reject invalid metadata with a stable capture error", async ({
 		expect,
 		onTestFinished,
@@ -422,6 +451,30 @@ describe("capture listener", () => {
 		},
 	);
 
+	it("should retain the named serialization diagnostic in its structured capture error", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const message = "Lighting attribute Reference: unsupported capture value InstanceHandle";
+		const body = JSON.stringify({ error: "serialize_failed", message });
+		const rejected = expect(
+			fixture.listener.captureAsync(AbortSignal.any([])),
+		).rejects.toMatchObject({
+			code: "capture_rejected",
+			details: { message, response: body },
+		});
+		const url = await dispatchedUrlAsync(fixture);
+		const reply = await fixture.request(url, "POST", [body], {
+			"content-type": "application/json",
+		}).finished;
+		await rejected;
+
+		expect(reply.status).toBe(400);
+	});
+
 	it("should report Studio's rejection as a capture error", async ({
 		expect,
 		onTestFinished,
@@ -441,6 +494,31 @@ describe("capture listener", () => {
 			"content-type": "application/json",
 		}).finished;
 
+		await rejected;
+
+		expect(reply.status).toBe(400);
+	});
+
+	it("should reject a diagnostic message that is not text", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		const rejected = expect(
+			fixture.listener.captureAsync(AbortSignal.any([])),
+		).rejects.toMatchObject({
+			code: "capture_rejected",
+			message: "Studio sent an invalid capture.",
+		});
+		const url = await dispatchedUrlAsync(fixture);
+		const reply = await fixture.request(
+			url,
+			"POST",
+			[JSON.stringify({ error: "serialize_failed", message: { attribute: "Reference" } })],
+			{ "content-type": "application/json" },
+		).finished;
 		await rejected;
 
 		expect(reply.status).toBe(400);

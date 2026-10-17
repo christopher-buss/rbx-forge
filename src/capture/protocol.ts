@@ -1,7 +1,18 @@
-/** One service's roots in the single serialized model, in input order. */
+/** One typed property value, encoded with an rbx_types variant tag. */
+export interface CaptureProperty {
+	name: string;
+	value: Record<string, unknown>;
+}
+
+/** One service's roots and readable metadata in the single serialized model. */
 export interface CaptureService {
 	name: string;
+	attributes?: Array<CaptureProperty>;
+	properties?: Array<CaptureProperty>;
 	roots: Array<number>;
+	tags?: Array<string>;
+	/** Serialized properties whose protected reads failed in this Studio. */
+	unreadableProperties?: Array<string>;
 }
 
 /** One serialized copy of Studio's service children. */

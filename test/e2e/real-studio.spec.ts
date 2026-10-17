@@ -355,7 +355,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 		"captures Studio edits and reconnects a Found Studio after a session restart",
 		{ timeout: 360_000 },
 		async ({ expect, onTestFinished }) => {
-			expect.assertions(13);
+			expect.assertions(15);
 
 			const fixture = await makeRealFixtureAsync({
 				studio: { saveMethod: "capture" },
@@ -368,12 +368,19 @@ local part = Instance.new("Part")
 part.Name = "ForgeCapturedFirstPart"
 part.Anchored = true
 part.Parent = workspace
-game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured first edit")\\n'`,
+game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured first edit")\\n'
+local lighting = game:GetService("Lighting")
+lighting.ClockTime = 13.5
+lighting:SetAttribute("CapturedServiceEdit", "first")
+lighting:AddTag("captured-service")`,
 					second: `local part = Instance.new("Part")
 part.Name = "ForgeCapturedAfterRestartPart"
 part.Anchored = true
 part.Parent = workspace
-game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured after restart")\\n'`,
+game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured after restart")\\n'
+local lighting = game:GetService("Lighting")
+lighting.ClockTime = 15.25
+lighting:SetAttribute("CapturedServiceEdit", "second")`,
 				},
 				captureName: fixture.cli.captureName,
 				directory: fixture.project,
@@ -395,7 +402,7 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured a
 							...fixture.cli.launchAttributes,
 						},
 						$className: "DataModel",
-						Lighting: { $properties: { Technology: "ShadowMap" } },
+						Lighting: { $properties: { ClockTime: 9, Technology: "ShadowMap" } },
 						ServerScriptService: { $path: "scripts" },
 						Workspace: { $path: "workspace" },
 					},
@@ -422,6 +429,22 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured a
 			const synced = await captureForgeAsync(fixture, ["syncback", "--json"]);
 
 			expect(synced.status).toBe(0);
+			expect(
+				JSON.parse(
+					readFileSync(path.join(fixture.project, "default.project.json"), "utf8"),
+				),
+			).toMatchObject({
+				tree: {
+					Lighting: {
+						$attributes: { CapturedServiceEdit: "first" },
+						$properties: {
+							ClockTime: 13.5,
+							Tags: ["captured-service"],
+							Technology: "ShadowMap",
+						},
+					},
+				},
+			});
 			expect(readFileSync(script, "utf8")).toContain('print("captured first edit")');
 			expect(
 				existsSync(path.join(fixture.project, "workspace/ForgeCapturedFirstPart.rbxm")),
@@ -453,6 +476,22 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured a
 			const syncedAgain = await captureForgeAsync(fixture, ["syncback", "--json"]);
 
 			expect(syncedAgain.status).toBe(0);
+			expect(
+				JSON.parse(
+					readFileSync(path.join(fixture.project, "default.project.json"), "utf8"),
+				),
+			).toMatchObject({
+				tree: {
+					Lighting: {
+						$attributes: { CapturedServiceEdit: "second" },
+						$properties: {
+							ClockTime: 15.25,
+							Tags: ["captured-service"],
+							Technology: "ShadowMap",
+						},
+					},
+				},
+			});
 			expect(readFileSync(script, "utf8")).toContain('print("captured after restart")');
 			expect(
 				existsSync(

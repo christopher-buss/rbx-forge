@@ -137,6 +137,7 @@ describe(saveCaptureAsync, () => {
 		await expect(save.run()).rejects.toMatchObject({
 			cause,
 			code: "capture_assembly_failed",
+			details: { message: "invalid model" },
 			message: `Could not assemble the captured place ${path.join(PROJECT, "game.rbxl")}.`,
 		});
 		expect(save.memory.files()["game.rbxl"]).toBe("original");

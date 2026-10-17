@@ -1,4 +1,5 @@
-/* cspell:words fromstring readu readstring */
+/* cspell:words fromstring readu readstring rbxassetid keypoints pcall */
+/* cspell:words rawget */
 import { describe, expect, it, jest } from "@rbxts/jest-globals";
 
 import {
@@ -9,6 +10,7 @@ import {
 	startPlugin,
 } from "./capture";
 import type { PluginIo } from "./capture";
+import type { ReflectedProperty } from "./service-metadata";
 
 function makeCapture(root: Instance): Configuration {
 	const capture = new Instance("Configuration", root);
@@ -87,9 +89,12 @@ function playPoll(
 			messages.push(message);
 		},
 		services: {
+			capabilityBits: () => [],
 			history: game.GetService("ChangeHistoryService"),
 			isRunning: () => options.running === true,
 			isSerialized: () => false,
+			properties: () => [],
+			readProperty: () => error("unexpected property read"),
 			serialize: () => {
 				if (options.failure === "serialize") {
 					error("serialization unavailable");
@@ -116,9 +121,12 @@ function createIo(): { io: PluginIo; output: jest.Mock; request: jest.Mock } {
 		},
 		output: print,
 		services: {
+			capabilityBits: () => new Array<number>(),
 			history: game.GetService("ChangeHistoryService"),
 			isRunning: () => false,
 			isSerialized: () => true,
+			properties: () => new Array<ReflectedProperty>(),
+			readProperty: () => error("unexpected property read"),
 			serialize: (instances: Array<Instance>) => {
 				return game.GetService("SerializationService").SerializeInstancesAsync(instances);
 			},
@@ -127,7 +135,383 @@ function createIo(): { io: PluginIo; output: jest.Mock; request: jest.Mock } {
 	return { io, output, request };
 }
 
+function referenceTree(nested: boolean): {
+	capture: Configuration;
+	root: Folder;
+	service: Folder;
+	source: Instance;
+	target: Part;
+} {
+	const root = new Instance("Folder");
+	const service = new Instance("Folder", root);
+	const parent = nested ? new Instance("Folder", service) : service;
+	const target = new Instance("Part", parent);
+	return {
+		capture: new Instance("Configuration", service),
+		root,
+		service,
+		source: nested ? parent : target,
+		target,
+	};
+}
+
 describe("startPlugin", () => {
+	it.each([
+		{ engineType: "bool", expected: { Bool: false }, value: false },
+		{ engineType: "double", expected: { Float64: 1.25 }, value: 1.25 },
+		{ engineType: "int", expected: { Int32: -3 }, value: -3 },
+		{ engineType: "int64", expected: { Int64: 9007199254740991 }, value: 9007199254740991 },
+		{
+			engineType: "ContentId",
+			expected: { ContentId: "rbxassetid://123" },
+			value: "rbxassetid://123",
+		},
+		{ engineType: "Enum", expected: { Enum: 3 }, value: Enum.Technology.ShadowMap },
+		{ engineType: "Vector3", expected: { Vector3: [1, -2, 3] }, value: new Vector3(1, -2, 3) },
+		{
+			engineType: "Color3",
+			expected: { Color3: [0.25, 0.5, 1] },
+			value: new Color3(0.25, 0.5, 1),
+		},
+		{ engineType: "Vector2", expected: { Vector2: [4, -5] }, value: new Vector2(4, -5) },
+		{ engineType: "UDim", expected: { UDim: [0.5, 12] }, value: new UDim(0.5, 12) },
+		{
+			engineType: "UDim2",
+			expected: {
+				UDim2: [
+					[0.5, 12],
+					[0.25, -6],
+				],
+			},
+			value: new UDim2(0.5, 12, 0.25, -6),
+		},
+		{
+			engineType: "BrickColor",
+			expected: { BrickColor: 21 },
+			value: new BrickColor("Bright red"),
+		},
+		{
+			engineType: "NumberRange",
+			expected: { NumberRange: [1, 8] },
+			value: new NumberRange(1, 8),
+		},
+		{
+			engineType: "Rect",
+			expected: {
+				Rect: [
+					[1, 2],
+					[3, 4],
+				],
+			},
+			value: new Rect(1, 2, 3, 4),
+		},
+		{
+			engineType: "CFrame",
+			expected: {
+				CFrame: {
+					orientation: [
+						[1, 0, 0],
+						[0, 1, 0],
+						[0, 0, 1],
+					],
+					position: [1, 2, 3],
+				},
+			},
+			value: new CFrame(1, 2, 3),
+		},
+		{
+			engineType: "NumberSequence",
+			expected: {
+				NumberSequence: {
+					keypoints: [
+						{ envelope: 0, time: 0, value: 0.5 },
+						{ envelope: 0, time: 1, value: 0.5 },
+					],
+				},
+			},
+			value: new NumberSequence(0.5),
+		},
+		{
+			engineType: "ColorSequence",
+			expected: {
+				ColorSequence: {
+					keypoints: [
+						{ color: [0.25, 0.5, 1], time: 0 },
+						{ color: [0.25, 0.5, 1], time: 1 },
+					],
+				},
+			},
+			value: new ColorSequence(new Color3(0.25, 0.5, 1)),
+		},
+		{
+			engineType: "Font",
+			expected: { Font: { family: "rbxassetid://123", style: "Italic", weight: "Bold" } },
+			value: new Font("rbxassetid://123", Enum.FontWeight.Bold, Enum.FontStyle.Italic),
+		},
+		{
+			engineType: "SecurityCapabilities",
+			expected: { CapabilityBits: [0, 63] },
+			value: new SecurityCapabilities(),
+		},
+		{
+			engineType: "RefType",
+			expected: { Ref: "00000000000000000000000000000000" },
+			value: undefined,
+		},
+	])(
+		"should preserve a readable $engineType property's typed value",
+		({ engineType, expected, value }) => {
+			expect.assertions(1);
+
+			const { io } = createIo();
+			const root = new Instance("Folder");
+			const service = new Instance("Folder", root);
+			const capture = new Instance("Configuration", service);
+			const payload = captureInstances(root, {
+				capture,
+				io: {
+					...io,
+					services: {
+						...io.services,
+						capabilityBits: () => [0, 63],
+						properties: () => [{ name: "Edited", engineType, serialized: true }],
+						readProperty: () => value,
+						serialize: () => buffer.create(0),
+					},
+				},
+				url: "",
+			});
+			const metadata = payload.services[0];
+			assert(metadata !== undefined);
+			const property = metadata.properties[0];
+			assert(property !== undefined);
+
+			// eslint-disable-next-line jest/prefer-strict-equal -- strict equality rejects nested engine strings
+			expect(property.value).toEqual(expected);
+		},
+	);
+
+	it.each([{ nested: false }, { nested: true }])(
+		"should keep a readable instance reference in the one model (nested=$nested) and destroy its temporary carrier",
+		({ nested }) => {
+			expect.assertions(1);
+
+			const { io } = createIo();
+			const { capture, root, source, target } = referenceTree(nested);
+			const serialized = new Array<Instance>();
+			const payload = captureInstances(root, {
+				capture,
+				io: {
+					...io,
+					services: {
+						...io.services,
+						properties: () => [
+							{ name: "PrimaryPart", engineType: "RefType", serialized: true },
+						],
+						readProperty: () => target,
+						serialize: (instances) => {
+							for (const instance of instances) {
+								serialized.push(instance);
+							}
+
+							const carrier = instances[1];
+							assert(carrier !== undefined);
+							assert(carrier.IsA("ObjectValue"));
+							assert(carrier.Value === target);
+							return io.services.serialize(instances);
+						},
+					},
+				},
+				url: "",
+			});
+			const metadata = payload.services[0];
+			assert(metadata !== undefined);
+			const property = metadata.properties[0];
+			const carrier = serialized[1];
+			assert(property !== undefined);
+			assert(carrier !== undefined);
+			assert(carrier.IsA("ObjectValue"));
+
+			const [canMove] = pcall(() => {
+				carrier.Parent = root;
+			});
+
+			expect([
+				metadata.roots[0],
+				serialized.size(),
+				serialized[0] === source,
+				property.value["InstanceRef"],
+				canMove,
+				buffer.len(payload.model) > 0,
+			]).toStrictEqual([0, 2, true, 1, false, true]);
+		},
+	);
+
+	it.each([
+		{ expected: { ServiceRef: "Folder" }, target: "service" },
+		{ expected: { Ref: "00000000000000000000000000000000" }, target: "excluded" },
+	])(
+		"should preserve a reference to a $target instance without an extra serialized root",
+		({ expected, target }) => {
+			expect.assertions(1);
+
+			const { io } = createIo();
+			const root = new Instance("Folder");
+			const service = new Instance("Folder", root);
+			const capture = new Instance("Configuration", service);
+			const excluded = new Instance("Part", service);
+			excluded.Archivable = false;
+			const persisted = new Instance("Part", service);
+			const targets: Record<string, Instance> = { excluded, service };
+			const payload = captureInstances(root, {
+				capture,
+				io: {
+					...io,
+					services: {
+						...io.services,
+						properties: () => [
+							{ name: "Target", engineType: "RefType", serialized: true },
+						],
+						readProperty: () => targets[target],
+						serialize: (instances) => {
+							assert(instances.size() === 1);
+							assert(instances[0] === persisted);
+							return buffer.create(0);
+						},
+					},
+				},
+				url: "",
+			});
+			const metadata = payload.services[0];
+			assert(metadata !== undefined);
+			const property = metadata.properties[0];
+			assert(property !== undefined);
+
+			// eslint-disable-next-line jest/prefer-strict-equal -- strict equality rejects nested engine strings
+			expect(property.value).toEqual(expected);
+		},
+	);
+
+	it("should identify an unsupported readable property instead of treating it as unreadable", () => {
+		expect.assertions(1);
+
+		const { io } = createIo();
+		const root = new Instance("Folder");
+		const service = new Instance("Folder", root);
+		const capture = new Instance("Configuration", service);
+
+		expect(() => {
+			return captureInstances(root, {
+				capture,
+				io: {
+					...io,
+					services: {
+						...io.services,
+						properties: () => [
+							{ name: "Unsupported", engineType: "FutureType", serialized: true },
+						],
+						readProperty: () => ({}),
+					},
+				},
+				url: "",
+			});
+		}).toThrow("Folder.Unsupported");
+	});
+
+	it("should name a current-engine reference attribute that the native writer cannot preserve", () => {
+		expect.assertions(1);
+
+		const { io } = createIo();
+		const root = new Instance("Folder");
+		const service = new Instance("Folder", root);
+		const capture = new Instance("Configuration", service);
+		const target = new Instance("Part", service);
+		service.SetAttribute("Reference", target);
+
+		expect(() => captureInstances(root, { capture, io, url: "" })).toThrow(
+			"Folder attribute Reference",
+		);
+	});
+
+	it("should preserve the double precision of a numeric service attribute", () => {
+		expect.assertions(1);
+
+		const { io } = createIo();
+		const root = new Instance("Folder");
+		const service = new Instance("Folder", root);
+		const capture = new Instance("Configuration", service);
+		service.SetAttribute("Number", 1.0000000000000002);
+		const payload = captureInstances(root, {
+			capture,
+			io: { ...io, services: { ...io.services, serialize: () => buffer.create(0) } },
+			url: "",
+		});
+		const metadata = payload.services[0];
+		assert(metadata !== undefined);
+		const attribute = metadata.attributes[0];
+		assert(attribute !== undefined);
+
+		expect(attribute.value).toStrictEqual({ Float64: 1.0000000000000002 });
+	});
+
+	it("should carry readable serialized properties and service attributes and tags", () => {
+		expect.assertions(1);
+
+		const { io } = createIo();
+		const root = new Instance("Folder");
+		const service = new Instance("Folder", root);
+		service.SetAttribute("Edited", "from Studio");
+		service.AddTag("capture-tag");
+		const capture = new Instance("Configuration", service);
+		const payload = captureInstances(root, {
+			capture,
+			io: {
+				...io,
+				services: {
+					...io.services,
+					properties: () => [
+						{ name: "Brightness", engineType: "float", serialized: true },
+						{ name: "Technology", engineType: "Enum", serialized: true },
+						{ name: "Transient", engineType: "float", serialized: false },
+					],
+					readProperty: (_service, name) => {
+						assert(name === "Brightness", `cannot read ${name}`);
+						return 3.5;
+					},
+					serialize: () => buffer.create(0),
+				},
+			},
+			url: "",
+		});
+
+		const metadata = payload.services[0];
+		assert(metadata !== undefined);
+		const property = metadata.properties[0];
+		const attribute = metadata.attributes[0];
+		assert(property !== undefined);
+		assert(attribute !== undefined);
+
+		expect(
+			[
+				payload.services.size(),
+				metadata.name,
+				metadata.roots.size(),
+				metadata.properties.size(),
+				property.name,
+				tostring(property.value["Float32"]),
+				metadata.attributes.size(),
+				attribute.name,
+				tostring(attribute.value["String"]),
+				metadata.tags.size(),
+				tostring(metadata.tags[0]),
+				metadata.unreadableProperties.size(),
+				tostring(metadata.unreadableProperties[0]),
+			]
+				.map(tostring)
+				.join("|"),
+		).toBe("1|Folder|0|1|Brightness|3.5|1|Edited|from Studio|1|capture-tag|1|Technology");
+	});
+
 	it("should ignore a malformed capture request identifier", () => {
 		expect.assertions(1);
 
@@ -224,12 +608,16 @@ describe("startPlugin", () => {
 	});
 
 	it("should report serialization failure", () => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const { messages, posts } = playPoll({ failure: "serialize" });
 		assert(posts[0] !== undefined);
+		const body = posts[0].Body;
+		assert(typeIs(body, "string"));
+		const rejection = game.GetService("HttpService").JSONDecode(body);
 
-		expect(posts[0].Body).toBe('{"error":"serialize_failed"}');
+		expect(rawget(rejection, "error")).toBe("serialize_failed");
+		expect(rawget(rejection, "message")).toMatch("serialization unavailable");
 		expect(messages[0]).toMatch("serialization unavailable");
 	});
 
@@ -342,9 +730,10 @@ describe("startPlugin", () => {
 		});
 
 		expect(buffer.tostring(payload.model)).toBe("EditedPart,StoredCamera,EditedScript");
-		expect(game.GetService("HttpService").JSONEncode(payload.services)).toBe(
-			'[{"name":"Folder","roots":[0,1]},{"name":"Folder","roots":[2]}]',
-		);
+		expect(payload.services).toMatchObject([
+			{ name: "Folder", roots: [0, 1] },
+			{ name: "Folder", roots: [2] },
+		]);
 		expect(serialized.mock.calls.size()).toBe(1);
 	});
 
