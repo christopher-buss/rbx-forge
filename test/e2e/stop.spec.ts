@@ -203,18 +203,30 @@ describe("forge stop", () => {
 
 	it("should close the attached Studio and stop its Rojo, and keep the compiler and the session", async ({
 		expect,
+		onTestFailed,
 	}) => {
-		expect.assertions(3);
+		expect.assertions(5);
+
+		let phase = "fixture setup";
+		const started = Date.now();
+		onTestFailed(() => {
+			console.error(`attached Studio stop: ${phase}, elapsed ${Date.now() - started}ms`);
+		});
 
 		const fixture = await makeFixtureAsync(
 			{ ...WATCH_COMMAND, open: { buildFirst: true } },
 			{ studio: true },
 		);
-		await runForgeAsync(fixture, [...UP, "--studio"]);
+		const command = { timeoutMs: 15_000 };
+		phase = "up --studio";
+		await runForgeAsync(fixture, [...UP, "--studio"], {}, command);
 		const studio = readWorkerLog(fixture.log).find(({ role }) => role === "studio");
-		const stop = await runForgeAsync(fixture, ["stop", "--json"]);
-		const status = await runForgeAsync(fixture, ["status", "--json"]);
+		phase = "stop";
+		const stop = await runForgeAsync(fixture, ["stop", "--json"], {}, command);
+		phase = "status";
+		const status = await runForgeAsync(fixture, ["status", "--json"], {}, command);
 
+		expect([stop.status, status.status]).toStrictEqual([EXIT_SUCCESS, EXIT_SUCCESS]);
 		expect(stop.result).toMatchObject({
 			data: {
 				end: CLOSED_END,
@@ -234,7 +246,17 @@ describe("forge stop", () => {
 				studio: { status: "closed" },
 			},
 		});
-		await expect(waitForDeathAsync([studio!.pid], 2000)).resolves.toStrictEqual([]);
+
+		const workers = readWorkerLog(fixture.log);
+		const rojo = workers.find(({ args }) => args[0] === "serve");
+		const compiler = workers.find(({ role }) => role === "rbxtsc");
+		assert(rojo !== undefined);
+
+		expect(isProcessAlive(compiler!.pid)).toBeTrue();
+
+		phase = "Studio and Rojo exit";
+
+		await expect(waitForDeathAsync([studio!.pid, rojo.pid], 2000)).resolves.toStrictEqual([]);
 	});
 
 	it("should close a Studio with --force, as one with no owner", async ({ expect }) => {

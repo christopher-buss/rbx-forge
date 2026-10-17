@@ -3,9 +3,7 @@
  * (`session-fixture.ts`), and a cleanup that stops the session with
  * `forge down --force` and makes sure its supervisor is gone.
  */
-import { spawn } from "node:child_process";
 import nodeFs from "node:fs";
-import process from "node:process";
 import { onTestFinished } from "vitest";
 
 import { findSession } from "../../src/client/session.ts";
@@ -13,8 +11,8 @@ import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import type { ResultLine } from "../helpers/output.ts";
 import { parseResult } from "../helpers/output.ts";
 import { pinNow, waitForDeathAsync } from "../helpers/worker-log.ts";
-import type { BinRun } from "./run-bin.ts";
-import { BIN, runBinAsync } from "./run-bin.ts";
+import type { BinRun, BinRunOptions } from "./run-bin.ts";
+import { runBinAsync } from "./run-bin.ts";
 import type { Fixture } from "./session-fixture.ts";
 
 /** `forge up`: the watch-mode compiler alone. */
@@ -38,29 +36,30 @@ export interface UpRun extends BinRun {
  * supervisor when it still runs after that.
  *
  * @param fixture - The project and its environment.
+ * @param timeoutMs - The cleanup command's deadline, before the hook deadline.
  */
-export async function stopDetachedAsync(fixture: Fixture): Promise<void> {
+export async function stopDetachedAsync(fixture: Fixture, timeoutMs = 15_000): Promise<void> {
 	const session = findSession(nodeFs, forgeFiles(fixture.project));
 	if (session === undefined) {
 		return;
 	}
 
-	// Spawned here, not through `runBinAsync`: this runs in a test's cleanup.
-	const down = spawn(process.execPath, [BIN, "down", "--force", "--json", "--timeout", "5"], {
-		cwd: fixture.project,
-		env: fixture.environment(),
-		stdio: "ignore",
-		windowsHide: true,
-	});
-	await new Promise((resolve) => {
-		down.once("close", resolve);
-	});
-	await waitForDeathAsync([session.identity.pid], 5000);
-	// Through a pin with the recorded start time: never a process that
-	// reused the PID.
 	const pin = pinNow(session.identity.pid);
-	if (pin?.startTime === session.identity.processStartTime) {
-		pin.kill();
+	try {
+		await runBinAsync(
+			["down", "--force", "--json", "--timeout", "5"],
+			fixture.project,
+			fixture.environment(),
+			{ registerCleanup: false, timeoutMs },
+		);
+	} finally {
+		await waitForDeathAsync([session.identity.pid], 5000);
+		// The pin retains the recorded identity across the cleanup command.
+		if (pin?.startTime === session.identity.processStartTime) {
+			pin.kill();
+		}
+
+		await waitForDeathAsync([session.identity.pid], 1000);
 	}
 }
 
@@ -71,16 +70,23 @@ export async function stopDetachedAsync(fixture: Fixture): Promise<void> {
  * @param fixture - The project and its environment.
  * @param argv - Arguments after `forge`.
  * @param variables - Fixture variables for the workers and supervisor.
+ * @param options - The subprocess deadline.
  * @returns The run and its result line.
  */
 export async function runForgeAsync(
 	fixture: Fixture,
 	argv: ReadonlyArray<string>,
 	variables: Record<string, string> = {},
+	options: BinRunOptions = {},
 ): Promise<UpRun> {
 	onTestFinished(async () => {
 		await stopDetachedAsync(fixture);
 	});
-	const run = await runBinAsync([...argv], fixture.project, fixture.environment(variables));
+	const run = await runBinAsync(
+		[...argv],
+		fixture.project,
+		fixture.environment(variables),
+		options,
+	);
 	return { ...run, result: parseResult(run.stdout) };
 }
