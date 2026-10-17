@@ -1,18 +1,20 @@
 import { type } from "arktype";
 import type { Type } from "arktype";
 
+import { captureWarnings } from "../capture/warnings.ts";
 import { ForgeError } from "../errors.ts";
 import { STUDIO_SAVE_TIMEOUT_MS } from "./save-studio.ts";
 import type { StudioSave } from "./save-studio.ts";
 
 /** Save metadata shared by direct saves and session responses. */
 export const studioSaveResult: Type<StudioSave> = type({
-	bytes: "number",
-	desktop: "'user' | 'hidden'",
-	durationMs: "number",
-	mtime: "string",
-	pid: "number",
-	place: "string",
+	"bytes": "number",
+	"desktop": "'user' | 'hidden'",
+	"durationMs": "number",
+	"mtime": "string",
+	"pid": "number",
+	"place": "string",
+	"warnings?": captureWarnings,
 });
 
 /**

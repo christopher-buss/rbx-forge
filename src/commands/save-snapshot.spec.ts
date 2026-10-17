@@ -158,6 +158,7 @@ describe("saving snapshot Studios", () => {
 			mtime: "1970-01-01T00:00:02.000Z",
 			pid: 42,
 			place: PLACE,
+			warnings: [],
 		});
 		expect(memory.fileSystem.readFileSync(PLACE, "utf8")).toBe("saved snapshot");
 	});

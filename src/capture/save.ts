@@ -5,7 +5,8 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
 import { rojoBuildArgs, runRojoAsync } from "../rojo/rojo.ts";
 import type { StudioSave } from "../studio/save-studio.ts";
-import type { Capture, CaptureListener } from "./protocol.ts";
+import type { Capture, CaptureListener, CaptureWarning } from "./protocol.ts";
+import { withCaptureWarnings } from "./warnings.ts";
 
 /** One Studio and its bounded capture request. */
 export interface CaptureSaveOptions {
@@ -21,16 +22,17 @@ export interface CaptureSaveOptions {
  * @param config - The syncback project and destination.
  * @param options - The listener, Studio identity, deadline and cancellation.
  * @returns The written place metadata.
+ * @rejects A build, capture, cancellation, or assembly failure with any received warnings.
  */
 export async function saveCaptureAsync(
 	context: CommandContext,
 	config: ResolvedConfig,
 	{ deadline, listener, signal, studio }: CaptureSaveOptions,
 ): Promise<StudioSave> {
-	const { seams } = context;
-	const started = seams.clock.now();
+	const started = context.seams.clock.now();
 	const output = path.resolve(context.cwd, config.syncback.inputPath ?? studio.place);
-	const base = path.join(path.dirname(output), `.forge-capture-${seams.randomId()}.rbxl`);
+	const base = path.join(path.dirname(output), `.forge-capture-${context.seams.randomId()}.rbxl`);
+	let warnings: Array<CaptureWarning> = [];
 	try {
 		signal.throwIfAborted();
 		await runRojoAsync(
@@ -43,11 +45,17 @@ export async function saveCaptureAsync(
 		);
 		signal.throwIfAborted();
 		const capture = await listener.captureAsync(signal);
+		warnings = capture.warnings ?? [];
 		signal.throwIfAborted();
 		assembleCapture(context, { base, capture, output });
-		return captureResult(context, studio, output, started);
+		return {
+			...captureResult(context, studio, output, started),
+			warnings,
+		};
+	} catch (err) {
+		throw withCaptureWarnings(err, warnings);
 	} finally {
-		seams.fileSystem.rmSync(base, { force: true });
+		context.seams.fileSystem.rmSync(base, { force: true });
 	}
 }
 

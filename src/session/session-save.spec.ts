@@ -12,6 +12,7 @@ import {
 	createTestSeams,
 	PROJECT,
 } from "../../test/helpers/seams.ts";
+import type { Capture } from "../capture/protocol.ts";
 import { resolveConfig } from "../config/resolve.ts";
 import { nodeClock } from "../seams/clock.ts";
 import { createIdleTracker } from "./idle.ts";
@@ -47,7 +48,7 @@ describe(saveSessionStudioAsync, () => {
 	it("writes a plugin capture to the syncback input without a Studio menu save", async ({
 		expect,
 	}) => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const memory = createMemoryFileSystem({ "game.rbxl": "old place", "tools/rojo": "" });
 		const place = path.join(PROJECT, "game.rbxl");
@@ -86,7 +87,13 @@ describe(saveSessionStudioAsync, () => {
 				randomId: () => "capture-test",
 			}),
 		});
-		const payload = { model: new Uint8Array([1]), services: [] };
+		const payload: Capture = {
+			model: new Uint8Array([1]),
+			services: [],
+			warnings: [
+				{ property: "StreamingTargetRadius", reason: "unreadable", service: "Workspace" },
+			],
+		};
 		const saved = await saveSessionStudioAsync(
 			{
 				capture: {
@@ -112,6 +119,9 @@ describe(saveSessionStudioAsync, () => {
 
 		expect(memory.files()["game.rbxl"]).toBe("captured place");
 		expect(saved).toMatchObject({ bytes: 14, durationMs: 45, pid: 42, place });
+		expect(saved.warnings).toStrictEqual([
+			{ property: "StreamingTargetRadius", reason: "unreadable", service: "Workspace" },
+		]);
 	});
 
 	it.for(["request", "session"] as const)(

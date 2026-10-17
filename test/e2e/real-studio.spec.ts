@@ -20,6 +20,7 @@
  *
  * Timings go to `RBX_FORGE_TEST_REAL_STUDIO_LOG` (NDJSON), when set.
  */
+// cspell:words pcall
 import { spawnSync } from "node:child_process";
 import {
 	appendFileSync,
@@ -42,7 +43,7 @@ import { parseStatus } from "../../src/session/status.ts";
 import { captureRealStudioFixtureAsync } from "../helpers/capture-real-studio-fixture.ts";
 import type { IsolatedRealStudioCli } from "../helpers/isolated-real-studio-cli.ts";
 import { isolatedRealStudioFixtureAsync } from "../helpers/isolated-real-studio-fixture.ts";
-import { parseOpened } from "../helpers/output.ts";
+import { parseLines, parseOpened } from "../helpers/output.ts";
 import { loadRealNative } from "../helpers/real-native.ts";
 import { studioCleanup } from "../helpers/real-studio-cleanup.ts";
 import { genuineRojo } from "../helpers/real-studio-sync-fixture.ts";
@@ -351,6 +352,108 @@ async function captureForgeAsync(fixture: Fixture, argv: Array<string>): Promise
 }
 
 describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
+	it(
+		"names generated protected-property history and collision-group changes once per session",
+		{ timeout: 240_000 },
+		async ({ expect, onTestFinished }) => {
+			expect.assertions(7);
+
+			const fixture = await makeRealFixtureAsync({ studio: { saveMethod: "capture" } });
+			const editor = await captureRealStudioFixtureAsync({
+				actions: {
+					warnings: `local readable = pcall(function() return workspace.PhysicsSteppingMethod end)
+assert(not readable, "PhysicsSteppingMethod must be protected in this Studio")
+game:GetService("Selection"):Set({ workspace })
+local history = game:GetService("ChangeHistoryService")
+local recording = history:TryBeginRecording("PhysicsSteppingMethod", "PhysicsSteppingMethod")
+assert(recording, "The fixture must create an engine undo recording")
+local folder = Instance.new("Folder")
+folder.Name = "ForgeGeneratedWarningWaypoint"
+folder.Parent = workspace
+history:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+local canUndo, name = history:GetCanUndo()
+assert(canUndo and name == "PhysicsSteppingMethod", "The generated waypoint must name the protected property: " .. tostring(name))
+local physics = game:GetService("PhysicsService")
+physics:RegisterCollisionGroup("ForgeCaptureWarningGroup")
+assert(physics:IsCollisionGroupRegistered("ForgeCaptureWarningGroup"))
+task.wait(0.1)`,
+				},
+				captureName: fixture.cli.captureName,
+				directory: fixture.project,
+				native: loadRealNative(),
+				pluginsDirectory: realPluginsDirectory(),
+			});
+			onTestFinished(editor.closeAsync);
+			writeFileSync(
+				path.join(fixture.project, "default.project.json"),
+				JSON.stringify({
+					name: "forge-real-warning-capture",
+					tree: {
+						$attributes: {
+							...editor.launchAttributes,
+							...fixture.cli.launchAttributes,
+						},
+						$className: "DataModel",
+						Lighting: { $properties: { Technology: "ShadowMap" } },
+						Workspace: { $className: "Workspace" },
+					},
+				}),
+			);
+			const sessionId = await upStudioAsync(fixture, "hidden");
+			const [, pid, pinned] = await waitForLoadedAsync(fixture, sessionId, 0);
+			editor.own(pinned);
+			await editor.waitForCaptureUrlAsync();
+			const baseline = await captureForgeAsync(fixture, ["save", "--json"]);
+
+			expect(baseline).toMatchObject({ result: { data: { warnings: [] } }, status: 0 });
+
+			const observation = await editor.runAsync("warnings");
+			note({
+				command: "generated-warning-waypoint-and-collision-group",
+				pid,
+				startTime: pinned.startTime,
+				studioVersion: observation.version,
+			});
+			const saved = await captureForgeAsync(fixture, ["save", "--json"]);
+			assert(saved.result.data !== undefined, "capture save returns data");
+			const unreadable = {
+				property: "PhysicsSteppingMethod",
+				reason: "unreadable",
+				service: "Workspace",
+			};
+			const collisions = {
+				property: "CollisionGroups",
+				reason: "collision_groups",
+				service: "Workspace",
+			};
+
+			expect(saved).toMatchObject({
+				result: { data: { pid, place: fixture.place } },
+				status: 0,
+			});
+			expect(saved.result.data["warnings"]).toIncludeSameMembers([unreadable, collisions]);
+			expect(parseLines(saved.stdout)).toContainEqual({
+				...unreadable,
+				message:
+					"Workspace.PhysicsSteppingMethod cannot be captured; set it in the project file.",
+				type: "warning",
+			});
+			expect(parseLines(saved.stdout)).toContainEqual({
+				...collisions,
+				message:
+					"Workspace.CollisionGroups cannot be captured; set it in the project file.",
+				type: "warning",
+			});
+
+			const repeated = await captureForgeAsync(fixture, ["save", "--json"]);
+
+			expect(repeated).toMatchObject({ result: { data: { warnings: [] } }, status: 0 });
+			expect(parseLines(repeated.stdout)).not.toContainEqual(
+				expect.objectContaining({ type: "warning" }),
+			);
+		},
+	);
+
 	it(
 		"captures Studio edits and reconnects a Found Studio after a session restart",
 		{ timeout: 360_000 },

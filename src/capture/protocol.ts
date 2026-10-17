@@ -15,10 +15,18 @@ export interface CaptureService {
 	unreadableProperties?: Array<string>;
 }
 
+/** One edited property that capture cannot carry into syncback. */
+export interface CaptureWarning {
+	property: string;
+	reason: "collision_groups" | "material_override" | "unreadable";
+	service: string;
+}
+
 /** One serialized copy of Studio's service children. */
 export interface Capture {
 	model: Uint8Array;
 	services: Array<CaptureService>;
+	warnings?: Array<CaptureWarning>;
 }
 
 /** A listener that accepts capture data, never session control requests. */
@@ -27,7 +35,6 @@ export interface CaptureListener {
 	close: () => void;
 	url: string;
 }
-
 /** A snapshot keeps its endpoint address between open and save. */
 export interface CaptureAddress {
 	port: number;
