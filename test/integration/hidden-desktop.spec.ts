@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import type { TestContext } from "vitest";
 import { assert, describe, it } from "vitest";
 
+import type { PinnedProcess } from "../../src/native/addon.ts";
 import { studioProcess } from "../../src/studio/launcher.ts";
 import {
 	loadRealNative,
@@ -92,11 +93,12 @@ async function launchSnapshotWatcherAsync(
 		"snapshot-lighting-launcher.ts",
 	);
 	const entry = path.join(import.meta.dirname, "..", "..", "src", "supervisor.ts");
+	const trace = `${place}.lighting.jsonl`;
 	const source = `import { createSnapshotLightingLauncher } from ${JSON.stringify(pathToFileURL(launcher).href)};
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const launch = createSnapshotLightingLauncher({ host: { execPath: process.execPath }, native: () => require(${JSON.stringify(realNativePath())}) }, ${JSON.stringify(entry)});
-console.log(launch({ cwd: ${JSON.stringify(path.dirname(place))}, env: { ...process.env, RBX_FORGE_NATIVE_DIR: ${JSON.stringify(path.dirname(realNativePath()))} }, place: ${JSON.stringify(place)}, studio: ${JSON.stringify(studio)} }));`;
+console.log(launch({ cwd: ${JSON.stringify(path.dirname(place))}, env: { ...process.env, RBX_FORGE_NATIVE_DIR: ${JSON.stringify(path.dirname(realNativePath()))}, RBX_FORGE_TEST_SNAPSHOT_LIGHTING_TRACE: ${JSON.stringify(trace)} }, place: ${JSON.stringify(place)}, studio: ${JSON.stringify(studio)} }));`;
 	const pid = await new Promise<number>((resolve, reject) => {
 		execFile(
 			process.execPath,
@@ -154,15 +156,21 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 		expect(studioProcess(pin)).toMatchObject({ desktop: "hidden" });
 	});
 
-	it(
-		"dismisses a delayed snapshot prompt after the launching client exits",
+	it.for([0, 7000])(
+		"dismisses a delayed snapshot prompt after the launching client exits (%i ms)",
 		{ timeout: 20_000 },
-		async ({ expect, onTestFinished }) => {
-			expect.assertions(5);
+		async (delay, { expect, onTestFinished }) => {
+			expect.assertions(9);
 
+			const control = path.join(makeTemporaryDirectory(), "prompt");
 			const { pin, place } = await hiddenStudioAsync({ onTestFinished }, "exit", {
-				FIXTURE_STUDIO_DIALOG_DELAY_MS: "7000",
+				FIXTURE_STUDIO_DIALOG_DELAY_MS: String(delay),
+				FIXTURE_STUDIO_DIALOG_READY_FILE: `${control}.opened`,
+				FIXTURE_STUDIO_DIALOG_TRIGGER: control,
 			});
+
+			expect(pin.isBlocked()).toBeFalse();
+
 			const watcherPid = await launchSnapshotWatcherAsync(
 				{ onTestFinished },
 				{ pid: pin.pid, startTime: pin.startTime },
@@ -170,17 +178,43 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 			);
 			const watcher = loadRealNative().pinProcess(watcherPid);
 			assert(watcher !== null);
+			const observed = { control, launcherExitedAt: Date.now(), pin, place, watcher };
 
 			expect(watcher.isAlive()).toBeTrue();
+			expect(existsSync(`${control}.opened`)).toBeFalse();
 
-			await sleep(8500);
+			writeFileSync(control, "");
 
-			expect(watcher.waitForExit(5000)).toBeTrue();
+			await expect
+				.poll(() => snapshotCheck(watcher.waitForExit(0), observed), {
+					interval: 50,
+					timeout: 13_500,
+				})
+				.toBeTrue();
 
 			await expect(waitForDeathAsync([watcherPid], 5000)).resolves.toStrictEqual([]);
 
-			expect(pin.isBlocked()).toBeFalse();
+			await expect.poll(() => snapshotCheck(!pin.isBlocked(), observed)).toBeTrue();
 			expect(pin.isAlive()).toBeTrue();
+			await expect
+				.poll(() => JSON.parse(readDiagnosticFile(`${control}.opened`)))
+				.toMatchObject({ pid: pin.pid });
+			expect(
+				readDiagnosticFile(`${place}.lighting.jsonl`)
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line)),
+			).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						event: "start",
+						pid: pin.pid,
+						startTime: pin.startTime,
+					}),
+					expect.objectContaining({ dismissed: true, event: "dismiss-end" }),
+					expect.objectContaining({ event: "end", reason: "dismissed" }),
+				]),
+			);
 		},
 	);
 
@@ -336,3 +370,36 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 		expect(pin.isBlocked()).toBeTrue();
 	});
 });
+
+interface SnapshotObservation {
+	control: string;
+	launcherExitedAt: number;
+	pin: PinnedProcess;
+	place: string;
+	watcher: PinnedProcess;
+}
+
+function readDiagnosticFile(file: string): string {
+	return existsSync(file) ? readFileSync(file, "utf8") : "<not observed>";
+}
+
+function snapshotDiagnostics({
+	control,
+	launcherExitedAt,
+	pin,
+	place,
+	watcher,
+}: SnapshotObservation) {
+	return {
+		at: Date.now(),
+		launcherExitedAt,
+		prompt: readDiagnosticFile(`${control}.opened`),
+		studio: { alive: pin.isAlive(), blocked: pin.isBlocked() },
+		trace: readDiagnosticFile(`${place}.lighting.jsonl`),
+		watcher: { alive: watcher.isAlive(), pid: watcher.pid },
+	};
+}
+
+function snapshotCheck(hasCompleted: boolean, observed: SnapshotObservation) {
+	return hasCompleted || snapshotDiagnostics(observed);
+}
