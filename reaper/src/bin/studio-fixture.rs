@@ -3,6 +3,8 @@
 //! FIXTURE_STUDIO_ACK=none omits the GET; wrong sends an invalid token.
 //! FIXTURE_STUDIO_ACK_DELAY_MS delays the GET from the lock's creation.
 //! FIXTURE_STUDIO_PLATFORM_LAUNCHER=1 reads the place from RBX_FORGE_PLACE.
+//! FIXTURE_STUDIO_DIALOG_TRIGGER gates the prompt on a file's creation.
+//! FIXTURE_STUDIO_DIALOG_READY_FILE records when the prompt opens.
 
 #[allow(
     dead_code,
@@ -79,6 +81,7 @@ fn main() -> io::Result<()> {
     let dialog_delay = env::var("FIXTURE_STUDIO_DIALOG_DELAY_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok());
+    let dialog_trigger = env::var("FIXTURE_STUDIO_DIALOG_TRIGGER").ok();
     let mut dialog_opened = false;
     let mut handled_close = 0;
     let mut extra_window_opened = false;
@@ -123,9 +126,21 @@ fn main() -> io::Result<()> {
         }
         if !dialog_opened
             && dialog_delay.is_some_and(|ms| started.elapsed() >= Duration::from_millis(ms))
+            && dialog_trigger
+                .as_ref()
+                .is_none_or(|file| Path::new(file).exists())
         {
             open_dialog(window)?;
             dialog_opened = true;
+            if let Ok(file) = env::var("FIXTURE_STUDIO_DIALOG_READY_FILE") {
+                fs::write(
+                    file,
+                    serde_json::json!({
+                        "at": SystemTime::now().duration_since(UNIX_EPOCH).expect("after epoch").as_millis(),
+                        "pid": std::process::id(),
+                    }).to_string(),
+                )?;
+            }
         }
         let requests = close_requests();
         if requests > handled_close {

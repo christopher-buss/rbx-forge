@@ -10,6 +10,7 @@
  *
  * `RBX_FORGE_TEST_PAUSE_DIR` and `RBX_FORGE_TEST_PAUSE` enable the
  * fault-injection pause points (`session/pause.ts`); only tests set them.
+ * `RBX_FORGE_TEST_SNAPSHOT_LIGHTING_TRACE` records snapshot watcher boundaries.
  */
 import { appendFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -18,6 +19,7 @@ import { fileURLToPath } from "node:url";
 
 import packageJson from "../package.json" with { type: "json" };
 import { ForgeError, toForgeError } from "./errors.ts";
+import { readVariable } from "./process/environment.ts";
 import { nodeClock } from "./seams/clock.ts";
 import { nodeFileSystem } from "./seams/file-system.ts";
 import { createNodeSeams } from "./seams/node-seams.ts";
@@ -79,7 +81,11 @@ if (process.argv[2] === KEEP_HIDDEN_FLAG) {
 }
 
 if (process.argv[2] === "--watch-hidden-lighting") {
-	await runSnapshotLightingAsync(createSupervisorSeams(), process.argv[3] ?? "");
+	await runSnapshotLightingAsync(
+		createSupervisorSeams(),
+		process.argv[3] ?? "",
+		readVariable(process.env, "RBX_FORGE_TEST_SNAPSHOT_LIGHTING_TRACE", process.platform),
+	);
 	process.exit();
 }
 
