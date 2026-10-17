@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import nodeFs from "node:fs";
 import process from "node:process";
-import { onTestFinished } from "vitest";
+import { assert, onTestFinished } from "vitest";
 
 import { findSession } from "../../src/client/session.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
@@ -46,12 +46,16 @@ export async function stopDetachedAsync(fixture: Fixture): Promise<void> {
 	}
 
 	// Spawned here, not through `runBinAsync`: this runs in a test's cleanup.
-	const down = spawn(process.execPath, [BIN, "down", "--force", "--json", "--timeout", "5"], {
-		cwd: fixture.project,
-		env: fixture.environment(),
-		stdio: "ignore",
-		windowsHide: true,
-	});
+	const down = spawn(
+		process.execPath,
+		[fixture.bin ?? BIN, "down", "--force", "--json", "--timeout", "5"],
+		{
+			cwd: fixture.project,
+			env: fixture.environment(),
+			stdio: "ignore",
+			windowsHide: true,
+		},
+	);
 	await new Promise((resolve) => {
 		down.once("close", resolve);
 	});
@@ -81,6 +85,12 @@ export async function runForgeAsync(
 	onTestFinished(async () => {
 		await stopDetachedAsync(fixture);
 	});
-	const run = await runBinAsync([...argv], fixture.project, fixture.environment(variables));
+	const run = await runBinAsync(
+		[...argv],
+		fixture.project,
+		fixture.environment(variables),
+		fixture.bin,
+	);
+	assert(run.stdout.trim() !== "", run.stderr);
 	return { ...run, result: parseResult(run.stdout) };
 }

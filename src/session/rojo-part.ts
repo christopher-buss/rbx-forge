@@ -1,3 +1,4 @@
+import type { CaptureListener } from "../capture/protocol.ts";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import type { RojoPort } from "../rojo/rojo-port.ts";
@@ -18,6 +19,8 @@ export const ROJO_LISTEN_BOUND_MS = 60_000;
 
 /** What Rojo's part runs with. */
 export interface RojoSetup {
+	/** The current Rojo generation's capture-only endpoint. */
+	capture?: CaptureListener & { rojoPort: number };
 	config: ResolvedConfig;
 	context: CommandContext;
 	directory: string;
@@ -43,6 +46,9 @@ export interface RunningRojo {
 	part: RunningPart;
 	port: number;
 }
+
+type CaptureRojoSetup = Partial<Pick<RojoSetup, "config" | "directory">> &
+	Pick<RojoSetup, "capture" | "context" | "status">;
 
 /**
  * Resolve Rojo on the session's port, choosing it the first time.
@@ -103,7 +109,7 @@ export function hasEnded(scope: Pick<SessionScope, "signal">): boolean {
  *   session ended first.
  */
 export async function waitForRojoAsync(
-	setup: Pick<RojoSetup, "context" | "status">,
+	setup: CaptureRojoSetup,
 	scope: Pick<SessionScope, "signal" | "track">,
 	parts: Pick<ServiceParts, "stop">,
 	{ part, port }: RunningRojo,
@@ -118,6 +124,8 @@ export async function waitForRojoAsync(
 			if (hasEnded(scope) || !isRunning()) {
 				return false;
 			}
+
+			await prepareCaptureAsync(setup, scope.signal, port);
 
 			setup.status.service("rojo", "ready");
 			return true;
@@ -136,6 +144,24 @@ export async function waitForRojoAsync(
 	}
 
 	return false;
+}
+
+async function prepareCaptureAsync(
+	setup: CaptureRojoSetup,
+	signal: AbortSignal,
+	port: number,
+): Promise<void> {
+	if (setup.config?.studio.saveMethod !== "capture" || setup.directory === undefined) {
+		return;
+	}
+
+	const identity = await setup.context.seams.network.getRojoInfoAsync(port, signal);
+	setup.capture?.close();
+	setup.capture = {
+		...(await setup.context.seams.network.listenForCaptureAsync(identity, signal)),
+		rojoPort: port,
+	};
+	writeRojoWrapper(setup.context, setup.config, setup.directory, setup.capture);
 }
 
 /**

@@ -5,6 +5,7 @@ import type {
 	HookCommand,
 	HookPhases,
 	ProjectType,
+	SaveMethod,
 	StudioDesktop,
 } from "./schema.ts";
 
@@ -28,7 +29,11 @@ export interface ConfigDefaults {
 	rojoPort: number | undefined;
 	rojoProjectPath: string;
 	session: { idleTimeout: number };
-	studio: { autoRecovery: AutoRecoveryMode; desktop: StudioDesktop | undefined };
+	studio: {
+		autoRecovery: AutoRecoveryMode;
+		desktop: StudioDesktop | undefined;
+		saveMethod: SaveMethod;
+	};
 	syncback: {
 		inputPath: string | undefined;
 		projectPath: string | undefined;
@@ -60,7 +65,7 @@ export const DEFAULT_CONFIG: Readonly<ConfigDefaults> = {
 	rojoPort: undefined,
 	rojoProjectPath: "default.project.json",
 	session: { idleTimeout: 30 },
-	studio: { autoRecovery: "move", desktop: undefined },
+	studio: { autoRecovery: "move", desktop: undefined, saveMethod: "menu" },
 	syncback: { inputPath: undefined, projectPath: undefined, runOnStart: false },
 	typegen: {
 		exclude: ["**/node_modules/**"],

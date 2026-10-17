@@ -97,6 +97,8 @@ export interface FixtureOptions {
 }
 
 export interface Fixture {
+	/** A private built CLI for a fixture that owns its plugin installation. */
+	bin?: string;
 	environment: (variables?: Record<string, string>) => NodeJS.ProcessEnv;
 	log: string;
 	/** The absolute path of {@link PLACE}. */
@@ -222,7 +224,7 @@ export function startSession(
 	argv: Array<string>,
 	variables: Record<string, string> = {},
 ): Session {
-	const child = spawn(process.execPath, [BIN, ...argv], {
+	const child = spawn(process.execPath, [fixture.bin ?? BIN, ...argv], {
 		cwd: fixture.project,
 		env: fixture.environment(variables),
 		stdio: ["pipe", "pipe", "pipe"],

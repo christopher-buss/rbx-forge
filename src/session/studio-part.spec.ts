@@ -166,7 +166,7 @@ ${source}`,
 
 		const app = SCRIPTS[0]!;
 		const run = fixture([
-			`-- rbx-forge patch 3 stock ${app.hash}\n${app.source}`,
+			`-- rbx-forge patch ${VERSION} stock ${app.hash}\n${app.source}`,
 			stock.ServeSession,
 			"return { protocolVersion = 5 }",
 		]);
@@ -181,7 +181,7 @@ ${source}`,
 			expect.assertions(2);
 
 			const run = fixture([
-				`-- rbx-forge patch 3 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${source}`,
+				`-- rbx-forge patch ${VERSION} stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${source}`,
 				stock.ServeSession,
 				"return { protocolVersion = 5 }",
 			]);

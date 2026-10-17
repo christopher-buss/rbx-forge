@@ -5,16 +5,15 @@
  * `genuineRojo`); CI never runs it. It opens Studio windows on the desktop.
  *
  * Each test cleans up only the Studio returned by its launcher or recorded
- * in its session, through a PID and start-time pin. The managed Rojo plugin
- * must already have the current patch; these tests never install or patch it.
- * Every direct launch installs the inert forge plugin in the user's Plugins
- * folder, as forge does for users; a current copy is left unwritten.
+ * in its session, through a PID and start-time pin. Each fixture runs a copied
+ * built CLI with private plugin filenames and marker names. Its plugins stay
+ * gated until its own launch script runs; canonical plugins stay unchanged.
  *
  * Places (`test/fixtures/studio/`):
  *
- * - `saved.rbxl`: Studio saved it, so it has no unsaved changes and closes
- *   without a dialog. Made by opening the `rojo build` of
- *   `unsaved.project.json` in Studio and saving it.
+ * - `saved.rbxl`: Studio saved the `rojo build` of `unsaved.project.json`.
+ *   Current Studio and plugins may update it on load; graceful-close cases
+ *   save their owned copy after readiness to establish a clean baseline.
  * - `unsaved.rbxl`: `rojo build unsaved.project.json`. Studio always takes a
  *   place fresh from Rojo as changed, so it asks to save on close.
  *   `Lighting.Technology` is set, so no Lighting migration dialog shows.
@@ -39,16 +38,16 @@ import type { TestContext } from "vitest";
 import { assert, describe, it, expect as matchers } from "vitest";
 
 import type { PinnedProcess } from "../../src/native/addon.ts";
-import { readVariable } from "../../src/process/environment.ts";
 import { parseStatus } from "../../src/session/status.ts";
-import { SCRIPTS, VERSION } from "../../src/studio/rojo-plugin.ts";
+import { captureRealStudioFixtureAsync } from "../helpers/capture-real-studio-fixture.ts";
+import type { IsolatedRealStudioCli } from "../helpers/isolated-real-studio-cli.ts";
+import { isolatedRealStudioFixtureAsync } from "../helpers/isolated-real-studio-fixture.ts";
 import { parseOpened } from "../helpers/output.ts";
 import { loadRealNative } from "../helpers/real-native.ts";
 import { studioCleanup } from "../helpers/real-studio-cleanup.ts";
 import { genuineRojo } from "../helpers/real-studio-sync-fixture.ts";
 import { pinNow } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
-import { makeFixtureAsync } from "./session-fixture.ts";
 import type { UpRun } from "./up-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
@@ -64,33 +63,28 @@ const QUIET_MS = 3000;
 /** How a Studio that closes on the request goes. */
 const CLOSED_END: unknown = matchers.toBeOneOf(["exited", "lock_released"]);
 
+interface RealFixture extends Fixture {
+	cli: IsolatedRealStudioCli;
+}
+
 /**
- * Fail before production `up` could install or patch the shared managed model.
- * @param testContext - Assertions and cleanup for this test.
+ * The real Plugins folder, where every fixture uses unique filenames.
+ *
+ * @returns Its path.
  */
-function requireCurrentManagedPlugin(testContext: Pick<TestContext, "onTestFinished">): void {
-	const home = readVariable(env, "RBX_FORGE_TEST_REAL_USERPROFILE", process.platform);
-	assert(home !== undefined);
-	const managed = path.join(home, "AppData/Local/Roblox/Plugins/RojoManagedPlugin.rbxm");
-	assert(
-		existsSync(managed),
-		"Install the current managed Rojo plugin before real Studio e2e tests",
-	);
-	const original = readFileSync(managed);
-	const modified = statSync(managed).mtimeMs;
-	const native = loadRealNative();
-	const sources = native.readModelScriptSources(
-		managed,
-		SCRIPTS.map(({ name }) => ["Rojo", "Plugin", name]),
-	);
-	assert.deepEqual(
-		sources,
-		SCRIPTS.map(({ hash, source }) => `-- rbx-forge patch ${VERSION} stock ${hash}\n${source}`),
-		"Update the managed Rojo plugin before real Studio e2e tests",
-	);
-	testContext.onTestFinished(() => {
-		assert.deepEqual(readFileSync(managed), original);
-		assert.equal(statSync(managed).mtimeMs, modified);
+function realPluginsDirectory(): string {
+	const home = env["RBX_FORGE_TEST_REAL_USERPROFILE"] ?? "";
+	return path.join(home, "AppData/Local/Roblox/Plugins");
+}
+
+async function makeRealFixtureAsync(
+	config: Record<string, unknown> = {},
+	sharedCli?: IsolatedRealStudioCli,
+): Promise<RealFixture> {
+	return isolatedRealStudioFixtureAsync({
+		config,
+		pluginsDirectory: realPluginsDirectory(),
+		...(sharedCli === undefined ? {} : { sharedCli }),
 	});
 }
 
@@ -132,8 +126,8 @@ function realVariables(): Record<string, string> {
  * @param fixturePlace - `saved.rbxl` or `unsaved.rbxl`.
  * @returns The project, with the copy as its place.
  */
-async function makeRealProjectAsync(fixturePlace: string): Promise<Fixture> {
-	const fixture = await makeFixtureAsync({
+async function makeRealProjectAsync(fixturePlace: string): Promise<RealFixture> {
+	const fixture = await makeRealFixtureAsync({
 		buildOutputPath: PLACE,
 		open: { buildFirst: false },
 	});
@@ -141,8 +135,11 @@ async function makeRealProjectAsync(fixturePlace: string): Promise<Fixture> {
 	return { ...fixture, place: path.join(fixture.project, PLACE) };
 }
 
-async function compatibilitySnapshotAsync(fixturePlace = "compatibility.rbxl"): Promise<Fixture> {
-	const fixture = await makeFixtureAsync({ projectType: "luau" });
+async function compatibilitySnapshotAsync(
+	fixturePlace = "compatibility.rbxl",
+	sharedCli?: IsolatedRealStudioCli,
+): Promise<RealFixture> {
+	const fixture = await makeRealFixtureAsync({ projectType: "luau" }, sharedCli);
 	const directory = path.join(fixture.project, "node_modules", "snapshot-rojo");
 	mkdirSync(directory, { recursive: true });
 	writeFileSync(
@@ -168,24 +165,28 @@ copyFileSync(${JSON.stringify(path.join(PLACES, fixturePlace))}, output);`,
  * Start a session with `up --studio`, which opens the place in the
  * installed Studio.
  *
- * @param testContext - Assertions and cleanup for this test.
  * @param fixture - The project.
  * @param desktop - Where Studio opens.
  * @returns The session's id.
  */
 async function upStudioAsync(
-	testContext: Pick<TestContext, "onTestFinished">,
 	fixture: Fixture,
 	desktop: "hidden" | "user" = "user",
 ): Promise<string> {
-	requireCurrentManagedPlugin(testContext);
 	const own = studioCleanup(fixture.project);
 	const up = await runForgeAsync(
 		fixture,
 		["up", "--studio", "--desktop", desktop, "--json"],
 		realVariables(),
 	);
-	const sessionId = String(up.result.data!["sessionId"]);
+	note({
+		command: "up --studio",
+		project: fixture.project,
+		stderr: up.stderr,
+		stdout: up.stdout,
+	});
+	assert(up.status === 0 && up.result.data !== undefined, up.stdout);
+	const sessionId = String(up.result.data["sessionId"]);
 	const state = parseStatus(
 		JSON.parse(
 			readFileSync(
@@ -206,12 +207,14 @@ async function upStudioAsync(
  *
  * @param fixture - The project.
  * @param sessionId - The session that opens Studio.
+ * @param quietMs - Time without modal dialogs; capture needs no menu readiness.
  * @returns The PID the session recorded, the lock PID and its verified pin.
  * @rejects When Studio does not open the place in time.
  */
 async function waitForLoadedAsync(
 	fixture: Fixture,
 	sessionId: string,
+	quietMs = QUIET_MS,
 ): Promise<[unknown, number, PinnedProcess]> {
 	const state = path.join(fixture.project, ".forge", "sessions", sessionId, "state.json");
 	const deadline = Date.now() + OPEN_MS;
@@ -232,7 +235,7 @@ async function waitForLoadedAsync(
 	const pinned = pinNow(lockPid);
 	assert(pinned !== undefined && pinned.startTime === status.services.studio.startTime);
 	let quietSince = Date.now();
-	while (Date.now() - quietSince < QUIET_MS) {
+	while (Date.now() - quietSince < quietMs) {
 		if (Date.now() > deadline) {
 			throw new Error(`Studio did not open ${fixture.place} in time`);
 		}
@@ -276,19 +279,6 @@ function notOwnedBy(testContext: Pick<TestContext, "expect">, studio: number): u
 	return testContext.expect.toSatisfy((owner: number) => owner !== studio);
 }
 
-/** The forge plugin this build ships. */
-const BUNDLED_PLUGIN = path.join(import.meta.dirname, "../../dist/forge-plugin/ForgePlugin.rbxm");
-
-/**
- * The installed forge plugin in the user's Plugins folder.
- *
- * @returns Its path.
- */
-function installedPlugin(): string {
-	const home = env["RBX_FORGE_TEST_REAL_USERPROFILE"] ?? "";
-	return path.join(home, "AppData/Local/Roblox/Plugins/ForgePlugin.rbxm");
-}
-
 /**
  * The log of the Studio that opened `place`: Studio writes its command line,
  * with the place, at the top of its log.
@@ -311,17 +301,24 @@ function studioLogLines(place: string): Array<string> {
 	);
 }
 
-function hasRunForgePlugin(place: string): boolean {
-	return studioLogLines(place).some((line) => line.includes("loadPlugin user_ForgePlugin.rbxm"));
+function hasRunForgePlugin(place: string, plugin: string): boolean {
+	return studioLogLines(place).some((line) => {
+		return line.includes(`loadPlugin user_${path.basename(plugin)}`);
+	});
 }
 
 /**
  * Open a saved snapshot on the hidden desktop; the test's end stops its Studio.
  *
+ * @param sharedCli - The private installation reused by the second launch.
  * @returns The snapshot, and the installed forge plugin's modification time.
  */
-async function openPluginSnapshotAsync(): Promise<{ place: string; pluginModified: number }> {
-	const fixture = await compatibilitySnapshotAsync("saved.rbxl");
+async function openPluginSnapshotAsync(sharedCli?: IsolatedRealStudioCli): Promise<{
+	cli: IsolatedRealStudioCli;
+	place: string;
+	pluginModified: number;
+}> {
+	const fixture = await compatibilitySnapshotAsync("saved.rbxl", sharedCli);
 	const pin = studioCleanup();
 	const opened = await runForgeAsync(
 		fixture,
@@ -331,9 +328,9 @@ async function openPluginSnapshotAsync(): Promise<{ place: string; pluginModifie
 	const { place, studio } = parseOpened(opened.result.data);
 	assert(opened.status === 0 && studio !== null, JSON.stringify(opened.result));
 	pin(studio);
-	const { mtimeMs, size } = statSync(installedPlugin());
+	const { mtimeMs, size } = statSync(fixture.cli.installedPlugin);
 	note({ command: "forge-plugin-open", plugin: size, result: opened.result });
-	return { place, pluginModified: mtimeMs };
+	return { cli: fixture.cli, place, pluginModified: mtimeMs };
 }
 
 /**
@@ -341,18 +338,144 @@ async function openPluginSnapshotAsync(): Promise<{ place: string; pluginModifie
  * state.
  */
 const PLUGIN_LOAD_LINE =
-	/\[FLog::(?:PluginFileRead|PluginLoadingEnhanced|PluginDebugState)\] (?:Hashing Plugin '|Plugin file read '|loadPlugin |Restoring (?:IDE|debugger) state for plugin `)user_ForgePlugin\.rbxm/u;
+	/\[FLog::(?:PluginFileRead|PluginLoadingEnhanced|PluginDebugState)\] (?:Hashing Plugin '|Plugin file read '|loadPlugin |Restoring (?:IDE|debugger) state for plugin `)user_/u;
 
 function saveOutcome(run: UpRun): string {
 	return run.status === 0 ? "saved" : JSON.stringify(run.result);
 }
 
+async function captureForgeAsync(fixture: Fixture, argv: Array<string>): Promise<UpRun> {
+	const run = await runForgeAsync(fixture, argv, realVariables());
+	note({ command: argv, project: fixture.project, stderr: run.stderr, stdout: run.stdout });
+	return run;
+}
+
 describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
+	it(
+		"captures Studio edits and reconnects a Found Studio after a session restart",
+		{ timeout: 360_000 },
+		async ({ expect, onTestFinished }) => {
+			expect.assertions(13);
+
+			const fixture = await makeRealFixtureAsync({
+				studio: { saveMethod: "capture" },
+			});
+			const editor = await captureRealStudioFixtureAsync({
+				actions: {
+					first: `local capture = game:GetService("ServerStorage"):FindFirstChild("ForgeCapture")
+assert(capture and not capture.Archivable, "Session capture instance must be non-Archivable")
+local part = Instance.new("Part")
+part.Name = "ForgeCapturedFirstPart"
+part.Anchored = true
+part.Parent = workspace
+game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured first edit")\\n'`,
+					second: `local part = Instance.new("Part")
+part.Name = "ForgeCapturedAfterRestartPart"
+part.Anchored = true
+part.Parent = workspace
+game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured after restart")\\n'`,
+				},
+				captureName: fixture.cli.captureName,
+				directory: fixture.project,
+				native: loadRealNative(),
+				pluginsDirectory: realPluginsDirectory(),
+			});
+			onTestFinished(editor.closeAsync);
+			mkdirSync(path.join(fixture.project, "workspace"));
+			mkdirSync(path.join(fixture.project, "scripts"));
+			const script = path.join(fixture.project, "scripts", "CaptureScript.server.luau");
+			writeFileSync(script, 'print("original capture script")\n');
+			writeFileSync(
+				path.join(fixture.project, "default.project.json"),
+				JSON.stringify({
+					name: "forge-real-capture",
+					tree: {
+						$attributes: {
+							...editor.launchAttributes,
+							...fixture.cli.launchAttributes,
+						},
+						$className: "DataModel",
+						Lighting: { $properties: { Technology: "ShadowMap" } },
+						ServerScriptService: { $path: "scripts" },
+						Workspace: { $path: "workspace" },
+					},
+				}),
+			);
+			const sessionId = await upStudioAsync(fixture, "hidden");
+			const [, pid, pinned] = await waitForLoadedAsync(fixture, sessionId, 0);
+			editor.own(pinned);
+			const initial = await editor.runAsync("first");
+			note({
+				command: "capture-edit",
+				pid,
+				sequence: initial.sequence,
+				studioVersion: initial.version,
+			});
+
+			const saved = await captureForgeAsync(fixture, ["save", "--json"]);
+
+			expect(saved).toMatchObject({
+				result: { data: { desktop: "user", pid, place: fixture.place } },
+				status: 0,
+			});
+
+			const synced = await captureForgeAsync(fixture, ["syncback", "--json"]);
+
+			expect(synced.status).toBe(0);
+			expect(readFileSync(script, "utf8")).toContain('print("captured first edit")');
+			expect(
+				existsSync(path.join(fixture.project, "workspace/ForgeCapturedFirstPart.rbxm")),
+			).toBeTrue();
+
+			const down = await captureForgeAsync(fixture, ["down", "--keep-studio", "--json"]);
+
+			expect(down.status).toBe(0);
+			expect(pinned.isAlive()).toBeTrue();
+
+			const restarted = await upStudioAsync(fixture, "hidden");
+			const [, foundPid] = await waitForLoadedAsync(fixture, restarted, 0);
+
+			expect(restarted).not.toBe(sessionId);
+			expect(foundPid).toBe(pid);
+
+			const foundStatus = await captureForgeAsync(fixture, ["status", "--json"]);
+
+			expect(foundStatus.result.data).toMatchObject({
+				services: { studio: { origin: "found", pid } },
+			});
+
+			await editor.waitForCaptureUrlAsync(initial.captureUrl);
+			await editor.runAsync("second");
+			const savedAgain = await captureForgeAsync(fixture, ["save", "--json"]);
+
+			expect(savedAgain.status).toBe(0);
+
+			const syncedAgain = await captureForgeAsync(fixture, ["syncback", "--json"]);
+
+			expect(syncedAgain.status).toBe(0);
+			expect(readFileSync(script, "utf8")).toContain('print("captured after restart")');
+			expect(
+				existsSync(
+					path.join(fixture.project, "workspace/ForgeCapturedAfterRestartPart.rbxm"),
+				),
+			).toBeTrue();
+
+			note({
+				command: "capture-files",
+				files: readdirSync(path.join(fixture.project, "workspace")),
+				pid,
+				project: fixture.project,
+				script: readFileSync(script, "utf8"),
+				startTime: pinned.startTime,
+			});
+		},
+	);
+
 	it(
 		"dismisses hidden snapshot Compatibility lighting after the open CLI exits",
 		{ timeout: 150_000 },
 		async ({ expect }) => {
-			expect.assertions(6);
+			expect.assertions(5);
 
 			const fixture = await compatibilitySnapshotAsync();
 			const pinSnapshot = studioCleanup();
@@ -375,11 +498,11 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			});
 
 			await expect
-				.poll(() => existsSync(`${place}.lock`), { interval: 100, timeout: OPEN_MS })
-				.toBeTrue();
-			expect(Number(readFileSync(`${place}.lock`, "utf8").split(/\r?\n/, 1)[0])).toBe(
-				studio.pid,
-			);
+				.poll(() => Number(readFileSync(`${place}.lock`, "utf8").split(/\r?\n/, 1)[0]), {
+					interval: 100,
+					timeout: OPEN_MS,
+				})
+				.toBe(studio.pid);
 
 			await sleep(10_000);
 
@@ -398,14 +521,19 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 			expect.assertions(7);
 
 			const first = await openPluginSnapshotAsync();
-			const second = await openPluginSnapshotAsync();
+			const second = await openPluginSnapshotAsync(first.cli);
 
-			expect(readFileSync(installedPlugin())).toStrictEqual(readFileSync(BUNDLED_PLUGIN));
+			expect(readFileSync(first.cli.installedPlugin)).toStrictEqual(
+				readFileSync(first.cli.bundledPlugin),
+			);
 			// The second launch found a current copy and left it unwritten.
 			expect(second.pluginModified).toBe(first.pluginModified);
 
 			await expect
-				.poll(() => hasRunForgePlugin(first.place), { interval: 500, timeout: OPEN_MS })
+				.poll(() => hasRunForgePlugin(first.place, first.cli.installedPlugin), {
+					interval: 500,
+					timeout: OPEN_MS,
+				})
 				.toBeTrue();
 			await expect
 				.poll(() => existsSync(`${first.place}.lock`), { interval: 100, timeout: OPEN_MS })
@@ -413,22 +541,24 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 			await sleep(QUIET_MS);
 			const lines = studioLogLines(first.place);
-			const mentions = lines.filter((line) => line.includes("ForgePlugin"));
+			const mentions = lines.filter((line) => {
+				return line.includes(path.basename(first.cli.installedPlugin));
+			});
 
 			expect(mentions).not.toBeEmpty();
 			expect(mentions.filter((line) => !PLUGIN_LOAD_LINE.test(line))).toStrictEqual([]);
-			expect(lines.filter((line) => line.includes("ForgeCapture"))).toStrictEqual([]);
+			expect(lines.filter((line) => line.includes(first.cli.captureName))).toStrictEqual([]);
 		},
 	);
 
 	it(
 		"shows, hides, and saves the same session Studio while hidden",
 		{ timeout: 600_000 },
-		async ({ expect, onTestFinished }) => {
+		async ({ expect }) => {
 			expect.assertions(4);
 
 			const fixture = await makeRealProjectAsync("saved.rbxl");
-			const sessionId = await upStudioAsync({ onTestFinished }, fixture, "hidden");
+			const sessionId = await upStudioAsync(fixture, "hidden");
 			const [, original] = await waitForLoadedAsync(fixture, sessionId);
 			const before = await runForgeAsync(fixture, ["status", "--json"], realVariables());
 			assert(before.result.data !== undefined, "status returns data");
@@ -496,11 +626,11 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 	] as const)(
 		"saves Studio on the $desktop desktop",
 		{ timeout: 240_000 },
-		async ({ desktop, expectedFocus }, { expect, onTestFinished }) => {
+		async ({ desktop, expectedFocus }, { expect }) => {
 			expect.assertions(5);
 
 			const fixture = await makeRealProjectAsync("unsaved.rbxl");
-			const sessionId = await upStudioAsync({ onTestFinished }, fixture, desktop);
+			const sessionId = await upStudioAsync(fixture, desktop);
 			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			const before = statSync(fixture.place).mtimeMs;
 			const save = await runForgeAsync(
@@ -508,6 +638,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 				["save", "--timeout", "30", "--json"],
 				realVariables(),
 			);
+			note({ command: "save", result: save.result, status: save.status });
 			const after = foregroundOwner();
 
 			expect(saveOutcome(save)).toBe("saved");
@@ -523,6 +654,7 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 
 			const firstSavedAt = statSync(fixture.place).mtimeMs;
 			const again = await runForgeAsync(fixture, ["save", "--json"], realVariables());
+			note({ command: "save-again", result: again.result, status: again.status });
 
 			expect({
 				changed: statSync(fixture.place).mtimeMs > firstSavedAt,
@@ -534,11 +666,11 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 	it(
 		"dismisses delayed Compatibility lighting migration on the hidden desktop",
 		{ timeout: 240_000 },
-		async ({ expect, onTestFinished }) => {
+		async ({ expect }) => {
 			expect.assertions(3);
 
 			const fixture = await makeRealProjectAsync("compatibility.rbxl");
-			const sessionId = await upStudioAsync({ onTestFinished }, fixture, "hidden");
+			const sessionId = await upStudioAsync(fixture, "hidden");
 			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			await sleep(10_000);
 			const save = await runForgeAsync(fixture, ["save", "--json"], realVariables());
@@ -552,16 +684,22 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 	it(
 		"should open Studio directly with up --studio, and close it with down",
 		{ timeout: 240_000 },
-		async ({ expect, onTestFinished }) => {
-			expect.assertions(4);
+		async ({ expect }) => {
+			expect.assertions(5);
 
 			const fixture = await makeRealProjectAsync("saved.rbxl");
 			const started = Date.now();
-			const sessionId = await upStudioAsync({ onTestFinished }, fixture);
+			const sessionId = await upStudioAsync(fixture);
 			const [recorded, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 			const opened = Date.now();
+			const saved = await runForgeAsync(fixture, ["save", "--json"], realVariables());
+			note({ command: "prepare-down", result: saved.result, status: saved.status });
+
+			expect(saveOutcome(saved)).toBe("saved");
+
+			const closing = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables());
-			note({ closeMs: Date.now() - opened, openMs: opened - started, test: "down" });
+			note({ closeMs: Date.now() - closing, openMs: opened - started, test: "down" });
 
 			expect(recorded).toBe(lockPid);
 			expect(down.result.data).toMatchObject({
@@ -572,37 +710,38 @@ describe.skipIf(!IS_ENABLED)("real Roblox Studio", () => {
 		},
 	);
 
-	it(
-		"should close the session's Studio with stop",
-		{ timeout: 240_000 },
-		async ({ expect, onTestFinished }) => {
-			expect.assertions(2);
+	it("should close the session's Studio with stop", { timeout: 240_000 }, async ({ expect }) => {
+		expect.assertions(3);
 
-			const fixture = await makeRealProjectAsync("saved.rbxl");
-			const sessionId = await upStudioAsync({ onTestFinished }, fixture);
-			const [, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
-			const loaded = Date.now();
-			const stop = await runForgeAsync(fixture, ["stop", "--json"], realVariables());
-			note({ closeMs: Date.now() - loaded, test: "stop" });
+		const fixture = await makeRealProjectAsync("saved.rbxl");
+		const sessionId = await upStudioAsync(fixture);
+		const [, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
+		const saved = await runForgeAsync(fixture, ["save", "--json"], realVariables());
+		note({ command: "prepare-stop", result: saved.result, status: saved.status });
 
-			expect(stop.result.data).toMatchObject({
-				end: CLOSED_END,
-				forced: false,
-				pid: lockPid,
-				stopped: true,
-			});
-			await expect.poll(() => pinned.isAlive(), { timeout: 10_000 }).toBeFalse();
-		},
-	);
+		expect(saveOutcome(saved)).toBe("saved");
+
+		const loaded = Date.now();
+		const stop = await runForgeAsync(fixture, ["stop", "--json"], realVariables());
+		note({ closeMs: Date.now() - loaded, test: "stop" });
+
+		expect(stop.result.data).toMatchObject({
+			end: CLOSED_END,
+			forced: false,
+			pid: lockPid,
+			stopped: true,
+		});
+		await expect.poll(() => pinned.isAlive(), { timeout: 10_000 }).toBeFalse();
+	});
 
 	it(
 		"should end a Studio that asks to save at once, and remove its lock file",
 		{ timeout: 240_000 },
-		async ({ expect, onTestFinished }) => {
+		async ({ expect }) => {
 			expect.assertions(3);
 
 			const fixture = await makeRealProjectAsync("unsaved.rbxl");
-			const sessionId = await upStudioAsync({ onTestFinished }, fixture);
+			const sessionId = await upStudioAsync(fixture);
 			const [, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 			const loaded = Date.now();
 			const down = await runForgeAsync(fixture, ["down", "--json"], realVariables());

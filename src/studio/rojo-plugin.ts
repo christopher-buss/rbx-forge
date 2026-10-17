@@ -20,24 +20,27 @@ export interface PluginCapabilities {
 }
 
 /** Current patch version, shared with the readable source distribution. */
-export const VERSION = 3;
+export const VERSION = 4;
 /** Script bodies and provenance for the source distribution. */
 export const SCRIPTS: ReadonlyArray<{
 	hash: string;
 	name: string;
+	olderHash: string;
 	previousHash: string;
 	source: string;
 }> = [
 	{
 		name: "App",
 		hash: "f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
-		previousHash: "6f2c0bc5ca581f2d0dd62da344fee033821a44ead7d55d800247f071f113bae9",
+		olderHash: "6f2c0bc5ca581f2d0dd62da344fee033821a44ead7d55d800247f071f113bae9",
+		previousHash: "4000a9940ca1584d58cb9c748cec7084e818e2d5b17e99ebe11bd34584898c9f",
 		source: patched.App,
 	},
 	{
 		name: "ServeSession",
 		hash: "e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
-		previousHash: "0ae6058c41a198e5a5cee72918809e9f67733669732895e3fee208dd0f6e1318",
+		olderHash: "0ae6058c41a198e5a5cee72918809e9f67733669732895e3fee208dd0f6e1318",
+		previousHash: "2ed6224bb7fc40c4daff5f4b06adf0c22e2b9e0314b5341a1d00e464a5cf2592",
 		source: patched.ServeSession,
 	},
 ];
@@ -144,9 +147,10 @@ function checkProtocol(context: CommandContext, source: string, serverProtocol: 
 function recognizes(
 	{
 		hash,
+		olderHash,
 		previousHash,
 		source: original,
-	}: { hash: string; previousHash: string; source: string },
+	}: { hash: string; olderHash: string; previousHash: string; source: string },
 	source: string,
 ): boolean {
 	const mark = MARK.exec(source);
@@ -156,7 +160,11 @@ function recognizes(
 
 	const body = source.slice(mark[0].length);
 	const version = Number(mark[1]);
-	const legacyHash = version === VERSION - 1 ? previousHash : hash;
+	const legacyHashes = new Map([
+		[VERSION - 1, previousHash],
+		[VERSION - 2, olderHash],
+	]);
+	const legacyHash = legacyHashes.get(version) ?? hash;
 	const isKnownBody =
 		version === VERSION
 			? body === original

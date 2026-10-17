@@ -1,3 +1,4 @@
+import type { SaveMethod } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import type { IpcOwner, IpcServerOptions } from "../ipc/server.ts";
 import type { Clock } from "../seams/clock.ts";
@@ -19,6 +20,7 @@ export interface ControlTarget {
 			PartRequests,
 			"addAsync" | "ownAsync" | "releaseAsync" | "restartAsync" | "saveAsync" | "stopAsync"
 		>;
+	saveMethod?: SaveMethod | undefined;
 	sessionId: string;
 	status: Pick<StatusStore, "snapshot">;
 	stop: Pick<StopSource, "request">;
@@ -178,9 +180,13 @@ async function saveAsync(
 			target.parts.saveAsync(timeoutMs, request.signal).then((result) => ({ ...result })),
 			target.clock.sleep(timeoutMs, timer.signal).then(() => {
 				request.abort();
-				throw new ForgeError("save_failed", "Studio did not save before the timeout.", {
-					details: { reason: "timeout" },
-				});
+				throw new ForgeError(
+					target.saveMethod === "capture" ? "capture_timeout" : "save_failed",
+					"Studio did not save before the timeout.",
+					{
+						details: { reason: "timeout" },
+					},
+				);
 			}),
 		]);
 	} finally {
