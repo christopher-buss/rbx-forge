@@ -1,3 +1,6 @@
+import { mkdirSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
 import { assert, describe, it } from "vitest";
 
 import { callSessionAsync } from "../../src/ipc/client.ts";
@@ -14,6 +17,12 @@ import {
 } from "./session-harness.ts";
 import { waitForSessionAsync } from "./session-reach.ts";
 
+function studioPluginsDirectory(home: string): string {
+	return process.platform === "win32"
+		? path.join(home, "AppData", "Local", "Roblox", "Plugins")
+		: path.join(home, "Documents", "Roblox", "Plugins");
+}
+
 describe("the capture fixture's Rojo proxy", () => {
 	it("disconnects the owned genuine Rojo transport while its forge session remains running", async ({
 		expect,
@@ -25,7 +34,10 @@ describe("the capture fixture's Rojo proxy", () => {
 			rojoAlias: "forge-capture-rojo",
 		});
 		const proxy = installCaptureRojoProxy(project.project, captureRojo());
-		const run = launch(project, START_STUDIO, studioEnvironment(project));
+		const environment = studioEnvironment(project);
+		// Genuine `rojo plugin install` fails without Studio's Plugins folder.
+		mkdirSync(studioPluginsDirectory(environment["USERPROFILE"]!), { recursive: true });
+		const run = launch(project, START_STUDIO, environment);
 		await waitForReadyAsync(run);
 		const session = await waitForSessionAsync(project);
 		const target = { endpoint: session.identity.endpoint, token: session.token };
