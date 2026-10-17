@@ -1,7 +1,11 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, it } from "vitest";
 
+import { makeProject, runBinAsync } from "../e2e/run-bin.ts";
+import { makeFixtureAsync } from "../e2e/session-fixture.ts";
+import { runForgeAsync, stopDetachedAsync, UP, WATCH_COMMAND } from "../e2e/up-fixture.ts";
 import { pidOf, spawnSleeper } from "../helpers/real-native.ts";
 import {
 	isProcessAlive,
@@ -9,9 +13,6 @@ import {
 	readWorkerLog,
 	waitForDeathAsync,
 } from "../helpers/worker-log.ts";
-import { makeProject, runBinAsync } from "./run-bin.ts";
-import { makeFixtureAsync } from "./session-fixture.ts";
-import { runForgeAsync, stopDetachedAsync, UP, WATCH_COMMAND } from "./up-fixture.ts";
 
 describe("built CLI subprocess diagnostics", () => {
 	it("should report output and kill a stop CLI that stays alive after its result", async ({
@@ -46,6 +47,51 @@ export default { projectType: "luau" };
 
 		expect(isProcessAlive(pid)).toBeFalse();
 	}, 6000);
+
+	it.for([{}, { timeoutMs: 120_000 }])(
+		"should retain diagnostics before the remaining test budget expires with command timeout %s",
+		{ timeout: 6000 },
+		async (options, { expect }) => {
+			expect.assertions(3);
+
+			const project = makeProject({
+				"rbx-forge.config.mjs": `
+process.stderr.write("remaining budget stderr\\n");
+setInterval(() => {}, 60_000);
+export default { projectType: "luau" };
+`,
+			});
+			await sleep(1500);
+			const failure: unknown = await runBinAsync(
+				["stop", "--json"],
+				project,
+				undefined,
+				options,
+			).catch((err: unknown) => err);
+			assert(failure instanceof Error);
+
+			expect(failure.message).toContain("stop --json");
+			expect(failure.message).toContain("remaining budget stderr");
+			expect(failure.message).toContain('"command":"stop"');
+		},
+	);
+
+	it("should allow a command to complete beyond the former universal deadline", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		const project = makeProject({
+			"rbx-forge.config.mjs": `
+await new Promise((resolve) => setTimeout(resolve, 46_000));
+export default { projectType: "luau" };
+`,
+		});
+
+		await expect(runBinAsync(["stop", "--json"], project)).resolves.toMatchObject({
+			status: 0,
+		});
+	}, 65_000);
 
 	it("should bound a stalled cleanup CLI and leave no session processes running", async ({
 		expect,

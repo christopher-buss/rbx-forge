@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { closeSync, fstatSync, mkdirSync, openSync, readSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { onTestFinished } from "vitest";
+import { onTestFinished, TestRunner } from "vitest";
 
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 
@@ -13,6 +13,7 @@ const REPOSITORY = path.join(import.meta.dirname, "..", "..");
 export const BIN = path.join(REPOSITORY, "bin", "rbx-forge.js");
 
 const COMMAND_TIMEOUT_MS = 45_000;
+const DIAGNOSTIC_RESERVE_MS = 2000;
 const CLEANUP_TIMEOUT_MS = 1000;
 const DIAGNOSTIC_CHARACTERS = 16_384;
 
@@ -56,7 +57,7 @@ export async function runBinAsync(
 	argv: Array<string>,
 	cwd = REPOSITORY,
 	environment?: NodeJS.ProcessEnv,
-	{ registerCleanup = true, timeoutMs = COMMAND_TIMEOUT_MS }: BinRunOptions = {},
+	{ registerCleanup = true, timeoutMs }: BinRunOptions = {},
 ): Promise<BinRun> {
 	const child = spawn(process.execPath, [BIN, ...argv], {
 		cwd,
@@ -71,7 +72,13 @@ export async function runBinAsync(
 		});
 	}
 
-	return waitForBinAsync(observed, argv, cwd, timeoutMs);
+	const task = TestRunner.getCurrentTest();
+	const started = task?.result?.startTime;
+	const remaining =
+		registerCleanup && started !== undefined && task !== undefined && task.timeout > 0
+			? Math.max(1, started + task.timeout - Date.now() - DIAGNOSTIC_RESERVE_MS)
+			: (timeoutMs ?? COMMAND_TIMEOUT_MS);
+	return waitForBinAsync(observed, argv, cwd, Math.min(timeoutMs ?? remaining, remaining));
 }
 
 /**
