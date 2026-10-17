@@ -85,7 +85,7 @@ catalogs:
     "@total-typescript/shoehorn": 0.1.2
     "@vitest/coverage-v8": 5.0.4
     jest-extended: 7.0.0
-    memfs: 4.79.0
+    memfs: 4.80.0
     vitest: 5.0.4
   tsc:
     "@isentinel/tsconfig": 2.0.0
