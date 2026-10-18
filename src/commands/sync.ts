@@ -1,10 +1,12 @@
 import { type } from "arktype";
 
+import { emitCaptureFailureWarnings, emitCaptureWarnings } from "../capture/warnings.ts";
 import { findSession } from "../client/session.ts";
 import { ForgeError } from "../errors.ts";
 import { callSessionAsync } from "../ipc/client.ts";
 import type { CommandResult } from "../seams/reporter.ts";
 import { parseHookResults } from "../session/status.ts";
+import { studioSaveResult } from "../studio/save-contract.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext } from "./context.ts";
 
@@ -17,10 +19,11 @@ import type { CommandContext } from "./context.ts";
 export const SYNC_WAIT_MS: number = 30 * 60_000;
 
 const syncResult = type({
-	durationMs: "number",
-	hooks: "unknown",
-	input: "string",
-	project: "string",
+	"capture?": studioSaveResult,
+	"durationMs": "number",
+	"hooks": "unknown",
+	"input": "string",
+	"project": "string",
 });
 
 /**
@@ -36,6 +39,15 @@ const syncResult = type({
  *   `hook_failed` with the hook results in `details.hooks`.
  */
 export async function runSyncAsync(context: CommandContext): Promise<CommandResult> {
+	try {
+		return await syncAsync(context);
+	} catch (err) {
+		emitCaptureFailureWarnings(context.reporter, err);
+		throw err;
+	}
+}
+
+async function syncAsync(context: CommandContext): Promise<CommandResult> {
 	const session = findSession(context.seams.fileSystem, forgeFiles(context.cwd));
 	if (session === undefined) {
 		throw new ForgeError("not_running", "No session runs for this project.", {
@@ -56,9 +68,10 @@ export async function runSyncAsync(context: CommandContext): Promise<CommandResu
 		});
 	}
 
-	const { durationMs, input, project } = parsed;
+	emitCaptureWarnings(context.reporter, parsed.capture?.warnings ?? []);
+	const { input, project } = parsed;
 	return {
-		data: { durationMs, hooks: parseHookResults(parsed.hooks), input, project },
+		data: { ...parsed, hooks: parseHookResults(parsed.hooks) },
 		summary: `Synced ${input} into ${project} through session ${session.identity.sessionId}.`,
 	};
 }

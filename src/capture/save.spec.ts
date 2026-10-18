@@ -103,7 +103,12 @@ describe(saveCaptureAsync, () => {
 
 		const save = captureSave({ studio: { place: "game.rbxl" } });
 
-		await expect(save.run()).resolves.toMatchObject({ desktop: "user", durationMs: 0, pid: 0 });
+		await expect(save.run()).resolves.toMatchObject({
+			desktop: "user",
+			durationMs: 0,
+			method: "capture",
+			pid: 0,
+		});
 	});
 
 	it("builds the current syncback project and writes its configured input", async ({

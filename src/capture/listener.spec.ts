@@ -497,7 +497,7 @@ describe("capture listener", () => {
 			fixture.listener.captureAsync(AbortSignal.any([])),
 		).rejects.toMatchObject({
 			code: "capture_rejected",
-			details: { message, response: body },
+			details: { message, reason: "serialize_failed", response: body },
 		});
 		const url = await dispatchedUrlAsync(fixture);
 		const reply = await fixture.request(url, "POST", [body], {
@@ -508,29 +508,51 @@ describe("capture listener", () => {
 		expect(reply.status).toBe(400);
 	});
 
-	it("should report Studio's rejection as a capture error", async ({
-		expect,
-		onTestFinished,
-	}) => {
-		expect.assertions(2);
-
-		const fixture = await fixtureAsync({ onTestFinished });
-		const rejected = expect(
-			fixture.listener.captureAsync(AbortSignal.any([])),
-		).rejects.toMatchObject({
+	it.for([
+		{
+			code: "capture_not_connected",
+			message: "The forge plugin is not connected; connect Studio to the session's Rojo.",
+			reason: "not_connected",
+		},
+		{
 			code: "capture_rejected",
-			details: { response: '{"error":"play_mode"}' },
-			message: "Studio rejected the capture.",
-		});
-		const url = await dispatchedUrlAsync(fixture);
-		const reply = await fixture.request(url, "POST", ['{"error":"play_mode"}'], {
-			"content-type": "application/json",
-		}).finished;
+			message: "Studio is in Play mode; stop Play mode before capturing.",
+			reason: "play_mode",
+		},
+		{
+			code: "capture_rejected",
+			message: "Studio is busy capturing; wait for that capture to finish.",
+			reason: "busy",
+		},
+		{
+			code: "capture_rejected",
+			message: "Studio could not serialize the capture; check Studio's Output window.",
+			reason: "serialize_failed",
+		},
+	])(
+		"should explain Studio's $reason capture rejection",
+		async ({ code, message, reason }, { expect, onTestFinished }) => {
+			expect.assertions(2);
 
-		await rejected;
+			const fixture = await fixtureAsync({ onTestFinished });
+			const body = JSON.stringify({ error: reason });
+			const rejected = expect(
+				fixture.listener.captureAsync(AbortSignal.any([])),
+			).rejects.toMatchObject({
+				code,
+				details: { reason, response: body },
+				message,
+			});
+			const url = await dispatchedUrlAsync(fixture);
+			const reply = await fixture.request(url, "POST", [body], {
+				"content-type": "application/json",
+			}).finished;
 
-		expect(reply.status).toBe(400);
-	});
+			await rejected;
+
+			expect(reply.status).toBe(400);
+		},
+	);
 
 	it("should reject a diagnostic message that is not text", async ({
 		expect,
@@ -666,6 +688,21 @@ describe("capture listener", () => {
 			code: "capture_timeout",
 			message: "Studio did not finish the capture before the timeout.",
 		});
+	});
+
+	it("should report disconnection when an earlier poll ended before the current capture", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const fixture = await fixtureAsync({ onTestFinished });
+		fixture.request(fixture.listener.url).close();
+		const abort = new AbortController();
+		const rejected = fixture.listener.captureAsync(abort.signal);
+		abort.abort();
+
+		await expect(rejected).rejects.toMatchObject({ code: "capture_not_connected" });
 	});
 
 	it("should reject overlapping captures and release cancellation listeners", async ({

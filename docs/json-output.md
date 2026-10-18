@@ -70,7 +70,9 @@ The fields of the session commands. The agent workflow is in the
 - `forge open --json`: `data.place` is the snapshot, `data.pruned` the old
   snapshots it deleted.
 - `forge sync --json`: it waits for a running save-triggered run, then runs once
-  more. Failures keep their code, with hook results in `error.details.hooks`.
+  more. With `studio.saveMethod: "capture"`, it captures Studio first, then runs
+  syncback and hooks. `data.capture` contains the save metadata. Failures keep
+  their code, with hook results in `error.details.hooks`.
 - `forge restart --json`: see [The `restart` result](#the-restart-result).
 - `forge down --json`: see
   [The `down` and `stop` result](#the-down-and-stop-result). A session no
@@ -267,6 +269,7 @@ When the user requests syncback after editing in Studio, run
 		"pid": 5678,
 		"desktop": "user",
 		"bytes": 1048576,
+		"method": "menu",
 		"mtime": "2026-01-01T12:00:00.000Z",
 		"durationMs": 412
 	}
@@ -276,16 +279,21 @@ When the user requests syncback after editing in Studio, run
 `place` is absolute; `bytes` and the ISO `mtime` describe the saved file after
 its changed timestamp settles. `desktop` is `user` or `hidden`. On Windows,
 `desktop` reports the physical desktop, so a hidden session Studio returns
-`user` even when `services.studio.desktop` is `hidden`. Every save of that
-Studio briefly shows the File menu and moves keyboard focus. A hidden snapshot
-returns `hidden` and leaves the user's focus unchanged. `durationMs` includes
-waiting for an opening Studio. `--timeout <s>` defaults to 30 seconds.
+`user` even when `services.studio.desktop` is `hidden`. `method` is `capture` or
+`menu`. A menu save of that Studio briefly shows the File menu and moves
+keyboard focus. A hidden snapshot returns `hidden` and leaves the user's focus
+unchanged. `durationMs` includes waiting for an opening Studio. `--timeout <s>`
+defaults to 30 seconds.
 
-| Code              | Exit | Meaning                                                                                                       |
-| ----------------- | ---- | ------------------------------------------------------------------------------------------------------------- |
-| `studio_not_open` | 3    | No Studio has the target place open.                                                                          |
-| `studio_busy`     | 1    | A modal blocks Studio before the save.                                                                        |
-| `save_failed`     | 1    | `error.details.reason` is `timeout`, `studio_error`, `no_menu_item`, `menu_disabled`, or `permission_denied`. |
+| Code                      | Exit | Meaning                                                                                                                                      |
+| ------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `studio_not_open`         | 3    | No Studio has the target place open.                                                                                                         |
+| `studio_busy`             | 1    | A modal blocks Studio before the save.                                                                                                       |
+| `save_failed`             | 1    | `error.details.reason` is `timeout`, `studio_error`, `no_menu_item`, `menu_disabled`, or `permission_denied`.                                |
+| `capture_not_connected`   | 1    | The forge plugin is not connected. Connect Studio to the session's Rojo.                                                                     |
+| `capture_rejected`        | 1    | Studio rejected the capture. `error.details.reason` is `play_mode`, `busy`, or `serialize_failed`; invalid capture data also uses this code. |
+| `capture_timeout`         | 1    | Studio did not finish the capture, or its base did not build, before the deadline.                                                           |
+| `capture_assembly_failed` | 1    | The native addon could not assemble the place; the existing place is preserved.                                                              |
 
 The writable check runs before the save request; a read-only place returns
 `save_failed` with `permission_denied` without triggering a Studio save dialog.

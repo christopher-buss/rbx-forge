@@ -41,6 +41,7 @@ import { assert, describe, it, expect as matchers } from "vitest";
 import type { PinnedProcess } from "../../src/native/addon.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import { captureRealStudioFixtureAsync } from "../helpers/capture-real-studio-fixture.ts";
+import { installCaptureRojoProxy } from "../helpers/capture-rojo-proxy.ts";
 import type { IsolatedRealStudioCli } from "../helpers/isolated-real-studio-cli.ts";
 import { isolatedRealStudioFixtureAsync } from "../helpers/isolated-real-studio-fixture.ts";
 import { parseLines, parseOpened } from "../helpers/output.ts";
@@ -451,6 +452,90 @@ task.wait(0.1)`,
 			expect(parseLines(repeated.stdout)).not.toContainEqual(
 				expect.objectContaining({ type: "warning" }),
 			);
+		},
+	);
+
+	it(
+		"captures through sync and reports Play mode and an actual Rojo disconnection",
+		{ timeout: 300_000 },
+		async ({ expect, onTestFinished }) => {
+			expect.assertions(6);
+
+			const fixture = await makeRealFixtureAsync({
+				rojoAlias: "forge-capture-rojo",
+				studio: { saveMethod: "capture" },
+			});
+			const proxy = installCaptureRojoProxy(fixture.project, genuineRojo());
+			const editor = await captureRealStudioFixtureAsync({
+				actions: {
+					edit: `local part = Instance.new("Part")
+part.Name = "ForgeSyncedPart"
+part.Anchored = true
+part.Parent = workspace
+game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured through sync")\\n'`,
+					play: 'game:GetService("RunService"):Run()\nassert(game:GetService("RunService"):IsRunning(), "Studio did not enter Play mode")',
+					stop: 'game:GetService("RunService"):Stop()',
+				},
+				captureName: fixture.cli.captureName,
+				directory: fixture.project,
+				native: loadRealNative(),
+				pluginsDirectory: realPluginsDirectory(),
+			});
+			onTestFinished(editor.closeAsync);
+			mkdirSync(path.join(fixture.project, "workspace"));
+			mkdirSync(path.join(fixture.project, "scripts"));
+			const script = path.join(fixture.project, "scripts", "CaptureScript.server.luau");
+			writeFileSync(script, 'print("original sync script")\n');
+			writeFileSync(
+				path.join(fixture.project, "default.project.json"),
+				JSON.stringify({
+					name: "forge-real-capture-sync",
+					tree: {
+						$attributes: {
+							...editor.launchAttributes,
+							...fixture.cli.launchAttributes,
+						},
+						$className: "DataModel",
+						Lighting: { $properties: { Technology: "ShadowMap" } },
+						ServerScriptService: { $path: "scripts" },
+						Workspace: { $path: "workspace" },
+					},
+				}),
+			);
+			const sessionId = await upStudioAsync(fixture, "hidden");
+			const [, pid, pinned] = await waitForLoadedAsync(fixture, sessionId, 0);
+			editor.own(pinned);
+			const observation = await editor.runAsync("edit");
+			note({ command: "capture-sync-edit", pid, studioVersion: observation.version });
+			const synced = await captureForgeAsync(fixture, ["sync", "--json"]);
+
+			expect(synced).toMatchObject({
+				result: { data: { capture: { method: "capture", pid } } },
+				status: 0,
+			});
+			expect(readFileSync(script, "utf8")).toContain('print("captured through sync")');
+			expect(
+				existsSync(path.join(fixture.project, "workspace/ForgeSyncedPart.rbxm")),
+			).toBeTrue();
+
+			await editor.runAsync("play");
+			const inPlay = await captureForgeAsync(fixture, ["sync", "--json"]);
+			await editor.runAsync("stop");
+
+			expect(inPlay).toMatchObject({
+				result: { error: { code: "capture_rejected", details: { reason: "play_mode" } } },
+				status: 1,
+			});
+
+			proxy.disconnect();
+			await editor.waitForDisconnectedAsync();
+			const disconnected = await captureForgeAsync(fixture, ["sync", "--json"]);
+
+			expect(disconnected).toMatchObject({
+				result: { error: { code: "capture_not_connected" } },
+				status: 1,
+			});
+			expect(pinned.isAlive()).toBeTrue();
 		},
 	);
 
