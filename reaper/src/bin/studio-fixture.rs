@@ -189,6 +189,11 @@ fn marker_attribute(script: &str, attribute: &str) -> Option<String> {
     })
 }
 
+enum CaptureLocation {
+    Rojo(u16),
+    Snapshot(String),
+}
+
 fn start_capture(marker_script: &str) {
     let model = env::var("FIXTURE_STUDIO_CAPTURE_MODEL").ok();
     let mode = env::var("FIXTURE_STUDIO_CAPTURE").unwrap_or_default();
@@ -196,12 +201,16 @@ fn start_capture(marker_script: &str) {
     if model.is_none() && mode.is_empty() && error.is_none() {
         return;
     }
-    let Some(port) = env::var("FIXTURE_STUDIO_CAPTURE_ROJO_PORT")
+    let port = env::var("FIXTURE_STUDIO_CAPTURE_ROJO_PORT")
         .ok()
         .or_else(|| marker_attribute(marker_script, "Port"))
-        .and_then(|value| value.parse::<u16>().ok())
-    else {
-        return;
+        .and_then(|value| value.parse::<u16>().ok());
+    let location = match marker_attribute(marker_script, "CaptureUrl") {
+        Some(url) => CaptureLocation::Snapshot(url),
+        None => match port {
+            Some(port) => CaptureLocation::Rojo(port),
+            None => return,
+        },
     };
     let services = env::var("FIXTURE_STUDIO_CAPTURE_SERVICES")
         .unwrap_or_else(|_| r#"[{"name":"ServerScriptService","roots":[0]}]"#.to_owned());
@@ -219,7 +228,7 @@ fn start_capture(marker_script: &str) {
         loop {
             if mode != "disconnect" {
                 let _ = poll_capture(
-                    port,
+                    &location,
                     model.as_deref(),
                     &services,
                     &mode,
@@ -233,27 +242,15 @@ fn start_capture(marker_script: &str) {
 }
 
 fn poll_capture(
-    port: u16,
+    location: &CaptureLocation,
     model: Option<&str>,
     services: &serde_json::Value,
     mode: &str,
     error: Option<&str>,
     delay: Duration,
 ) -> io::Result<()> {
-    let (status, body) = http_request(
-        &format!("http://127.0.0.1:{port}/forge-capture"),
-        "GET",
-        "application/json",
-        &[],
-    )?;
-    if status != 200 {
-        return Ok(());
-    }
-    let endpoint: serde_json::Value = serde_json::from_slice(&body).map_err(io::Error::other)?;
-    let url = endpoint["url"]
-        .as_str()
-        .ok_or_else(|| io::Error::other("capture URL is not ready"))?;
-    let (status, body) = http_request(url, "GET", "application/json", &[])?;
+    let url = capture_url(location)?;
+    let (status, body) = http_request(&url, "GET", "application/json", &[])?;
     if status != 200 || mode == "timeout" {
         return Ok(());
     }
@@ -287,6 +284,27 @@ fn poll_capture(
         &body,
     )?;
     Ok(())
+}
+
+fn capture_url(location: &CaptureLocation) -> io::Result<String> {
+    let port = match location {
+        CaptureLocation::Rojo(port) => port,
+        CaptureLocation::Snapshot(url) => return Ok(url.clone()),
+    };
+    let (status, body) = http_request(
+        &format!("http://127.0.0.1:{port}/forge-capture"),
+        "GET",
+        "application/json",
+        &[],
+    )?;
+    if status != 200 {
+        return Err(io::Error::other("capture URL is not ready"));
+    }
+    let endpoint: serde_json::Value = serde_json::from_slice(&body).map_err(io::Error::other)?;
+    let url = endpoint["url"]
+        .as_str()
+        .ok_or_else(|| io::Error::other("capture URL is not ready"))?;
+    Ok(url.to_owned())
 }
 
 fn http_request(

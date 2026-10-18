@@ -2,6 +2,7 @@ import path from "node:path";
 import { describe, it } from "vitest";
 
 import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
+import type { FileSystem } from "../seams/file-system.ts";
 import { listSnapshots, pruneSnapshots, SNAPSHOT_KEEP_COUNT, snapshotName } from "./snapshots.ts";
 
 const DIRECTORY = path.join(PROJECT, ".forge", "snapshots");
@@ -25,6 +26,19 @@ function seed(
 
 function at(name: string): string {
 	return path.join(DIRECTORY, name);
+}
+
+function denyRemoval(fileSystem: FileSystem, denied: string): FileSystem {
+	return {
+		...fileSystem,
+		rmSync: (file, options) => {
+			if (file === denied) {
+				throw Object.assign(new Error("EACCES: access denied"), { code: "EACCES" });
+			}
+
+			fileSystem.rmSync(file, options);
+		},
+	};
 }
 
 describe(snapshotName, () => {
@@ -62,6 +76,43 @@ describe(listSnapshots, () => {
 });
 
 describe(pruneSnapshots, () => {
+	it("keeps capture credentials and the launch script when the snapshot cannot be deleted", ({
+		expect,
+	}) => {
+		expect.assertions(4);
+
+		const place = at(snapshot(0));
+		const { fileSystem } = createMemoryFileSystem(
+			seed(SNAPSHOT_KEEP_COUNT + 1, {
+				[`.forge/snapshots/${snapshot(0)}.capture.json`]: "credentials",
+				[`.forge/snapshots/${snapshot(0)}.capture.lua`]: "marker",
+			}),
+		);
+
+		expect(pruneSnapshots(denyRemoval(fileSystem, place), DIRECTORY)).toStrictEqual({
+			pruned: [],
+			warnings: [`Could not delete ${place}: Error: EACCES: access denied`],
+		});
+		expect(fileSystem.readFileSync(place, "utf8")).toBe("place");
+		expect(fileSystem.readFileSync(`${place}.capture.json`, "utf8")).toBe("credentials");
+		expect(fileSystem.readFileSync(`${place}.capture.lua`, "utf8")).toBe("marker");
+	});
+
+	it("removes a pruned snapshot's capture credentials and launch script", ({ expect }) => {
+		expect.assertions(3);
+
+		const { fileSystem } = createMemoryFileSystem(
+			seed(SNAPSHOT_KEEP_COUNT + 1, {
+				[`.forge/snapshots/${snapshot(0)}.capture.json`]: "credentials",
+				[`.forge/snapshots/${snapshot(0)}.capture.lua`]: "marker",
+			}),
+		);
+
+		expect(pruneSnapshots(fileSystem, DIRECTORY).pruned).toStrictEqual([at(snapshot(0))]);
+		expect(fileSystem.existsSync(`${at(snapshot(0))}.capture.json`)).toBeFalse();
+		expect(fileSystem.existsSync(`${at(snapshot(0))}.capture.lua`)).toBeFalse();
+	});
+
 	it(`should keep the ${SNAPSHOT_KEEP_COUNT} newest snapshots`, ({ expect }) => {
 		expect.assertions(2);
 

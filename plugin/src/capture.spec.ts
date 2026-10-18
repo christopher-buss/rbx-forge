@@ -223,6 +223,22 @@ describe("startPlugin", () => {
 		);
 	});
 
+	it("should accept a non-Archivable snapshot launch marker without a Rojo connection", () => {
+		expect.assertions(1);
+
+		const root = new Instance("Folder");
+		const capture = makeCapture(root);
+		capture.Archivable = false;
+		capture.SetAttribute("Snapshot", true);
+		capture.SetAttribute("ConnectedProjectName", undefined);
+		capture.SetAttribute("ConnectedSessionId", undefined);
+
+		const active = startPlugin(root, createIo().io);
+		assert(active !== undefined);
+
+		expect(active.capture).toBe(capture);
+	});
+
 	it.each([
 		{ engineType: "bool", expected: { Bool: false }, value: false },
 		{ engineType: "double", expected: { Float64: 1.25 }, value: 1.25 },

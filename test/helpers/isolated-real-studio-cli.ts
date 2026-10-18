@@ -148,6 +148,17 @@ function replaceOne(source: string, before: string, after: string): string {
 	return source.replace(before, () => after);
 }
 
+function injectSnapshotGate(source: string, gate: string): string {
+	const marker = 'return `local m=Instance.new("Configuration");m.Name="ForgeCapture"';
+	return source.includes(marker)
+		? replaceOne(
+				source,
+				marker,
+				`return \`${gate}local m=Instance.new("Configuration");m.Name="ForgeCapture"`,
+			)
+		: source;
+}
+
 function injectGates(
 	input: string,
 	{ gate, gateFile }: { gate: string; gateFile: string },
@@ -174,7 +185,7 @@ function injectGates(
 		counts.launcher += 1;
 	}
 
-	return source;
+	return injectSnapshotGate(source, gate);
 }
 
 function privateNames(

@@ -1,11 +1,18 @@
+import { type } from "arktype";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { assert, describe, it } from "vitest";
 
 import { captureRojo, makeCaptureModel } from "../helpers/capture-fixture.ts";
-import { parseResult } from "../helpers/output.ts";
+import { parseOpened, parseResult } from "../helpers/output.ts";
+import { waitForFileAsync } from "../helpers/real-native.ts";
 import { runBinAsync } from "./run-bin.ts";
-import { makeFixtureAsync, START_STUDIO, startReadyAsync } from "./session-fixture.ts";
+import {
+	holdPortAsync,
+	makeFixtureAsync,
+	START_STUDIO,
+	startReadyAsync,
+} from "./session-fixture.ts";
 
 describe("forge save through the capture plugin", () => {
 	it("reports an unsupported captured-child attribute in CLI JSON and preserves the place", async ({
@@ -91,6 +98,100 @@ describe("forge save through the capture plugin", () => {
 			ok: false,
 		});
 		expect(readFileSync(fixture.place)).toStrictEqual(original);
+	});
+
+	it("reports the snapshot's occupied capture port", async ({ expect }) => {
+		expect.assertions(2);
+
+		const fixture = await makeFixtureAsync(
+			{ studio: { saveMethod: "capture" } },
+			{ studio: true },
+		);
+		const opened = await runBinAsync(
+			["open", "--desktop", "hidden", "--json"],
+			fixture.project,
+			fixture.environment(),
+		);
+		assert(opened.status === 0, opened.stdout);
+		const { place } = parseOpened(parseResult(opened.stdout).data);
+		await waitForFileAsync(`${place}.lock`);
+		const { port } = type({ port: "number" }).assert(
+			JSON.parse(readFileSync(`${place}.capture.json`, "utf8")),
+		);
+		await holdPortAsync(port);
+
+		const saved = await runBinAsync(
+			["save", "--place", place, "--json"],
+			fixture.project,
+			fixture.environment(),
+		);
+
+		expect(saved.status).toBe(1);
+		expect(parseResult(saved.stdout)).toMatchObject({
+			error: { code: "capture_port_in_use" },
+			ok: false,
+		});
+	});
+
+	it("captures a snapshot without a session and syncs the requested input back", async ({
+		expect,
+	}) => {
+		expect.assertions(5);
+
+		const fixture = await makeFixtureAsync(
+			{ studio: { saveMethod: "capture" } },
+			{ studio: true },
+		);
+		mkdirSync(path.join(fixture.project, "src"));
+		writeFileSync(
+			path.join(fixture.project, "default.project.json"),
+			JSON.stringify({
+				name: "fixture",
+				tree: {
+					$className: "DataModel",
+					Workspace: { $className: "Workspace", $path: "src" },
+				},
+			}),
+		);
+		const rojo = captureRojo();
+		const variables = {
+			FIXTURE_REAL_ROJO: rojo,
+			FIXTURE_STUDIO_CAPTURE_MODEL: makeCaptureModel(fixture.project, rojo),
+			FIXTURE_STUDIO_CAPTURE_SERVICES: JSON.stringify([{ name: "Workspace", roots: [0] }]),
+		};
+		const opened = await runBinAsync(
+			["open", "--desktop", "hidden", "--json"],
+			fixture.project,
+			fixture.environment(variables),
+		);
+
+		expect(opened.status).toBe(0);
+
+		const { place } = parseOpened(parseResult(opened.stdout).data);
+		await waitForFileAsync(`${place}.lock`);
+
+		const saved = await runBinAsync(
+			["save", "--place", place, "--timeout", "10", "--json"],
+			fixture.project,
+			fixture.environment(variables),
+		);
+
+		expect(parseResult(saved.stdout), saved.stdout).toMatchObject({
+			data: { place },
+			ok: true,
+		});
+
+		const synced = await runBinAsync(
+			["syncback", "--input", place, "--json"],
+			fixture.project,
+			fixture.environment(variables),
+		);
+
+		expect(parseResult(synced.stdout)).toMatchObject({ command: "syncback", ok: true });
+		expect(
+			readFileSync(path.join(fixture.project, "src/Edited/ChangedScript.luau"), "utf8"),
+		).toBe("return 'captured edit'");
+		expect(readdirSync(path.join(fixture.project, "src/Edited"))).toContain("NewPart.rbxm");
 	});
 
 	it("captures through the Studio stand-in and syncs the assembled place back with genuine Rojo", async ({
