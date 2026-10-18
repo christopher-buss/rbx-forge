@@ -325,11 +325,21 @@ Options for opening, saving, and closing Roblox Studio.
 - Default: `"menu"`
 - Flag: none
 
-Choose how `forge save` gets the session Studio's content onto disk. `menu` uses
-Studio's Save to File menu. `capture` asks the forge plugin for a capture and
-assembles the place from it and a fresh Rojo build of the syncback project,
-without showing Studio or moving keyboard focus. Connect Studio's Rojo plugin to
-the session before capturing.
+Choose how `forge save` gets Studio's content onto disk. `menu` uses Studio's
+Save to File menu. `capture` asks the forge plugin for a capture and assembles
+the place from it and a fresh Rojo build of the syncback project, without
+showing Studio or moving keyboard focus. Connect Studio's Rojo plugin to the
+session before capturing. With `capture`, `forge sync` captures before syncback
+too, and snapshots opened with `forge open` support capture saves through
+`forge save --place <snapshot>` without Rojo.
+
+The capture includes readable serialized service properties, attributes and
+tags. Detected changes to unreadable properties, collision groups and material
+overrides produce named warnings; the base project's unreadable property values
+stay intact. Unsupported reference attributes fail capture and leave the
+previous place unchanged. See [Saving](./studio.md#saving) for the workflow and
+limits, and [JSON output](./json-output.md#the-save-result) for warnings and
+error codes.
 
 ```ts
 defineConfig({

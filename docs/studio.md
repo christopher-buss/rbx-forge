@@ -121,15 +121,6 @@ does nothing (no requests, no output, no UI) unless the place holds a forge
 capture URL. A write failure fails the launch with `forge_plugin_write_failed`
 (exit 8).
 
-Captures read serialized service properties through Studio's runtime reflection.
-Readable properties, service attributes, and tags reach the saved place; properties
-Studio prevents the plugin from reading keep their project values.
-
-Reference attributes (`InstanceHandle`) currently fail capture because the pinned
-native and Rojo attribute codecs cannot preserve them. The diagnostic names the
-affected service attribute or instance, including in CLI JSON. The previous place
-file stays unchanged.
-
 ## Managed Rojo plugin
 
 After a successful place build, immediately before attempting a new direct
@@ -273,10 +264,78 @@ match each other's file. `move` keeps the file, so nothing is lost.
 ## Saving
 
 `forge save` saves the session's Studio, whether forge opened it or found it
-already open. It waits while Studio opens, checks that the place is writable,
-presses the English File > Save to File menu, and waits for the changed mtime
-to settle. `--timeout <s>` controls the wait (30 seconds by default). Session
+already open. `--timeout <s>` bounds the save (30 seconds by default). Session
 saves run one at a time and count as activity for the idle timeout.
+[`studio.saveMethod`](./config.md#studiosavemethod) selects the method;
+`"menu"` is the default.
+
+### Capture saves
+
+Select capture in `rbx-forge.config.ts`:
+
+```ts
+import { defineConfig } from "rbx-forge";
+
+export default defineConfig({
+	projectType: "luau",
+	studio: { saveMethod: "capture" },
+});
+```
+
+Start the session with `forge up --studio --json`, then edit in Studio. Connect
+Studio's Rojo plugin to the session's Rojo before capturing. `forge sync --json`
+captures the current Studio and runs syncback with its hooks in one step.
+`forge save --json` captures without running syncback; follow it with
+`forge syncback --json` when needed. A found Studio can capture too, including
+one kept open across sessions after its Rojo connection returns.
+
+A capture carries persisted service children, readable serialized service
+properties, service attributes, and service tags. It builds the current
+syncback project as a base, retains every declared node with its declared
+class, and atomically replaces the syncback input with the assembled place.
+References across services remain intact. Capturing does not show Studio or
+move focus; serialization blocks Studio for the duration of that operation.
+
+Studio's runtime reflection determines which service properties are serialized.
+The plugin attempts to read each one. Properties it cannot read, including
+`UniqueId` and `HistoryId`, keep their base project values.
+
+Reference attributes (`InstanceHandle`) are unsupported by the pinned native
+and Rojo attribute codecs. Updating the public reflection database alone does
+not add this decoding support. An unsupported service attribute fails with
+`capture_rejected` and reason `serialize_failed`; one in captured content fails
+with `capture_assembly_failed`. The diagnostic in `error.details.message` names
+the service attribute or instance, and the previous place file stays unchanged.
+
+Detected changes to unreadable service properties, collision groups, and
+base-material overrides produce warnings naming the affected service and
+property. Set those values in the project file. Each service/property pair is
+reported once per forge session, including across repeated saves and syncs. See
+[the structured warning fields](./json-output.md#the-save-result).
+
+Studio's own syncback churn, including empty `SerializedOverrides` and defaults
+of new engine properties, affects capture and menu saves equally.
+
+Snapshots use the same selection. Run `forge open --json`, edit the snapshot,
+then run `forge save --place <snapshot> --json` and
+`forge syncback --input <snapshot> --json`. A snapshot needs no session or Rojo
+connection. Keep it in `.forge/snapshots` until saved: its launch records the
+private endpoint used by later captures. An occupied endpoint port returns
+`capture_port_in_use`; release the port or open a new snapshot.
+
+`capture_not_connected` means the session's Rojo connection is missing, or the
+snapshot has no valid capture marker. `capture_rejected` names a Studio
+rejection such as Play mode or a busy serializer. `capture_timeout` means the
+capture exceeded its deadline, and `capture_assembly_failed` means the captured
+place could not be assembled. The failed save leaves the previous output
+intact. See [save errors](./json-output.md#the-save-result).
+
+### Menu saves
+
+With the default `studio.saveMethod: "menu"`, forge waits while Studio opens,
+checks that the place is writable,
+presses the English File > Save to File menu, and waits for the changed mtime
+to settle.
 
 On Windows, every save of a hidden session Studio briefly shows the File menu
 and moves keyboard focus to Studio until the user clicks elsewhere. The save
