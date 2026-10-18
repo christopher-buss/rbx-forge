@@ -169,8 +169,8 @@ pub fn frontmost() -> io::Result<Option<u32>> {
 
 /// How long LaunchServices may take to report a launch.
 const LAUNCH_DEADLINE: Duration = Duration::from_secs(60);
-/// `BLOCK_IS_GLOBAL`: `Block_copy` returns the block itself, so the
-/// completion's context outlives the copy LaunchServices keeps.
+/// `BLOCK_IS_GLOBAL`: `Block_copy` returns the block itself, which is never
+/// freed: LaunchServices releases its copy after the completion returns.
 const BLOCK_IS_GLOBAL: i32 = 1 << 28;
 
 #[link(name = "System")]
@@ -276,7 +276,7 @@ fn string(text: &str) -> io::Result<Object> {
 }
 
 unsafe extern "C" fn complete(block: *mut Completion, application: Object, error: Object) {
-    // SAFETY: LaunchServices passes the block it was given, alive until `launch` returns or leaks it.
+    // SAFETY: LaunchServices passes the block it was given, which is never freed.
     let completion = unsafe { &*block };
     let result = if application.is_null() {
         // SAFETY: a failed launch reports an NSError, whose description is an NSString.
@@ -316,9 +316,7 @@ unsafe extern "C" fn complete(block: *mut Completion, application: Object, error
             ))
         }
     };
-    // Once the result is stored, `launch` may free the block: own the outcome first.
-    let outcome = Arc::clone(&completion.outcome);
-    let (slot, ready) = &*outcome;
+    let (slot, ready) = &*completion.outcome;
     let mut guard = slot
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -379,7 +377,7 @@ pub fn launch(request: &Launch<'_>) -> io::Result<u32> {
         hides: request.hides,
         outcome: Arc::clone(&outcome),
     });
-    let block = Box::into_raw(block);
+    let block = Box::leak(block);
     // SAFETY: openApplicationAtURL:configuration:completionHandler: takes a URL, a
     // configuration, and a block; the global block is never copied away from `block`.
     unsafe {
@@ -408,8 +406,6 @@ pub fn launch(request: &Launch<'_>) -> io::Result<u32> {
         ));
     };
     drop(guard);
-    // SAFETY: the completion ran once and LaunchServices never calls it again.
-    drop(unsafe { Box::from_raw(block) });
     let pid = result.map_err(io::Error::other)?;
     u32::try_from(pid).map_err(io::Error::other)
 }

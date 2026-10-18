@@ -132,6 +132,7 @@ export function createFakeNative(
 
 	return {
 		addon: {
+			assemblePlace: modelNotConfigured,
 			...sessionMembers(sessions, cleanups),
 			...processMembers(table),
 			isLockFree: (path) => !locks.has(path),

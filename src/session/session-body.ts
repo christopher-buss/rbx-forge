@@ -18,7 +18,7 @@ import { hasEnded, resolveRojoAsync, startRojoAsync, waitForRojoAsync } from "./
 import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
 import { createServiceParts } from "./service-parts.ts";
-import { saveSessionStudioAsync } from "./session-save.ts";
+import { createSessionSaveHandler } from "./session-save.ts";
 import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
 import { checkSyncbackOnce, startSyncback, watchSavesForSyncback } from "./session-syncback.ts";
@@ -386,9 +386,7 @@ function attachPartHandlers(session: SessionSetup, scope: SessionScope, state: B
 		},
 		move,
 		restart: createPartRestarter(session, { add, parts: state.parts, stop }),
-		save: async (timeoutMs, signal) => {
-			return saveSessionStudioAsync(session, scope, timeoutMs, signal);
-		},
+		save: createSessionSaveHandler(session, scope, state.steps),
 		stop,
 		...createOwnerHandlers(session, scope, {
 			...state,

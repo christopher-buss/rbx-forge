@@ -18,6 +18,10 @@ import {
  * constant.
  */
 export type ForgeErrorCode =
+	| "capture_assembly_failed"
+	| "capture_not_connected"
+	| "capture_rejected"
+	| "capture_timeout"
 	| "cleanup_in_progress"
 	| "cleanup_unverifiable"
 	| "command_unavailable"
@@ -77,6 +81,22 @@ export interface ErrorCodeInfo {
  * until it has a row here.
  */
 export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
+	capture_assembly_failed: {
+		exitCode: EXIT_FAILURE,
+		text: "The captured place could not be assembled.",
+	},
+	capture_not_connected: {
+		exitCode: EXIT_FAILURE,
+		text: "The forge plugin is not connected to the session's Rojo.",
+	},
+	capture_rejected: {
+		exitCode: EXIT_FAILURE,
+		text: "Studio rejected a capture or sent invalid capture data.",
+	},
+	capture_timeout: {
+		exitCode: EXIT_FAILURE,
+		text: "Studio did not finish a capture before the deadline.",
+	},
 	cleanup_in_progress: {
 		exitCode: EXIT_CLEANUP_PENDING,
 		text: "Workers of the session are still alive after the wait bound.",

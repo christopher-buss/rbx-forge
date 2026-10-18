@@ -149,6 +149,13 @@ with the project's `rojo plugin install`, then restart Studio. See
 launch also installs forge's own Studio plugin; it stays inert in a Studio forge
 does not serve. See [Forge plugin](./docs/studio.md#forge-plugin).
 
+Set [`studio.saveMethod`](./docs/config.md#studiosavemethod) to `"capture"` to
+use the forge plugin for the session's `forge save`. It captures Studio's
+content without showing or focusing Studio, builds a base from the syncback
+project, and replaces the syncback input atomically. Connect Studio to the
+session's Rojo first; a Studio kept open across sessions receives its new
+capture URL when Rojo reconnects. The default `"menu"` method remains available.
+
 A Studio that already had the place open when the session attached it is a found
 Studio (`origin: "found"` in `status`; a Studio the session opened is `forge`).
 Only `stop --force` and `restart --force` close it during cleanup. Explicit

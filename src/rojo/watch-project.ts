@@ -29,7 +29,6 @@ export function watchRojoProject(
 	const project = path.resolve(cwd, config.rojoProjectPath);
 	const basename = normalizeFilename(path.basename(project), host.platform);
 	const wrapper = rojoWrapperPath(directory);
-	const content = fileSystem.readFileSync(wrapper);
 	function warn(error: unknown): void {
 		reporter.emit({
 			message: `Cannot reload Rojo project ${project}: ${String(error)}.`,
@@ -49,7 +48,7 @@ export function watchRojoProject(
 	watcher.on("change", (_event: string, filename: null | string) => {
 		if (filename === null || normalizeFilename(filename, host.platform) === basename) {
 			try {
-				fileSystem.writeFileSync(wrapper, content);
+				fileSystem.writeFileSync(wrapper, fileSystem.readFileSync(wrapper));
 			} catch (err) {
 				warn(err);
 			}

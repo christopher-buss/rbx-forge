@@ -349,11 +349,12 @@ async function runOpenSessionAsync(
 function controlPlan(
 	cwd: string,
 	{ compiler, config, owner, plan }: SessionServices,
-): Pick<ControlSetup, "idleTimeout" | "plan" | "readsBuilds" | "sources"> {
+): Pick<ControlSetup, "idleTimeout" | "plan" | "readsBuilds" | "saveMethod" | "sources"> {
 	return {
 		idleTimeout: config.session.idleTimeout,
 		plan: { ...plan, compiler: compiler !== undefined, owner },
 		readsBuilds: compiler?.parsesDiagnostics === true,
+		saveMethod: config.studio.saveMethod,
 		sources: { args: config.rbxts.args, cwd, project: config.rbxts.project },
 	};
 }

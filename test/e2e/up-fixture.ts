@@ -4,7 +4,7 @@
  * `forge down --force` and makes sure its supervisor is gone.
  */
 import nodeFs from "node:fs";
-import { onTestFinished } from "vitest";
+import { assert, onTestFinished } from "vitest";
 
 import { findSession } from "../../src/client/session.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
@@ -50,7 +50,7 @@ export async function stopDetachedAsync(fixture: Fixture, timeoutMs = 15_000): P
 			["down", "--force", "--json", "--timeout", "5"],
 			fixture.project,
 			fixture.environment(),
-			{ registerCleanup: false, timeoutMs },
+			{ bin: fixture.bin, registerCleanup: false, timeoutMs },
 		);
 	} finally {
 		await waitForDeathAsync([session.identity.pid], 5000);
@@ -82,11 +82,10 @@ export async function runForgeAsync(
 	onTestFinished(async () => {
 		await stopDetachedAsync(fixture);
 	});
-	const run = await runBinAsync(
-		[...argv],
-		fixture.project,
-		fixture.environment(variables),
-		options,
-	);
+	const run = await runBinAsync([...argv], fixture.project, fixture.environment(variables), {
+		bin: fixture.bin,
+		...options,
+	});
+	assert(run.stdout.trim() !== "", run.stderr);
 	return { ...run, result: parseResult(run.stdout) };
 }

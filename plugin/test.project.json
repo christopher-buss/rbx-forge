@@ -3,6 +3,9 @@
 	"globIgnorePaths": ["**/package.json", "**/tsconfig.json", "**/*.d.ts"],
 	"tree": {
 		"$className": "DataModel",
+		"Lighting": {
+			"$properties": { "Technology": "ShadowMap" }
+		},
 		"ReplicatedStorage": {
 			"$className": "ReplicatedStorage",
 			"plugin": { "$path": "out" },

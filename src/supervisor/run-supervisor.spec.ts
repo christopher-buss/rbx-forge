@@ -4,7 +4,8 @@ import path from "node:path";
 import type { TestContext } from "vitest";
 import { assert, describe, it, vi } from "vitest";
 
-import previousPlugin from "../../test/fixtures/rojo-plugin-v2.json" with { type: "json" };
+import olderPlugin from "../../test/fixtures/rojo-plugin-v2.json" with { type: "json" };
+import previousPlugin from "../../test/fixtures/rojo-plugin-v3.json" with { type: "json" };
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createFakeReaper, createFakeSignals } from "../../test/helpers/fake-reaper.ts";
@@ -108,6 +109,7 @@ interface StartSetup {
 	/** Whether the Rojo port is free. */
 	isPortFree?: boolean;
 	launchedStudio?: boolean;
+	listenForCapture?: Network["listenForCaptureAsync"];
 	listenForStudioReady?: Network["listenForStudioReadyAsync"];
 	/** How a one-shot run ends; services never end on their own. */
 	oneShot?: (worker: WorkerSpec) => undefined | WorkerReport;
@@ -679,10 +681,10 @@ describe("managed Rojo plugin lifecycle", () => {
 		await run.result;
 
 		expect(sources[0]).toContain(
-			"-- rbx-forge patch 3 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+			"-- rbx-forge patch 4 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
 		);
 		expect(sources[1]).toContain(
-			"-- rbx-forge patch 3 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+			"-- rbx-forge patch 4 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
 		);
 	});
 
@@ -698,27 +700,33 @@ describe("managed Rojo plugin lifecycle", () => {
 		await endPluginSessionAsync(run);
 
 		expect(sources[0].split("\n", 1)[0]).toBe(
-			"-- rbx-forge patch 3 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+			"-- rbx-forge patch 4 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
 		);
 		expect(sources[1]!.split("\n", 1)[0]).toBe(
-			"-- rbx-forge patch 3 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+			"-- rbx-forge patch 4 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
 		);
 	});
 
-	it("should upgrade the genuine preceding plugin sources coherently", async ({ expect }) => {
-		expect.assertions(2);
+	it.for([
+		{ plugin: olderPlugin, version: 2 },
+		{ plugin: previousPlugin, version: 3 },
+	])(
+		"should upgrade genuine plugin patch $version sources coherently",
+		async ({ plugin, version }, { expect }) => {
+			expect.assertions(2);
 
-		const sources = [
-			`-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${previousPlugin.App}`,
-			`-- rbx-forge patch 2 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a\n${previousPlugin.ServeSession}`,
-			"return { protocolVersion = 5 }",
-		];
-		const run = startPluginSession(sources);
-		await endPluginSessionAsync(run);
+			const sources = [
+				`-- rbx-forge patch ${version} stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${plugin.App}`,
+				`-- rbx-forge patch ${version} stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a\n${plugin.ServeSession}`,
+				"return { protocolVersion = 5 }",
+			];
+			const run = startPluginSession(sources);
+			await endPluginSessionAsync(run);
 
-		expect(sources[0]).toContain("-- rbx-forge patch 3 stock");
-		expect(sources[1]).toContain("-- rbx-forge patch 3 stock");
-	});
+			expect(sources[0]).toContain("-- rbx-forge patch 4 stock");
+			expect(sources[1]).toContain("-- rbx-forge patch 4 stock");
+		},
+	);
 
 	it("should preserve a coherent current pair without rewriting the model", async ({
 		expect,
@@ -749,11 +757,11 @@ describe("managed Rojo plugin lifecycle", () => {
 		},
 		{
 			reason: "changed preceding patch sources",
-			source: `-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${previousPlugin.App}\n-- changed`,
+			source: `-- rbx-forge patch 3 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${previousPlugin.App}\n-- changed`,
 		},
 		{
 			reason: "stock bodies with a preceding patch header",
-			source: `-- rbx-forge patch 2 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`,
+			source: `-- rbx-forge patch 3 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n${stockPlugin.App}`,
 		},
 	])("should preserve $reason and explain manual connection", async ({ source }, { expect }) => {
 		expect.assertions(3);
@@ -883,7 +891,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		await endPluginSessionAsync(run);
 
 		expect(run.fake.spawned.map(({ args }) => args)).not.toContainEqual(["plugin", "install"]);
-		expect(sources[0]).toStartWith("-- rbx-forge patch 3");
+		expect(sources[0]).toStartWith("-- rbx-forge patch 4");
 	});
 
 	it.for(["", undefined])(
@@ -990,7 +998,7 @@ describe("managed Rojo plugin lifecycle", () => {
 				file: path.join(TOOLS, "custom-rojo"),
 			}),
 		);
-		expect(sources[0]).toStartWith("-- rbx-forge patch 3");
+		expect(sources[0]).toStartWith("-- rbx-forge patch 4");
 	});
 
 	it("should fail on a protocol mismatch before changing the plugin or launching", async ({
@@ -1134,6 +1142,7 @@ function startCommand({
 	isListening = async () => true,
 	isPortFree = true,
 	launchedStudio = false,
+	listenForCapture,
 	listenForStudioReady = async () => {
 		return {
 			close: () => {},
@@ -1226,6 +1235,7 @@ function startCommand({
 				getRojoInfoAsync: vi.fn<Network["getRojoInfoAsync"]>(getRojoInfo),
 				isListeningAsync,
 				isPortFreeAsync,
+				listenForCaptureAsync: listenForCapture ?? seams.network.listenForCaptureAsync,
 				listenForStudioReadyAsync: listenForStudioReady,
 			},
 			randomId: () => "session-1",
@@ -1397,6 +1407,168 @@ function spawnedIds(fake: FakeReaper): Array<string> {
 }
 
 describe(runSupervisorAsync, () => {
+	it("should declare an inert capture instance before Rojo starts serving", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const run = startCommand({
+			file: { studio: { saveMethod: "capture" } },
+			isListening: async () => false,
+		});
+		onTestFinished(async () => {
+			run.signals.fire("SIGINT");
+			await run.result;
+		});
+		await flushAsync();
+		const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		assert(typeof wrapper === "string");
+
+		expect(JSON.parse(wrapper)).toHaveProperty("tree.ServerStorage.ForgeCapture", {
+			$attributes: { CaptureUrl: "", ProjectName: "", RojoPort: 0, SessionId: "" },
+			$className: "Configuration",
+			$properties: { Archivable: false },
+		});
+		expect(stateOf(run)).toMatchObject({ services: { rojo: { status: "starting" } } });
+	});
+
+	it("should expose a non-Archivable capture instance with the connected Rojo identity", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(3);
+
+		const close = vi.fn<() => void>();
+		const projectName = `Example@${endpointKey(PROJECT, "game.rbxl")}`;
+		const sessionId = "rojo session & generation 1";
+		const url = new URL("http://127.0.0.1:50002/capture/first-secret");
+		url.searchParams.set("projectName", projectName);
+		url.searchParams.set("sessionId", sessionId);
+		const run = startCommand({
+			file: { studio: { saveMethod: "capture" } },
+			getRojoInfo: async () => {
+				return {
+					projectName,
+					protocolVersion: 5,
+					serverVersion: "7.7.1",
+					sessionId,
+				};
+			},
+			listenForCapture: async (_identity, signal) => {
+				assert(signal !== undefined);
+				signal.addEventListener("abort", close, { once: true });
+				return {
+					captureAsync: async () => ({ model: new Uint8Array(), services: [] }),
+					close,
+					url: url.href,
+				};
+			},
+		});
+		onTestFinished(async () => {
+			run.signals.fire("SIGINT");
+			await run.result;
+		});
+		await flushAsync();
+		const wrapper = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		assert(typeof wrapper === "string");
+
+		expect(JSON.parse(wrapper)).toStrictEqual({
+			name: projectName,
+			tree: {
+				$path: path.join(PROJECT, "default.project.json"),
+				ServerStorage: {
+					$className: "ServerStorage",
+					ForgeCapture: {
+						$attributes: {
+							CaptureUrl: url.href,
+							ProjectName: projectName,
+							RojoPort: 4000,
+							SessionId: sessionId,
+						},
+						$className: "Configuration",
+						$properties: { Archivable: false },
+					},
+				},
+			},
+		});
+		expect(stateOf(run)).toMatchObject({ services: { rojo: { status: "ready" } } });
+
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(close).toHaveBeenCalledOnce();
+	});
+
+	it("should replace the capture endpoint and identity when the session repairs Rojo", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(5);
+
+		let sessionId = "first-rojo-session";
+		const projectName = `Example@${endpointKey(PROJECT, "game.rbxl")}`;
+		const closed = new Set<string>();
+		const run = startCommand({
+			...ATTACHED,
+			file: { studio: { saveMethod: "capture" } },
+			getRojoInfo: async () => {
+				return {
+					projectName,
+					protocolVersion: 5,
+					serverVersion: "7.7.1",
+					sessionId,
+				};
+			},
+			listenForCapture: async (identity, signal) => {
+				const url = new URL(`http://127.0.0.1:50002/capture/${identity.sessionId}-secret`);
+				url.searchParams.set("projectName", identity.projectName);
+				url.searchParams.set("sessionId", identity.sessionId);
+				function close(): void {
+					closed.add(identity.sessionId);
+				}
+
+				assert(signal !== undefined);
+				signal.addEventListener("abort", close, { once: true });
+				return {
+					captureAsync: async () => ({ model: new Uint8Array(), services: [] }),
+					close,
+					url: url.href,
+				};
+			},
+		});
+		onTestFinished(async () => {
+			run.signals.fire("SIGINT");
+			await run.result;
+		});
+		await flushAsync();
+		const before = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		run.fake.exit("rojo", EXITED);
+		await passAsync(run, OUTPUT_POLL_MS);
+		sessionId = "second-rojo-session";
+		const repair = await askAddAsync(run, { parts: [] });
+		const after = run.memory.files()[".forge/sessions/session-1/rojo.project.json"];
+		assert(typeof before === "string" && typeof after === "string");
+
+		expect(repair).toStrictEqual({ added: ["rojo"] });
+		expect(JSON.parse(before)).toHaveProperty(
+			"tree.ServerStorage.ForgeCapture.$attributes.SessionId",
+			"first-rojo-session",
+		);
+		expect(JSON.parse(after)).toHaveProperty("tree.ServerStorage.ForgeCapture.$attributes", {
+			CaptureUrl: `http://127.0.0.1:50002/capture/second-rojo-session-secret?projectName=${encodeURIComponent(projectName)}&sessionId=second-rojo-session`,
+			ProjectName: projectName,
+			RojoPort: 4000,
+			SessionId: "second-rojo-session",
+		});
+		expect(closed).toStrictEqual(new Set(["first-rojo-session"]));
+
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(closed).toStrictEqual(new Set(["first-rojo-session", "second-rojo-session"]));
+	});
+
 	it("should release a stopped Rojo's cancellation listener before the session ends", async ({
 		expect,
 	}) => {

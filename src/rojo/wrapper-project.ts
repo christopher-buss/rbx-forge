@@ -1,6 +1,7 @@
 import path from "node:path";
 import stripJsonComments from "strip-json-comments";
 
+import type { CaptureListener } from "../capture/protocol.ts";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { endpointKey } from "../supervisor/endpoint.ts";
@@ -23,11 +24,13 @@ export function rojoWrapperPath(directory: string): string {
  * @param context - The project root and file system.
  * @param config - The original project and build output, for the endpoint key.
  * @param directory - The session directory.
+ * @param capture - The endpoint and port of the connected Rojo generation.
  */
 export function writeRojoWrapper(
 	{ cwd, seams }: CommandContext,
-	config: Pick<ResolvedConfig, "buildOutputPath" | "rojoProjectPath">,
+	config: Pick<ResolvedConfig, "buildOutputPath" | "rojoProjectPath" | "studio">,
 	directory: string,
+	capture?: CaptureListener & { rojoPort: number },
 ): void {
 	const projectPath = path.resolve(cwd, config.rojoProjectPath);
 	// Rojo validates the project; forge reads only its name and root serve
@@ -39,8 +42,9 @@ export function writeRojoWrapper(
 	const project = JSON.parse(content) as Record<string, unknown> & { name?: string };
 	const wrapper: Record<string, unknown> = {
 		name: `${project.name ?? inferProjectName(projectPath)}@${endpointKey(cwd, config.buildOutputPath)}`,
-		tree: { $path: projectPath },
+		tree: wrapperTree(projectPath, config.studio.saveMethod === "capture", capture),
 	};
+
 	// Rojo reads these fields from the root project only.
 	for (const field of ["servePort", "serveAddress", "servePlaceIds", "placeId", "gameId"]) {
 		// Stryker disable next-line ConditionalExpression: JSON drops undefined
@@ -54,6 +58,46 @@ export function writeRojoWrapper(
 		// Stryker disable next-line StringLiteral: equivalent formatting
 		`${JSON.stringify(wrapper, undefined, "\t")}\n`,
 	);
+}
+
+function captureAttributes(
+	capture?: CaptureListener & { rojoPort: number },
+): Record<string, unknown> {
+	if (capture === undefined) {
+		// Hydration must map the existing singleton and config before endpoint
+		// updates arrive.
+		return { CaptureUrl: "", ProjectName: "", RojoPort: 0, SessionId: "" };
+	}
+
+	const url = new URL(capture.url);
+	return {
+		CaptureUrl: capture.url,
+		ProjectName: url.searchParams.get("projectName"),
+		RojoPort: capture.rojoPort,
+		SessionId: url.searchParams.get("sessionId"),
+	};
+}
+
+function wrapperTree(
+	projectPath: string,
+	isCaptureEnabled: boolean,
+	capture?: CaptureListener & { rojoPort: number },
+): Record<string, unknown> {
+	if (!isCaptureEnabled) {
+		return { $path: projectPath };
+	}
+
+	return {
+		$path: projectPath,
+		ServerStorage: {
+			$className: "ServerStorage",
+			ForgeCapture: {
+				$attributes: captureAttributes(capture),
+				$className: "Configuration",
+				$properties: { Archivable: false },
+			},
+		},
+	};
 }
 
 /**

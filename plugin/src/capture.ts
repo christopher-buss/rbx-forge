@@ -1,47 +1,195 @@
+/* cspell:words pcall rawget fromstring writeu */
 /** The instance a forge session or snapshot fills with its capture URL. */
 export const CAPTURE_INSTANCE = "ForgeCapture";
 /** The attribute of {@link CAPTURE_INSTANCE} that holds the URL. */
 export const CAPTURE_URL_ATTRIBUTE = "CaptureUrl";
 
-/** What the plugin reaches outside itself. Specs pass fakes. */
+/** Engine adapters; specs provide functions at the same boundary. */
 export interface PluginIo {
-	http: Pick<HttpService, "RequestAsync">;
+	http: {
+		decode: (value: string) => unknown;
+		encode: (value: unknown) => string;
+		request: (request: RequestAsyncRequest) => RequestAsyncResponse;
+	};
 	output: (message: string) => void;
-	/** The engine services a capture uses. */
-	services: { history: ChangeHistoryService; serialization: SerializationService };
+	services: {
+		history: ChangeHistoryService;
+		isRunning: () => boolean;
+		isSerialized: (name: string) => boolean;
+		serialize: (instances: Array<Instance>) => buffer;
+	};
 }
 
-/** A plugin that holds a forge capture URL. */
+/** A plugin holding a capture URL verified by the connected Rojo plugin. */
 export interface ActivePlugin {
+	capture: Configuration;
 	io: PluginIo;
 	url: string;
 }
 
-/**
- * Start the plugin. Without a capture URL it returns at once: no request, no
- * output, no UI.
- *
- * @param root - Where forge puts the capture instance.
- * @param io - HTTP, output, and engine services.
- * @returns The active plugin; `undefined` when inert.
- */
-export function startPlugin(root: Instance, io: PluginIo): ActivePlugin | undefined {
-	const url = findCaptureUrl(root);
-	return url === undefined ? undefined : { io, url };
+/** The one model and its service root indices. */
+export interface CapturePayload {
+	model: buffer;
+	services: Array<{ name: string; roots: Array<number> }>;
 }
 
 /**
- * Find the forge capture URL.
- *
- * @param root - Where forge puts the capture instance.
- * @returns The URL; `undefined` in a Studio forge does not serve.
+ * Hold a URL only while the connected Rojo identity matches its configuration.
+ * @param root - The session's ServerStorage.
+ * @param io - Engine adapters.
+ * @returns The verified plugin, or undefined while disconnected.
  */
-function findCaptureUrl(root: Instance): string | undefined {
+export function startPlugin(root: Instance, io: PluginIo): ActivePlugin | undefined {
 	const capture = root.FindFirstChild(CAPTURE_INSTANCE);
 	if (capture === undefined || !capture.IsA("Configuration")) {
 		return undefined;
 	}
 
 	const url = capture.GetAttribute(CAPTURE_URL_ATTRIBUTE);
-	return url !== "" && typeIs(url, "string") ? url : undefined;
+	if (!typeIs(url, "string")) {
+		return undefined;
+	}
+
+	if (string.match(url, "^http://127%.0%.0%.1:%d+/capture/%w+%?")[0] === undefined) {
+		return undefined;
+	}
+
+	const project = capture.GetAttribute("ProjectName");
+	if (project === "" || !typeIs(project, "string")) {
+		return undefined;
+	}
+
+	const session = capture.GetAttribute("SessionId");
+	if (session === "" || !typeIs(session, "string")) {
+		return undefined;
+	}
+
+	if (
+		capture.GetAttribute("ConnectedProjectName") !== project ||
+		capture.GetAttribute("ConnectedSessionId") !== session
+	) {
+		return undefined;
+	}
+
+	return { capture, io, url };
+}
+
+/**
+ * Serialize every persisted service's children together so references survive.
+ * @param root - The data model.
+ * @param active - The plugin and its capture configuration.
+ * @returns One model and the roots belonging to each service.
+ */
+export function captureInstances(root: Instance, active: ActivePlugin): CapturePayload {
+	const instances = new Array<Instance>();
+	const services = new Array<{ name: string; roots: Array<number> }>();
+	for (const service of root.GetChildren()) {
+		if (!active.io.services.isSerialized(service.ClassName)) {
+			continue;
+		}
+
+		const roots = new Array<number>();
+		for (const child of captureChildren(service, active.capture)) {
+			roots.push(instances.size());
+			instances.push(child);
+		}
+
+		services.push({ name: service.ClassName, roots });
+	}
+
+	return { model: active.io.services.serialize(instances), services };
+}
+
+/**
+ * Poll in its own task until Rojo replaces or disconnects the URL.
+ * @param root - The session's ServerStorage.
+ * @param active - The current plugin generation.
+ */
+export function pollCaptures(root: Instance, active: ActivePlugin): void {
+	while (startPlugin(root, active.io)?.url === active.url) {
+		const [isSuccessful] = pcall(() => {
+			receiveCapture(root, active);
+		});
+		if (!isSuccessful) {
+			task.wait(1);
+		}
+	}
+}
+
+function captureChildren(service: Instance, capture: Instance): Array<Instance> {
+	const currentCamera = service.IsA("Workspace") ? service.CurrentCamera : undefined;
+	return service.GetChildren().filter((child) => {
+		return (
+			child !== capture && child !== currentCamera && child.Archivable && !child.IsA("Player")
+		);
+	});
+}
+
+function postError(active: ActivePlugin, url: string, reason: string): void {
+	active.io.http.request({
+		Body: active.io.http.encode({ error: reason }),
+		Headers: { "Content-Type": "application/json" },
+		Method: "POST",
+		Url: url,
+	});
+}
+
+function frameCapture(io: PluginIo, payload: CapturePayload): string {
+	const header = buffer.fromstring(io.http.encode({ services: payload.services }));
+	const size = buffer.len(header);
+	const body = buffer.create(4 + size + buffer.len(payload.model));
+	buffer.writeu32(body, 0, size);
+	buffer.copy(body, 4, header);
+	buffer.copy(body, 4 + size, payload.model);
+	return buffer.tostring(body);
+}
+
+function serializeCapture(active: ActivePlugin, postUrl: string): void {
+	const [isCaptured, payload] = pcall(() => captureInstances(game, active));
+	if (!isCaptured) {
+		active.io.output(`Forge capture failed: ${tostring(payload)}`);
+		postError(active, postUrl, "serialize_failed");
+		return;
+	}
+
+	active.io.http.request({
+		Body: frameCapture(active.io, payload),
+		Headers: { "Content-Type": "application/octet-stream" },
+		Method: "POST",
+		Url: postUrl,
+	});
+}
+
+function receiveCapture(root: Instance, active: ActivePlugin): void {
+	const response = active.io.http.request({ Method: "GET", Url: active.url });
+	if (response.StatusCode !== 200) {
+		return;
+	}
+
+	const request = active.io.http.decode(response.Body);
+	if (
+		rawget(request, "projectName") !== active.capture.GetAttribute("ProjectName") ||
+		rawget(request, "sessionId") !== active.capture.GetAttribute("SessionId")
+	) {
+		return;
+	}
+
+	const requestId = rawget(request, "requestId");
+	if (!typeIs(requestId, "string")) {
+		return;
+	}
+
+	if (startPlugin(root, active.io)?.url !== active.url) {
+		return;
+	}
+
+	const postUrl = `${active.url}&requestId=${requestId}`;
+	if (active.io.services.isRunning()) {
+		postError(active, postUrl, "play_mode");
+		return;
+	}
+
+	task.spawn(() => {
+		serializeCapture(active, postUrl);
+	});
 }

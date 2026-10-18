@@ -317,7 +317,25 @@ defineConfig({
 
 ### `studio`
 
-Options for the Roblox Studio that `stop`, `down`, and the idle timeout close.
+Options for opening, saving, and closing Roblox Studio.
+
+#### `studio.saveMethod`
+
+- Type: `"menu" | "capture"`
+- Default: `"menu"`
+- Flag: none
+
+Choose how `forge save` gets the session Studio's content onto disk. `menu` uses
+Studio's Save to File menu. `capture` asks the forge plugin for a capture and
+assembles the place from it and a fresh Rojo build of the syncback project,
+without showing Studio or moving keyboard focus. Connect Studio's Rojo plugin to
+the session before capturing.
+
+```ts
+defineConfig({
+	studio: { saveMethod: "capture" },
+});
+```
 
 #### `studio.desktop`
 

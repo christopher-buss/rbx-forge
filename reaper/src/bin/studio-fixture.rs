@@ -5,6 +5,10 @@
 //! FIXTURE_STUDIO_PLATFORM_LAUNCHER=1 reads the place from RBX_FORGE_PLACE.
 //! FIXTURE_STUDIO_DIALOG_TRIGGER gates the prompt on a file's creation.
 //! FIXTURE_STUDIO_DIALOG_READY_FILE records when the prompt opens.
+//! FIXTURE_STUDIO_CAPTURE_MODEL posts that binary model with CAPTURE_SERVICES JSON.
+//! FIXTURE_STUDIO_CAPTURE_ROJO_PORT overrides the marker's Rojo Port.
+//! FIXTURE_STUDIO_CAPTURE=timeout polls without posting; disconnect omits polling.
+//! FIXTURE_STUDIO_CAPTURE_DELAY_MS delays posts; CAPTURE_ERROR posts an error code.
 
 #[allow(
     dead_code,
@@ -38,12 +42,13 @@ fn main() -> io::Result<()> {
                 .or_else(|| args.first().map(String::as_str))
         })
         .ok_or_else(|| io::Error::other("missing place"))?;
-    let mut ready_url = args
+    let marker_script = args
         .windows(2)
         .find(|pair| pair[0] == "--runScriptFile")
         .map(|script| fs::read_to_string(&script[1]))
         .transpose()?
-        .and_then(|script| marker_ready_url(&script));
+        .unwrap_or_default();
+    let mut ready_url = marker_attribute(&marker_script, "ReadyUrl");
     if env::var("FIXTURE_STUDIO_ACK").as_deref() == Ok("none") {
         ready_url = None;
     } else if env::var("FIXTURE_STUDIO_ACK").as_deref() == Ok("wrong") {
@@ -61,6 +66,7 @@ fn main() -> io::Result<()> {
     }
     install_close_handler();
     record_start(&args)?;
+    start_capture(&marker_script);
     let lock = format!("{place}.lock");
     let started = Instant::now();
     let lock_delay = env::var("FIXTURE_STUDIO_LOCK_DELAY_MS")
@@ -170,10 +176,10 @@ fn main() -> io::Result<()> {
     }
 }
 
-fn marker_ready_url(script: &str) -> Option<String> {
+fn marker_attribute(script: &str, attribute: &str) -> Option<String> {
     script.split(":SetAttribute(").find_map(|setter| {
         let (name, value) = setter.split_once(',')?;
-        if name.trim() != "\"ReadyUrl\"" {
+        if name.trim() != format!("\"{attribute}\"") {
             return None;
         }
         serde_json::Deserializer::from_str(value.trim_start())
@@ -181,6 +187,141 @@ fn marker_ready_url(script: &str) -> Option<String> {
             .next()?
             .ok()
     })
+}
+
+fn start_capture(marker_script: &str) {
+    let model = env::var("FIXTURE_STUDIO_CAPTURE_MODEL").ok();
+    let mode = env::var("FIXTURE_STUDIO_CAPTURE").unwrap_or_default();
+    let error = env::var("FIXTURE_STUDIO_CAPTURE_ERROR").ok();
+    if model.is_none() && mode.is_empty() && error.is_none() {
+        return;
+    }
+    let Some(port) = env::var("FIXTURE_STUDIO_CAPTURE_ROJO_PORT")
+        .ok()
+        .or_else(|| marker_attribute(marker_script, "Port"))
+        .and_then(|value| value.parse::<u16>().ok())
+    else {
+        return;
+    };
+    let services = env::var("FIXTURE_STUDIO_CAPTURE_SERVICES")
+        .unwrap_or_else(|_| r#"[{"name":"ServerScriptService","roots":[0]}]"#.to_owned());
+    let delay = Duration::from_millis(
+        env::var("FIXTURE_STUDIO_CAPTURE_DELAY_MS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0),
+    );
+    // Capture I/O cannot stall the Studio close loop.
+    thread::spawn(move || {
+        let Ok(services) = serde_json::from_str::<serde_json::Value>(&services) else {
+            return;
+        };
+        loop {
+            if mode != "disconnect" {
+                let _ = poll_capture(
+                    port,
+                    model.as_deref(),
+                    &services,
+                    &mode,
+                    error.as_deref(),
+                    delay,
+                );
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+}
+
+fn poll_capture(
+    port: u16,
+    model: Option<&str>,
+    services: &serde_json::Value,
+    mode: &str,
+    error: Option<&str>,
+    delay: Duration,
+) -> io::Result<()> {
+    let (status, body) = http_request(
+        &format!("http://127.0.0.1:{port}/forge-capture"),
+        "GET",
+        "application/json",
+        &[],
+    )?;
+    if status != 200 {
+        return Ok(());
+    }
+    let endpoint: serde_json::Value = serde_json::from_slice(&body).map_err(io::Error::other)?;
+    let url = endpoint["url"]
+        .as_str()
+        .ok_or_else(|| io::Error::other("capture URL is not ready"))?;
+    let (status, body) = http_request(url, "GET", "application/json", &[])?;
+    if status != 200 || mode == "timeout" {
+        return Ok(());
+    }
+    let request: serde_json::Value = serde_json::from_slice(&body).map_err(io::Error::other)?;
+    let request_id = request["requestId"]
+        .as_str()
+        .ok_or_else(|| io::Error::other("capture request id is missing"))?;
+    thread::sleep(delay);
+    let (content_type, body) = if let Some(error) = error {
+        (
+            "application/json",
+            serde_json::to_vec(&serde_json::json!({ "error": error })).map_err(io::Error::other)?,
+        )
+    } else {
+        let metadata = serde_json::to_vec(&serde_json::json!({ "services": services }))
+            .map_err(io::Error::other)?;
+        let length = u32::try_from(metadata.len()).map_err(io::Error::other)?;
+        let mut frame = length.to_le_bytes().to_vec();
+        frame.extend_from_slice(&metadata);
+        frame.extend_from_slice(&fs::read(
+            model.ok_or_else(|| io::Error::other("capture model is missing"))?,
+        )?);
+        ("application/octet-stream", frame)
+    };
+    http_request(
+        &format!("{url}&requestId={request_id}"),
+        "POST",
+        content_type,
+        &body,
+    )?;
+    Ok(())
+}
+
+fn http_request(
+    url: &str,
+    method: &str,
+    content_type: &str,
+    body: &[u8],
+) -> io::Result<(u16, Vec<u8>)> {
+    let (port, target) = url
+        .strip_prefix("http://127.0.0.1:")
+        .and_then(|address| address.split_once('/'))
+        .ok_or_else(|| io::Error::other("capture URL must be loopback HTTP"))?;
+    let address: SocketAddr = format!("127.0.0.1:{port}")
+        .parse()
+        .map_err(io::Error::other)?;
+    let mut socket = TcpStream::connect_timeout(&address, Duration::from_secs(2))?;
+    socket.set_write_timeout(Some(Duration::from_secs(2)))?;
+    socket.set_read_timeout(Some(Duration::from_secs(25)))?;
+    write!(
+        socket,
+        "{method} /{target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    )?;
+    socket.write_all(body)?;
+    let mut response = Vec::new();
+    socket.read_to_end(&mut response)?;
+    let separator = response
+        .windows(4)
+        .position(|bytes| bytes == b"\r\n\r\n")
+        .ok_or_else(|| io::Error::other("HTTP response has no headers"))?;
+    let headers = std::str::from_utf8(&response[..separator]).map_err(io::Error::other)?;
+    let status = headers
+        .split_whitespace()
+        .nth(1)
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| io::Error::other("HTTP response has no status"))?;
+    Ok((status, response[separator + 4..].to_vec()))
 }
 
 fn acknowledge(url: &str) -> io::Result<()> {

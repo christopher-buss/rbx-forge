@@ -61,12 +61,17 @@ export type AutoRecoveryMode = "delete" | "keep" | "move";
 /** Where a Studio runs. Hidden is available only on Windows. */
 export type StudioDesktop = "hidden" | "user";
 
+/** How forge copies Studio content to disk during the fallback release. */
+export type SaveMethod = "capture" | "menu";
+
 /** Options for the Roblox Studio forge opens and closes. */
 export interface StudioOptions {
 	/** What to do with the auto-recovery files of a Studio forge ends. */
 	autoRecovery?: AutoRecoveryMode;
 	/** Override the desktop selected by the command. */
 	desktop?: StudioDesktop;
+	/** Capture through the plugin, or use Studio's File menu (the default). */
+	saveMethod?: SaveMethod;
 }
 
 /** Options for the sessions of `forge start` and `forge up`. */
@@ -181,6 +186,7 @@ const fileSchema = type({
 		"+": "reject",
 		"autoRecovery?": "'delete' | 'keep' | 'move'",
 		"desktop?": "'user' | 'hidden'",
+		"saveMethod?": "'capture' | 'menu'",
 	},
 	"syncback?": {
 		"+": "reject",

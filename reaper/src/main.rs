@@ -19,6 +19,8 @@
 //! `os` tests run through this target (`cargo test`).
 
 #[cfg(test)]
+mod capture;
+#[cfg(test)]
 mod model;
 #[allow(dead_code, reason = "the addon uses the rest of the os layer")]
 mod os;

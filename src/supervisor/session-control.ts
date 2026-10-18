@@ -47,6 +47,7 @@ export interface ControlSetup {
 	port: number | undefined;
 	/** The session reads its compiler's builds (roblox-ts). */
 	readsBuilds: boolean;
+	saveMethod?: ControlTarget["saveMethod"];
 	/** Where the compiler's sources are, for the edits a wait waits for. */
 	sources: SourceRoots;
 	/** The supervisor's stop requests: `shutdown` feeds them. */
@@ -114,6 +115,7 @@ export async function openSessionAsync(
 			builds,
 			clock: seams.clock,
 			parts: setup.parts,
+			saveMethod: setup.saveMethod,
 			sessionId: setup.identity.sessionId,
 			status,
 			stop: setup.stop,
