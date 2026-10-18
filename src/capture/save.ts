@@ -2,7 +2,7 @@ import path from "node:path";
 
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
-import { ForgeError } from "../errors.ts";
+import { ForgeError, toForgeError } from "../errors.ts";
 import { rojoBuildArgs, runRojoAsync } from "../rojo/rojo.ts";
 import type { StudioSave } from "../studio/save-studio.ts";
 import type { Capture, CaptureListener } from "./protocol.ts";
@@ -61,7 +61,7 @@ function assembleCapture(
 		throw new ForgeError(
 			"capture_assembly_failed",
 			`Could not assemble the captured place ${output}.`,
-			{ cause: err },
+			{ cause: err, details: { message: toForgeError(err).message } },
 		);
 	}
 }

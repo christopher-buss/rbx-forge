@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { describe, it } from "vitest";
+import { assert, describe, it } from "vitest";
 
 import { captureRojo, makeCaptureModel } from "../helpers/capture-fixture.ts";
 import { parseResult } from "../helpers/output.ts";
@@ -8,6 +8,91 @@ import { runBinAsync } from "./run-bin.ts";
 import { makeFixtureAsync, START_STUDIO, startReadyAsync } from "./session-fixture.ts";
 
 describe("forge save through the capture plugin", () => {
+	it("reports an unsupported captured-child attribute in CLI JSON and preserves the place", async ({
+		expect,
+	}) => {
+		expect.assertions(4);
+
+		const fixture = await makeFixtureAsync(
+			{ studio: { saveMethod: "capture" } },
+			{ studio: true },
+		);
+		mkdirSync(path.join(fixture.project, "src"));
+		writeFileSync(
+			path.join(fixture.project, "default.project.json"),
+			JSON.stringify({
+				name: "fixture",
+				tree: {
+					$className: "DataModel",
+					Workspace: { $className: "Workspace", $path: "src" },
+				},
+			}),
+		);
+		const variables = {
+			FIXTURE_REAL_ROJO: captureRojo(),
+			FIXTURE_STUDIO_CAPTURE_MODEL: path.join(
+				import.meta.dirname,
+				"../fixtures/models/reference-attribute.rbxm",
+			),
+			FIXTURE_STUDIO_CAPTURE_ROJO_PORT: String(fixture.port),
+			FIXTURE_STUDIO_CAPTURE_SERVICES: JSON.stringify([{ name: "Workspace", roots: [0, 1] }]),
+		};
+		await startReadyAsync(fixture, START_STUDIO, variables);
+		const original = readFileSync(fixture.place);
+		const saved = await runBinAsync(
+			["save", "--timeout", "5", "--json"],
+			fixture.project,
+			fixture.environment(variables),
+		);
+		const result = parseResult(saved.stdout);
+
+		expect(saved.status).toBe(1);
+		expect(result).toMatchObject({
+			command: "save",
+			error: { code: "capture_assembly_failed" },
+			ok: false,
+		});
+
+		assert(result.error !== undefined);
+		assert(result.error.details !== undefined);
+
+		expect(result.error.details["message"]).toContain(
+			"ForgeReferenceAttributeFixture.Attributes",
+		);
+		expect(readFileSync(fixture.place)).toStrictEqual(original);
+	});
+
+	it("reports a named plugin failure in CLI JSON and preserves the existing place", async ({
+		expect,
+	}) => {
+		expect.assertions(3);
+
+		const fixture = await makeFixtureAsync(
+			{ studio: { saveMethod: "capture" } },
+			{ studio: true },
+		);
+		const message = "Lighting attribute Reference: unsupported capture value InstanceHandle";
+		const variables = {
+			FIXTURE_STUDIO_CAPTURE_ERROR: JSON.stringify({ error: "serialize_failed", message }),
+			FIXTURE_STUDIO_CAPTURE_ROJO_PORT: String(fixture.port),
+		};
+		await startReadyAsync(fixture, START_STUDIO, variables);
+		const original = readFileSync(fixture.place);
+		const saved = await runBinAsync(
+			["save", "--timeout", "5", "--json"],
+			fixture.project,
+			fixture.environment(variables),
+		);
+
+		expect(saved.status).toBe(1);
+		expect(parseResult(saved.stdout)).toMatchObject({
+			command: "save",
+			error: { code: "capture_rejected", details: { message } },
+			ok: false,
+		});
+		expect(readFileSync(fixture.place)).toStrictEqual(original);
+	});
+
 	it("captures through the Studio stand-in and syncs the assembled place back with genuine Rojo", async ({
 		expect,
 	}) => {
