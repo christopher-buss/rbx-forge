@@ -78,6 +78,7 @@ function hiddenWindowsReadiness({
 		reporter,
 		status: () => status.snapshot().services.studio.status,
 		studio,
+		warnings: () => reporter.events.filter(({ type }) => type === "warning"),
 	};
 }
 
@@ -91,7 +92,7 @@ describe(createStudioReadiness, () => {
 	it.for([false, true])(
 		"records Studio open only once its watcher hides the windows (acknowledged %s)",
 		async (isAcknowledged, { expect }) => {
-			expect.assertions(2);
+			expect.assertions(3);
 
 			const run = hiddenWindowsReadiness({ isAcknowledged });
 			run.readiness.onLock();
@@ -104,6 +105,7 @@ describe(createStudioReadiness, () => {
 			await run.readiness.open;
 
 			expect(run.status()).toBe("open");
+			expect(run.warnings()).toStrictEqual([]);
 		},
 	);
 
@@ -136,12 +138,13 @@ describe(createStudioReadiness, () => {
 	});
 
 	it("waits for no watcher when the pinned process is another Studio", async ({ expect }) => {
-		expect.assertions(1);
+		expect.assertions(2);
 
 		const run = hiddenWindowsReadiness({ startTime: "43" });
 		run.readiness.onLock();
 		await run.readiness.open;
 
 		expect(run.status()).toBe("open");
+		expect(run.warnings()).toStrictEqual([]);
 	});
 });
