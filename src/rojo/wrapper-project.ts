@@ -42,7 +42,12 @@ export function writeRojoWrapper(
 	const project = JSON.parse(content) as Record<string, unknown> & { name?: string };
 	const wrapper: Record<string, unknown> = {
 		name: `${project.name ?? inferProjectName(projectPath)}@${endpointKey(cwd, config.buildOutputPath)}`,
-		tree: wrapperTree(projectPath, config.studio.saveMethod === "capture", capture),
+		tree: wrapperTree(
+			projectPath,
+			config.studio.saveMethod === "capture",
+			path.basename(directory),
+			capture,
+		),
 	};
 
 	// Rojo reads these fields from the root project only.
@@ -61,17 +66,25 @@ export function writeRojoWrapper(
 }
 
 function captureAttributes(
+	forgeSessionId: string,
 	capture?: CaptureListener & { rojoPort: number },
 ): Record<string, unknown> {
 	if (capture === undefined) {
 		// Hydration must map the existing singleton and config before endpoint
 		// updates arrive.
-		return { CaptureUrl: "", ProjectName: "", RojoPort: 0, SessionId: "" };
+		return {
+			CaptureUrl: "",
+			ForgeSessionId: forgeSessionId,
+			ProjectName: "",
+			RojoPort: 0,
+			SessionId: "",
+		};
 	}
 
 	const url = new URL(capture.url);
 	return {
 		CaptureUrl: capture.url,
+		ForgeSessionId: forgeSessionId,
 		ProjectName: url.searchParams.get("projectName"),
 		RojoPort: capture.rojoPort,
 		SessionId: url.searchParams.get("sessionId"),
@@ -81,6 +94,7 @@ function captureAttributes(
 function wrapperTree(
 	projectPath: string,
 	isCaptureEnabled: boolean,
+	forgeSessionId: string,
 	capture?: CaptureListener & { rojoPort: number },
 ): Record<string, unknown> {
 	if (!isCaptureEnabled) {
@@ -92,7 +106,7 @@ function wrapperTree(
 		ServerStorage: {
 			$className: "ServerStorage",
 			ForgeCapture: {
-				$attributes: captureAttributes(capture),
+				$attributes: captureAttributes(forgeSessionId, capture),
 				$className: "Configuration",
 				$properties: { Archivable: false },
 			},

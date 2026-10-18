@@ -1426,7 +1426,13 @@ describe(runSupervisorAsync, () => {
 		assert(typeof wrapper === "string");
 
 		expect(JSON.parse(wrapper)).toHaveProperty("tree.ServerStorage.ForgeCapture", {
-			$attributes: { CaptureUrl: "", ProjectName: "", RojoPort: 0, SessionId: "" },
+			$attributes: {
+				CaptureUrl: "",
+				ForgeSessionId: "session-1",
+				ProjectName: "",
+				RojoPort: 0,
+				SessionId: "",
+			},
 			$className: "Configuration",
 			$properties: { Archivable: false },
 		});
@@ -1482,6 +1488,7 @@ describe(runSupervisorAsync, () => {
 					ForgeCapture: {
 						$attributes: {
 							CaptureUrl: url.href,
+							ForgeSessionId: "session-1",
 							ProjectName: projectName,
 							RojoPort: 4000,
 							SessionId: sessionId,
@@ -1504,7 +1511,7 @@ describe(runSupervisorAsync, () => {
 		expect,
 		onTestFinished,
 	}) => {
-		expect.assertions(5);
+		expect.assertions(6);
 
 		let sessionId = "first-rojo-session";
 		const projectName = `Example@${endpointKey(PROJECT, "game.rbxl")}`;
@@ -1555,8 +1562,13 @@ describe(runSupervisorAsync, () => {
 			"tree.ServerStorage.ForgeCapture.$attributes.SessionId",
 			"first-rojo-session",
 		);
+		expect(JSON.parse(before)).toHaveProperty(
+			"tree.ServerStorage.ForgeCapture.$attributes.ForgeSessionId",
+			"session-1",
+		);
 		expect(JSON.parse(after)).toHaveProperty("tree.ServerStorage.ForgeCapture.$attributes", {
 			CaptureUrl: `http://127.0.0.1:50002/capture/second-rojo-session-secret?projectName=${encodeURIComponent(projectName)}&sessionId=second-rojo-session`,
+			ForgeSessionId: "session-1",
 			ProjectName: projectName,
 			RojoPort: 4000,
 			SessionId: "second-rojo-session",

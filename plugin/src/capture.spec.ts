@@ -10,6 +10,7 @@ import {
 	startPlugin,
 } from "./capture";
 import type { PluginIo } from "./capture";
+import type { CaptureWarnings } from "./capture-warnings";
 import type { ReflectedProperty } from "./service-metadata";
 
 function makeCapture(root: Instance): Configuration {
@@ -36,6 +37,7 @@ function playPoll(
 		running?: boolean;
 		session?: string;
 		status?: number;
+		warnings?: CaptureWarnings;
 	} = {},
 ): { messages: Array<string>; posts: Array<RequestAsyncRequest> } {
 	const root = new Instance("Folder");
@@ -106,7 +108,10 @@ function playPoll(
 	};
 	const active = startPlugin(root, io);
 	assert(active !== undefined);
-	pollCaptures(root, active);
+	pollCaptures(
+		root,
+		options.warnings === undefined ? active : { ...active, warnings: options.warnings },
+	);
 	return { messages, posts };
 }
 
@@ -156,6 +161,54 @@ function referenceTree(nested: boolean): {
 }
 
 describe("startPlugin", () => {
+	it("should retain pending warnings when serialization fails before a successful capture", () => {
+		expect.assertions(2);
+
+		const { io } = createIo();
+		const root = new Instance("Folder");
+		const capture = new Instance("Configuration");
+		let canSerialize = false;
+		let pending = [
+			{
+				property: "PhysicsSteppingMethod",
+				reason: "unreadable" as const,
+				service: "Workspace",
+			},
+		];
+		const active = {
+			capture,
+			io: {
+				...io,
+				services: {
+					...io.services,
+					serialize: () => {
+						assert(canSerialize, "serialization unavailable");
+						return buffer.create(0);
+					},
+				},
+			},
+			url: "",
+			warnings: {
+				capture: () => {
+					const warnings = pending;
+					pending = [];
+					return warnings;
+				},
+				close: () => {},
+				resume: () => {},
+			},
+		};
+
+		expect(() => captureInstances(root, active)).toThrow("serialization unavailable");
+
+		canSerialize = true;
+		const saved = captureInstances(root, active);
+
+		expect(saved.warnings.map((warning) => warning.property).join(",")).toBe(
+			"PhysicsSteppingMethod",
+		);
+	});
+
 	it.each([
 		{ engineType: "bool", expected: { Bool: false }, value: false },
 		{ engineType: "double", expected: { Float64: 1.25 }, value: 1.25 },
@@ -570,7 +623,19 @@ describe("startPlugin", () => {
 	it("should send one raw binary frame with a metadata prefix", () => {
 		expect.assertions(3);
 
-		const { posts } = playPoll();
+		const { posts } = playPoll({
+			warnings: {
+				capture: () => [
+					{
+						property: "PhysicsSteppingMethod",
+						reason: "unreadable",
+						service: "Workspace",
+					},
+				],
+				close: () => {},
+				resume: () => {},
+			},
+		});
 
 		expect(posts.size()).toBe(1);
 
@@ -580,9 +645,19 @@ describe("startPlugin", () => {
 		const body = buffer.fromstring(posted.Body);
 		const size = buffer.readu32(body, 0);
 
-		expect(
-			game.GetService("HttpService").JSONDecode(buffer.readstring(body, 4, size)),
-		).toStrictEqual({ services: [] });
+		// eslint-disable-next-line jest/prefer-strict-equal -- strict equality rejects nested engine strings
+		expect(game.GetService("HttpService").JSONDecode(buffer.readstring(body, 4, size))).toEqual(
+			{
+				services: [],
+				warnings: [
+					{
+						property: "PhysicsSteppingMethod",
+						reason: "unreadable",
+						service: "Workspace",
+					},
+				],
+			},
+		);
 		expect(buffer.readstring(body, 4 + size, 3)).toBe("\0\x80\xff");
 	});
 
