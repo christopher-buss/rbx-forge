@@ -233,8 +233,8 @@ catalogs:
       version: 3.10.8
   plugin:
     '@isentinel/jest-roblox':
-      specifier: 0.4.6
-      version: 0.4.6
+      specifier: 0.4.7
+      version: 0.4.7
     '@isentinel/roblox-ts':
       specifier: 4.0.12
       version: 4.0.12
@@ -437,7 +437,7 @@ importers:
     devDependencies:
       '@isentinel/jest-roblox':
         specifier: catalog:plugin
-        version: 0.4.6(jiti@2.7.0)(magicast@0.5.5)(typescript@6.0.3)(typescript@7.0.2)
+        version: 0.4.7(jiti@2.7.0)(magicast@0.5.5)(typescript@6.0.3)(typescript@7.0.2)
       '@isentinel/roblox-ts':
         specifier: catalog:plugin
         version: 4.0.12
@@ -1455,8 +1455,8 @@ packages:
       oxlint-tsgolint:
         optional: true
 
-  '@isentinel/jest-roblox@0.4.6':
-    resolution: {integrity: sha512-S/OYHLT+x/myU6QBOh6wi0ry15t58aNDbW51kpjhEaoQw5Mqh40yR+WVKEWbUQdGJRM0shJTpzXANeMWBZygAg==}
+  '@isentinel/jest-roblox@0.4.7':
+    resolution: {integrity: sha512-Q1tfaPnRK6w4UEWehZ/9/OOYTgAFcIQMLMD7aysZaMWwNrD4PK4mK2OMi8sq51GT8orFfZTBx7DzasHjH0NrQA==}
     engines: {node: '>=24.12.0'}
     hasBin: true
     peerDependencies:
@@ -7235,7 +7235,7 @@ snapshots:
       - typescript
       - vite-plus
 
-  '@isentinel/jest-roblox@0.4.6(jiti@2.7.0)(magicast@0.5.5)(typescript@6.0.3)(typescript@7.0.2)':
+  '@isentinel/jest-roblox@0.4.7(jiti@2.7.0)(magicast@0.5.5)(typescript@6.0.3)(typescript@7.0.2)':
     dependencies:
       '@bedrock-rbx/ocale': 0.3.4
       '@jridgewell/trace-mapping': 0.3.31
