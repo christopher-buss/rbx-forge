@@ -256,7 +256,8 @@ async function launchAsync(runtime: Runtime, withMarker: boolean): Promise<void>
 	const { context, directory, executable } = runtime;
 	const { seams } = context;
 	const model = prepareSyncModel(seams.native(), directory, runtime);
-	const place = path.join(directory, "forge-sync.rbxl");
+	// No Studio auto-recovery file can match a unique place name.
+	const place = path.join(directory, `forge-sync-${runtime.token}.rbxl`);
 	copyFileSync(path.join(SYNC_FIXTURES, "studio/saved.rbxl"), place);
 	const script = await observerScriptAsync(runtime, withMarker);
 	const launched = await directSyncLauncher(context)({
