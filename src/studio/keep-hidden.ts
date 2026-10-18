@@ -7,9 +7,7 @@ import { parseStatus } from "../session/status.ts";
 import { STUDIO_OPEN_BOUND_MS } from "../session/studio-readiness.ts";
 import { forgeFiles, listSessions, sessionFiles } from "../supervisor/session-files.ts";
 import { hasStudioLock } from "./lock-file.ts";
-
-/** How often the watcher reads Studio's app visibility. */
-export const KEEP_HIDDEN_POLL_MS = 10;
+import { KEEP_HIDDEN_POLL_MS } from "./window-hiding.ts";
 
 /** How long Studio stays hidden after its place opens before the watch ends. */
 export const KEEP_HIDDEN_QUIET_MS = 3000;

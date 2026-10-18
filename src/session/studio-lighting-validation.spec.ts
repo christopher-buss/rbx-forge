@@ -79,7 +79,8 @@ function followingLightingStudio(
 
 	if (kind !== undefined) {
 		const races = { gone: null, reused: { ...pinned, startTime: "reused" } };
-		const pins = [pinned, races[kind]];
+		// The readiness pin, the lock check's pin, then the race.
+		const pins = [pinned, pinned, races[kind]];
 		native.addon.pinProcess = () => pins.shift() ?? null;
 	}
 
