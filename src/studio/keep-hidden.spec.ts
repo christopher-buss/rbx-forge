@@ -8,10 +8,10 @@ import { STUDIO_OPEN_BOUND_MS } from "../session/studio-readiness.ts";
 import {
 	createKeepHiddenLauncher,
 	KEEP_HIDDEN_FLAG,
-	KEEP_HIDDEN_POLL_MS,
 	KEEP_HIDDEN_QUIET_MS,
 	keepStudioHiddenAsync,
 } from "./keep-hidden.ts";
+import { KEEP_HIDDEN_POLL_MS } from "./window-hiding.ts";
 
 const PLACE = path.join(PROJECT, "game.rbxl");
 const TARGET = { pid: 42, place: PLACE, startTime: "42" };

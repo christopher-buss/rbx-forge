@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { assert, describe, it } from "vitest";
 import type { TestContext } from "vitest";
 
+import { KEEP_HIDDEN_START_BOUND_MS } from "../../src/studio/window-hiding.ts";
 import {
 	loadRealNative,
 	makeRunScriptStudioExecutable,
@@ -83,11 +84,15 @@ describe.skipIf(process.platform !== "win32")("windows native window visibility"
 		expect,
 		onTestFinished,
 	}) => {
-		expect.assertions(7);
+		expect.assertions(8);
 
 		const { pinned, trigger } = await launchHiddenStudioAsync(onTestFinished);
 
 		expect(pinned.desktop()).toBe("user");
+		// A session reads Studio as open only once the detached watcher runs.
+		await expect
+			.poll(() => pinned.windowHiding(), { timeout: KEEP_HIDDEN_START_BOUND_MS })
+			.toBeTrue();
 
 		writeFileSync(trigger, "new window");
 		await waitForFileAsync(`${trigger}.created`);
