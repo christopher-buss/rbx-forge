@@ -83,10 +83,10 @@ catalogs:
     strip-json-comments: 5.0.3
   test:
     "@total-typescript/shoehorn": 0.1.2
-    "@vitest/coverage-v8": 5.0.4
+    "@vitest/coverage-v8": 5.0.5
     jest-extended: 7.0.0
     memfs: 4.80.0
-    vitest: 5.0.4
+    vitest: 5.0.5
   tsc:
     "@isentinel/tsconfig": 2.0.0
     "@typescript/native": npm:typescript@7.0.2
