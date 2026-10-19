@@ -9,6 +9,11 @@
 	"schedule": ["* 0-23 * * 1,4,6"],
 	"packageRules": [
 		{
+			"description": "Vendored agent skills keep the dependencies of their upstream.",
+			"matchFileNames": [".agents/skills/**"],
+			"enabled": false
+		},
+		{
 			"matchUpdateTypes": ["minor", "patch"],
 			"matchCurrentVersion": "!/^0/",
 			"automerge": true
