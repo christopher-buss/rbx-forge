@@ -44,8 +44,8 @@ catalogs:
   build:
     tsdown: 0.23.1
   lint:
-    "@commitlint/cli": 21.2.3
-    "@commitlint/config-conventional": 21.2.3
+    "@commitlint/cli": 21.2.4
+    "@commitlint/config-conventional": 21.2.4
     "@commitlint/types": 21.2.3
     "@isentinel/eslint-config": 6.1.0
     "@vitest/eslint-plugin": 1.6.27
