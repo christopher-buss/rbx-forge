@@ -194,8 +194,8 @@ catalogs:
       specifier: 3.0.1
       version: 3.0.1
     eslint-plugin-n:
-      specifier: 18.4.1
-      version: 18.4.1
+      specifier: 18.5.0
+      version: 18.5.0
     eslint-plugin-pnpm:
       specifier: 1.9.1
       version: 1.9.1
@@ -347,7 +347,7 @@ importers:
         version: 21.2.3
       '@isentinel/eslint-config':
         specifier: catalog:lint
-        version: 6.1.0(@vitest/eslint-plugin@1.6.27)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.4.1)(eslint@10.12.0)(oxc-parser@0.153.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.88.0)(supports-color@10.2.2)(typescript@6.0.3)
+        version: 6.1.0(@vitest/eslint-plugin@1.6.27)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.12.0)(oxc-parser@0.153.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.88.0)(supports-color@10.2.2)(typescript@6.0.3)
       '@isentinel/tsconfig':
         specifier: catalog:tsc
         version: 2.0.0(typescript@6.0.3)
@@ -398,7 +398,7 @@ importers:
         version: 3.0.1(eslint@10.12.0)(supports-color@10.2.2)(typescript@6.0.3)
       eslint-plugin-n:
         specifier: catalog:lint
-        version: 18.4.1(eslint@10.12.0)(typescript@6.0.3)
+        version: 18.5.0(eslint@10.12.0)(typescript@6.0.3)
       eslint-plugin-pnpm:
         specifier: catalog:lint
         version: 1.9.1(eslint@10.12.0)
@@ -4110,8 +4110,8 @@ packages:
     peerDependencies:
       eslint: '>=9.38.0'
 
-  eslint-plugin-n@18.4.1:
-    resolution: {integrity: sha512-2sBReWOvCbzgkPri9M5SFmD5EbIwZLa1xz6B5RZsrI19WSFKpyx1sOMr+pdk8puCiXuEgCbErEHy1PuaUrc/4w==}
+  eslint-plugin-n@18.5.0:
+    resolution: {integrity: sha512-M7uF6MTN/An+AXqvyIbXq7npJIZOkd5eKo8iMMvWrcDVNyZVdA6TF2lw01aKQfCEidRfpnR78GhAjZorlXNHiw==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
     peerDependencies:
       eslint: '>=8.57.1'
@@ -6916,7 +6916,7 @@ snapshots:
 
   '@isentinel/dict-roblox@1.0.21': {}
 
-  '@isentinel/eslint-config@6.1.0(@vitest/eslint-plugin@1.6.27)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.4.1)(eslint@10.12.0)(oxc-parser@0.153.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.88.0)(supports-color@10.2.2)(typescript@6.0.3)':
+  '@isentinel/eslint-config@6.1.0(@vitest/eslint-plugin@1.6.27)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.12.0)(oxc-parser@0.153.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.88.0)(supports-color@10.2.2)(typescript@6.0.3)':
     dependencies:
       '@antfu/install-pkg': 2.0.1
       '@clack/prompts': 1.7.0
@@ -6977,7 +6977,7 @@ snapshots:
       '@vitest/eslint-plugin': 1.6.27(@typescript-eslint/eslint-plugin@8.70.1)(eslint@10.12.0)(supports-color@10.2.2)(typescript@6.0.3)(vitest@5.0.5)
       eslint-plugin-jest: 29.17.0(@typescript-eslint/eslint-plugin@8.70.1)(eslint@10.12.0)(supports-color@10.2.2)(typescript@6.0.3)
       eslint-plugin-jest-extended: 3.0.1(eslint@10.12.0)(supports-color@10.2.2)(typescript@6.0.3)
-      eslint-plugin-n: 18.4.1(eslint@10.12.0)(typescript@6.0.3)
+      eslint-plugin-n: 18.5.0(eslint@10.12.0)(typescript@6.0.3)
       oxlint: 1.88.0(oxlint-tsgolint@7.0.2003)
       oxlint-tsgolint: 7.0.2003
     transitivePeerDependencies:
@@ -9335,7 +9335,7 @@ snapshots:
     transitivePeerDependencies:
       - '@eslint/json'
 
-  eslint-plugin-n@18.4.1(eslint@10.12.0)(typescript@6.0.3):
+  eslint-plugin-n@18.5.0(eslint@10.12.0)(typescript@6.0.3):
     dependencies:
       '@eslint-community/eslint-utils': 4.10.1(eslint@10.12.0)
       enhanced-resolve: 5.25.1
