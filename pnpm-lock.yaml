@@ -288,8 +288,8 @@ catalogs:
       version: 5.0.5
   tsc:
     '@isentinel/tsconfig':
-      specifier: 2.0.0
-      version: 2.0.0
+      specifier: 3.0.0
+      version: 3.0.0
     '@typescript/native':
       specifier: npm:typescript@7.0.2
       version: 7.0.2
@@ -350,7 +350,7 @@ importers:
         version: 6.1.0(@vitest/eslint-plugin@1.6.27)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.4.1)(eslint@10.12.0)(oxc-parser@0.153.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.88.0)(supports-color@10.2.2)(typescript@6.0.3)
       '@isentinel/tsconfig':
         specifier: catalog:tsc
-        version: 2.0.0(typescript@6.0.3)
+        version: 3.0.0(typescript@6.0.3)
       '@napi-rs/cli':
         specifier: catalog:native
         version: 3.10.8(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@26.6.5)(supports-color@10.2.2)
@@ -443,7 +443,7 @@ importers:
         version: 4.0.12
       '@isentinel/tsconfig':
         specifier: catalog:tsc
-        version: 2.0.0(typescript@6.0.3)
+        version: 3.0.0(typescript@6.0.3)
       '@rbxts/compiler-types':
         specifier: catalog:plugin
         version: 3.0.0-types.0
@@ -1475,8 +1475,8 @@ packages:
     resolution: {integrity: sha512-pn3vLktbaHiJqPL1Q+yEA2k55Nrlj0GAaD+mB0B9IcvXeBJYrb4dIbzA31m8GGqybyCoRHcF4VLNAb3KBwbUlA==}
     hasBin: true
 
-  '@isentinel/tsconfig@2.0.0':
-    resolution: {integrity: sha512-sdYI9atuVNp8SC/qWYC/3LNK9rCYVsiUNgfF+O/h3a2/0Bmn6RZUlhGzhS0J5iwK1AifRXS6cWZPo2RerwOAAw==}
+  '@isentinel/tsconfig@3.0.0':
+    resolution: {integrity: sha512-j187ESnoLFO6wwU0PpL9b/JDtvEa6TwABaiVSOw41li3yoZyfg4ZEudRWElbxVdvp7hiBgCESTZEohkYS03bsQ==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       typescript: ^5.5.0
@@ -7032,7 +7032,7 @@ snapshots:
       typescript: 6.0.3
       yargs: 18.0.0
 
-  '@isentinel/tsconfig@2.0.0(typescript@6.0.3)':
+  '@isentinel/tsconfig@3.0.0(typescript@6.0.3)':
     dependencies:
       typescript: 6.0.3
 
