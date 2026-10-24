@@ -65,7 +65,7 @@ catalogs:
     "@stryker-mutator/typescript-checker": 10.0.0
     "@stryker-mutator/vitest-runner": 10.0.0
   native:
-    "@napi-rs/cli": 3.10.8
+    "@napi-rs/cli": 3.10.9
   plugin:
     "@isentinel/jest-roblox": 0.4.7
     "@isentinel/roblox-ts": 4.0.12
