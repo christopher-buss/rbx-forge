@@ -72,7 +72,7 @@ catalogs:
     "@rbxts/compiler-types": 3.0.0-types.0
     "@rbxts/jest": 3.16.0-ts.2
     "@rbxts/jest-globals": 3.16.0-ts.2
-    "@rbxts/types": 1.0.958
+    "@rbxts/types": 1.0.959
   release:
     bumpp: 12.3.0
   runtime:
