@@ -179,8 +179,8 @@ catalogs:
       specifier: 21.2.3
       version: 21.2.3
     '@isentinel/eslint-config':
-      specifier: 6.1.0
-      version: 6.1.0
+      specifier: 6.2.0
+      version: 6.2.0
     '@vitest/eslint-plugin':
       specifier: 1.6.28
       version: 1.6.28
@@ -347,7 +347,7 @@ importers:
         version: 21.2.3
       '@isentinel/eslint-config':
         specifier: catalog:lint
-        version: 6.1.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.13.0)(oxc-parser@0.154.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.89.0)(supports-color@10.2.2)(typescript@6.0.3)
+        version: 6.2.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.13.0)(oxc-parser@0.154.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.89.0)(supports-color@10.2.2)(typescript@6.0.3)
       '@isentinel/tsconfig':
         specifier: catalog:tsc
         version: 2.0.0(typescript@6.0.3)
@@ -1411,8 +1411,8 @@ packages:
     resolution: {integrity: sha512-rGl23rh/RQ5svoqKhiRR+tjRHNv334VNfNP10vgyUhXCM7T0V9U/93FPTSQhEP8oF+oXDKN5r9pFG5yqyfx9+Q==}
     engines: {node: '>=20.18.0'}
 
-  '@isentinel/eslint-config@6.1.0':
-    resolution: {integrity: sha512-wzfw7fOHmPH3oY6oiDtb0ZQxfF7uwusPh2YdTq/XsduY3pGzfj3Xoa24DAO+3w52K/RBk7bE6s8Hp6+kVddCNw==}
+  '@isentinel/eslint-config@6.2.0':
+    resolution: {integrity: sha512-Ds2u+D9SGn079w/qNCXQF2ZUSMReitIuibtUdxCEIv4uRQbEVWUur4Q7Y0V/GYMHiMrhgCG4yLC5QI9qbUkT8g==}
     engines: {node: '>=24.12.0'}
     hasBin: true
     peerDependencies:
@@ -6919,7 +6919,7 @@ snapshots:
 
   '@isentinel/dict-roblox@1.0.21': {}
 
-  '@isentinel/eslint-config@6.1.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.13.0)(oxc-parser@0.154.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.89.0)(supports-color@10.2.2)(typescript@6.0.3)':
+  '@isentinel/eslint-config@6.2.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.13.0)(oxc-parser@0.154.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.89.0)(supports-color@10.2.2)(typescript@6.0.3)':
     dependencies:
       '@antfu/install-pkg': 2.0.1
       '@clack/prompts': 1.7.0
@@ -6965,6 +6965,7 @@ snapshots:
       file-entry-cache: 11.1.5
       find-up-simple: 1.0.1
       globals: 17.7.0
+      jiti: 2.7.0
       jsonc-eslint-parser: 3.1.0
       local-pkg: 1.2.1
       oxfmt: 0.72.0
@@ -9215,6 +9216,12 @@ snapshots:
       eslint: 10.13.0(jiti@2.7.0)(supports-color@10.2.2)
       prettier-linter-helpers: 1.0.1
 
+  eslint-json-compat-utils@0.2.3(eslint@10.13.0)(jsonc-eslint-parser@3.1.0):
+    dependencies:
+      eslint: 10.13.0(jiti@2.7.0)(supports-color@10.2.2)
+      esquery: 1.7.0
+      jsonc-eslint-parser: 3.1.0
+
   eslint-json-compat-utils@0.2.3(eslint@10.13.0)(jsonc-eslint-parser@3.3.0):
     dependencies:
       eslint: 10.13.0(jiti@2.7.0)(supports-color@10.2.2)
@@ -9329,8 +9336,8 @@ snapshots:
       '@ota-meshi/ast-token-store': 0.3.0
       diff-sequences: 29.6.3
       eslint: 10.13.0(jiti@2.7.0)(supports-color@10.2.2)
-      eslint-json-compat-utils: 0.2.3(eslint@10.13.0)(jsonc-eslint-parser@3.3.0)
-      jsonc-eslint-parser: 3.3.0
+      eslint-json-compat-utils: 0.2.3(eslint@10.13.0)(jsonc-eslint-parser@3.1.0)
+      jsonc-eslint-parser: 3.1.0
       natural-compare: 1.4.0
       synckit: 0.11.13
     transitivePeerDependencies:
@@ -9370,8 +9377,8 @@ snapshots:
       detect-newline: 4.0.1
       eslint: 10.13.0(jiti@2.7.0)(supports-color@10.2.2)
       eslint-fix-utils: 0.4.4(@types/estree@1.0.9)(eslint@10.13.0)
-      eslint-json-compat-utils: 0.2.3(eslint@10.13.0)(jsonc-eslint-parser@3.3.0)
-      jsonc-eslint-parser: 3.3.0
+      eslint-json-compat-utils: 0.2.3(eslint@10.13.0)(jsonc-eslint-parser@3.1.0)
+      jsonc-eslint-parser: 3.1.0
       package-json-validator: 1.6.1
       semver: 7.8.5
       sort-object-keys: 2.1.0
@@ -9390,7 +9397,7 @@ snapshots:
     dependencies:
       empathic: 2.1.0
       eslint: 10.13.0(jiti@2.7.0)(supports-color@10.2.2)
-      jsonc-eslint-parser: 3.3.0
+      jsonc-eslint-parser: 3.1.0
       pathe: 2.0.3
       pnpm-workspace-yaml: 1.7.0
       tinyglobby: 0.2.17
@@ -10034,7 +10041,7 @@ snapshots:
   local-pkg@1.2.1:
     dependencies:
       mlly: 1.8.2
-      pkg-types: 2.3.3
+      pkg-types: 2.4.0
       quansync: 0.2.11
 
   locate-path@6.0.0:
