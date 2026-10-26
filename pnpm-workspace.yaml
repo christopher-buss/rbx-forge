@@ -47,7 +47,7 @@ catalogs:
     "@commitlint/cli": 21.2.4
     "@commitlint/config-conventional": 21.2.4
     "@commitlint/types": 21.2.3
-    "@isentinel/eslint-config": 6.1.0
+    "@isentinel/eslint-config": 6.2.0
     "@vitest/eslint-plugin": 1.6.28
     eslint: 10.13.0
     eslint-plugin-jest: 29.17.0
