@@ -42,7 +42,7 @@ patchedDependencies:
 
 catalogs:
   build:
-    tsdown: 0.23.1
+    tsdown: 0.23.3
   lint:
     "@commitlint/cli": 21.2.4
     "@commitlint/config-conventional": 21.2.4
