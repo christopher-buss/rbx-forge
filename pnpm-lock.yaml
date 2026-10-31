@@ -262,8 +262,8 @@ catalogs:
       specifier: 2.2.9
       version: 2.2.9
     c12:
-      specifier: 4.0.0-rc.3
-      version: 4.0.0-rc.3
+      specifier: 4.0.0-rc.4
+      version: 4.0.0-rc.4
     jiti:
       specifier: 2.7.0
       version: 2.7.0
@@ -328,7 +328,7 @@ importers:
         version: 2.2.9
       c12:
         specifier: catalog:runtime
-        version: 4.0.0-rc.3(jiti@2.7.0)(magicast@0.5.5)
+        version: 4.0.0-rc.4(jiti@2.7.0)(magicast@0.5.5)
       jiti:
         specifier: catalog:runtime
         version: 2.7.0
@@ -3638,8 +3638,8 @@ packages:
       magicast:
         optional: true
 
-  c12@4.0.0-rc.3:
-    resolution: {integrity: sha512-zJdMuRSVnBwcZAmbL3efOhRafOZMgU977nXmcdeuUtpEIgdrncoMDhwzRCVd5Drp/lhXAUvEylxP4mQDJTzoGQ==}
+  c12@4.0.0-rc.4:
+    resolution: {integrity: sha512-SdcZfDXUc7ownRiqbEf5yjaVlbWN9GuWS6SSPlKJ1cFOQYMrb1ouU8YWxZoPfXZbF/tw+f4HjjJS0tlXQJfkEg==}
     peerDependencies:
       dotenv: '*'
       giget: '>=3.3.1'
@@ -8891,7 +8891,7 @@ snapshots:
       jiti: 2.7.0
       magicast: 0.5.5
 
-  c12@4.0.0-rc.3(jiti@2.7.0)(magicast@0.5.5):
+  c12@4.0.0-rc.4(jiti@2.7.0)(magicast@0.5.5):
     dependencies:
       confbox: 0.3.1
       defu: 6.1.7
