@@ -57,7 +57,7 @@ catalogs:
     eslint_d: 15.0.3
     knip: 6.43.0
     oxlint: 1.90.0
-    oxlint-tsgolint: 7.0.2003
+    oxlint-tsgolint: 7.0.2005
     publint: 0.3.25
   mutation:
     "@stryker-mutator/api": 10.0.0
