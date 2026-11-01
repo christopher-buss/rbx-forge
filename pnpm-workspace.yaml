@@ -60,10 +60,10 @@ catalogs:
     oxlint-tsgolint: 7.0.2003
     publint: 0.3.25
   mutation:
-    "@stryker-mutator/api": 10.0.0
-    "@stryker-mutator/core": 10.0.0
-    "@stryker-mutator/typescript-checker": 10.0.0
-    "@stryker-mutator/vitest-runner": 10.0.0
+    "@stryker-mutator/api": 10.1.1
+    "@stryker-mutator/core": 10.1.1
+    "@stryker-mutator/typescript-checker": 10.1.1
+    "@stryker-mutator/vitest-runner": 10.1.1
   native:
     "@napi-rs/cli": 3.10.9
   plugin:
