@@ -233,8 +233,8 @@ catalogs:
       version: 3.10.9
   plugin:
     '@isentinel/jest-roblox':
-      specifier: 0.4.7
-      version: 0.4.7
+      specifier: 0.4.11
+      version: 0.4.11
     '@isentinel/roblox-ts':
       specifier: 4.0.12
       version: 4.0.12
@@ -437,7 +437,7 @@ importers:
     devDependencies:
       '@isentinel/jest-roblox':
         specifier: catalog:plugin
-        version: 0.4.7(jiti@2.7.0)(magicast@0.5.5)(typescript@6.0.3)(typescript@7.0.2)
+        version: 0.4.11(jiti@2.7.0)(magicast@0.5.5)(typescript@6.0.3)(typescript@7.0.2)
       '@isentinel/roblox-ts':
         specifier: catalog:plugin
         version: 4.0.12
@@ -1455,8 +1455,8 @@ packages:
       oxlint-tsgolint:
         optional: true
 
-  '@isentinel/jest-roblox@0.4.7':
-    resolution: {integrity: sha512-Q1tfaPnRK6w4UEWehZ/9/OOYTgAFcIQMLMD7aysZaMWwNrD4PK4mK2OMi8sq51GT8orFfZTBx7DzasHjH0NrQA==}
+  '@isentinel/jest-roblox@0.4.11':
+    resolution: {integrity: sha512-7WYpv+7EpnFUMn6vfBzkglgYIzUomLfbfS03XFMQ/clBGMlDb7dfJMptj6fmh+LicjhTRKj2tfY/aj4oSFnVjg==}
     engines: {node: '>=24.12.0'}
     hasBin: true
     peerDependencies:
@@ -4284,9 +4284,6 @@ packages:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
     engines: {node: '>=12.0.0'}
 
-  exsolve@1.1.1:
-    resolution: {integrity: sha512-9U/jZUgjnSGyntRr6y5Muu1MJcwFl6kPu7k8qLF0IMNfLqvw0NZ4nnVDq0RVoZ0RvCyumib4Ez3KYrVfilrw+g==}
-
   exsolve@1.1.3:
     resolution: {integrity: sha512-kuzL9zherLQoqDeQaS55AiiIg1kb4KYXaSusTtgZTPlvKP2gGCI82LNmBNh5RjDVUXIcmgx+/Mx7vPwRzBbhJA==}
 
@@ -5185,9 +5182,6 @@ packages:
 
   pkg-types@1.3.1:
     resolution: {integrity: sha512-/Jm5M4RvtBFVkKWRu2BLUTNP8/M2a+UwuAX+ae4770q1qVGtfjG+WTCupoZixokjmHiry8uI+dlY8KXYV5HVVQ==}
-
-  pkg-types@2.3.3:
-    resolution: {integrity: sha512-j/lCFdcppV0JxWpCEITdbDltBxPP6cHT+yNJ6Go2OgoSA9518X847X9z0p6LtA4Nc16+eQzCZjRrWanTGvHJ5w==}
 
   pkg-types@2.4.0:
     resolution: {integrity: sha512-07Fys7iVx0X6TcviMOgogM1Lk33ZyqOezMnU79S+kffWqwolG/5W9V8EgQSeYCIfFTYVgssRbnH630Oa2+soBA==}
@@ -6995,7 +6989,7 @@ snapshots:
       - typescript
       - vite-plus
 
-  '@isentinel/jest-roblox@0.4.7(jiti@2.7.0)(magicast@0.5.5)(typescript@6.0.3)(typescript@7.0.2)':
+  '@isentinel/jest-roblox@0.4.11(jiti@2.7.0)(magicast@0.5.5)(typescript@6.0.3)(typescript@7.0.2)':
     dependencies:
       '@bedrock-rbx/ocale': 0.3.4
       '@jridgewell/trace-mapping': 0.3.31
@@ -8883,9 +8877,9 @@ snapshots:
     dependencies:
       confbox: 0.2.4
       defu: 6.1.7
-      exsolve: 1.1.1
+      exsolve: 1.1.3
       pathe: 2.0.3
-      pkg-types: 2.3.3
+      pkg-types: 2.4.0
       rc9: 3.1.0
     optionalDependencies:
       jiti: 2.7.0
@@ -9617,8 +9611,6 @@ snapshots:
       yoctocolors: 2.2.0
 
   expect-type@1.4.0: {}
-
-  exsolve@1.1.1: {}
 
   exsolve@1.1.3: {}
 
@@ -10710,12 +10702,6 @@ snapshots:
     dependencies:
       confbox: 0.1.8
       mlly: 1.8.2
-      pathe: 2.0.3
-
-  pkg-types@2.3.3:
-    dependencies:
-      confbox: 0.3.1
-      exsolve: 1.1.1
       pathe: 2.0.3
 
   pkg-types@2.4.0:
