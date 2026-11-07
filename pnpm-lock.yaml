@@ -179,8 +179,8 @@ catalogs:
       specifier: 21.2.3
       version: 21.2.3
     '@isentinel/eslint-config':
-      specifier: 6.2.0
-      version: 6.2.0
+      specifier: 6.3.0
+      version: 6.3.0
     '@vitest/eslint-plugin':
       specifier: 1.6.28
       version: 1.6.28
@@ -347,7 +347,7 @@ importers:
         version: 21.2.3
       '@isentinel/eslint-config':
         specifier: catalog:lint
-        version: 6.2.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.14.0)(oxc-parser@0.155.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.90.0)(supports-color@10.2.2)(typescript@6.0.3)
+        version: 6.3.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.14.0)(oxc-parser@0.155.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.90.0)(supports-color@10.2.2)(typescript@6.0.3)
       '@isentinel/tsconfig':
         specifier: catalog:tsc
         version: 2.0.0(typescript@6.0.3)
@@ -1545,8 +1545,8 @@ packages:
     resolution: {integrity: sha512-Qz0B8/91H7vTF6kNp8TfhACXhpOZtVca+YY+HRij+W1nzdeJEx7z8KMeGO27FUBW9ZWCcvTYFdCkTMKfDvPMbg==}
     engines: {node: '>=20.18.0'}
 
-  '@isentinel/eslint-config@6.2.0':
-    resolution: {integrity: sha512-Ds2u+D9SGn079w/qNCXQF2ZUSMReitIuibtUdxCEIv4uRQbEVWUur4Q7Y0V/GYMHiMrhgCG4yLC5QI9qbUkT8g==}
+  '@isentinel/eslint-config@6.3.0':
+    resolution: {integrity: sha512-gXR0qj9j4zeGBtvGCHZH6+aw34Rdto1Z+GjeuEcrEta8zRLS9inEwE3o3hifQEUBg5uw4mmS5G8Nha6vUlcKTA==}
     engines: {node: '>=24.12.0'}
     hasBin: true
     peerDependencies:
@@ -7197,7 +7197,7 @@ snapshots:
 
   '@isentinel/dict-roblox@1.0.23': {}
 
-  '@isentinel/eslint-config@6.2.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.14.0)(oxc-parser@0.155.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.90.0)(supports-color@10.2.2)(typescript@6.0.3)':
+  '@isentinel/eslint-config@6.3.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.14.0)(oxc-parser@0.155.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.90.0)(supports-color@10.2.2)(typescript@6.0.3)':
     dependencies:
       '@antfu/install-pkg': 2.0.1
       '@clack/prompts': 1.7.0
