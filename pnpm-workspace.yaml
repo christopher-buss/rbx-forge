@@ -55,7 +55,7 @@ catalogs:
     eslint-plugin-n: 18.5.0
     eslint-plugin-pnpm: 1.9.1
     eslint_d: 15.1.0
-    knip: 6.44.1
+    knip: 6.44.2
     oxlint: 1.92.0
     oxlint-tsgolint: 7.0.2003
     publint: 0.3.25
