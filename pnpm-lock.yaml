@@ -248,8 +248,8 @@ catalogs:
       specifier: 3.16.0-ts.2
       version: 3.16.0-ts.2
     '@rbxts/types':
-      specifier: 1.0.961
-      version: 1.0.961
+      specifier: 1.0.962
+      version: 1.0.962
   release:
     bumpp:
       specifier: 12.3.0
@@ -455,7 +455,7 @@ importers:
         version: 3.16.0-ts.2
       '@rbxts/types':
         specifier: catalog:plugin
-        version: 1.0.961
+        version: 1.0.962
 
 packages:
 
@@ -3037,8 +3037,8 @@ packages:
   '@rbxts/pretty-format@3.16.0-ts.2':
     resolution: {integrity: sha512-EDyn1hQOCIE0JVC6iI0NGUemRzvRQdgN174kNzaFMdqq7h/sYs0BmUKJUPg0k2+CCb8QztXa3gozG0qfqOyp1g==}
 
-  '@rbxts/types@1.0.961':
-    resolution: {integrity: sha512-9CsS11ylVVH4on1FpCOQULJS7gUX4JghrgkJIwgjXD1RiGQH17IFv42maq30GiP7gvZgtAjZlrmLb1/3eyw70w==}
+  '@rbxts/types@1.0.962':
+    resolution: {integrity: sha512-sOIXlW98r5t2u/uRDncTnU+82zzTUT0p5hD8PFuKIjzFhPXy5yJ2ZOn4Xd5zSEwa1fYca8FRKJB0Dwfbsx8Gxg==}
 
   '@roblox-ts/luau-ast@2.0.1':
     resolution: {integrity: sha512-jej2mzRGwhR9wu4woAtgTwqsKADlegZYlQ+M5qVHRojvjoyJVFkLrSbhBKRr8HR+fVW5nCz0qX7kNa0tSpAY+A==}
@@ -8540,7 +8540,7 @@ snapshots:
     dependencies:
       '@rbxts-js/pretty-format': 3.16.0-ts.1
 
-  '@rbxts/types@1.0.961': {}
+  '@rbxts/types@1.0.962': {}
 
   '@roblox-ts/luau-ast@2.0.1': {}
 
