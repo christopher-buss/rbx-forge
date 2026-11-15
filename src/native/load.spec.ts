@@ -11,6 +11,7 @@ import type { NativeHost, ReaperLocateOptions } from "./load.ts";
 import {
 	createNativeLoader,
 	createReaperLocator,
+	createWindowsHelperLocator,
 	isExecutableFile,
 	nativeTarget,
 	readHost,
@@ -347,5 +348,82 @@ describe(createReaperLocator, () => {
 		makeLocator({ readHost: readHostSpy });
 
 		expect(readHostSpy).not.toHaveBeenCalled();
+	});
+});
+
+describe("windows helper lookup", () => {
+	it.for(["gnu", "musl"] as const)(
+		"should resolve the installed %s Linux package",
+		(libc, { expect }) => {
+			expect.assertions(1);
+
+			const locate = createWindowsHelperLocator({
+				directory: undefined,
+				isExecutable: () => true,
+				readHost: () => ({ ...LINUX, libc }),
+				resolveModule: (id) => path.resolve("packages", id),
+			});
+
+			expect(locate()).toBe(
+				path.resolve(
+					"packages",
+					`@rbx-forge/native-linux-x64-${libc}/package.json`,
+					"..",
+					"forge-windows-helper.exe",
+				),
+			);
+		},
+	);
+
+	it("should resolve a development helper to an absolute path", ({ expect }) => {
+		expect.assertions(1);
+
+		const locate = createWindowsHelperLocator({
+			directory: "native",
+			isExecutable: () => true,
+			readHost: () => LINUX,
+			resolveModule: () => "",
+		});
+
+		expect(locate()).toBe(path.resolve("native", "forge-windows-helper.exe"));
+	});
+
+	it.for([
+		{
+			failure: "unsupported",
+			host: { ...LINUX, arch: "ia32" },
+			resolveModule: () => path.resolve("package.json"),
+		},
+		{
+			failure: "package",
+			host: LINUX,
+			resolveModule: () => {
+				throw new Error("missing package");
+			},
+		},
+		{
+			failure: "non-error package failure",
+			host: LINUX,
+			resolveModule: () => {
+				// oxlint-disable-next-line typescript/only-throw-error -- a resolver may throw anything
+				throw "missing";
+			},
+		},
+		{ failure: "non-Linux", host: WINDOWS, resolveModule: () => path.resolve("package.json") },
+		{ failure: "file", host: LINUX, resolveModule: () => path.resolve("package.json") },
+	])("should explain an unavailable $failure helper", ({ host, resolveModule }, { expect }) => {
+		expect.assertions(3);
+
+		const locate = createWindowsHelperLocator({
+			directory: undefined,
+			isExecutable: () => false,
+			readHost: () => host,
+			resolveModule,
+		});
+		const error = catchForgeError(locate);
+
+		expect(error.code).toBe("windows_helper_unavailable");
+		expect(error.exitCode).toBe(1);
+		expect(error.hint).toContain("Reinstall rbx-forge with optional dependencies");
 	});
 });

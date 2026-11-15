@@ -98,6 +98,7 @@ export const NATIVE_TARGETS: ReadonlyArray<NativeTarget> = packageJson.napi.targ
 	},
 );
 
+const WINDOWS_HELPER = "forge-windows-helper.exe";
 const MANIFEST = "package.json";
 const NATIVE_PREFIX = "@rbx-forge/native-";
 /** `owner/name` in a `github:` shorthand or a github.com URL. */
@@ -140,7 +141,7 @@ export function runReleaseCheck({ log, platform, read, run }: CheckDependencies)
 }
 
 /**
- * The manifest of one platform package: the addon plus `forge-reaper`.
+ * The manifest of one platform package, including its executable binaries.
  * @param root - The root `package.json`.
  * @param target - The native target.
  * @param version - The release version.
@@ -159,7 +160,7 @@ export function platformManifest(
 		cpu: [target.cpu],
 		description: `The ${target.rust} native build of rbx-forge`,
 		engines: root["engines"],
-		files: [addon, reaperName(target)],
+		files: [addon, reaperName(target), ...(target.os === "linux" ? [WINDOWS_HELPER] : [])],
 		homepage: root["homepage"],
 		license: root["license"],
 		version,
@@ -410,9 +411,8 @@ function publishOnce(
 }
 
 /**
- * Pack a staged platform package and make its reaper executable in the
- * tarball: artifact downloads and a Windows pack both drop the exec bit, and
- * the reaper locator never sets it.
+ * Pack a platform package with executable modes for the reaper and Linux helper.
+ * Artifact downloads and Windows packing drop execute bits; loaders never set them.
  * @param dependencies - Files and processes.
  * @param staged - The staged package.
  * @param version - The release version.
@@ -426,7 +426,12 @@ function packPlatform(
 	runOrThrow(run, "pnpm", ["--dir", directory, "pack", "--pack-destination", ".."]);
 	const tarball = path.join(path.dirname(directory), tarballName(name, version));
 	const entry = `package/${reaperName(target)}`;
-	files.writeBytes(tarball, setEntryMode(files.readBytes(tarball), entry, 0o755));
+	let packed = setEntryMode(files.readBytes(tarball), entry, 0o755);
+	if (target.os === "linux") {
+		packed = setEntryMode(packed, `package/${WINDOWS_HELPER}`, 0o755);
+	}
+
+	files.writeBytes(tarball, packed);
 	return tarball;
 }
 
@@ -434,17 +439,35 @@ function stagePackage(
 	files: ReleaseFiles,
 	root: Manifest,
 	{ root: rootDirectory, staging, version }: PublishOptions,
-	{ addon, reaper, target }: { addon: string; reaper: string; target: NativeTarget },
+	{
+		addon,
+		helper,
+		reaper,
+		target,
+	}: { addon: string; helper: string | undefined; reaper: string; target: NativeTarget },
 ): StagedPackage {
 	const directory = path.join(staging, target.target);
 	const manifest = platformManifest(root, target, version);
 	files.mkdir(directory);
 	files.copy(addon, path.join(directory, path.basename(addon)));
 	files.copy(reaper, path.join(directory, reaperName(target)));
+	if (helper !== undefined) {
+		files.copy(helper, path.join(directory, WINDOWS_HELPER));
+	}
+
 	files.copy(path.join(rootDirectory, "LICENSE"), path.join(directory, "LICENSE"));
 	files.write(path.join(directory, "README.md"), platformReadme(root, target));
 	files.write(path.join(directory, MANIFEST), `${JSON.stringify(manifest, undefined, "\t")}\n`);
 	return { name: String(manifest["name"]), directory, target };
+}
+
+function helperArtifact(artifacts: string, target: NativeTarget): string | undefined {
+	if (target.os !== "linux") {
+		return undefined;
+	}
+
+	const rust = target.cpu === "arm64" ? "aarch64-pc-windows-msvc" : "x86_64-pc-windows-msvc";
+	return path.join(artifacts, `native-${rust}`, rust, "release", WINDOWS_HELPER);
 }
 
 function stageNativePackages(
@@ -456,12 +479,15 @@ function stageNativePackages(
 		const artifact = path.join(options.artifacts, `native-${target.rust}`);
 		return {
 			addon: path.join(artifact, "napi", `forge-native.${target.target}.node`),
+			helper: helperArtifact(options.artifacts, target),
 			reaper: path.join(artifact, target.rust, "release", reaperName(target)),
 			target,
 		};
 	});
 	const missing = sources
-		.flatMap(({ addon, reaper }) => [addon, reaper])
+		.flatMap(({ addon, helper, reaper }) => {
+			return helper === undefined ? [addon, reaper] : [addon, reaper, helper];
+		})
 		.filter((file) => !files.exists(file));
 	if (missing.length > 0) {
 		throw new Error(`missing native artifacts:\n${missing.join("\n")}`);

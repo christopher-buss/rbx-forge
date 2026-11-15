@@ -237,10 +237,12 @@ Window states after `WM_CLOSE` to the main window:
   `scripts/release/release.ts`:
   1. For each `package.json#napi` target it stages
      `@rbx-forge/native-<platform>`: the `.node` file, `forge-reaper` (`.exe` on
-     Windows), and a generated `package.json` that lists both in `files`. It
-     packs each package and sets the reaper entry to mode 0755 in the tarball.
-     Artifact downloads and a pack on Windows both drop the exec bit, so the
-     tarball, not the file system, carries the mode.
+     Windows), and a generated `package.json` that lists them in `files`. Each
+     Linux package also stages `forge-windows-helper.exe` from the matching
+     Windows build (x64 or arm64, for both glibc and musl). It packs each
+     package and sets the reaper and Linux helper entries to mode 0755 in the
+     tarball. Artifact downloads and a pack on Windows both drop the exec bit,
+     so the tarball, not the file system, carries the mode.
   2. It publishes each platform package, then `rbx-forge` with them as
      `optionalDependencies`. Those are written only for the publish, so the
      lockfile never names a version that is not on npm. `pnpm pack` writes each
@@ -258,10 +260,12 @@ Window states after `WM_CLOSE` to the main window:
 - **Loader.** A TypeScript module in the native-bindings area (no napi generated
   JS; the build already uses `--no-js`) picks the package from
   `process.platform`, `process.arch`, and glibc or musl. It loads the addon with
-  `createRequire`, and resolves the reaper path from the package's
-  `package.json`. If the package is missing or the reaper is not executable, it
-  returns the typed error `native_missing`. It does not `chmod` at run time,
-  because pnpm hard-links package files from its shared store.
+  `createRequire`, and resolves the reaper and Windows helper paths from the
+  package's `package.json`. If the package is missing or the reaper is not
+  executable, it returns `reaper_unavailable`; a missing or incompatible Windows
+  helper returns `windows_helper_unavailable`. Broken WSL launch or handshake
+  returns `wsl_interop_unavailable`. It does not `chmod` at run time, because
+  pnpm hard-links package files from its shared store.
 - **Development and tests.** The loader takes an explicit directory through its
   seam. Tests and local runs point it at `reaper/target` output.
 - **Targets.** The eight targets in `package.json#napi` stay. CI loads the addon

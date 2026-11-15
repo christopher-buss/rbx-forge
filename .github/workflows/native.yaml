@@ -64,6 +64,11 @@ jobs:
         run: cargo build --manifest-path reaper/Cargo.toml --release --bin forge-reaper --target ${{ matrix.target }}
         shell: bash
 
+      - if: runner.os == 'Windows'
+        name: Build Windows helper
+        run: cargo build --manifest-path reaper/Cargo.toml --release --bin forge-windows-helper --target ${{ matrix.target }}
+        shell: bash
+
       # musl targets build in Alpine, where the C toolchain is musl's own: a
       # glibc host links the glibc loader into the addon, and Ubuntu's
       # musl-gcc has no `libgcc_s`. A Node addon must link the C runtime
@@ -118,6 +123,7 @@ jobs:
             reaper/target/napi/*.node
             reaper/target/${{ matrix.target }}/release/forge-reaper
             reaper/target/${{ matrix.target }}/release/forge-reaper.exe
+            reaper/target/${{ matrix.target }}/release/forge-windows-helper.exe
     timeout-minutes: 30
     strategy:
       matrix:
