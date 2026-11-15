@@ -7,7 +7,8 @@ status: accepted
 ## Context
 
 All process ownership is in one Rust crate (`reaper/`): the `forge-reaper`
-binary and the `@rbx-forge/native` addon. Four questions shape its design:
+binary, the `forge-windows-helper` binary, and the `@rbx-forge/native` addon.
+Four questions shape its design:
 
 1. Does job breakaway work for a detached `up` in Windows Terminal, the VS Code
    terminal, and an agent shell?
@@ -246,6 +247,14 @@ Window states after `WM_CLOSE` to the main window:
      tarball (it resolves `catalog:` versions) and `npm publish` sends it with
      its README. `packageName` `@rbx-forge/native` is only the name prefix;
      there is no separate umbrella package.
+- **Windows helper.** `forge-windows-helper` compiles the plain Rust Windows
+  Studio modules without napi. The addon retains thin wrappers over the same
+  detached launcher and pinned-process primitives. Each WSL forge process owns
+  one helper and keeps Studio pins there; Windows creation times remain decimal
+  FILETIME strings. Helper EOF drops handles and exits without closing Studio.
+  Studio launches use the helper's Windows environment plus named overrides, and
+  the same detached launch policy as the addon. Each Linux package carries the
+  matching Windows architecture's helper (ADR 0009).
 - **Loader.** A TypeScript module in the native-bindings area (no napi generated
   JS; the build already uses `--no-js`) picks the package from
   `process.platform`, `process.arch`, and glibc or musl. It loads the addon with
