@@ -23,6 +23,7 @@ import type {
 } from "../../src/seams/reporter.ts";
 import type { Seams } from "../../src/seams/seams.ts";
 import type { Signals } from "../../src/seams/signals.ts";
+import { createAddonStudioHost } from "../../src/seams/studio-host.ts";
 import { noInstalledStudio } from "../../src/studio/discover.ts";
 import type { StudioLauncher } from "../../src/studio/launcher.ts";
 import type { DetachedLauncher } from "../../src/supervisor/detached-launcher.ts";
@@ -121,7 +122,7 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 		supervisor: vi.fn<SupervisorLauncher>(unreachable("supervisor")),
 		...overrides,
 	};
-	return { ...seams, studioHost: overrides.studioHost ?? createFakeStudioHost(seams).studioHost };
+	return withStudioHost(seams, overrides);
 }
 
 /**
@@ -165,6 +166,19 @@ export function createCommandContext(overrides: Partial<CommandContext> = {}): C
 		seams: createTestSeams(),
 		...overrides,
 	};
+}
+
+function withStudioHost(
+	seams: Pick<Seams, Exclude<keyof Seams, "studioHost">>,
+	overrides: Partial<Seams>,
+): Seams {
+	const result: Seams = { ...seams, studioHost: fromAny(undefined) };
+	result.studioHost =
+		overrides.studioHost ??
+		(overrides.native === undefined
+			? createFakeStudioHost(result).studioHost
+			: createAddonStudioHost(result));
+	return result;
 }
 
 function unreachable(seam: string): () => never {

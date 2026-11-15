@@ -7,7 +7,6 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
 import { runRojoAsync } from "../rojo/rojo.ts";
 import type { RojoServerInfo } from "../seams/network.ts";
-import { studioPluginsFolder } from "./plugins-folder.ts";
 import patched from "./rojo-plugin/patched.json" with { type: "json" };
 
 /**
@@ -74,7 +73,7 @@ export async function prepareRojoPluginAsync(
 	server: Pick<RojoServerInfo, "protocolVersion" | "serverVersion">,
 	signal: AbortSignal,
 ): Promise<PluginCapabilities> {
-	const model = pluginPath(context);
+	const model = await pluginPathAsync(context);
 	if (model === undefined) {
 		return MANUAL;
 	}
@@ -99,8 +98,8 @@ export async function prepareRojoPluginAsync(
 	return FORGE;
 }
 
-function pluginPath(context: CommandContext): string | undefined {
-	const folder = studioPluginsFolder(context);
+async function pluginPathAsync(context: CommandContext): Promise<string | undefined> {
+	const folder = await context.seams.studioHost.pluginsFolderAsync(context.env);
 	return folder === undefined ? undefined : path.join(folder, "RojoManagedPlugin.rbxm");
 }
 

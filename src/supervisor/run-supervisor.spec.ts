@@ -329,6 +329,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		expect(run.fake.calls).not.toContain("stop rojo 3000");
 
 		await passAsync(run, FILE_POLL_MS);
+		await passAsync(run, FILE_POLL_MS);
 		run.fake.exit("rojo", OK);
 		await passAsync(run, OUTPUT_POLL_MS);
 		await stopped;
@@ -2264,8 +2265,8 @@ describe(runSupervisorAsync, () => {
 					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
 				type: "warning",
 			},
-			{ message: `Roblox Studio has ${PLACE} open.`, type: "info" },
 			{ name: "rojo serve", status: "started", type: "step" },
+			{ message: `Roblox Studio has ${PLACE} open.`, type: "info" },
 			{ name: "rojo serve", status: "succeeded", type: "step" },
 		]);
 	});

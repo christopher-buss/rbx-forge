@@ -10,7 +10,7 @@ import type { StudioReadyListener } from "../seams/network.ts";
 import { watchHiddenLightingAsync } from "../studio/lighting-dialog.ts";
 import { studioLockPath } from "../studio/lock-file.ts";
 import type { OpenedStudio } from "./attach.ts";
-import { attachStudio } from "./attach.ts";
+import { attachStudioAsync } from "./attach.ts";
 import type { BuildWatch } from "./build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
 import type { IdleTracker } from "./idle.ts";
@@ -101,7 +101,7 @@ export async function prepareStudioAsync(
 	steps: CommandContext,
 	{ build }: Pick<OpenOptions, "build">,
 ): Promise<PreparedStudio> {
-	const attached = attachStudio(context, config);
+	const attached = await attachStudioAsync(context, config);
 	if (build && attached?.place !== path.resolve(context.cwd, config.buildOutputPath)) {
 		await buildPlaceAsync(steps, config);
 	}
@@ -265,7 +265,7 @@ async function watchStartupLightingAsync(
 	opened: OpenedStudio,
 	signal: AbortSignal,
 ): Promise<void> {
-	return context.seams.host.platform === "win32"
+	return (await context.seams.studioHost.platformAsync()) === "win32"
 		? watchHiddenLightingAsync(
 				context.seams,
 				{ place: opened.place, process: opened.studio ?? undefined },
@@ -287,10 +287,11 @@ async function watchStartupLightingAsync(
  */
 function studioLock(context: CommandContext, { place, studio }: OpenedStudio): StudioLockWatch {
 	return {
-		isAlive: () => {
+		isAlive: async () => {
 			return (
 				studio === null ||
-				context.seams.native().processStartTime(studio.pid) === studio.startTime
+				(await context.seams.studioHost.processStartTimeAsync(studio.pid)) ===
+					studio.startTime
 			);
 		},
 		path: studioLockPath(place),

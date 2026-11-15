@@ -93,7 +93,10 @@ export async function runDownAsync(
 		recovery: studio.autoRecovery,
 		timeoutMs,
 	});
-	return { data: { ...report }, summary: downSummary(report, context.seams.host.platform) };
+	return {
+		data: { ...report },
+		summary: downSummary(report, await context.seams.studioHost.platformAsync()),
+	};
 }
 
 /**

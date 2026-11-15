@@ -1,8 +1,8 @@
 import { type } from "arktype";
 
-import type { PinnedProcess } from "../native/addon.ts";
 import type { ChildProcessBackend } from "../process/process-runner.ts";
 import type { Environment, Seams } from "../seams/seams.ts";
+import type { PinnedStudio } from "../seams/studio-host.ts";
 import { parseStatus } from "../session/status.ts";
 import { STUDIO_OPEN_BOUND_MS } from "../session/studio-readiness.ts";
 import { forgeFiles, listSessions, sessionFiles } from "../supervisor/session-files.ts";
@@ -74,12 +74,12 @@ export function createKeepHiddenLauncher(
  * @returns Resolves when hiding ends.
  */
 export async function keepStudioHiddenAsync(
-	seams: Pick<Seams, "clock" | "fileSystem" | "native">,
+	seams: Pick<Seams, "clock" | "fileSystem" | "studioHost">,
 	payload: string,
 	root: string,
 ): Promise<void> {
 	const { isWindows, pid, place, startTime } = keepHiddenTarget.assert(JSON.parse(payload));
-	const pinned = seams.native().pinProcess(pid);
+	const pinned = await seams.studioHost.pinProcessAsync(pid);
 	if (pinned?.startTime !== startTime) {
 		return;
 	}
@@ -95,10 +95,10 @@ function ignoreError(): void {
 	// The launch already succeeded; the watcher is best effort.
 }
 
-function hideInactive(pinned: PinnedProcess): void {
+async function hideInactiveAsync(pinned: PinnedStudio): Promise<void> {
 	// An active Studio is never re-hidden.
-	if (pinned.appActive() !== true) {
-		pinned.setAppHidden(true);
+	if ((await pinned.appActiveAsync()) !== true) {
+		await pinned.setAppHiddenAsync(true);
 	}
 }
 
@@ -119,7 +119,7 @@ function isShownBySession(
 
 async function keepMacStudioHiddenAsync(
 	seams: Pick<Seams, "clock" | "fileSystem">,
-	pinned: PinnedProcess,
+	pinned: PinnedStudio,
 	{ pid, place, startTime }: KeepHiddenTarget,
 	root: string,
 ): Promise<void> {
@@ -128,13 +128,13 @@ async function keepMacStudioHiddenAsync(
 	const deadline = clock.now() + STUDIO_OPEN_BOUND_MS;
 	let quietSince = clock.now();
 	let isOpen = false;
-	while (pinned.isAlive() && clock.now() < deadline) {
-		if (pinned.appHidden() === false) {
+	while ((await pinned.isAliveAsync()) && clock.now() < deadline) {
+		if ((await pinned.appHiddenAsync()) === false) {
 			if (isShownBySession(seams.fileSystem, root, { pid, startTime })) {
 				return;
 			}
 
-			hideInactive(pinned);
+			await hideInactiveAsync(pinned);
 			quietSince = clock.now();
 		}
 
@@ -151,12 +151,12 @@ async function keepMacStudioHiddenAsync(
 	}
 }
 
-async function keepWindowsHiddenAsync(pinned: PinnedProcess, clock: Seams["clock"]): Promise<void> {
-	if (!pinned.startWindowHiding()) {
+async function keepWindowsHiddenAsync(pinned: PinnedStudio, clock: Seams["clock"]): Promise<void> {
+	if (!(await pinned.startWindowHidingAsync())) {
 		return;
 	}
 
-	while (pinned.windowHiding()) {
+	while (await pinned.windowHidingAsync()) {
 		await clock.sleep(KEEP_HIDDEN_POLL_MS);
 	}
 }

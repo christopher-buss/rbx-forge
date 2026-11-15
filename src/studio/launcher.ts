@@ -2,12 +2,13 @@ import type { ChildProcess } from "node:child_process";
 
 import type { StudioDesktop } from "../config/schema.ts";
 import { toForgeError } from "../errors.ts";
-import type { NativeLoader, PinnedProcess } from "../native/addon.ts";
+import type { NativeLoader } from "../native/addon.ts";
 import type { Invocation } from "../process/command-line.ts";
 import { readVariable, withVariables } from "../process/environment.ts";
 import type { ChildProcessBackend } from "../process/process-runner.ts";
 import type { FileSystem } from "../seams/file-system.ts";
 import type { Environment } from "../seams/seams.ts";
+import type { PinnedStudio } from "../seams/studio-host.ts";
 import type { InstalledStudio, StudioExecutable } from "./discover.ts";
 import { findStudioExecutable } from "./discover.ts";
 import { createKeepHiddenLauncher } from "./keep-hidden.ts";
@@ -96,10 +97,11 @@ type LauncherEnd =
  * @param pinned - A process verified as Studio.
  * @returns Its process identity and placement.
  */
-export function studioProcess(pinned: PinnedProcess): LocatedStudio {
-	const desktop = pinned.desktop();
+export async function studioProcessAsync(pinned: PinnedStudio): Promise<LocatedStudio> {
+	const desktop = await pinned.desktopAsync();
 	return {
-		desktop: desktop === "hidden" ? desktop : (pinned.windowVisibility() ?? desktop),
+		desktop:
+			desktop === "hidden" ? desktop : ((await pinned.windowVisibilityAsync()) ?? desktop),
 		pid: pinned.pid,
 		startTime: pinned.startTime,
 	};

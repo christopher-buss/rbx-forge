@@ -90,7 +90,7 @@ export async function runStopAsync(
 	input: CommandInput,
 ): Promise<CommandResult> {
 	const { cwd, env, seams } = context;
-	const { platform } = seams.host;
+	const platform = await seams.studioHost.platformAsync();
 	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
 	const forge = forgeFiles(cwd);
 	const request: SessionStop = {
@@ -211,7 +211,7 @@ async function closeSnapshotsAsync(
 	{ cwd, seams }: CommandContext,
 	recovery: RecoveryOptions,
 ): Promise<Array<CommandResult>> {
-	const { platform } = seams.host;
+	const platform = await seams.studioHost.platformAsync();
 	const results: Array<CommandResult> = [];
 	for (const place of listSnapshots(seams.fileSystem, forgeFiles(cwd).snapshots)) {
 		if (seams.fileSystem.existsSync(studioLockPath(place))) {

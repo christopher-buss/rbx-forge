@@ -83,9 +83,9 @@ function hiddenWindowsReadiness({
 }
 
 async function flushAsync(): Promise<void> {
-	for (let tick = 0; tick < 20; tick++) {
-		await Promise.resolve();
-	}
+	await new Promise<void>((resolve) => {
+		setImmediate(resolve);
+	});
 }
 
 describe(createStudioReadiness, () => {
@@ -114,6 +114,7 @@ describe(createStudioReadiness, () => {
 
 		const run = hiddenWindowsReadiness();
 		run.readiness.onLock();
+		await flushAsync();
 		run.manual.advance(KEEP_HIDDEN_START_BOUND_MS);
 		await run.readiness.open;
 

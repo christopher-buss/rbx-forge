@@ -1,5 +1,5 @@
-import type { PinnedProcess } from "../native/addon.ts";
 import type { Clock } from "../seams/clock.ts";
+import type { PinnedStudio } from "../seams/studio-host.ts";
 
 /** How often a watcher, or a wait for one, reads Studio's visibility. */
 export const KEEP_HIDDEN_POLL_MS = 10;
@@ -17,12 +17,16 @@ export const KEEP_HIDDEN_START_BOUND_MS = 10_000;
  * @returns `false` when {@link KEEP_HIDDEN_START_BOUND_MS} passes first.
  */
 export async function waitForWindowHidingAsync(
-	pinned: PinnedProcess,
+	pinned: PinnedStudio,
 	clock: Clock,
 	signal: AbortSignal,
 ): Promise<boolean> {
 	const deadline = clock.now() + KEEP_HIDDEN_START_BOUND_MS;
-	while (!signal.aborted && pinned.isAlive() && !pinned.windowHiding()) {
+	while (
+		!signal.aborted &&
+		(await pinned.isAliveAsync()) &&
+		!(await pinned.windowHidingAsync())
+	) {
 		if (clock.now() >= deadline) {
 			return false;
 		}

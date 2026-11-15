@@ -112,7 +112,12 @@ async function launchMarkedAsync(
 			plugin = await prepareRojoPluginAsync(steps, config, info, signal);
 			signal.throwIfAborted();
 		},
-		desktop: resolveStudioDesktop(config, steps.seams.host.platform, defaultDesktop, desktop),
+		desktop: resolveStudioDesktop(
+			config,
+			await steps.seams.studioHost.platformAsync(),
+			defaultDesktop,
+			desktop,
+		),
 		isBuilt,
 		runScript,
 		signal,

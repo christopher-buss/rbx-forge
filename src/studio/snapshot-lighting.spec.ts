@@ -120,6 +120,10 @@ describe("hidden snapshot Lighting watcher", () => {
 
 		const watching = runSnapshotLightingAsync(run.seams, run.payload, run.traceFile);
 
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
+
 		expect(run.events().at(-1)).toStrictEqual({ at: 0, event: "dismiss-start" });
 
 		pending.resolve(true);

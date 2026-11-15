@@ -3,7 +3,7 @@ import path from "node:path";
 import type { CommandContext } from "../commands/context.ts";
 import { openPlacePath } from "../commands/open.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
-import { findPlaceStudio } from "../studio/close-studio.ts";
+import { findPlaceStudioAsync } from "../studio/close-studio.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
 import type { StudioOrigin } from "./status.ts";
 
@@ -24,12 +24,12 @@ export interface OpenedStudio {
  * @param config - The resolved config: the place the session opens.
  * @returns The place and that Studio, or `undefined` when there is none.
  */
-export function attachStudio(
+export async function attachStudioAsync(
 	context: CommandContext,
 	config: Pick<ResolvedConfig, "buildOutputPath" | "open">,
-): OpenedStudio | undefined {
+): Promise<OpenedStudio | undefined> {
 	const place = path.resolve(context.cwd, openPlacePath(config));
-	const studio = findPlaceStudio(context.seams, place);
+	const studio = await findPlaceStudioAsync(context.seams, place);
 	if (studio === undefined) {
 		return undefined;
 	}

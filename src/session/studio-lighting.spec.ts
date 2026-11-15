@@ -16,9 +16,9 @@ import {
 import { followSessionStudio } from "./studio-part.ts";
 
 async function settleAsync() {
-	for (let tick = 0; tick < 20; tick++) {
-		await Promise.resolve();
-	}
+	await new Promise<void>((resolve) => {
+		setImmediate(resolve);
+	});
 }
 
 describe("hidden Studio startup dialogs", () => {

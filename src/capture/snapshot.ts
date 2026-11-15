@@ -3,7 +3,7 @@ import { type } from "arktype";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
-import { findPlaceStudio } from "../studio/close-studio.ts";
+import { findPlaceStudioAsync } from "../studio/close-studio.ts";
 import type { StudioSave } from "../studio/save-studio.ts";
 import type { CaptureListener } from "./protocol.ts";
 import { saveCaptureAsync } from "./save.ts";
@@ -69,7 +69,7 @@ export async function saveSnapshotCaptureAsync(
 	timeoutMs: number,
 ): Promise<StudioSave> {
 	const { seams } = context;
-	const studio = findPlaceStudio(seams, place);
+	const studio = await findPlaceStudioAsync(seams, place);
 	if (studio === undefined) {
 		throw new ForgeError("studio_not_open", `Roblox Studio does not have ${place} open.`);
 	}

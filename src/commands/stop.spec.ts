@@ -145,7 +145,7 @@ function makeProject({
 	}
 
 	const native = createFakeNative(processes);
-	const seams = createTestSeams();
+	const seams = createTestSeams({ native: () => native.addon });
 	const { clock, elapsed } = steppingClock(onSleep);
 	const configLoader = vi.fn<ConfigLoader>().mockResolvedValue({
 		path: path.join(PROJECT, "rbx-forge.config.ts"),
@@ -155,15 +155,14 @@ function makeProject({
 	return {
 		context: createCommandContext({
 			env: environment,
-			seams: {
-				...seams,
+			seams: Object.assign(seams, {
 				clock,
 				configLoader,
 				fileSystem: memory.fileSystem,
 				host: { ...seams.host, bootTimeMs: () => BOOT, ...host },
 				ipc: createMemoryTransport(),
 				native: () => native.addon,
-			},
+			}),
 		}),
 		elapsed,
 		files: memory.files,

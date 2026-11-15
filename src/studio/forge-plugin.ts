@@ -2,7 +2,6 @@ import path from "node:path";
 
 import type { CommandContext } from "../commands/context.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
-import { studioPluginsFolder } from "./plugins-folder.ts";
 
 /** The installed forge Studio plugin's file name. */
 const FORGE_PLUGIN_FILE = "ForgePlugin.rbxm";
@@ -12,10 +11,12 @@ const FORGE_PLUGIN_FILE = "ForgePlugin.rbxm";
  * byte-equal copy is left alone: a write reloads it in an open Studio.
  *
  * @param context - The environment, file system, and bundled plugin.
- * @throws {ForgeError} `forge_plugin_write_failed` when it cannot be written.
+ * @rejects {ForgeError} `forge_plugin_write_failed` when it cannot be written.
  */
-export function installForgePlugin(context: Pick<CommandContext, "env" | "seams">): void {
-	const folder = studioPluginsFolder(context);
+export async function installForgePluginAsync(
+	context: Pick<CommandContext, "env" | "seams">,
+): Promise<void> {
+	const folder = await context.seams.studioHost.pluginsFolderAsync(context.env);
 	if (folder === undefined) {
 		return;
 	}

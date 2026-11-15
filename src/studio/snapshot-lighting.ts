@@ -26,8 +26,8 @@ export async function runSnapshotLightingAsync(
 	const { pid, place, startTime } = watchTarget.assert(JSON.parse(payload));
 	const trace = createLightingTrace(seams, traceFile);
 	trace({ event: "start", pid, place, startTime });
-	const pinned = seams.native().pinProcess(pid);
-	if (pinned === null || pinned.startTime !== startTime || !pinned.isAlive()) {
+	const pinned = await seams.studioHost.pinProcessAsync(pid);
+	if (pinned === null || pinned.startTime !== startTime || !(await pinned.isAliveAsync())) {
 		trace({ event: "identity-rejected" });
 		return;
 	}
@@ -40,7 +40,7 @@ export async function runSnapshotLightingAsync(
 				...seams.clock,
 				sleep: async (ms, signal) => {
 					await seams.clock.sleep(ms, signal);
-					if (!pinned.isAlive()) {
+					if (!(await pinned.isAliveAsync())) {
 						trace({ event: "studio-exited" });
 						abort.abort();
 					}

@@ -363,7 +363,11 @@ function atTime(world: StopWorld, ms: number, action: () => void): void {
 }
 
 async function stopAsync(world: StopWorld, request: StopPartsRequest): Promise<PartStops> {
-	const seams = createTestSeams();
+	const seams = createTestSeams({
+		clock: world.clock,
+		fileSystem: world.memory.fileSystem,
+		native: () => world.native.addon,
+	});
 	const stop = createPartStopper(
 		{
 			config: { studio: { ...DEFAULT_CONFIG.studio, autoRecovery: "keep" } },
