@@ -79,7 +79,7 @@ export async function runRojoAsync(
  * @returns Arguments after the Rojo command.
  */
 export function rojoServeArgs(project: string, port: number): RojoArgs {
-	return ["serve", project, "--port", String(port)];
+	return ["serve", project, "--port", String(port), "--address", "127.0.0.1"];
 }
 
 /**

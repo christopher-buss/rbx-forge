@@ -22,6 +22,10 @@ enum Operation {
         protocol: u32,
     },
     PluginsFolder,
+    ProbeHttp {
+        port: u16,
+        route: String,
+    },
     ProcessStartTime {
         pid: u32,
     },
@@ -123,6 +127,9 @@ impl Session {
                         .join("Roblox")
                         .join("Plugins")
                 ))
+            }
+            Operation::ProbeHttp { port, route } => {
+                Ok(json!(crate::helper_probe::probe(port, &route)?))
             }
             Operation::ProcessStartTime { pid } => Ok(json!(
                 crate::os::process::start_time(pid)?.map(|time| time.to_string())

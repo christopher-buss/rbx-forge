@@ -71,7 +71,8 @@ export type ForgeErrorCode =
 	| "syncback_unsupported"
 	| "usage"
 	| "windows_helper_unavailable"
-	| "wsl_interop_unavailable";
+	| "wsl_interop_unavailable"
+	| "wsl_network_unreachable";
 
 /** What an error code means and the exit code it maps to. */
 export interface ErrorCodeInfo {
@@ -255,6 +256,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	wsl_interop_unavailable: {
 		exitCode: EXIT_FAILURE,
 		text: "WSL could not launch and establish a channel to the Windows helper.",
+	},
+	wsl_network_unreachable: {
+		exitCode: EXIT_FAILURE,
+		text: "Windows cannot reach the WSL session on IPv4 loopback.",
 	},
 };
 

@@ -10,6 +10,8 @@ interface Request {
 	id: string;
 	args?: Array<string>;
 	op: string;
+	port?: number | undefined;
+	route?: string | undefined;
 }
 interface State {
 	actualPid: number;
@@ -50,9 +52,18 @@ if (MODE === "path") {
 	}, 1000);
 } else {
 	createInterface({ input: process.stdin }).on("line", (line) => {
-		const request = parseRequest(line);
-		process.stdout.write(`${JSON.stringify({ id: request.id, result: execute(request) })}\n`);
+		void replyAsync(line);
 	});
+}
+
+async function probeAsync(request: Request): Promise<Array<number>> {
+	if (process.env["FIXTURE_HELPER_UNREACHABLE"] === "1") {
+		throw new Error("unreachable");
+	}
+
+	const response = await fetch(`http://127.0.0.1:${request.port}${request.route}`);
+	assert(response.ok);
+	return [...new Uint8Array(await response.arrayBuffer())];
 }
 
 function launch(windowsPlace: string, windowsScript?: string): unknown {
@@ -164,5 +175,23 @@ function parseRequest(line: string): Request {
 		args === undefined ||
 			(Array.isArray(args) && args.every((item: unknown) => typeof item === "string")),
 	);
-	return { id: value.id, op: value.op, ...(args === undefined ? {} : { args }) };
+	return {
+		id: value.id,
+		op: value.op,
+		port: "port" in value && typeof value.port === "number" ? value.port : undefined,
+		route: "route" in value && typeof value.route === "string" ? value.route : undefined,
+		...(args === undefined ? {} : { args }),
+	};
+}
+
+async function replyAsync(line: string): Promise<void> {
+	const request = parseRequest(line);
+	try {
+		const result = request.op === "probeHttp" ? await probeAsync(request) : execute(request);
+		process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
+	} catch {
+		process.stdout.write(
+			`${JSON.stringify({ id: request.id, error: { code: "operation_failed", message: "unreachable" } })}\n`,
+		);
+	}
 }

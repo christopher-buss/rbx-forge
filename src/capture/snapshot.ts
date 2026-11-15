@@ -4,6 +4,7 @@ import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import { findPlaceStudioAsync } from "../studio/close-studio.ts";
+import { probeCaptureAsync } from "../studio/network-probe.ts";
 import type { StudioSave } from "../studio/save-studio.ts";
 import type { CaptureListener } from "./protocol.ts";
 import { saveCaptureAsync } from "./save.ts";
@@ -29,6 +30,7 @@ export async function prepareSnapshotCaptureAsync(
 	const identity = { projectName: "snapshot", sessionId: seams.randomId() };
 	const listener = await seams.network.listenForCaptureAsync(identity);
 	try {
+		await probeCaptureAsync(seams, listener);
 		const url = new URL(listener.url);
 		const secret = url.pathname.slice("/capture/".length);
 		seams.fileSystem.writeFileSync(
@@ -102,11 +104,13 @@ async function bindSnapshotAsync(
 	signal: AbortSignal,
 ): Promise<CaptureListener> {
 	try {
-		return await seams.network.listenForCaptureAsync(
+		const listener = await seams.network.listenForCaptureAsync(
 			{ projectName: endpoint.projectName, sessionId: endpoint.sessionId },
 			signal,
 			{ port: endpoint.port, secret: endpoint.secret },
 		);
+		await probeCaptureAsync(seams, listener);
+		return listener;
 	} catch (err) {
 		if (err instanceof Error && "code" in err && err.code === "EADDRINUSE") {
 			throw new ForgeError(

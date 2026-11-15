@@ -52,6 +52,7 @@ class WslHost {
 				const folder = await this.requestAsync({ op: "pluginsFolder" }, type("string"));
 				return this.convertAsync(folder, false, false);
 			},
+			probeHttpAsync: this.probeHttpAsync.bind(this),
 			processStartTimeAsync: async (pid) => {
 				return this.requestAsync({ op: "processStartTime", pid }, NULLABLE_TEXT);
 			},
@@ -187,6 +188,14 @@ class WslHost {
 		}
 
 		return this.wrap(await this.client().requestAsync({ op: "pin", pid, startTime: current }));
+	}
+
+	private async probeHttpAsync(port: number, route: string): Promise<Uint8Array> {
+		const bytes = await this.requestAsync(
+			{ op: "probeHttp", port, route },
+			type("(0 <= number.integer <= 255)[]"),
+		);
+		return new Uint8Array(bytes);
 	}
 
 	private async requestAsync<T>(

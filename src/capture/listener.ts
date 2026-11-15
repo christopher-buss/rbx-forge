@@ -177,7 +177,7 @@ class CaptureEndpoint implements CaptureListener {
 
 	private isCurrent(url: URL): boolean {
 		return (
-			url.pathname === this.route &&
+			(url.pathname === this.route || url.pathname.startsWith(`${this.route}/probe/`)) &&
 			url.searchParams.get("projectName") === this.identity.projectName &&
 			url.searchParams.get("sessionId") === this.identity.sessionId
 		);
@@ -196,6 +196,15 @@ class CaptureEndpoint implements CaptureListener {
 		this.dispatch();
 	}
 
+	private probe(incoming: IncomingMessage, response: ServerResponse, url: URL): void {
+		const nonce = url.pathname.slice(`${this.route}/probe/`.length);
+		response
+			.writeHead(incoming.method === "GET" ? 200 : 404, {
+				"content-length": Buffer.byteLength(nonce),
+			})
+			.end(nonce);
+	}
+
 	private receive(incoming: IncomingMessage, response: ServerResponse): void {
 		const url = requestUrl(incoming);
 		if (url === null || this.isClosed || !this.isCurrent(url)) {
@@ -203,8 +212,8 @@ class CaptureEndpoint implements CaptureListener {
 			return;
 		}
 
-		if (incoming.method === "GET") {
-			this.poll(response);
+		if (url.pathname !== this.route || incoming.method === "GET") {
+			this.respond(incoming, response, url);
 			return;
 		}
 
@@ -241,6 +250,14 @@ class CaptureEndpoint implements CaptureListener {
 		}
 
 		response.writeHead(400).end();
+	}
+
+	private respond(incoming: IncomingMessage, response: ServerResponse, url: URL): void {
+		if (url.pathname === this.route) {
+			this.poll(response);
+		} else {
+			this.probe(incoming, response, url);
+		}
 	}
 }
 
