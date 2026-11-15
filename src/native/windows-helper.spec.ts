@@ -39,6 +39,8 @@ describe(handshakeWindowsHelperAsync, () => {
 			code: "windows_helper_unavailable",
 			exitCode: 1,
 			hint: "Reinstall rbx-forge with optional dependencies and the Windows helper matching your Linux architecture.",
+			message:
+				"The Windows helper handshake has an invalid protocol, architecture, or Windows host name.",
 		});
 	});
 
@@ -64,6 +66,7 @@ describe(handshakeWindowsHelperAsync, () => {
 			code: "wsl_interop_unavailable",
 			exitCode: 1,
 			hint: "Enable [interop] enabled=true in /etc/wsl.conf, restart WSL with `wsl --shutdown` from Windows, and check that Windows executables run from this distro.",
+			message: "Could not start the Windows helper channel: EOF",
 		});
 	});
 });

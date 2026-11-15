@@ -392,11 +392,13 @@ describe("windows helper lookup", () => {
 		{
 			failure: "unsupported",
 			host: { ...LINUX, arch: "ia32" },
+			message: "No Windows helper for linux-ia32.",
 			resolveModule: () => path.resolve("package.json"),
 		},
 		{
 			failure: "package",
 			host: LINUX,
+			message: "missing package",
 			resolveModule: () => {
 				throw new Error("missing package");
 			},
@@ -404,26 +406,41 @@ describe("windows helper lookup", () => {
 		{
 			failure: "non-error package failure",
 			host: LINUX,
+			message: "missing",
 			resolveModule: () => {
 				// oxlint-disable-next-line typescript/only-throw-error -- a resolver may throw anything
 				throw "missing";
 			},
 		},
-		{ failure: "non-Linux", host: WINDOWS, resolveModule: () => path.resolve("package.json") },
-		{ failure: "file", host: LINUX, resolveModule: () => path.resolve("package.json") },
-	])("should explain an unavailable $failure helper", ({ host, resolveModule }, { expect }) => {
-		expect.assertions(3);
+		{
+			failure: "non-Linux",
+			host: WINDOWS,
+			message: "No Windows helper for win32-x64.",
+			resolveModule: () => path.resolve("package.json"),
+		},
+		{
+			failure: "file",
+			host: LINUX,
+			message: `${path.resolve("forge-windows-helper.exe")} is missing or cannot run.`,
+			resolveModule: () => path.resolve("package.json"),
+		},
+	])(
+		"should explain an unavailable $failure helper",
+		({ failure, host, message, resolveModule }, { expect }) => {
+			expect.assertions(4);
 
-		const locate = createWindowsHelperLocator({
-			directory: undefined,
-			isExecutable: () => false,
-			readHost: () => host,
-			resolveModule,
-		});
-		const error = catchForgeError(locate);
+			const locate = createWindowsHelperLocator({
+				directory: undefined,
+				isExecutable: () => failure !== "file",
+				readHost: () => host,
+				resolveModule,
+			});
+			const error = catchForgeError(locate);
 
-		expect(error.code).toBe("windows_helper_unavailable");
-		expect(error.exitCode).toBe(1);
-		expect(error.hint).toContain("Reinstall rbx-forge with optional dependencies");
-	});
+			expect(error.code).toBe("windows_helper_unavailable");
+			expect(error.message).toBe(message);
+			expect(error.exitCode).toBe(1);
+			expect(error.hint).toContain("Reinstall rbx-forge with optional dependencies");
+		},
+	);
 });
