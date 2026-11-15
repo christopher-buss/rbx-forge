@@ -29,6 +29,7 @@ import type { DetachedLauncher } from "../../src/supervisor/detached-launcher.ts
 import type { SupervisorLauncher } from "../../src/supervisor/launcher.ts";
 import { createFakeFileWatch } from "./fake-file-watch.ts";
 import type { FakeFileWatch } from "./fake-file-watch.ts";
+import { createFakeStudioHost } from "./studio-host.ts";
 
 /** The project directory of every in-memory test project. */
 export const PROJECT = path.resolve("/project");
@@ -92,7 +93,7 @@ export function createMemoryFileSystem(files: Record<string, string> = {}): Memo
  * @returns A full seam record.
  */
 export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
-	return {
+	const seams = {
 		childProcess: { spawn: unreachable("child process") },
 		// A clock that stands still: `sleep` resolves at once.
 		clock: {
@@ -120,6 +121,7 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 		supervisor: vi.fn<SupervisorLauncher>(unreachable("supervisor")),
 		...overrides,
 	};
+	return { ...seams, studioHost: overrides.studioHost ?? createFakeStudioHost(seams).studioHost };
 }
 
 /**

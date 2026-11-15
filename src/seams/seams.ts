@@ -14,6 +14,7 @@ import type { Host } from "./host.ts";
 import type { Network } from "./network.ts";
 import type { Prompter } from "./prompter.ts";
 import type { Signals } from "./signals.ts";
+import type { StudioHost } from "./studio-host.ts";
 
 /**
  * Environment variables, read once at the CLI entry. No other module reads
@@ -59,6 +60,8 @@ export interface Seams {
 	/** Starts a session's `forge-reaper`, which owns its workers. */
 	reaper: ReaperLauncher;
 	signals: Signals;
+	/** Async operations on the OS that runs Studio. */
+	studioHost: StudioHost;
 	/** Opens a place in Studio outside every forge-owned process tree. */
 	studioLauncher: StudioLauncher;
 	/** Starts the supervisor process of a `forge start` session. */

@@ -31,6 +31,7 @@ import { nodeNetwork } from "./network.ts";
 import { createReadlinePrompter } from "./prompter.ts";
 import type { Seams } from "./seams.ts";
 import { createSignals } from "./signals.ts";
+import { createAddonStudioHost } from "./studio-host.ts";
 
 /** What the real seams are built from. */
 export interface NodeSeamsOptions {
@@ -94,6 +95,7 @@ export function createNodeSeams({
 		readForgePlugin: () => nodeFs.readFileSync(forgePluginPath),
 		reaper: createNodeReaperLauncher(nativeDirectory, native, requireModule),
 		signals: createSignals(process),
+		studioHost: createNodeStudioHost(native, noInstalledStudio, supervisorEntry),
 		studioLauncher: createNodeStudioLauncher(native, noInstalledStudio, supervisorEntry),
 		supervisor: createSupervisorLauncher(PROCESS_BACKEND, supervisorEntry),
 	};
@@ -150,4 +152,18 @@ function createNodeStudioLauncher(
 		},
 		entry,
 	);
+}
+
+function createNodeStudioHost(
+	native: NativeLoader,
+	noInstalledStudio: boolean,
+	entry: string,
+): Seams["studioHost"] {
+	return createAddonStudioHost({
+		fileSystem: nodeFileSystem,
+		host: nodeHost,
+		installedStudio: installedStudioLookup(noInstalledStudio),
+		native,
+		studioLauncher: createNodeStudioLauncher(native, noInstalledStudio, entry),
+	});
 }
