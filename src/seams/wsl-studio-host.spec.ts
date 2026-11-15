@@ -2,6 +2,7 @@
 import { assert, describe, it } from "vitest";
 
 import { createMemoryFileSystem, createTestSeams } from "../../test/helpers/seams.ts";
+import { ForgeError } from "../errors.ts";
 import type { HelperClient } from "../native/helper-client.ts";
 import type { ProcessOutcome, ProcessSpec } from "../process/process-runner.ts";
 import { closeStudioAsync, findPlaceStudioAsync } from "../studio/close-studio.ts";
@@ -23,6 +24,7 @@ function setup(
 		alive?: boolean;
 		launchReply?: unknown;
 		output?: string;
+		registries?: Array<null | string>;
 		registry?: null | string;
 		result?: ProcessOutcome;
 		startTime?: null | string;
@@ -67,7 +69,7 @@ function setup(
 					return options.startTime === undefined ? PIN.startTime : options.startTime;
 				}
 				case "readRegistry": {
-					return options.registry ?? null;
+					return options.registries?.shift() ?? options.registry ?? null;
 				}
 				case "windowVisibility": {
 					return "user";
@@ -144,6 +146,101 @@ describe("wsl Studio tracer", () => {
 			path: "/project/Studio.exe",
 			source: "registry",
 		});
+	});
+
+	it("ignores a stale registry entry and finds the next installed Studio", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup({ registries: ['"relative.exe" %1', `"${WINDOWS}" %1`] });
+
+		await expect(seams.studioHost.findStudioExecutableAsync({ env: {} })).resolves.toEqual({
+			path: "/project/Studio.exe",
+			source: "registry",
+		});
+	});
+
+	it.for([
+		{
+			env: { RBX_FORGE_STUDIO_PATH: "/missing.exe" },
+			source: "flag",
+			studioPath: "/project/Studio.exe",
+		},
+		{ env: { RBX_FORGE_STUDIO_PATH: "/missing.exe" }, source: "flag", studioPath: WINDOWS },
+		{ env: {}, source: "flag", studioPath: String.raw`\\server\share\Studio.exe` },
+		{ env: { RBX_FORGE_STUDIO_PATH: "/project/Studio.exe" }, source: "environment" },
+		{ env: { RBX_FORGE_STUDIO_PATH: WINDOWS }, source: "environment" },
+		{
+			env: { RBX_FORGE_STUDIO_PATH: String.raw`\\server\share\Studio.exe` },
+			source: "environment",
+		},
+	])("discovers explicit paths before the registry: %j", async (options, { expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup({ registry: '"missing.exe" %1' });
+
+		await expect(seams.studioHost.findStudioExecutableAsync(options)).resolves.toEqual({
+			path: "/project/Studio.exe",
+			source: options.source,
+		});
+	});
+
+	it.for([
+		"/missing.exe",
+		"D:relative.exe",
+		String.raw`\rooted.exe`,
+		"",
+		"/project",
+		"bad\n.exe",
+	])("fails an invalid flag instead of using installed Studio: %j", async (file, { expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup({ registry: `"${WINDOWS}" %1` });
+
+		await expect(
+			seams.studioHost.findStudioExecutableAsync({
+				env: { RBX_FORGE_STUDIO_PATH: "/project/Studio.exe" },
+				studioPath: file,
+			}),
+		).rejects.toMatchObject({ code: "studio_launch_failed" });
+	});
+
+	it.for(["/missing.exe", "D:relative.exe", String.raw`\rooted.exe`, "/project", "bad\n.exe"])(
+		"fails an invalid environment override instead of using installed Studio: %j",
+		async (file, { expect }) => {
+			expect.assertions(1);
+
+			const { seams } = setup({ registry: `"${WINDOWS}" %1` });
+
+			await expect(
+				seams.studioHost.findStudioExecutableAsync({
+					env: { RBX_FORGE_STUDIO_PATH: file },
+				}),
+			).rejects.toMatchObject({ code: "studio_launch_failed" });
+		},
+	);
+
+	it.for([
+		new Error("unreadable"),
+		new ForgeError("windows_helper_unavailable", "host unavailable"),
+	])("preserves unexpected registry discovery failures: %j", async (error, { expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup({ registry: `"${WINDOWS}" %1` });
+		seams.fileSystem.statSync = () => {
+			throw error;
+		};
+
+		await expect(seams.studioHost.findStudioExecutableAsync({ env: {} })).rejects.toBe(error);
+	});
+
+	it("uses installed Studio when the environment override is empty", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup({ registry: `"${WINDOWS}" %1` });
+
+		await expect(
+			seams.studioHost.findStudioExecutableAsync({ env: { RBX_FORGE_STUDIO_PATH: "" } }),
+		).resolves.toEqual({ path: "/project/Studio.exe", source: "registry" });
 	});
 
 	it("does not use a platform launcher when Studio is absent", async ({ expect }) => {

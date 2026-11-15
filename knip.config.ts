@@ -3,7 +3,7 @@ import type { KnipConfig } from "knip";
 export default {
 	ignore: [".agents/**"],
 	// External tools exercised by integration and opt-in Studio tests.
-	ignoreBinaries: ["luau", "rojo"],
+	ignoreBinaries: ["luau", "reg.exe", "rojo"],
 	// A type that annotates an export in its own file is part of that
 	// export's declaration (`isolatedDeclarations` needs it exported).
 	ignoreExportsUsedInFile: { interface: true, type: true },

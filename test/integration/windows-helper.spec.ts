@@ -1,5 +1,6 @@
 import { type } from "arktype";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -82,6 +83,33 @@ async function launchStudioAsync(testContext: Pick<TestContext, "onTestFinished"
 }
 
 describe.skipIf(process.platform !== "win32")("windows helper", () => {
+	it("reads a Windows registry command through the helper", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const key = `Software\\rbx-forge-test\\${randomUUID()}`;
+		const fullKey = `HKCU\\${key}`;
+		const command = `"${path.join(makeTemporaryDirectory(), "Studio with spaces.exe")}" "%1"`;
+		execFileSync("reg.exe", ["add", fullKey, "/ve", "/t", "REG_SZ", "/d", command, "/f"], {
+			windowsHide: true,
+		});
+		onTestFinished(() => {
+			execFileSync("reg.exe", ["delete", fullKey, "/f"], { windowsHide: true });
+		});
+		const { requestAsync } = startHelper({ onTestFinished });
+		await requestAsync({ op: "handshake", protocol: 1 });
+
+		await expect(requestAsync({ key, op: "readRegistry" })).resolves.toHaveProperty(
+			"result",
+			command,
+		);
+		await expect(
+			requestAsync({ key: `${key}\\missing`, op: "readRegistry" }),
+		).resolves.toHaveProperty("result", null);
+	});
+
 	it("uses the TypeScript client against the real helper protocol", async ({
 		expect,
 		onTestFinished,
