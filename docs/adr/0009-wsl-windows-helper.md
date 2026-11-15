@@ -53,11 +53,11 @@ Native Linux, outside WSL, still has no Studio.
   Failed recovery leaves Studio control unavailable and keeps the side record.
   Watchers and CLI commands recover the same way, within their own deadlines; a
   helper loss never closes Studio or ends the session.
-- **Network.** Listeners stay on loopback and rely on WSL localhost forwarding
-  or mirrored networking. The helper probes Rojo and the capture listener from
-  the Windows side through `127.0.0.1`, never `localhost` and never the
-  readiness route; a failed probe is `wsl_network_unreachable`. There is no
-  relay.
+- **Network.** Listeners stay on IPv4 loopback and rely on WSL localhost
+  forwarding or mirrored networking; Windows reaches neither mode's `::1`. The
+  helper probes Rojo and the capture listener from the Windows side through
+  `127.0.0.1`, never `localhost` and never the readiness route; a failed probe
+  is `wsl_network_unreachable`. There is no relay.
 - **Rojo plugin.** The session's own Rojo installs its plugin under a temporary
   `HOME`, with `ROBLOX_STUDIO_PATH` at a temporary folder that holds `content/`;
   forge checks and patches the model, then writes it to the Windows Plugins
@@ -96,5 +96,7 @@ Native Linux, outside WSL, still has no Studio.
   stdio is killed. Studio opens, locks, runs RunScript on, saves, and closes a
   place under `\\wsl.localhost`. Structured data goes through stdin, never
   interop argv.
-- Not measured: WSL2 on hosted Windows runners; an interop start inside a job;
-  mirrored networking.
+- Mirrored networking reaches a WSL listener on `127.0.0.1` or `0.0.0.0` from
+  Windows; NAT with `localhostForwarding=false` reaches none. Closing the
+  terminal ends the helper in both modes.
+- Not measured: WSL2 on hosted Windows runners; an interop start inside a job.
