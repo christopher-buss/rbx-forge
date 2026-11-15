@@ -21,6 +21,7 @@ enum Operation {
     Handshake {
         protocol: u32,
     },
+    PluginsFolder,
     ProcessStartTime {
         pid: u32,
     },
@@ -112,6 +113,17 @@ impl Session {
         }
         match op {
             Operation::Handshake { .. } => unreachable!(),
+            Operation::PluginsFolder => {
+                let home = std::env::var_os("USERPROFILE")
+                    .ok_or_else(|| io::Error::other("Windows user profile is unavailable"))?;
+                Ok(json!(
+                    std::path::PathBuf::from(home)
+                        .join("AppData")
+                        .join("Local")
+                        .join("Roblox")
+                        .join("Plugins")
+                ))
+            }
             Operation::ProcessStartTime { pid } => Ok(json!(
                 crate::os::process::start_time(pid)?.map(|time| time.to_string())
             )),

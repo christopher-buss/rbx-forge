@@ -74,10 +74,13 @@ Under WSL2, `forge up --studio` and `forge down` use the packaged Windows
 helper. The helper reports Windows process identities; native Linux outside WSL
 keeps its existing behavior. `--studio-path` and `RBX_FORGE_STUDIO_PATH` accept
 absolute Windows drive or UNC paths, or Linux paths accessible through
-`wslpath`. WSL interop must be enabled. Studio opens on the user's desktop; the
-remaining WSL Studio features and release validation are tracked in
-[#297](https://github.com/christopher-buss/rbx-forge/issues/297). See
-[JSON output](docs/json-output.md) for Windows PID interpretation and an
+`wslpath`. WSL interop must be enabled. Forge installs both Studio plugins in
+the Windows Plugins folder; managed Rojo installation is verified for 7.7.1 and
+other versions need a manual connection when the plugin is missing.
+`forge build --plugin` also writes to the Windows Plugins folder. Studio opens
+on the user's desktop; the remaining WSL Studio features and release validation
+are tracked in [#297](https://github.com/christopher-buss/rbx-forge/issues/297).
+See [JSON output](docs/json-output.md) for Windows PID interpretation and an
 uncertain launch result.
 
 ## Commands

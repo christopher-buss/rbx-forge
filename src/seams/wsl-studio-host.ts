@@ -49,8 +49,8 @@ class WslHost {
 			pinProcessAsync: this.pinProcessAsync.bind(this),
 			platformAsync: async () => "win32",
 			pluginsFolderAsync: async () => {
-				// The tracer leaves managed plugin installation to the
-				// subsequent WSL slice.
+				const folder = await this.requestAsync({ op: "pluginsFolder" }, type("string"));
+				return this.convertAsync(folder, false, false);
 			},
 			processStartTimeAsync: async (pid) => {
 				return this.requestAsync({ op: "processStartTime", pid }, NULLABLE_TEXT);
@@ -90,7 +90,7 @@ class WslHost {
 		return this.channel;
 	}
 
-	private async convertAsync(input: string, windows: boolean): Promise<string> {
+	private async convertAsync(input: string, windows: boolean, mustExist = true): Promise<string> {
 		if (
 			INVALID_PATH.test(input) ||
 			!(windows ? path.posix.isAbsolute(input) : windowsAbsolute.test(input))
@@ -113,7 +113,7 @@ class WslHost {
 			timeoutMs: 10_000,
 		});
 		const output = convertedOutput(result, input);
-		this.validateConverted(output, windows, input);
+		this.validateConverted(output, windows, input, mustExist);
 		return output;
 	}
 
@@ -186,7 +186,12 @@ class WslHost {
 		return shape.assert(await this.client().requestAsync(operation));
 	}
 
-	private validateConverted(output: string, windows: boolean, input: string): void {
+	private validateConverted(
+		output: string,
+		windows: boolean,
+		input: string,
+		mustExist: boolean,
+	): void {
 		if (
 			INVALID_PATH.test(output) ||
 			!(windows ? windowsAbsolute.test(output) : path.posix.isAbsolute(output))
@@ -197,7 +202,7 @@ class WslHost {
 			);
 		}
 
-		if (!windows && !this.backend.fileSystem.existsSync(output)) {
+		if (mustExist && !windows && !this.backend.fileSystem.existsSync(output)) {
 			throw new ForgeError(
 				"studio_launch_failed",
 				`The converted Windows path is unavailable in WSL: ${output}`,

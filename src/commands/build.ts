@@ -6,6 +6,7 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { HookedRun } from "../hooks/run-hooks.ts";
 import { runWithHooksAsync } from "../hooks/run-hooks.ts";
+import { isWsl } from "../process/wsl.ts";
 import type { BuildTarget } from "../rojo/rojo.ts";
 import { rojoBuildArgs, runRojoAsync } from "../rojo/rojo.ts";
 import type { CommandResult } from "../seams/reporter.ts";
@@ -63,7 +64,8 @@ export async function buildAsync(
 ): Promise<HookedRun<BuildOutcome>> {
 	return runWithHooksAsync(context, config, "build", async () => {
 		const destination = prepareTarget(context, options.target);
-		const args = rojoBuildArgs(options.project, options.target);
+		const target = await pluginTargetAsync(context, options.target);
+		const args = rojoBuildArgs(options.project, target);
 		const { durationMs } = await runRojoAsync(context, config, args);
 		return { durationMs, ...destination };
 	});
@@ -111,6 +113,34 @@ export async function runBuildCommandAsync(
 				? `Built plugin ${target.plugin}.`
 				: `Built ${String(value.output)}.`,
 	};
+}
+
+async function pluginTargetAsync(
+	context: CommandContext,
+	target: BuildTarget,
+): Promise<BuildTarget> {
+	if (target.type !== "plugin" || !isWsl(context.seams.host.platform, context.env)) {
+		return target;
+	}
+
+	if (
+		path.isAbsolute(target.plugin) ||
+		![".rbxm", ".rbxmx"].includes(path.extname(target.plugin))
+	) {
+		throw new ForgeError("usage", "--plugin needs a relative .rbxm or .rbxmx file name.");
+	}
+
+	const folder = await context.seams.studioHost.pluginsFolderAsync(context.env);
+	if (folder === undefined) {
+		throw new ForgeError(
+			"windows_helper_unavailable",
+			"The Windows Plugins folder is unavailable.",
+		);
+	}
+
+	const output = path.join(folder, target.plugin);
+	context.seams.fileSystem.mkdirSync(path.dirname(output), { recursive: true });
+	return { output, type: "output" };
 }
 
 /**

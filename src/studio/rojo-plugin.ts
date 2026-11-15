@@ -5,9 +5,11 @@ import path from "node:path";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
+import { isWsl } from "../process/wsl.ts";
 import { runRojoAsync } from "../rojo/rojo.ts";
 import type { RojoServerInfo } from "../seams/network.ts";
 import patched from "./rojo-plugin/patched.json" with { type: "json" };
+import { installWslPluginAsync } from "./wsl-plugin-install.ts";
 
 /**
  * Whether forge can guarantee automatic sync and acknowledge its completion.
@@ -79,28 +81,26 @@ export async function prepareRojoPluginAsync(
 	}
 
 	if (!context.seams.fileSystem.existsSync(model)) {
+		if (isWsl(context.seams.host.platform, context.env)) {
+			if (server.serverVersion !== "7.7.1") {
+				return manual(
+					context,
+					`Rojo ${server.serverVersion} plugin installation under WSL is not verified.`,
+				);
+			}
+
+			return installWslPluginAsync(context, config, {
+				prepare: (staged) => prepareModel(context, staged, server, signal),
+				signal,
+				target: model,
+			});
+		}
+
 		await runRojoAsync(context, config, ["plugin", "install"]);
 		signal.throwIfAborted();
 	}
 
-	const sources = readSources(context, model);
-	if (sources === undefined) {
-		return MANUAL;
-	}
-
-	const decision = decide(context, model, sources, server);
-	if (decision !== "patch") {
-		return decision;
-	}
-
-	signal.throwIfAborted();
-	writeSources(context, model);
-	return FORGE;
-}
-
-async function pluginPathAsync(context: CommandContext): Promise<string | undefined> {
-	const folder = await context.seams.studioHost.pluginsFolderAsync(context.env);
-	return folder === undefined ? undefined : path.join(folder, "RojoManagedPlugin.rbxm");
+	return prepareModel(context, model, server, signal);
 }
 
 function manual(context: CommandContext, reason: string): PluginCapabilities {
@@ -269,4 +269,30 @@ function writeSources(context: CommandContext, model: string): void {
 			{ cause: err, hint: "Check permissions on RojoManagedPlugin.rbxm and retry." },
 		);
 	}
+}
+
+function prepareModel(
+	context: CommandContext,
+	model: string,
+	server: Pick<RojoServerInfo, "protocolVersion" | "serverVersion">,
+	signal: AbortSignal,
+): PluginCapabilities {
+	const sources = readSources(context, model);
+	if (sources === undefined) {
+		return MANUAL;
+	}
+
+	const decision = decide(context, model, sources, server);
+	if (decision !== "patch") {
+		return decision;
+	}
+
+	signal.throwIfAborted();
+	writeSources(context, model);
+	return FORGE;
+}
+
+async function pluginPathAsync(context: CommandContext): Promise<string | undefined> {
+	const folder = await context.seams.studioHost.pluginsFolderAsync(context.env);
+	return folder === undefined ? undefined : path.join(folder, "RojoManagedPlugin.rbxm");
 }

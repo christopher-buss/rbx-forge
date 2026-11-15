@@ -1,5 +1,5 @@
 // cspell:words wslpath
-import { chmodSync, copyFileSync, existsSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import type { TestContext } from "vitest";
@@ -18,7 +18,7 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 		expect,
 		onTestFinished,
 	}) => {
-		expect.assertions(6);
+		expect.assertions(9);
 
 		const fixture = makeFixtureProject({
 			config: {
@@ -35,6 +35,8 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 		const environment = {
 			FIXTURE_HELPER_EXECUTABLE: executable,
 			FIXTURE_HELPER_STATE: path.join(fixture.project, "helper.json"),
+			FIXTURE_ROJO_VERSION: "7.7.1",
+			FIXTURE_WSL_PLUGIN: "1",
 			RBX_FORGE_NATIVE_DIR: NATIVE_DIRECTORY,
 			RBX_FORGE_STUDIO_PATH: process.execPath,
 			RBX_FORGE_TEST_WINDOWS_HELPER: HELPER,
@@ -44,6 +46,24 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 		const up = await fixture.forge(["up", "--no-compiler", "--studio", "--json"], environment);
 
 		expect(up.status, up.stdout + up.stderr).toBe(0);
+
+		expect(
+			readFileSync(path.join(fixture.project, "windows-plugins/ForgePlugin.rbxm")),
+		).toEqual(readFileSync(path.resolve("dist/forge-plugin/ForgePlugin.rbxm")));
+		expect(
+			existsSync(path.join(fixture.project, "windows-plugins/RojoManagedPlugin.rbxm")),
+		).toBe(true);
+
+		const build = await fixture.forge(
+			["build", "--plugin", "Tool.rbxm", "--json"],
+			environment,
+		);
+
+		expect(
+			build.status === 0 &&
+				existsSync(path.join(fixture.project, "windows-plugins/Tool.rbxm")),
+			build.stdout + build.stderr,
+		).toBe(true);
 
 		const status = await fixture.forge(["status", "--json"], environment);
 		const state = parseStatus(parseResult(status.stdout).data);

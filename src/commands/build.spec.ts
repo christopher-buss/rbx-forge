@@ -76,6 +76,57 @@ function input(flags: CommandInput["flags"] = {}, config: ConfigLayer = {}): Com
 }
 
 describe(runBuildCommandAsync, () => {
+	it.for(["/absolute.rbxm", "wrong.rbxl", "Tool"])(
+		"rejects an invalid WSL plugin name %s",
+		async (plugin, { expect }) => {
+			expect.assertions(1);
+
+			const { context } = makeBuild();
+			context.env = { ...context.env, WSL_DISTRO_NAME: "fixture" };
+
+			await expect(runBuildCommandAsync(context, input({ plugin }))).rejects.toMatchObject({
+				code: "usage",
+				message: "--plugin needs a relative .rbxm or .rbxmx file name.",
+			});
+		},
+	);
+
+	it("fails when WSL cannot locate the Windows Plugins folder", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { context } = makeBuild();
+		context.env = { ...context.env, WSL_DISTRO_NAME: "fixture" };
+
+		await expect(
+			runBuildCommandAsync(context, input({ plugin: "Tool.rbxm" })),
+		).rejects.toMatchObject({
+			code: "windows_helper_unavailable",
+			message: "The Windows Plugins folder is unavailable.",
+		});
+	});
+
+	it("builds a plugin into the Windows folder under WSL", async ({ expect }) => {
+		expect.assertions(2);
+
+		const { context, memory, specs } = makeBuild();
+		context.env = { ...context.env, WSL_DISTRO_NAME: "fixture" };
+		context.seams.studioHost.pluginsFolderAsync = async () => {
+			return path.join(PROJECT, "windows/plugins");
+		};
+
+		await runBuildCommandAsync(context, input({ plugin: "Tool.rbxm" }));
+
+		expect(specs[0]!.args).toEqual([
+			"build",
+			"default.project.json",
+			"--output",
+			path.join(PROJECT, "windows/plugins/Tool.rbxm"),
+		]);
+		expect(
+			memory.fileSystem.statSync(path.join(PROJECT, "windows/plugins")).isDirectory(),
+		).toBe(true);
+	});
+
 	it("should build the configured project to the configured output", async ({ expect }) => {
 		expect.assertions(2);
 
