@@ -288,7 +288,13 @@ defineConfig({
 
 The Studio executable is not a config option: its path differs per computer. Use
 `--studio-path` or `RBX_FORGE_STUDIO_PATH` (see
-[Opening Studio](./studio.md#opening-studio)).
+[Opening Studio](./studio.md#opening-studio)). Under WSL, both accept a Linux
+path (`/mnt/c/Users/me/RobloxStudioBeta.exe`) or an absolute Windows drive or
+UNC path (`C:\Users\me\RobloxStudioBeta.exe` or
+`\\server\share\RobloxStudioBeta.exe`). Quote paths containing spaces. forge
+converts Windows paths before checking the file from Linux. The flag wins over
+the environment variable, then forge checks the Windows registry. An invalid
+explicit path fails; it never falls back to the installed Studio.
 
 ### `session`
 

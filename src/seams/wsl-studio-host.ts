@@ -132,11 +132,21 @@ class WslHost {
 			);
 		}
 
+		return this.installedAsync();
+	}
+
+	private async installedAsync(): Promise<StudioExecutable | undefined> {
 		for (const key of STUDIO_REGISTRY_KEYS) {
 			const command = await this.requestAsync({ key, op: "readRegistry" }, NULLABLE_TEXT);
 			const file = command === null ? undefined : commandExecutable(command);
 			if (file !== undefined) {
-				return this.checkedAsync(file, "registry");
+				try {
+					return await this.checkedAsync(file, "registry");
+				} catch (err) {
+					if (!(err instanceof ForgeError) || err.code !== "studio_launch_failed") {
+						throw err;
+					}
+				}
 			}
 		}
 
