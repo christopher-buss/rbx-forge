@@ -108,7 +108,7 @@ describe("forge up --studio", () => {
 		expect({ attached: attached.toSorted(), compiler }).toStrictEqual({
 			attached: [
 				...STUDIO_PLUGIN_INSTALL,
-				`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
+				`rojo serve ${wrapperPath(fixture)} --port ${fixture.port} --address 127.0.0.1`,
 				expect.stringMatching(/^studio /),
 			],
 			compiler: "rbxtsc -w",
@@ -147,7 +147,7 @@ describe("forge up --studio", () => {
 		});
 		expect(processes(fixture)).toIncludeSameMembers([
 			"rbxtsc -w",
-			`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
+			`rojo serve ${wrapperPath(fixture)} --port ${fixture.port} --address 127.0.0.1`,
 		]);
 	});
 
@@ -216,8 +216,8 @@ describe("forge up --studio", () => {
 			services: { rojo: { port, status: "ready" } },
 		});
 		expect(processes(fixture).filter((line) => line.startsWith("rojo serve"))).toStrictEqual([
-			`rojo serve ${wrapperPath(fixture)} --port ${String(port)}`,
-			`rojo serve ${wrapperPath(fixture)} --port ${String(port)}`,
+			`rojo serve ${wrapperPath(fixture)} --port ${String(port)} --address 127.0.0.1`,
+			`rojo serve ${wrapperPath(fixture)} --port ${String(port)} --address 127.0.0.1`,
 		]);
 	});
 });

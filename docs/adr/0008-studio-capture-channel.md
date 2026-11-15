@@ -33,6 +33,15 @@ The wrapper's capture instance is non-Archivable: Rojo supports setting
 places come from the original project, so the capture instance and its secret do
 not enter syncback or a saved place.
 
+Under WSL, listeners bind IPv4 loopback and rely on localhost forwarding or
+mirrored networking. Before Rojo reports ready, the Windows helper verifies its
+identity through `127.0.0.1`. Before publishing a capture URL and on every
+snapshot save bind, it verifies a separate nonce route on that listener. Probes
+never request the readiness route, whose GET acknowledges Studio
+synchronization. A failed probe is `wsl_network_unreachable`, with a hint to
+check localhost forwarding, networking mode, and the firewall. There is no
+relay.
+
 ## Consequences
 
 HTTP does not provide the control endpoint's OS user isolation. Possession of

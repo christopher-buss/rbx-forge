@@ -2065,6 +2065,8 @@ describe(runSupervisorAsync, () => {
 			path.join(SESSION, "rojo.project.json"),
 			"--port",
 			"4000",
+			"--address",
+			"127.0.0.1",
 		]);
 	});
 
@@ -2121,7 +2123,7 @@ describe(runSupervisorAsync, () => {
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: ",
 			"start-2: build default.project.json --output game.rbxl",
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"compiler: -w",
 		]);
 		expect(run.fake.calls[0]).toBe("go");
@@ -2189,7 +2191,14 @@ describe(runSupervisorAsync, () => {
 		expect(run.fake.spawned).toStrictEqual([
 			{
 				id: "rojo",
-				args: ["serve", path.join(SESSION, "rojo.project.json"), "--port", "4000"],
+				args: [
+					"serve",
+					path.join(SESSION, "rojo.project.json"),
+					"--port",
+					"4000",
+					"--address",
+					"127.0.0.1",
+				],
 				cwd: PROJECT,
 				env: { PATH: TOOLS },
 				file: path.join(TOOLS, "rojo"),
@@ -2340,7 +2349,7 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"start-1: build default.project.json --output game.rbxl",
 		]);
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
@@ -2392,7 +2401,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: build default.project.json --output game.rbxl",
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"compiler: watch",
 		]);
 	});
@@ -2476,7 +2485,7 @@ describe(runSupervisorAsync, () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: ",
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"compiler: -w",
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
@@ -3043,7 +3052,7 @@ describe(runSupervisorAsync, () => {
 
 		await expect(run.result).resolves.toMatchObject({ data: { port: FREE_PORT } });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT} --address 127.0.0.1`,
 		]);
 	});
 
@@ -3157,7 +3166,7 @@ describe("forge start hooks and syncback", () => {
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 		]);
 	});
 
@@ -4229,7 +4238,7 @@ describe("forge up parts", () => {
 
 		expect(answer).toStrictEqual({ added: ["compiler"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"compiler: -w",
 		]);
 		expect([before, after]).toMatchObject([
@@ -4516,7 +4525,7 @@ describe("forge up --studio", () => {
 
 		expect(answer).toStrictEqual({ added: ["studio", "rojo"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"start-1: build default.project.json --output game.rbxl",
 		]);
 		expect(run.studioLauncher).toHaveBeenCalledExactlyOnceWith(
@@ -4549,7 +4558,7 @@ describe("forge up --studio", () => {
 
 		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
@@ -4611,8 +4620,8 @@ describe("forge up --studio", () => {
 
 		expect([first, repair]).toStrictEqual([{ added: ["studio", "rojo"] }, { added: ["rojo"] }]);
 		expect(spawnedIds(run.fake).filter((id) => id.startsWith("rojo"))).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT} --address 127.0.0.1`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT} --address 127.0.0.1`,
 		]);
 		expect(result.data).toMatchObject({ port: FREE_PORT });
 	});
@@ -4920,7 +4929,7 @@ describe("forge sync control channel", () => {
 			project: "default.project.json",
 		});
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"start-1: build default.project.json --output game.rbxl",
 			"syncback-1: syncback --help",
 			"syncback-2: syncback default.project.json --input game.rbxl --non-interactive",
@@ -6080,7 +6089,7 @@ describe("forge restart control channel", () => {
 
 		expect(spawnedIds(run.fake).slice(before)).toStrictEqual([
 			"compiler: -w",
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 		]);
 		await expect(answer).resolves.toStrictEqual({
 			added: ["compiler", "rojo"],
@@ -6258,7 +6267,7 @@ describe("forge restart control channel", () => {
 		expect(spawnedIds(run.fake).slice(before)).toStrictEqual([
 			"compiler: -w",
 			"start-2: build default.project.json --output game.rbxl",
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 		]);
 		await expect(answer).resolves.toMatchObject({
 			added: ["compiler", "studio", "rojo"],

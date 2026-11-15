@@ -1,5 +1,6 @@
 import { fromAny } from "@total-typescript/shoehorn";
 
+import { Buffer } from "node:buffer";
 import path from "node:path";
 import { describe, it, vi } from "vitest";
 
@@ -169,6 +170,29 @@ function oldSnapshots(count: number): Record<string, string> {
 }
 
 describe(runOpenAsync, () => {
+	it("does not publish snapshot credentials when Windows cannot reach its capture listener", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const run = makeOpen({ file: { studio: { saveMethod: "capture" } } });
+		run.context.seams.randomId = () => "snapshot-id";
+		run.context.seams.studioHost.probeHttpAsync = async () => {
+			throw new Error("refused");
+		};
+
+		vi.spyOn(run.context.seams.network, "listenForCaptureAsync").mockResolvedValue({
+			captureAsync: async () => ({ model: new Uint8Array(), services: [] }),
+			close: () => {},
+			url: "http://127.0.0.1:49152/capture/secret",
+		});
+
+		await expect(runOpenAsync(run.context, input())).rejects.toMatchObject({
+			code: "wsl_network_unreachable",
+		});
+		expect(run.memory.fileSystem.existsSync(`${SNAPSHOT}.capture.json`)).toBe(false);
+	});
+
 	it("prepares a snapshot capture marker and retains its endpoint for later saves", async ({
 		expect,
 	}) => {
@@ -178,6 +202,7 @@ describe(runOpenAsync, () => {
 		const secret = "a".repeat(64);
 		const close = vi.fn<() => void>();
 		run.context.seams.randomId = () => "snapshot-id";
+		run.context.seams.studioHost.probeHttpAsync = async () => Buffer.from("snapshot-id");
 		vi.spyOn(run.context.seams.network, "listenForCaptureAsync").mockResolvedValue({
 			captureAsync: async () => ({ model: new Uint8Array(), services: [] }),
 			close,

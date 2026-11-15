@@ -23,6 +23,7 @@ function setup(
 		alive?: boolean;
 		launchReply?: unknown;
 		output?: string;
+		probeReply?: unknown;
 		registry?: null | string;
 		result?: ProcessOutcome;
 		startTime?: null | string;
@@ -63,6 +64,9 @@ function setup(
 				case "pin": {
 					return PIN;
 				}
+				case "probeHttp": {
+					return options.probeReply;
+				}
 				case "processStartTime": {
 					return options.startTime === undefined ? PIN.startTime : options.startTime;
 				}
@@ -98,6 +102,17 @@ function setup(
 }
 
 describe("wsl Studio tracer", () => {
+	it("reads binary probe responses from the Windows helper", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup({ probeReply: [0, 255, 42] });
+		assert(seams.studioHost.probeHttpAsync !== undefined);
+
+		await expect(seams.studioHost.probeHttpAsync(34872, "/api/rojo")).resolves.toEqual(
+			new Uint8Array([0, 255, 42]),
+		);
+	});
+
 	it("launches a Windows identity without passing Linux environment variables", async ({
 		expect,
 	}) => {

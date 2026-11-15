@@ -143,6 +143,31 @@ async function dispatchedUrlAsync(
 
 describe("capture listener", () => {
 	it.for([
+		{ method: "GET", status: 200 },
+		{ method: "POST", status: 404 },
+	])(
+		"answers $method probes independently of capture polling",
+		async ({ method, status }, { expect }) => {
+			expect.assertions(1);
+
+			const fake = createCaptureBackend();
+			const network = createNodeNetwork(fake.backend);
+			const listener = await network.listenForCaptureAsync(IDENTITY);
+			const url = new URL(listener.url);
+			url.pathname += "/probe/challenge";
+			const reply = await fake.request(url.pathname + url.search, method).finished;
+
+			listener.close();
+
+			expect(reply).toMatchObject({
+				body: "challenge",
+				headers: { "content-length": 9 },
+				status,
+			});
+		},
+	);
+
+	it.for([
 		{ options: {}, port: 0, secret: "ab".repeat(32) },
 		{ options: { address: { port: 50123, secret: "saved" } }, port: 50123, secret: "saved" },
 	])(

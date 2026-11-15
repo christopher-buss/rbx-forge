@@ -1,5 +1,6 @@
 import { type } from "arktype";
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -10,6 +11,7 @@ import { assert, describe, it } from "vitest";
 import { createHelperClient } from "../../src/native/helper-client.ts";
 import { nodeChildProcessRunner } from "../../src/seams/child-process.ts";
 import { nodeClock } from "../../src/seams/clock.ts";
+import { nodeNetwork } from "../../src/seams/network.ts";
 import {
 	loadRealNative,
 	makeRunScriptStudioExecutable,
@@ -82,6 +84,80 @@ async function launchStudioAsync(testContext: Pick<TestContext, "onTestFinished"
 }
 
 describe.skipIf(process.platform !== "win32")("windows helper", () => {
+	it("probes capture without acknowledging Studio synchronization", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const identity = { projectName: "probe", sessionId: "generation" };
+		const capture = await nodeNetwork.listenForCaptureAsync(identity);
+		const ready = await nodeNetwork.listenForStudioReadyAsync(identity);
+		onTestFinished(() => {
+			capture.close();
+			ready.close();
+		});
+		const url = new URL(capture.url);
+		const { requestAsync } = startHelper({ onTestFinished });
+		await requestAsync({ op: "handshake", protocol: 1 });
+
+		expect(
+			await requestAsync({
+				op: "probeHttp",
+				port: Number(url.port),
+				route: `${url.pathname}/probe/nonce${url.search}`,
+			}),
+		).toMatchObject({ result: [110, 111, 110, 99, 101] });
+
+		ready.close();
+
+		await expect(ready.ready).resolves.toBe(false);
+	});
+
+	it("probes HTTP from Windows IPv4 loopback and reports failures", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(4);
+
+		let status = 200;
+		const server = createServer((_request, response) => {
+			response.writeHead(status, { "content-length": 5 }).end("nonce");
+		});
+		onTestFinished(() => {
+			server.close();
+			server.closeAllConnections();
+		});
+		await new Promise<void>((resolve) => {
+			server.listen(0, "127.0.0.1", resolve);
+		});
+		const address = server.address();
+		assert(address !== null && typeof address === "object");
+		const { port } = address;
+		const { requestAsync } = startHelper({ onTestFinished });
+		await requestAsync({ op: "handshake", protocol: 1 });
+
+		expect(await requestAsync({ op: "probeHttp", port, route: "/api/rojo" })).toMatchObject({
+			result: [110, 111, 110, 99, 101],
+		});
+
+		status = 404;
+
+		expect(
+			await requestAsync({ op: "probeHttp", port, route: "/capture/secret/probe/nonce" }),
+		).toMatchObject({ error: { code: "operation_failed" } });
+		expect(await requestAsync({ op: "probeHttp", port, route: "/ready/secret" })).toMatchObject(
+			{ error: { code: "operation_failed" } },
+		);
+
+		server.close();
+		server.closeAllConnections();
+
+		expect(await requestAsync({ op: "probeHttp", port, route: "/api/rojo" })).toMatchObject({
+			error: { code: "operation_failed" },
+		});
+	});
+
 	it("uses the TypeScript client against the real helper protocol", async ({
 		expect,
 		onTestFinished,

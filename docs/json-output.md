@@ -35,6 +35,10 @@ takes a safe default or fails with `needs_confirmation`.
 Error codes are stable: a code is never renamed or reused. The full list is in
 [`src/errors.ts`](../src/errors.ts).
 
+Under WSL, `wsl_network_unreachable` exits with code 1 when Windows cannot reach
+the session Rojo or capture listener on IPv4 loopback. Its `error.hint` points
+to localhost forwarding, networking mode, and firewall settings.
+
 Under WSL, helper startup failures exit with code 1 and include `error.hint`:
 
 - `windows_helper_unavailable`: the packaged `forge-windows-helper.exe` is

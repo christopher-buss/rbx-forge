@@ -1,5 +1,7 @@
 #[path = "../helper.rs"]
 mod helper;
+#[path = "../helper_probe.rs"]
+mod helper_probe;
 #[allow(
     dead_code,
     unfulfilled_lint_expectations,
