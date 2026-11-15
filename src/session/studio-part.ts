@@ -233,6 +233,7 @@ export function createStudioAdder(
 			? await prepareStudioAsync(setup, attach.steps, { build: hasCompiler })
 			: undefined;
 		let opening = followPreparedStudio(setup, scope, attach, prepared);
+		await opening?.open;
 		const isRojoStarted = await serveRojoAsync(setup, scope, attach.parts, rojo);
 		if (prepared !== undefined && opening === undefined && !hasEnded(scope)) {
 			opening = await attachAsync(setup, scope, attach, { ...request, prepared });

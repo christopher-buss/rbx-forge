@@ -2265,8 +2265,8 @@ describe(runSupervisorAsync, () => {
 					"Studio needs a manual Rojo connection; its open status does not confirm synchronization.",
 				type: "warning",
 			},
-			{ name: "rojo serve", status: "started", type: "step" },
 			{ message: `Roblox Studio has ${PLACE} open.`, type: "info" },
+			{ name: "rojo serve", status: "started", type: "step" },
 			{ name: "rojo serve", status: "succeeded", type: "step" },
 		]);
 	});

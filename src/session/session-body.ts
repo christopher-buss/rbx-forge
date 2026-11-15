@@ -118,7 +118,7 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 			steps,
 			studio: { isAttached: false },
 		};
-		followPreparedStudio(session, scope, state, prepared);
+		await followPreparedStudioAsync(session, scope, state, prepared);
 
 		const served = await runServicesAsync(session, scope, state);
 		if (served === undefined) {
@@ -146,15 +146,18 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
  * @param state - The Studio state and parts.
  * @param prepared - The prepared place, when requested.
  */
-function followPreparedStudio(
+async function followPreparedStudioAsync(
 	session: SessionSetup,
 	scope: SessionScope,
 	state: BodyState,
 	prepared: PreparedStudio | undefined,
-): void {
-	if (prepared?.attached !== undefined) {
-		followSessionStudio(session, scope, { ...state, state: state.studio }, prepared.attached);
+): Promise<void> {
+	if (prepared?.attached === undefined) {
+		return;
 	}
+
+	const follow = { ...state, state: state.studio };
+	await followSessionStudio(session, scope, follow, prepared.attached).open;
 }
 
 /**
