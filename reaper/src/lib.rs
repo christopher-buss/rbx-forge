@@ -13,6 +13,7 @@ mod model;
 #[allow(dead_code, reason = "the worker layer serves only the reaper binary")]
 mod os;
 mod studio_dialog;
+mod studio_operations;
 mod studio_save;
 #[cfg(windows)]
 mod windows_exports;
@@ -614,28 +615,10 @@ impl Task for StudioSaveTask {
     type Output = String;
     type JsValue = String;
     fn compute(&mut self) -> Result<Self::Output> {
-        if Instant::now() >= self.deadline {
-            return Ok("timeout".to_owned());
-        }
-        let pinned = os::process::PinnedProcess::open(self.pid)
-            .map_err(|err| to_napi("pin Studio for save", &err))?;
-        let Some(pinned) = pinned else {
-            return Err(Error::from_reason("Studio exited"));
-        };
-        if pinned.start_time() != self.start_time {
-            return Err(Error::from_reason("Studio identity changed"));
-        }
-        #[cfg(windows)]
-        let result = os::win::visibility::with_hiding_paused(&pinned, || {
-            studio_save::request(self.pid, self.deadline)
-        });
-        #[cfg(not(windows))]
-        let result = studio_save::request(self.pid, self.deadline);
-        match result {
-            _ if Instant::now() >= self.deadline => Ok("timeout".to_owned()),
-            result => result.map_err(|err| to_napi("save Studio", &err)),
-        }
+        studio_operations::save(self.pid, self.start_time, self.deadline)
+            .map_err(|err| to_napi("save Studio", &err))
     }
+
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output)
     }
@@ -649,12 +632,10 @@ impl Task for SaveMenuTask {
     type Output = bool;
     type JsValue = bool;
     fn compute(&mut self) -> Result<Self::Output> {
-        if Instant::now() >= self.deadline {
-            return Ok(false);
-        }
-        studio_save::save_menu_enabled(self.pid, self.deadline)
+        studio_operations::save_menu(self.pid, self.deadline)
             .map_err(|err| to_napi("read Studio save menu", &err))
     }
+
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output)
     }
@@ -689,25 +670,17 @@ impl Task for StudioDialogTask {
     type Output = bool;
     type JsValue = bool;
     fn compute(&mut self) -> Result<Self::Output> {
-        let pinned = os::process::PinnedProcess::open(self.pid)
-            .map_err(|err| to_napi("pin Studio for dialog", &err))?;
-        let Some(pinned) = pinned else {
-            return Ok(false);
-        };
-        if pinned.start_time() != self.start_time {
-            return Ok(false);
-        }
-        match studio_dialog::dismiss(
+        studio_operations::dismiss(
             self.pid,
+            self.start_time,
             &self.title,
             &self.button,
             &self.desktop,
             self.deadline,
-        ) {
-            _ if Instant::now() >= self.deadline => Ok(false),
-            result => result.map_err(|err| to_napi("dismiss Studio dialog", &err)),
-        }
+        )
+        .map_err(|err| to_napi("dismiss Studio dialog", &err))
     }
+
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output)
     }

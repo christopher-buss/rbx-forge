@@ -6,17 +6,16 @@ import path from "node:path";
 import { ForgeError } from "../errors.ts";
 import type { HelperClient } from "../native/helper-client.ts";
 import { readVariable } from "../process/environment.ts";
-import type { ProcessOutcome } from "../process/process-runner.ts";
 import type { StudioExecutable } from "../studio/discover.ts";
 import { studioArguments } from "../studio/launch-arguments.ts";
 import type { StudioLaunch, StudioLaunchOutcome } from "../studio/launcher.ts";
 import { commandExecutable, STUDIO_REGISTRY_KEYS } from "./addon-studio/discover.ts";
 import type { Environment, Seams } from "./seams.ts";
 import type { PinnedStudio, StudioHost } from "./studio-host.ts";
+import { convertedOutput } from "./wsl-path-output.ts";
 
 const pinShape = type({ pid: "number.integer > 0", pin: "string > 0", startTime: "string > 0" });
 const INVALID_PATH = /[\r\n\0]/;
-const WINDOWS_PATH_END = /\r?\n?$/;
 const NULLABLE_TEXT = type("string | null");
 const windowsAbsolute = /^(?:[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/i;
 
@@ -37,7 +36,7 @@ class WslHost {
 
 	public host(): StudioHost {
 		return {
-			autoSaveDirectoriesAsync: async () => [],
+			autoSaveDirectoriesAsync: this.autoSaveDirectoriesAsync.bind(this),
 			findStudioExecutableAsync: this.discoverAsync.bind(this),
 			fromHostPathAsync: async (file) => this.convertAsync(file, false),
 			frontmostApplicationAsync: async () => null,
@@ -65,6 +64,16 @@ class WslHost {
 		};
 	}
 
+	private async autoSaveDirectoriesAsync(): Promise<Array<string>> {
+		const directories = await this.requestAsync(
+			{ op: "autoSaveDirectories" },
+			type("string[]"),
+		);
+		return Promise.all(
+			directories.map(async (directory) => this.convertAsync(directory, false, false)),
+		);
+	}
+
 	private async checkedAsync(
 		file: string,
 		source: StudioExecutable["source"],
@@ -90,7 +99,7 @@ class WslHost {
 		return this.channel;
 	}
 
-	private async convertAsync(input: string, windows: boolean): Promise<string> {
+	private async convertAsync(input: string, windows: boolean, mustExist = true): Promise<string> {
 		if (
 			INVALID_PATH.test(input) ||
 			!(windows ? path.posix.isAbsolute(input) : windowsAbsolute.test(input))
@@ -113,7 +122,7 @@ class WslHost {
 			timeoutMs: 10_000,
 		});
 		const output = convertedOutput(result, input);
-		this.validateConverted(output, windows, input);
+		this.validateConverted(output, windows, input, mustExist);
 		return output;
 	}
 
@@ -192,11 +201,17 @@ class WslHost {
 	private async requestAsync<T>(
 		operation: Record<string, unknown>,
 		shape: { assert: (value: unknown) => T },
+		timeoutMs?: number,
 	): Promise<T> {
-		return shape.assert(await this.client().requestAsync(operation));
+		return shape.assert(await this.client().requestAsync(operation, timeoutMs));
 	}
 
-	private validateConverted(output: string, windows: boolean, input: string): void {
+	private validateConverted(
+		output: string,
+		windows: boolean,
+		input: string,
+		mustExist: boolean,
+	): void {
 		if (
 			INVALID_PATH.test(output) ||
 			!(windows ? windowsAbsolute.test(output) : path.posix.isAbsolute(output))
@@ -207,7 +222,7 @@ class WslHost {
 			);
 		}
 
-		if (!windows && !this.backend.fileSystem.existsSync(output)) {
+		if (!windows && mustExist && !this.backend.fileSystem.existsSync(output)) {
 			throw new ForgeError(
 				"studio_launch_failed",
 				`The converted Windows path is unavailable in WSL: ${output}`,
@@ -229,7 +244,13 @@ class WslHost {
 			appActiveAsync: unsupportedAsync,
 			appHiddenAsync: unsupportedAsync,
 			desktopAsync: async () => "user",
-			dismissDialogAsync: unsupportedAsync,
+			dismissDialogAsync: async (title, button, desktop, timeoutMs = 1000) => {
+				return request(
+					{ button, desktop, op: "dismissDialog", pin: identity.pin, timeoutMs, title },
+					type("boolean"),
+					timeoutMs,
+				);
+			},
 			executablePathAsync: async () => {
 				return this.requestAsync(
 					{ op: "executablePath", pin: identity.pin },
@@ -242,8 +263,20 @@ class WslHost {
 			os: "win32",
 			pid: identity.pid,
 			requestCloseAsync: async () => boolAsync("requestClose"),
-			requestSaveAsync: unsupportedAsync,
-			saveMenuEnabledAsync: unsupportedAsync,
+			requestSaveAsync: async (timeoutMs = 30_000) => {
+				return request(
+					{ op: "requestSave", pin: identity.pin, timeoutMs },
+					type("'menu_disabled' | 'no_menu_item' | 'requested' | 'timeout'"),
+					timeoutMs,
+				);
+			},
+			saveMenuEnabledAsync: async (timeoutMs) => {
+				return request(
+					{ op: "saveMenuEnabled", pin: identity.pin, timeoutMs },
+					type("boolean"),
+					timeoutMs,
+				);
+			},
 			setAppHiddenAsync: unsupportedAsync,
 			setWindowVisibilityAsync: unsupportedAsync,
 			startTime: identity.startTime,
@@ -305,15 +338,4 @@ async function unsupportedAsync(): Promise<never> {
 		"windows_helper_unavailable",
 		"This Studio operation is not supported by the Windows helper tracer.",
 	);
-}
-
-function convertedOutput(result: ProcessOutcome, input: string): string {
-	if (result.type !== "exited" || result.exitCode !== 0) {
-		throw new ForgeError(
-			"studio_launch_failed",
-			`wslpath could not convert ${input} to an absolute path.`,
-		);
-	}
-
-	return result.outputTail.join("\n").replace(WINDOWS_PATH_END, "");
 }

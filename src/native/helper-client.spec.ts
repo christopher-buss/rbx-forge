@@ -52,6 +52,26 @@ describe("windows helper channel", () => {
 		await expect(client.requestAsync({ op: "isAlive", pin: "1" })).resolves.toBe(true);
 	});
 
+	it("keeps a save request alive for its caller's deadline", async ({ expect }) => {
+		expect.assertions(2);
+
+		const { client, packets } = channel(() => "requested", {
+			now: () => 1000,
+			sleep: async (_ms, signal) => {
+				return new Promise((_resolve, reject) => {
+					signal!.addEventListener("abort", () => {
+						reject(new Error("aborted"));
+					});
+				});
+			},
+		});
+
+		await expect(client.requestAsync({ op: "requestSave", pin: "1" }, 30_000)).resolves.toBe(
+			"requested",
+		);
+		expect(packets.at(-1)).toMatchObject({ deadlineMs: 31_000 });
+	});
+
 	it("does not replay a launch after its reply is lost", async ({ expect }) => {
 		expect.assertions(2);
 

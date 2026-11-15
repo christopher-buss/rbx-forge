@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +26,25 @@ enum Operation {
     },
     ReadRegistry {
         key: String,
+    },
+    AutoSaveDirectories,
+    RequestSave {
+        pin: String,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u64,
+    },
+    SaveMenuEnabled {
+        pin: String,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u64,
+    },
+    DismissDialog {
+        pin: String,
+        title: String,
+        button: String,
+        desktop: String,
+        #[serde(rename = "timeoutMs")]
+        timeout_ms: u64,
     },
     IsBlocked {
         pin: String,
@@ -86,7 +105,7 @@ impl Session {
         result
     }
 
-    fn execute(&mut self, op: Operation) -> io::Result<Value> {
+    fn execute(&mut self, op: Operation, deadline: Instant) -> io::Result<Value> {
         if let Operation::Handshake { protocol } = op {
             if protocol != 1 {
                 return Err(io::Error::other("unsupported protocol"));
@@ -115,6 +134,21 @@ impl Session {
             Operation::ProcessStartTime { pid } => Ok(json!(
                 crate::os::process::start_time(pid)?.map(|time| time.to_string())
             )),
+            Operation::AutoSaveDirectories => {
+                let folders: Vec<String> = [
+                    ("LOCALAPPDATA", "Roblox\\RobloxStudio\\AutoSaves"),
+                    ("USERPROFILE", "Documents\\ROBLOX\\AutoSaves"),
+                ]
+                .iter()
+                .filter_map(|(name, suffix)| {
+                    std::env::var(name)
+                        .ok()
+                        .filter(|root| !root.is_empty())
+                        .map(|root| format!("{}\\{}", root.trim_end_matches('\\'), suffix))
+                })
+                .collect();
+                Ok(json!(folders))
+            }
             Operation::ReadRegistry { key } => {
                 #[cfg(windows)]
                 {
@@ -172,6 +206,9 @@ impl Session {
             Operation::Release { pin } => Ok(json!(self.pins.remove(&pin).is_some())),
             operation => {
                 let (Operation::IsAlive { pin }
+                | Operation::RequestSave { pin, .. }
+                | Operation::SaveMenuEnabled { pin, .. }
+                | Operation::DismissDialog { pin, .. }
                 | Operation::IsBlocked { pin }
                 | Operation::WindowVisibility { pin }
                 | Operation::ExecutablePath { pin }
@@ -185,6 +222,36 @@ impl Session {
                     .get(pin)
                     .ok_or_else(|| io::Error::other("unknown pin"))?;
                 match operation {
+                    Operation::RequestSave { timeout_ms, .. } => {
+                        Ok(json!(crate::studio_operations::save(
+                            pinned.pid(),
+                            pinned.start_time(),
+                            deadline.min(Instant::now() + Duration::from_millis(timeout_ms))
+                        )?))
+                    }
+                    Operation::SaveMenuEnabled { timeout_ms, .. } => {
+                        if !pinned.is_alive()? {
+                            return Err(io::Error::other("Studio exited"));
+                        }
+                        Ok(json!(crate::studio_operations::save_menu(
+                            pinned.pid(),
+                            deadline.min(Instant::now() + Duration::from_millis(timeout_ms))
+                        )?))
+                    }
+                    Operation::DismissDialog {
+                        title,
+                        button,
+                        desktop,
+                        timeout_ms,
+                        ..
+                    } => Ok(json!(crate::studio_operations::dismiss(
+                        pinned.pid(),
+                        pinned.start_time(),
+                        &title,
+                        &button,
+                        &desktop,
+                        deadline.min(Instant::now() + Duration::from_millis(timeout_ms))
+                    )?)),
                     Operation::IsAlive { .. } => Ok(json!(pinned.is_alive()?)),
                     Operation::IsBlocked { .. } => Ok(json!(pinned.is_blocked()?)),
                     Operation::WindowVisibility { .. } => Ok(json!(pinned.window_visibility()?)),
@@ -222,7 +289,15 @@ impl Session {
                 "request deadline elapsed before execution",
             );
         }
-        match self.execute(request.operation) {
+        match self.execute(
+            request.operation,
+            Instant::now()
+                + Duration::from_millis(
+                    request
+                        .deadline_ms
+                        .saturating_sub(u64::try_from(now).unwrap_or(u64::MAX)),
+                ),
+        ) {
             Ok(result) => json!({"id": request.id, "result": result}),
             Err(err) => failure(id, "operation_failed", err),
         }

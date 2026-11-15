@@ -84,13 +84,16 @@ function terminate(pid: number, signal: NodeJS.Signals): boolean {
 	return true;
 }
 
+// eslint-disable-next-line flawless/max-lines-per-function -- Flat table of protocol fixture operations.
 function control(op: string): unknown {
 	const state = readState();
 	const operations = new Map<string, () => unknown>([
+		["autoSaveDirectories", () => []],
+		["dismissDialog", () => false],
 		["executablePath", () => process.env["FIXTURE_HELPER_EXECUTABLE"]],
 		["isAlive", () => existsSync(`${state.place}.lock`)],
-		["isBlocked", () => false],
-		["kill", () => terminate(state.actualPid, "SIGKILL")],
+		["isBlocked", () => existsSync(`${STATE_FILE}.dialog`)],
+		["kill", () => terminate(state.actualPid, "SIGTERM")],
 		[
 			"pin",
 			() => {
@@ -98,7 +101,25 @@ function control(op: string): unknown {
 			},
 		],
 		["processStartTime", () => state.startTime],
-		["requestClose", () => terminate(state.actualPid, "SIGTERM")],
+		[
+			"requestClose",
+			() => {
+				if (process.env["FIXTURE_HELPER_DIALOG"] === "1") {
+					writeFileSync(`${STATE_FILE}.dialog`, "open");
+					return true;
+				}
+
+				return terminate(state.actualPid, "SIGTERM");
+			},
+		],
+		[
+			"requestSave",
+			() => {
+				writeFileSync(state.place, "saved by Windows Studio");
+				return "requested";
+			},
+		],
+		["saveMenuEnabled", () => true],
 		["windowVisibility", () => "user"],
 	]);
 	const operation = operations.get(op);
