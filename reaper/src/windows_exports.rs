@@ -11,7 +11,7 @@ use napi::bindgen_prelude::AsyncTask;
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
 
-use crate::os::win::{detach, pipe, registry, security, testing};
+use crate::os::win::{pipe, registry, security, testing};
 
 fn to_napi(context: &str, err: &std::io::Error) -> Error {
     Error::from_reason(format!("{context}: {err}"))
@@ -281,7 +281,7 @@ pub struct DetachedSpawn {
 #[napi]
 pub fn spawn_detached(spawn: DetachedSpawn) -> Result<Option<u32>> {
     let env: Vec<(String, String)> = spawn.env.into_iter().collect();
-    detach::spawn_detached(&detach::Detached {
+    crate::windows_studio::launch(&crate::windows_studio::Detached {
         program: &spawn.program,
         args: &spawn.args,
         cwd: &spawn.cwd,

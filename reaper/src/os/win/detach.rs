@@ -60,6 +60,24 @@ fn spawn_with_desktop(
     detached: &Detached<'_>,
     open_hidden: impl FnOnce() -> io::Result<super::desktop::Desktop>,
 ) -> io::Result<Option<u32>> {
+    spawn_and_then(detached, open_hidden, Ok)
+}
+
+/// Pin while the create handle still prevents PID reuse.
+pub fn spawn_pinned(
+    detached: &Detached<'_>,
+) -> io::Result<Option<crate::os::process::PinnedProcess>> {
+    spawn_and_then(detached, super::desktop::inherit_hidden, |pid| {
+        crate::os::process::PinnedProcess::open(pid)?
+            .ok_or_else(|| io::Error::other("launched process exited"))
+    })
+}
+
+fn spawn_and_then<T>(
+    detached: &Detached<'_>,
+    open_hidden: impl FnOnce() -> io::Result<super::desktop::Desktop>,
+    finish: impl FnOnce(u32) -> io::Result<T>,
+) -> io::Result<Option<T>> {
     let stdin = inheritable(File::open("NUL")?)?;
     let output = inheritable(match detached.output {
         Some(path) => OpenOptions::new().append(true).create(true).open(path)?,
@@ -146,7 +164,7 @@ fn spawn_with_desktop(
     // close here, and the process runs on.
     let _process = unsafe { OwnedHandle::from_raw_handle(info.hProcess.cast()) };
     let _thread = unsafe { OwnedHandle::from_raw_handle(info.hThread.cast()) };
-    Ok(Some(info.dwProcessId))
+    finish(info.dwProcessId).map(Some)
 }
 
 #[cfg(test)]

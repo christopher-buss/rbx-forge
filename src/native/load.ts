@@ -174,6 +174,42 @@ export function isExecutableFile(file: string): boolean {
 	}
 }
 
+/**
+ * Locate the Windows helper in the Linux platform package without changing its mode.
+ * @param options - Native directory, host facts, package resolver, and execute check.
+ * @returns A lazy lookup of the absolute helper path.
+ */
+export function createWindowsHelperLocator(options: ReaperLocateOptions): () => string {
+	return () => {
+		const host = options.readHost();
+		const target = nativeTarget(host);
+		try {
+			if (target === undefined || host.platform !== "linux") {
+				throw new Error(`No Windows helper for ${host.platform}-${host.arch}.`);
+			}
+
+			const directory =
+				options.directory ??
+				path.dirname(options.resolveModule(`${PACKAGE_PREFIX}${target}/package.json`));
+			const file = path.resolve(directory, "forge-windows-helper.exe");
+			if (!options.isExecutable(file)) {
+				throw new Error(`${file} is missing or cannot run.`);
+			}
+
+			return file;
+		} catch (err) {
+			throw new ForgeError(
+				"windows_helper_unavailable",
+				err instanceof Error ? err.message : String(err),
+				{
+					cause: err,
+					hint: "Reinstall rbx-forge with optional dependencies, or set RBX_FORGE_NATIVE_DIR to a directory containing the matching Windows forge-windows-helper.exe.",
+				},
+			);
+		}
+	};
+}
+
 function loadAddon({ directory, readHost: hostOf, requireModule }: NativeLoadOptions): NativeAddon {
 	const host = hostOf();
 	const target = nativeTarget(host);

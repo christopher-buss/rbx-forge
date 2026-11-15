@@ -35,6 +35,16 @@ takes a safe default or fails with `needs_confirmation`.
 Error codes are stable: a code is never renamed or reused. The full list is in
 [`src/errors.ts`](../src/errors.ts).
 
+Under WSL, these failures exit with code 1 and include `error.hint`:
+
+- `windows_helper_unavailable`: the packaged `forge-windows-helper.exe` is
+  missing, cannot run, or reports an incompatible protocol or architecture.
+  Reinstall forge with optional dependencies and the matching architecture.
+- `wsl_interop_unavailable`: launching or handshaking with the Windows helper
+  fails. Enable `[interop] enabled=true` in `/etc/wsl.conf`, run
+  `wsl --shutdown` from Windows, and check that Windows executables run in the
+  distro. forge judges interop by the actual launch and handshake.
+
 ## Session results
 
 The fields of the session commands. The agent workflow is in the

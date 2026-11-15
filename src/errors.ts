@@ -68,7 +68,9 @@ export type ForgeErrorCode =
 	| "studio_owned"
 	| "supervisor_unresponsive"
 	| "syncback_unsupported"
-	| "usage";
+	| "usage"
+	| "windows_helper_unavailable"
+	| "wsl_interop_unavailable";
 
 /** What an error code means and the exit code it maps to. */
 export interface ErrorCodeInfo {
@@ -241,6 +243,14 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		text: "The Rojo command has no syncback support.",
 	},
 	usage: { exitCode: EXIT_USAGE, text: "The command line could not be read." },
+	windows_helper_unavailable: {
+		exitCode: EXIT_FAILURE,
+		text: "The Windows helper is missing, cannot run, or does not match this install.",
+	},
+	wsl_interop_unavailable: {
+		exitCode: EXIT_FAILURE,
+		text: "WSL could not launch and establish a channel to the Windows helper.",
+	},
 };
 
 /** Options that {@link ForgeError} takes beyond its code and message. */

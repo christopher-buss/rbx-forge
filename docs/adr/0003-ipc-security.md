@@ -29,7 +29,7 @@ browsers, and a port number can collide across worktrees.
   holder removes a stale socket.
 - **Token.** A random UUID in `.forge/sessions/<id>/token`, written once: mode
   0600 on POSIX, an owner-only DACL on Windows (native `writePrivateFile`). The
-  first line on a connection is `{"type":"hello","protocol":1,"token":…}`. A
+  first line on a connection is `{"type":"hello","protocol":1,"token":â€¦}`. A
   wrong token or protocol closes the connection with no answer.
 - **One request per connection.** Hello, one request line, one response line,
   close. No streaming: `logs` reads the log files, and `up` and `start` read
@@ -37,7 +37,33 @@ browsers, and a port number can collide across worktrees.
   is at most 1 MiB). `sync` gets a longer answer bound (30 min) because it runs
   syncback and its hooks.
 
+- **Windows Studio helper.** Under WSL, Studio control uses a private inherited
+  stdio channel to `forge-windows-helper`, separate from the session endpoint.
+  It adds no listener, pipe name, or token. Structured data travels only as
+  NDJSON on stdin/stdout; diagnostics belong on stderr. A helper serves one
+  forge process and owns its pins until release or EOF. Channel loss never
+  closes Studio; recovery follows ADR 0009.
+- **Helper wire protocol.** Requests carry a string `id`, an absolute Unix epoch
+  deadline in milliseconds (`deadlineMs`), and `op`. The first operation is
+  `handshake` with `protocol: 1`; its result contains `protocol`, `helperArch`,
+  `windowsArch` (`x64` or `arm64`), and `hostname`. Responses echo `id` and
+  carry either `result` or `error: {code, message}`. Invalid JSON has a null id;
+  malformed requests return `malformed_request`, expired requests return
+  `deadline_exceeded`, and OS or identity failures return `operation_failed`.
+  Requests execute serially and expired requests perform no operation. The
+  helper discards an oversized line and replies with an error before reading the
+  next request.
+- **Helper pins.** `launch` takes `program`, `args`, `cwd`, optional environment
+  overrides (`env`), `output`, `desktop`, and `hiddenWindows`. It returns
+  `{pin, pid, startTime}`. `pin` takes `pid` and the decimal Windows FILETIME
+  `startTime`; an identity mismatch is refused. Pin ids are opaque strings
+  scoped to one helper. `isAlive`, `executablePath`, `requestClose`, `kill`, and
+  `release` take `pin`. Close requests do not wait for exit; callers verify
+  liveness separately. Releasing a pin closes its handle without closing Studio.
+
 ## Consequences
+
+- The helper request line limit is a tuning surface, currently 1 MiB.
 
 - The tests cover each rule: wrong token rejected, remote-style pipe paths
   rejected (needs the SMB server service on Windows), the pipe DACL has exactly

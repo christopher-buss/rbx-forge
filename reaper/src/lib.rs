@@ -16,6 +16,12 @@ mod studio_dialog;
 mod studio_save;
 #[cfg(windows)]
 mod windows_exports;
+#[cfg(windows)]
+#[allow(
+    dead_code,
+    reason = "the helper also uses the plain Studio entry points"
+)]
+mod windows_studio;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
