@@ -142,6 +142,32 @@ async function dispatchedUrlAsync(
 }
 
 describe("capture listener", () => {
+	it("never acknowledges Studio synchronization when a capture probe is received", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const readyBackend = createFakeNetworkBackend();
+		const ready = await createNodeNetwork(readyBackend.backend).listenForStudioReadyAsync(
+			IDENTITY,
+		);
+		const fake = createCaptureBackend();
+		const capture = await createNodeNetwork(fake.backend).listenForCaptureAsync(IDENTITY);
+		onTestFinished(() => {
+			ready.close();
+			capture.close();
+		});
+		const url = new URL(capture.url);
+		const reply = await fake.request(`${url.pathname}/probe/nonce${url.search}`).finished;
+
+		expect(reply.status).toBe(200);
+
+		ready.close();
+
+		await expect(ready.ready).resolves.toBe(false);
+	});
+
 	it.for([
 		{ method: "GET", status: 200 },
 		{ method: "POST", status: 404 },
