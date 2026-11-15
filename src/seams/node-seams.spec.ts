@@ -3,11 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { PassThrough } from "node:stream";
-import { describe, it } from "vitest";
+import type { TestContext } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
+import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import { REAPER_PATH } from "../../test/helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../../test/helpers/temporary-directory.ts";
+import { nodeChildProcessRunner } from "./child-process.ts";
+import { nodeHost } from "./host.ts";
 import { nodeNetwork } from "./network.ts";
 import { createNodeSeams } from "./node-seams.ts";
 
@@ -218,4 +222,63 @@ describe(createNodeSeams, () => {
 
 		await expect(answer).resolves.toBeTrue();
 	});
+
+	it.for([false, true])(
+		"selects and handshakes the WSL helper with fake locator %s",
+		async (fake, { expect, onTestFinished }) => {
+			expect.assertions(2);
+
+			wslHost(onTestFinished);
+			const directory = makeTemporaryDirectory();
+			writeFileSync(path.join(directory, "forge-windows-helper.exe"), "fixture");
+			vi.stubEnv("RBX_FORGE_TEST_WINDOWS_HELPER", fakeHelperPath(fake, directory));
+			const spawner = createFakeSpawner((child) => {
+				child.stdin.on("data", () => {
+					child.stdout.write(
+						`${JSON.stringify({ id: "1", result: { helperArch: process.arch, hostname: "WINDOWS", protocol: 1, windowsArch: process.arch } })}\n`,
+					);
+				});
+			});
+			vi.spyOn(nodeChildProcessRunner, "spawn").mockImplementation(spawner.runner.spawn);
+
+			await expect(makeSeams(directory).studioHost.hostnameAsync()).resolves.toBe("WINDOWS");
+			expect(spawner.calls).toEqual([helperSpawn(fake, directory)]);
+		},
+	);
+
+	it("locates the packaged helper lazily on WSL", async ({ expect, onTestFinished }) => {
+		expect.assertions(1);
+
+		wslHost(onTestFinished);
+		vi.stubEnv("RBX_FORGE_TEST_WINDOWS_HELPER", undefined);
+
+		await expect(makeSeams().studioHost.hostnameAsync()).rejects.toMatchObject({
+			code: "windows_helper_unavailable",
+		});
+	});
 });
+
+function wslHost(onTestFinished: TestContext["onTestFinished"]): void {
+	const original = nodeHost.platform;
+	const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+	assert(descriptor !== undefined);
+	nodeHost.platform = "linux";
+	Object.defineProperty(process, "platform", { value: "linux" });
+	vi.stubEnv("WSL_DISTRO_NAME", "forge-test");
+	onTestFinished(() => {
+		nodeHost.platform = original;
+		Object.defineProperty(process, "platform", descriptor);
+	});
+}
+
+function fakeHelperPath(fake: boolean, directory: string): string | undefined {
+	return fake ? path.join(directory, "fake.ts") : undefined;
+}
+
+function helperSpawn(fake: boolean, directory: string) {
+	return {
+		args: fake ? [path.join(directory, "fake.ts")] : [],
+		file: fake ? nodeHost.execPath : path.join(directory, "forge-windows-helper.exe"),
+		options: { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+	};
+}

@@ -64,6 +64,7 @@ export type ForgeErrorCode =
 	| "studio_busy"
 	| "studio_found"
 	| "studio_launch_failed"
+	| "studio_launch_unknown"
 	| "studio_not_open"
 	| "studio_owned"
 	| "supervisor_unresponsive"
@@ -228,6 +229,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 	studio_launch_failed: {
 		exitCode: EXIT_FAILURE,
 		text: "The platform launcher could not open the place in Roblox Studio.",
+	},
+	studio_launch_unknown: {
+		exitCode: EXIT_FAILURE,
+		text: "The Studio launch reply was lost; check Studio before trying again.",
 	},
 	studio_not_open: { exitCode: EXIT_NOT_RUNNING, text: "No Studio has the target place open." },
 	studio_owned: {

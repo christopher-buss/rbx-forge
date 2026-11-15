@@ -1,7 +1,9 @@
 import path from "node:path";
 
 import type { FlagDefinition, FlagValues } from "../cli/flags.ts";
+import type { CommandContext } from "../commands/context.ts";
 import { withVariables } from "../process/environment.ts";
+import { isWsl } from "../process/wsl.ts";
 import type { Environment } from "../seams/seams.ts";
 
 /** The variable that names the Studio executable. */
@@ -25,6 +27,27 @@ export interface StudioExecutable {
 }
 
 /**
+ * Resolve a flag without interpreting a WSL Windows path as Linux-relative.
+ * @param context - The project root and forge side.
+ * @param studioPath - The executable flag.
+ * @returns The absolute executable path in its original OS form.
+ */
+export function resolveStudioPath(
+	context: Pick<CommandContext, "cwd" | "env"> & {
+		seams: { host: { platform: NodeJS.Platform } };
+	},
+	studioPath: string,
+): string {
+	if (!isWsl(context.seams.host.platform, context.env)) {
+		return path.resolve(context.cwd, studioPath);
+	}
+
+	return path.win32.isAbsolute(studioPath)
+		? studioPath
+		: path.posix.resolve(context.cwd, studioPath);
+}
+
+/**
  * The environment of a session whose `start` or `up` got `--studio-path`:
  * the flag, resolved against the project, goes into
  * {@link STUDIO_PATH_VARIABLE}, so the session's open step finds it first.
@@ -45,7 +68,12 @@ export function withStudioPath(
 	return typeof studioPath === "string"
 		? withVariables(
 				environment,
-				{ [STUDIO_PATH_VARIABLE]: path.resolve(cwd, studioPath) },
+				{
+					[STUDIO_PATH_VARIABLE]: resolveStudioPath(
+						{ cwd, env: environment, seams: { host: { platform } } },
+						studioPath,
+					),
+				},
 				platform,
 			)
 		: environment;

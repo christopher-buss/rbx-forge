@@ -7,13 +7,17 @@ import process from "node:process";
 import type { IpcTransport } from "../ipc/transport.ts";
 import { createNodeTransport } from "../ipc/transport.ts";
 import type { NativeLoader } from "../native/addon.ts";
+import { createHelperClient } from "../native/helper-client.ts";
 import {
 	createNativeLoader,
 	createReaperLocator,
+	createWindowsHelperLocator,
 	isExecutableFile,
 	readHost,
 } from "../native/load.ts";
+import { readVariable } from "../process/environment.ts";
 import { createChildProcessRunner } from "../process/process-runner.ts";
+import { isWsl } from "../process/wsl.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
 import { createReaperLauncher } from "../reaper/reaper-client.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
@@ -32,6 +36,7 @@ import { createReadlinePrompter } from "./prompter.ts";
 import type { Seams } from "./seams.ts";
 import { createSignals } from "./signals.ts";
 import { createAddonStudioHost } from "./studio-host.ts";
+import { createWslStudioHost } from "./wsl-studio-host.ts";
 
 /** What the real seams are built from. */
 export interface NodeSeamsOptions {
@@ -79,10 +84,7 @@ export function createNodeSeams({
 		childProcess: nodeChildProcessRunner,
 		clock: nodeClock,
 		configLoader: loadConfigFileAsync,
-		detachedSupervisor: createDetachedLauncher(
-			{ ...PROCESS_BACKEND, fileSystem: nodeFileSystem, native },
-			supervisorEntry,
-		),
+		detachedSupervisor: nodeDetachedLauncher(native, supervisorEntry),
 		fileSystem: nodeFileSystem,
 		host: nodeHost,
 		ipc: createNodeIpcTransport(native),
@@ -94,7 +96,13 @@ export function createNodeSeams({
 		readForgePlugin: () => nodeFs.readFileSync(forgePluginPath),
 		reaper: createNodeReaperLauncher(nativeDirectory, native, requireModule),
 		signals: createSignals(process),
-		studioHost: createNodeStudioHost(native, noInstalledStudio, supervisorEntry),
+		studioHost: createSelectedStudioHost({
+			directory: nativeDirectory,
+			entry: supervisorEntry,
+			native,
+			requireModule,
+			skip: noInstalledStudio,
+		}),
 		supervisor: createSupervisorLauncher(PROCESS_BACKEND, supervisorEntry),
 	};
 }
@@ -164,4 +172,64 @@ function createNodeStudioHost(
 		native,
 		studioLauncher: createNodeStudioLauncher(native, noInstalledStudio, entry),
 	});
+}
+
+function helperLocator(directory: string | undefined, requireModule: NodeJS.Require): () => string {
+	return createWindowsHelperLocator({
+		directory,
+		isExecutable: isExecutableFile,
+		readHost: () => readHost(process),
+		resolveModule: (id) => requireModule.resolve(id),
+	});
+}
+
+function createSelectedStudioHost({
+	directory,
+	entry,
+	native,
+	requireModule,
+	skip,
+}: {
+	directory: string | undefined;
+	entry: string;
+	native: NativeLoader;
+	requireModule: NodeJS.Require;
+	skip: boolean;
+}): Seams["studioHost"] {
+	if (!isWsl(nodeHost.platform, process.env)) {
+		return createNodeStudioHost(native, skip, entry);
+	}
+
+	const locate = helperLocator(directory, requireModule);
+	return createWslStudioHost(
+		{
+			clock: nodeClock,
+			environment: process.env,
+			fileSystem: nodeFileSystem,
+			processRunner: createChildProcessRunner(PROCESS_BACKEND),
+		},
+		() => {
+			return createHelperClient(
+				PROCESS_BACKEND,
+				() => {
+					const fake = readVariable(
+						process.env,
+						"RBX_FORGE_TEST_WINDOWS_HELPER",
+						nodeHost.platform,
+					);
+					return fake === undefined
+						? { args: [], file: locate() }
+						: { args: [fake], file: nodeHost.execPath };
+				},
+				process.arch,
+			);
+		},
+	);
+}
+
+function nodeDetachedLauncher(native: NativeLoader, entry: string): Seams["detachedSupervisor"] {
+	return createDetachedLauncher(
+		{ ...PROCESS_BACKEND, fileSystem: nodeFileSystem, native },
+		entry,
+	);
 }

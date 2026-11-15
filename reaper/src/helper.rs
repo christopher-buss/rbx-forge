@@ -21,6 +21,18 @@ enum Operation {
     Handshake {
         protocol: u32,
     },
+    ProcessStartTime {
+        pid: u32,
+    },
+    ReadRegistry {
+        key: String,
+    },
+    IsBlocked {
+        pin: String,
+    },
+    WindowVisibility {
+        pin: String,
+    },
     Pin {
         pid: u32,
         #[serde(rename = "startTime")]
@@ -100,6 +112,20 @@ impl Session {
         }
         match op {
             Operation::Handshake { .. } => unreachable!(),
+            Operation::ProcessStartTime { pid } => Ok(json!(
+                crate::os::process::start_time(pid)?.map(|time| time.to_string())
+            )),
+            Operation::ReadRegistry { key } => {
+                #[cfg(windows)]
+                {
+                    Ok(json!(crate::os::win::registry::read_user_default(&key)?))
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = key;
+                    Err(io::Error::other("Windows only"))
+                }
+            }
             Operation::Pin { pid, start_time } => {
                 let start: u64 = start_time.parse().map_err(io::Error::other)?;
                 let pin = PinnedProcess::open(pid)?
@@ -146,6 +172,8 @@ impl Session {
             Operation::Release { pin } => Ok(json!(self.pins.remove(&pin).is_some())),
             operation => {
                 let (Operation::IsAlive { pin }
+                | Operation::IsBlocked { pin }
+                | Operation::WindowVisibility { pin }
                 | Operation::ExecutablePath { pin }
                 | Operation::RequestClose { pin }
                 | Operation::Kill { pin }) = &operation
@@ -158,6 +186,8 @@ impl Session {
                     .ok_or_else(|| io::Error::other("unknown pin"))?;
                 match operation {
                     Operation::IsAlive { .. } => Ok(json!(pinned.is_alive()?)),
+                    Operation::IsBlocked { .. } => Ok(json!(pinned.is_blocked()?)),
+                    Operation::WindowVisibility { .. } => Ok(json!(pinned.window_visibility()?)),
                     Operation::ExecutablePath { .. } => Ok(json!(pinned.executable_path()?)),
                     Operation::RequestClose { .. } => Ok(json!(pinned.request_close()?)),
                     Operation::Kill { .. } => Ok(json!(pinned.kill()?)),

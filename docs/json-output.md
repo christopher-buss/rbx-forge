@@ -35,7 +35,7 @@ takes a safe default or fails with `needs_confirmation`.
 Error codes are stable: a code is never renamed or reused. The full list is in
 [`src/errors.ts`](../src/errors.ts).
 
-Under WSL, these failures exit with code 1 and include `error.hint`:
+Under WSL, helper startup failures exit with code 1 and include `error.hint`:
 
 - `windows_helper_unavailable`: the packaged `forge-windows-helper.exe` is
   missing, cannot run, or reports an incompatible protocol or architecture.
@@ -44,6 +44,10 @@ Under WSL, these failures exit with code 1 and include `error.hint`:
   fails. Enable `[interop] enabled=true` in `/etc/wsl.conf`, run
   `wsl --shutdown` from Windows, and check that Windows executables run in the
   distro. forge judges interop by the actual launch and handshake.
+
+A lost Studio launch reply returns `studio_launch_unknown` (exit 1). Studio may
+already be running. forge never repeats that launch or falls back to a platform
+launcher; check Studio before trying again.
 
 ## Session results
 
@@ -134,6 +138,12 @@ it joined a running session, its result names what letting go did:
 
 A `start` that joined reports `Joined session <id>: …` first. When the session
 ends while it holds it, it returns `data.ending: true` with no other field.
+
+When present, `services.studio.os` identifies Studio's OS. Under WSL it is
+`"win32"`: Studio's `pid` and `startTime` identify a Windows process, while the
+session's top-level PID identifies the Linux supervisor. Do not pass Studio's
+Windows PID to Linux process-control tools. Older sessions and native hosts may
+omit `os`.
 
 ## Fresh builds: `status --wait`
 

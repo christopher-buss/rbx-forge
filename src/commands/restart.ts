@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import type { FlagDefinition } from "../cli/flags.ts";
 import { downStudio, FOUND_SENTENCE } from "../client/down-parts.ts";
 import type { KnownSession } from "../client/session.ts";
@@ -14,7 +12,7 @@ import type { PartRestarts, RestartRequest } from "../session/part-restarts.ts";
 import { restartWaitMs } from "../session/part-restarts.ts";
 import type { SessionStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
-import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
+import { resolveStudioPath, STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import { failureError } from "../supervisor/channel.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
@@ -106,7 +104,7 @@ export async function runRestartAsync(
  * @returns `force`, the recovery mode, and the absolute Studio path.
  */
 function restartRequest(
-	{ cwd }: CommandContext,
+	context: CommandContext,
 	{ flags }: CommandInput,
 	config: Pick<ResolvedConfig, "studio">,
 ): RestartRequest {
@@ -114,7 +112,9 @@ function restartRequest(
 	return {
 		force: flags["force"] === true,
 		recovery: config.studio.autoRecovery,
-		...(typeof studioPath === "string" ? { studioPath: path.resolve(cwd, studioPath) } : {}),
+		...(typeof studioPath === "string"
+			? { studioPath: resolveStudioPath(context, studioPath) }
+			: {}),
 	};
 }
 

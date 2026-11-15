@@ -25,6 +25,7 @@ export interface StudioLaunch {
 /** A Studio forge started itself, pinned at the start. */
 export interface StudioProcess {
 	desktop?: StudioDesktop;
+	os?: NodeJS.Platform;
 	pid: number;
 	/** Its OS start time (see `processStartTime`). */
 	startTime: string;
@@ -60,6 +61,7 @@ export type StudioLauncher = (launch: StudioLaunch) => Promise<StudioLaunchOutco
 export async function studioProcessAsync(pinned: PinnedStudio): Promise<LocatedStudio> {
 	const desktop = await pinned.desktopAsync();
 	return {
+		...(pinned.os === undefined ? {} : { os: pinned.os }),
 		desktop:
 			desktop === "hidden" ? desktop : ((await pinned.windowVisibilityAsync()) ?? desktop),
 		pid: pinned.pid,

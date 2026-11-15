@@ -24,6 +24,7 @@ export interface PinnedStudio {
 	isAliveAsync: () => Promise<boolean>;
 	isBlockedAsync: () => Promise<boolean>;
 	killAsync: () => Promise<boolean>;
+	os?: NodeJS.Platform;
 	readonly pid: number;
 	requestCloseAsync: () => Promise<boolean>;
 	requestSaveAsync: (timeoutMs?: number) => Promise<SaveOutcome>;

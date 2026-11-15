@@ -1,0 +1,309 @@
+// cspell:words wslpath
+/* oxlint-disable typescript/require-await -- Async Studio-host methods also wrap constant platform capabilities. */
+import { type } from "arktype";
+import path from "node:path";
+
+import { ForgeError } from "../errors.ts";
+import type { HelperClient } from "../native/helper-client.ts";
+import { readVariable } from "../process/environment.ts";
+import type { ProcessOutcome } from "../process/process-runner.ts";
+import type { StudioExecutable } from "../studio/discover.ts";
+import { studioArguments } from "../studio/launch-arguments.ts";
+import type { StudioLaunch, StudioLaunchOutcome } from "../studio/launcher.ts";
+import { commandExecutable, STUDIO_REGISTRY_KEYS } from "./addon-studio/discover.ts";
+import type { Environment, Seams } from "./seams.ts";
+import type { PinnedStudio, StudioHost } from "./studio-host.ts";
+
+const pinShape = type({ pid: "number.integer > 0", pin: "string > 0", startTime: "string > 0" });
+const INVALID_PATH = /[\r\n\0]/;
+const WINDOWS_PATH_END = /\r?\n?$/;
+const NULLABLE_TEXT = type("string | null");
+const windowsAbsolute = /^(?:[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/i;
+
+type WslBackend = Pick<Seams, "clock" | "fileSystem" | "processRunner"> & {
+	environment: Environment;
+};
+
+class WslHost {
+	private readonly backend: WslBackend;
+	private readonly connect: () => HelperClient;
+
+	private channel: HelperClient | undefined;
+
+	constructor(backend: WslBackend, connect: () => HelperClient) {
+		this.backend = backend;
+		this.connect = connect;
+	}
+
+	public host(): StudioHost {
+		return {
+			autoSaveDirectoriesAsync: async () => [],
+			findStudioExecutableAsync: this.discoverAsync.bind(this),
+			fromHostPathAsync: async (file) => this.convertAsync(file, false),
+			frontmostApplicationAsync: async () => null,
+			hostnameAsync: async () => {
+				const identity = await this.client().identity;
+				return identity.hostname;
+			},
+			launchAsync: this.launchAsync.bind(this),
+			pinProcessAsync: this.pinProcessAsync.bind(this),
+			platformAsync: async () => "win32",
+			pluginsFolderAsync: async () => {
+				// The tracer leaves managed plugin installation to the
+				// subsequent WSL slice.
+			},
+			processStartTimeAsync: async (pid) => {
+				return this.requestAsync({ op: "processStartTime", pid }, NULLABLE_TEXT);
+			},
+			toHostPathAsync: async (file) => this.convertAsync(file, true),
+			tryLockFileAsync: async () => {
+				throw new ForgeError(
+					"windows_helper_unavailable",
+					"Windows singleton locking is not supported by the tracer.",
+				);
+			},
+		};
+	}
+
+	private async checkedAsync(
+		file: string,
+		source: StudioExecutable["source"],
+	): Promise<StudioExecutable> {
+		const linux = windowsAbsolute.test(file) ? await this.convertAsync(file, false) : file;
+		if (
+			!path.posix.isAbsolute(linux) ||
+			INVALID_PATH.test(linux) ||
+			!this.backend.fileSystem.existsSync(linux) ||
+			!this.backend.fileSystem.statSync(linux).isFile()
+		) {
+			throw new ForgeError(
+				"studio_launch_failed",
+				`Studio executable is not an absolute file: ${file}`,
+			);
+		}
+
+		return { path: linux, source };
+	}
+
+	private client(): HelperClient {
+		this.channel ??= this.connect();
+		return this.channel;
+	}
+
+	private async convertAsync(input: string, windows: boolean): Promise<string> {
+		if (
+			INVALID_PATH.test(input) ||
+			!(windows ? path.posix.isAbsolute(input) : windowsAbsolute.test(input))
+		) {
+			throw new ForgeError(
+				"studio_launch_failed",
+				`Expected an absolute ${windows ? "Linux" : "Windows"} path: ${input}`,
+			);
+		}
+
+		if (windows && !this.backend.fileSystem.existsSync(input)) {
+			throw new ForgeError("studio_launch_failed", `The Linux path is unavailable: ${input}`);
+		}
+
+		const result = await this.backend.processRunner({
+			args: [windows ? "-w" : "-u", input],
+			cwd: "/",
+			env: this.backend.environment,
+			file: "wslpath",
+			timeoutMs: 10_000,
+		});
+		const output = convertedOutput(result, input);
+		this.validateConverted(output, windows, input);
+		return output;
+	}
+
+	private async discoverAsync(options: {
+		env: Environment;
+		studioPath?: string | undefined;
+	}): Promise<StudioExecutable | undefined> {
+		const variable = readVariable(options.env, "RBX_FORGE_STUDIO_PATH", "linux");
+		const explicit = options.studioPath ?? (variable === "" ? undefined : variable);
+
+		if (explicit !== undefined) {
+			return this.checkedAsync(
+				explicit,
+				options.studioPath === undefined ? "environment" : "flag",
+			);
+		}
+
+		for (const key of STUDIO_REGISTRY_KEYS) {
+			const command = await this.requestAsync({ key, op: "readRegistry" }, NULLABLE_TEXT);
+			const file = command === null ? undefined : commandExecutable(command);
+			if (file !== undefined) {
+				return this.checkedAsync(file, "registry");
+			}
+		}
+
+		return undefined;
+	}
+
+	private async launchAsync(launch: StudioLaunch): Promise<StudioLaunchOutcome> {
+		const executable = await this.discoverAsync(launch);
+		if (executable === undefined) {
+			throw new ForgeError(
+				"studio_launch_failed",
+				"Windows Studio was not found. Set --studio-path.",
+			);
+		}
+
+		const program = await this.convertAsync(executable.path, true);
+		const place = await this.convertAsync(launch.place, true);
+		const cwd = await this.convertAsync(launch.cwd, true);
+		const runScript =
+			launch.runScript === undefined
+				? undefined
+				: await this.convertAsync(launch.runScript, true);
+		await launch.beforeLaunch?.();
+		const result = await this.client().requestAsync({
+			args: studioArguments({ place, runScript }),
+			cwd,
+			env: {},
+			hiddenWindows: false,
+			op: "launch",
+			program,
+		});
+		return launched(result);
+	}
+
+	private async pinProcessAsync(pid: number, startTime?: string): Promise<null | PinnedStudio> {
+		const current = await this.requestAsync({ op: "processStartTime", pid }, NULLABLE_TEXT);
+		if (current === null || (startTime !== undefined && current !== startTime)) {
+			return null;
+		}
+
+		return this.wrap(await this.client().requestAsync({ op: "pin", pid, startTime: current }));
+	}
+
+	private async requestAsync<T>(
+		operation: Record<string, unknown>,
+		shape: { assert: (value: unknown) => T },
+	): Promise<T> {
+		return shape.assert(await this.client().requestAsync(operation));
+	}
+
+	private validateConverted(output: string, windows: boolean, input: string): void {
+		if (
+			INVALID_PATH.test(output) ||
+			!(windows ? windowsAbsolute.test(output) : path.posix.isAbsolute(output))
+		) {
+			throw new ForgeError(
+				"studio_launch_failed",
+				`wslpath could not convert ${input} to an absolute path.`,
+			);
+		}
+
+		if (!windows && !this.backend.fileSystem.existsSync(output)) {
+			throw new ForgeError(
+				"studio_launch_failed",
+				`The converted Windows path is unavailable in WSL: ${output}`,
+			);
+		}
+	}
+
+	// eslint-disable-next-line flawless/max-lines-per-function -- Flat mapping of the Studio pin interface.
+	private wrap(value: unknown): PinnedStudio {
+		const identity = pinShape.assert(value);
+		async function boolAsync(op: string): Promise<boolean> {
+			return request({ op, pin: identity.pin }, type("boolean"));
+		}
+
+		const request = this.requestAsync.bind(this);
+
+		return {
+			activateAppAsync: unsupportedAsync,
+			appActiveAsync: unsupportedAsync,
+			appHiddenAsync: unsupportedAsync,
+			desktopAsync: async () => "user",
+			dismissDialogAsync: unsupportedAsync,
+			executablePathAsync: async () => {
+				return this.requestAsync(
+					{ op: "executablePath", pin: identity.pin },
+					NULLABLE_TEXT,
+				);
+			},
+			isAliveAsync: async () => boolAsync("isAlive"),
+			isBlockedAsync: async () => boolAsync("isBlocked"),
+			killAsync: async () => boolAsync("kill"),
+			os: "win32",
+			pid: identity.pid,
+			requestCloseAsync: async () => boolAsync("requestClose"),
+			requestSaveAsync: unsupportedAsync,
+			saveMenuEnabledAsync: unsupportedAsync,
+			setAppHiddenAsync: unsupportedAsync,
+			setWindowVisibilityAsync: unsupportedAsync,
+			startTime: identity.startTime,
+			startWindowHidingAsync: unsupportedAsync,
+			stopWindowHidingAsync: unsupportedAsync,
+			waitForExitAsync: async (timeoutMs) => {
+				const deadline = this.backend.clock.now() + timeoutMs;
+				while (await boolAsync("isAlive")) {
+					if (this.backend.clock.now() >= deadline) {
+						return false;
+					}
+
+					await this.backend.clock.sleep(50);
+				}
+
+				return true;
+			},
+			windowHidingAsync: unsupportedAsync,
+			windowVisibilityAsync: async () => {
+				return this.requestAsync(
+					{ op: "windowVisibility", pin: identity.pin },
+					type("'hidden' | 'user' | null"),
+				);
+			},
+		};
+	}
+}
+
+/**
+ * Windows Studio control through one process-local helper.
+ * @param backend - Linux file, process and clock seams.
+ * @param connect - Lazy connection to the packaged Windows helper.
+ * @returns Windows Studio operations with Linux paths at the public boundary.
+ * @rejects Invalid paths, unavailable helpers, and uncertain launches.
+ */
+export function createWslStudioHost(backend: WslBackend, connect: () => HelperClient): StudioHost {
+	const host = new WslHost(backend, connect);
+	return host.host();
+}
+
+function launched(value: unknown): StudioLaunchOutcome {
+	if (!pinShape.allows(value)) {
+		throw new ForgeError(
+			"studio_launch_unknown",
+			"The Windows helper returned no usable Studio launch identity. Check Studio before trying again.",
+		);
+	}
+
+	const pinned = value;
+	return {
+		desktop: "user",
+		studio: { desktop: "user", os: "win32", pid: pinned.pid, startTime: pinned.startTime },
+		type: "launched",
+	};
+}
+
+async function unsupportedAsync(): Promise<never> {
+	throw new ForgeError(
+		"windows_helper_unavailable",
+		"This Studio operation is not supported by the Windows helper tracer.",
+	);
+}
+
+function convertedOutput(result: ProcessOutcome, input: string): string {
+	if (result.type !== "exited" || result.exitCode !== 0) {
+		throw new ForgeError(
+			"studio_launch_failed",
+			`wslpath could not convert ${input} to an absolute path.`,
+		);
+	}
+
+	return result.outputTail.join("\n").replace(WINDOWS_PATH_END, "");
+}

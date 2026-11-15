@@ -7,6 +7,7 @@ import type { Environment } from "../seams/seams.ts";
 import type { Invocation } from "./command-line.ts";
 import { batchInvocation } from "./command-line.ts";
 import { pathDelimiter, readVariable } from "./environment.ts";
+import { isWsl } from "./wsl.ts";
 
 /** How to start a tool forge runs, such as Rojo or the compiler. */
 export type Tool =
@@ -189,10 +190,7 @@ function fileNames(
 			: extensions.map((candidate) => `${name}${candidate}`);
 	}
 
-	const isWsl =
-		platform === "linux" &&
-		readVariable(environment, "WSL_DISTRO_NAME", platform) !== undefined;
-	return isWsl ? [name, `${name}.exe`] : [name];
+	return isWsl(platform, environment) ? [name, `${name}.exe`] : [name];
 }
 
 /**

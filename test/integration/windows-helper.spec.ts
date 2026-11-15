@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -6,6 +7,9 @@ import { createInterface } from "node:readline";
 import type { TestContext } from "vitest";
 import { assert, describe, it } from "vitest";
 
+import { createHelperClient } from "../../src/native/helper-client.ts";
+import { nodeChildProcessRunner } from "../../src/seams/child-process.ts";
+import { nodeClock } from "../../src/seams/clock.ts";
 import {
 	loadRealNative,
 	makeRunScriptStudioExecutable,
@@ -78,6 +82,52 @@ async function launchStudioAsync(testContext: Pick<TestContext, "onTestFinished"
 }
 
 describe.skipIf(process.platform !== "win32")("windows helper", () => {
+	it("uses the TypeScript client against the real helper protocol", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(5);
+
+		const client = createHelperClient(
+			{ childProcess: nodeChildProcessRunner, clock: nodeClock },
+			() => ({ args: [], file: path.join(NATIVE_DIRECTORY, "forge-windows-helper.exe") }),
+			process.arch,
+		);
+
+		const identity = await client.identity;
+
+		expect(identity.hostname.toLowerCase()).toBe(os.hostname().toLowerCase());
+
+		const program = makeRunScriptStudioExecutable();
+		const place = path.join(makeTemporaryDirectory(), "client.rbxl");
+		const result = type({ pid: "number", pin: "string", startTime: "string" }).assert(
+			await client.requestAsync({
+				args: [place],
+				cwd: path.dirname(place),
+				env: studioVariables(program),
+				op: "launch",
+				program,
+			}),
+		);
+		const pinned = loadRealNative().pinProcess(result.pid);
+		assert(pinned !== null);
+		onTestFinished(() => {
+			pinned.kill();
+		});
+		await waitForFileAsync(`${place}.lock`);
+
+		await expect(
+			client.requestAsync({ op: "processStartTime", pid: result.pid }),
+		).resolves.toBe(result.startTime);
+		await expect(
+			client.requestAsync({ key: "Software\\rbx-forge-test-missing", op: "readRegistry" }),
+		).resolves.toBeNull();
+		await expect(client.requestAsync({ op: "requestClose", pin: result.pin })).resolves.toBe(
+			true,
+		);
+		await expect.poll(() => pinned.isAlive()).toBeFalse();
+	});
+
 	it("should report a versioned Windows identity", async ({ expect, onTestFinished }) => {
 		expect.assertions(2);
 

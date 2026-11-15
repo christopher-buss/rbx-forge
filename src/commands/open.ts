@@ -10,7 +10,7 @@ import { ForgeError } from "../errors.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
 import { runWithHooksAsync } from "../hooks/run-hooks.ts";
 import type { CommandResult } from "../seams/reporter.ts";
-import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
+import { resolveStudioPath, STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import { installForgePluginAsync } from "../studio/forge-plugin.ts";
 import type { StudioLaunchOutcome, StudioProcess } from "../studio/launcher.ts";
 import { pruneSnapshots, snapshotName } from "../studio/snapshots.ts";
@@ -161,7 +161,7 @@ export async function runOpenAsync(
 	const { cwd, reporter, seams } = context;
 	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
 	const desktop = resolveStudioDesktop(config, await seams.studioHost.platformAsync(), "user");
-	const studioPath = input.flags["studio-path"];
+	const studioPath = snapshotStudioPath(context, input.flags["studio-path"]);
 	const { snapshots } = forgeFiles(cwd);
 	const place = path.join(snapshots, snapshotName(seams.clock.now(), openPlacePath(config)));
 
@@ -180,7 +180,7 @@ export async function runOpenAsync(
 			...(config.studio.saveMethod === "capture"
 				? { runScript: await prepareSnapshotCaptureAsync(context, place) }
 				: {}),
-			studioPath: typeof studioPath === "string" ? path.resolve(cwd, studioPath) : undefined,
+			studioPath,
 			watchHiddenLighting:
 				(await seams.studioHost.platformAsync()) === "win32" && desktop === "hidden",
 		});
@@ -337,4 +337,8 @@ async function launchAsync(
 	}
 
 	return reportLaunch(reporter, outcome);
+}
+
+function snapshotStudioPath(context: CommandContext, flag: unknown): string | undefined {
+	return typeof flag === "string" ? resolveStudioPath(context, flag) : undefined;
 }

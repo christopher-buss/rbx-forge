@@ -105,6 +105,7 @@ export interface SessionStudio {
 	 */
 	desktop?: StudioDesktop;
 	origin?: StudioOrigin;
+	os?: NodeJS.Platform;
 	owner: null | PartOwner;
 	pid?: number;
 	place?: string;
@@ -390,6 +391,7 @@ const statusSchema: Type<SessionStatus> = type({
 		studio: {
 			"desktop?": "'user' | 'hidden'",
 			"origin?": "'forge' | 'found'",
+			"os?": "'win32' | 'darwin' | 'linux' | 'aix' | 'android' | 'freebsd' | 'haiku' | 'openbsd' | 'sunos' | 'cygwin' | 'netbsd'",
 			"owner": OWNER,
 			"pid?": INTEGER,
 			"place?": TEXT,
