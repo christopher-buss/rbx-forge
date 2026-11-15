@@ -6,10 +6,10 @@ import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
 import { isWsl } from "../process/wsl.ts";
-import { runRojoAsync } from "../rojo/rojo.ts";
+import { rojoInvocation, runRojoAsync } from "../rojo/rojo.ts";
 import type { RojoServerInfo } from "../seams/network.ts";
 import patched from "./rojo-plugin/patched.json" with { type: "json" };
-import { installWslPluginAsync } from "./wsl-plugin-install.ts";
+import { installWslPluginAsync, PLUGIN_INSTALL_ARGS } from "./wsl-plugin-install.ts";
 
 /**
  * Whether forge can guarantee automatic sync and acknowledge its completion.
@@ -82,11 +82,9 @@ export async function prepareRojoPluginAsync(
 
 	if (!context.seams.fileSystem.existsSync(model)) {
 		if (isWsl(context.seams.host.platform, context.env)) {
-			if (server.serverVersion !== "7.7.1") {
-				return manual(
-					context,
-					`Rojo ${server.serverVersion} plugin installation under WSL is not verified.`,
-				);
+			const reason = unverifiedInstaller(context, config, server.serverVersion);
+			if (reason !== undefined) {
+				return manual(context, reason);
 			}
 
 			return installWslPluginAsync(context, config, {
@@ -96,11 +94,26 @@ export async function prepareRojoPluginAsync(
 			});
 		}
 
-		await runRojoAsync(context, config, ["plugin", "install"]);
+		await runRojoAsync(context, config, PLUGIN_INSTALL_ARGS);
 		signal.throwIfAborted();
 	}
 
 	return prepareModel(context, model, server, signal);
+}
+
+function unverifiedInstaller(
+	context: CommandContext,
+	config: Pick<ResolvedConfig, "rojoAlias">,
+	version: string,
+): string | undefined {
+	if (version !== "7.7.1") {
+		return `Rojo ${version} plugin installation under WSL is not verified.`;
+	}
+
+	const invocation = rojoInvocation(context, config, PLUGIN_INSTALL_ARGS);
+	return [".com", ".exe"].includes(path.extname(invocation.file).toLowerCase())
+		? "The Windows Rojo installer is not verified with Linux staging paths."
+		: undefined;
 }
 
 function manual(context: CommandContext, reason: string): PluginCapabilities {

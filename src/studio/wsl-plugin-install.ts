@@ -4,8 +4,11 @@ import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
 import { withVariables } from "../process/environment.ts";
+import type { RojoArgs } from "../rojo/rojo.ts";
 import { runRojoAsync } from "../rojo/rojo.ts";
 import type { PluginCapabilities } from "./rojo-plugin.ts";
+
+export const PLUGIN_INSTALL_ARGS: RojoArgs = ["plugin", "install"];
 
 export async function installWslPluginAsync(
 	context: CommandContext,
@@ -49,7 +52,7 @@ async function stageWslAsync(
 		{ HOME: home, ROBLOX_STUDIO_PATH: studio },
 		context.seams.host.platform,
 	);
-	await runRojoAsync({ ...context, env: environment }, config, ["plugin", "install"]);
+	await runRojoAsync({ ...context, env: environment }, config, PLUGIN_INSTALL_ARGS);
 	return path.join(home, "AppData", "Local", "Roblox", "Plugins", "RojoManagedPlugin.rbxm");
 }
 

@@ -61,6 +61,34 @@ function setup(exitCode = 0, app = stock.App) {
 const SERVER = { protocolVersion: 5, serverVersion: "7.7.1" };
 
 describe("wsl managed Rojo plugin preparation", () => {
+	it.for(["rojo.exe", "rojo.COM"])(
+		"does not run a Windows installer with Linux staging paths",
+		async (alias, { expect }) => {
+			expect.assertions(3);
+
+			const { context, memory, reporter, specs } = setup();
+			memory.fileSystem.renameSync(
+				path.join(PROJECT, "tools/rojo"),
+				path.join(PROJECT, "tools", alias),
+			);
+
+			await expect(
+				prepareRojoPluginAsync(
+					context,
+					{ rojoAlias: alias },
+					SERVER,
+					AbortSignal.timeout(10_000),
+				),
+			).resolves.toHaveProperty("source", "manual");
+			expect(specs).toEqual([]);
+			expect(reporter.events).toContainEqual({
+				message:
+					"The Windows Rojo installer is not verified with Linux staging paths. Auto-connect is off; connect to Rojo manually in Studio.",
+				type: "warning",
+			});
+		},
+	);
+
 	it("preserves a staging directory that belongs to another install", async ({ expect }) => {
 		expect.assertions(2);
 
