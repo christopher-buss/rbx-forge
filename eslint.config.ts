@@ -66,4 +66,30 @@ export default isentinel(
 			],
 		},
 	},
+	{
+		name: "project/studio-host-boundary",
+		files: ["src/studio/**/*.ts"],
+		ignores: ["**/*.spec.ts"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					patterns: [
+						{
+							group: ["**/seams/addon-studio/**"],
+							message: "Use the async StudioHost seam for Studio control.",
+						},
+					],
+				},
+			],
+			"no-restricted-syntax": [
+				"error",
+				{
+					message: "Use the async StudioHost seam for Studio control.",
+					selector:
+						"MemberExpression[property.name=/^(pinProcess|processStartTime|spawnDetached|launchApplication|readUserRegistryDefault|frontmostApplication)$/]",
+				},
+			],
+		},
+	},
 );

@@ -8,7 +8,6 @@ import { describe, it } from "vitest";
 import { catchForgeError } from "../../test/helpers/errors.ts";
 import { REAPER_PATH } from "../../test/helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../../test/helpers/temporary-directory.ts";
-import { findInstalledStudio, noInstalledStudio } from "../studio/discover.ts";
 import { nodeNetwork } from "./network.ts";
 import { createNodeSeams } from "./node-seams.ts";
 
@@ -154,11 +153,20 @@ describe(createNodeSeams, () => {
 		await expect(launch).rejects.toThrow(/^Could not find @rbx-forge\/native-/);
 	});
 
-	it("should find the installed Studio unless told there is none", ({ expect }) => {
+	it("should discover Studio through the host when installed discovery is disabled", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
-		expect(makeSeams().installedStudio).toBe(findInstalledStudio);
-		expect(makeSeams(undefined, true).installedStudio).toBe(noInstalledStudio);
+		await expect(
+			makeSeams(undefined, true).studioHost.findStudioExecutableAsync({ env: {} }),
+		).resolves.toBeUndefined();
+		await expect(
+			makeSeams(undefined, true).studioHost.findStudioExecutableAsync({
+				env: {},
+				studioPath: "/missing-studio",
+			}),
+		).rejects.toMatchObject({ code: "studio_launch_failed" });
 	});
 
 	it("should make random session ids", ({ expect }) => {

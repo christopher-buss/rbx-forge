@@ -1,6 +1,6 @@
-import { ForgeError } from "../errors.ts";
-import type { Environment, Seams } from "../seams/seams.ts";
-import type { StudioProcess } from "./launcher.ts";
+import { ForgeError } from "../../errors.ts";
+import type { StudioProcess } from "../../studio/launcher.ts";
+import type { Environment, Seams } from "../seams.ts";
 
 /** A snapshot watcher that outlives the command that opens Studio. */
 export type SnapshotLightingLauncher = (launch: {

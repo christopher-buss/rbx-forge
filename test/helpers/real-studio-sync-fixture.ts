@@ -13,8 +13,9 @@ import { gunzipSync } from "node:zlib";
 import type { CommandContext } from "../../src/commands/context.ts";
 import type { NativeAddon } from "../../src/native/addon.ts";
 import { readVariable } from "../../src/process/environment.ts";
+import { findInstalledStudio } from "../../src/seams/addon-studio/discover.ts";
+import { createStudioLauncher } from "../../src/seams/addon-studio/launcher.ts";
 import { createNodeSeams } from "../../src/seams/node-seams.ts";
-import { createStudioLauncher } from "../../src/studio/launcher.ts";
 import { SCRIPTS, VERSION } from "../../src/studio/rojo-plugin.ts";
 import { NATIVE_DIRECTORY } from "./real-native.ts";
 import { createRecordingReporter } from "./seams.ts";
@@ -88,6 +89,7 @@ export function directSyncLauncher({
 					);
 				},
 			},
+			installedStudio: findInstalledStudio,
 		},
 		path.join(import.meta.dirname, "..", "..", "src", "supervisor.ts"),
 	);

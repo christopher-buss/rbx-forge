@@ -1,10 +1,11 @@
 /* oxlint-disable typescript/require-await -- The async host wraps synchronous addon calls and turns throws into rejections. */
 import type { FileLock, PinnedProcess, SaveOutcome } from "../native/addon.ts";
 import { autoSaveDirectories } from "../studio/auto-recovery.ts";
-import { findStudioExecutable } from "../studio/discover.ts";
 import type { StudioExecutable } from "../studio/discover.ts";
-import type { StudioLaunch, StudioLaunchOutcome } from "../studio/launcher.ts";
+import type { StudioLaunch, StudioLauncher, StudioLaunchOutcome } from "../studio/launcher.ts";
 import { studioPluginsFolder } from "../studio/plugins-folder.ts";
+import { findStudioExecutable } from "./addon-studio/discover.ts";
+import type { InstalledStudio } from "./addon-studio/discover.ts";
 import type { Environment, Seams } from "./seams.ts";
 
 /** A Studio identity whose operations always act on its held native pin. */
@@ -68,10 +69,10 @@ export interface StudioHost {
 }
 
 /** Dependencies shared with the existing native Studio entry points. */
-export type AddonStudioHostBackend = Pick<
-	Seams,
-	"fileSystem" | "host" | "installedStudio" | "native" | "studioLauncher"
->;
+export type AddonStudioHostBackend = Pick<Seams, "fileSystem" | "host" | "native"> & {
+	installedStudio: InstalledStudio;
+	studioLauncher: StudioLauncher;
+};
 
 /**
  * Build the native Studio host without loading the addon until an operation needs it.

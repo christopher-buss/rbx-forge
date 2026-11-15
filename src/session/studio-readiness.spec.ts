@@ -21,13 +21,15 @@ const PLACE = path.join(PROJECT, "game.rbxl");
  *
  * @param options - The pinned start time and whether sync is acknowledged.
  * @param options.isAcknowledged - Give the launch an acknowledged readiness.
+ * @param options.origin - Whether forge launched this Studio.
  * @param options.startTime - The start time the launch recorded.
  * @returns The readiness and its controls.
  */
 function hiddenWindowsReadiness({
 	isAcknowledged = false,
+	origin = "forge",
 	startTime = "42",
-}: { isAcknowledged?: boolean; startTime?: string } = {}) {
+}: { isAcknowledged?: boolean; origin?: "forge" | "found"; startTime?: string } = {}) {
 	const native = createFakeNative({
 		42: { alive: true, executablePath: "RobloxStudioBeta.exe", startTime: "42" },
 	});
@@ -61,7 +63,7 @@ function hiddenWindowsReadiness({
 		},
 		{ isAttached: true },
 		{
-			origin: "forge",
+			origin,
 			place: PLACE,
 			studio: { desktop: "hidden", pid: 42, startTime },
 			...(isAcknowledged
@@ -108,6 +110,19 @@ describe(createStudioReadiness, () => {
 			expect(run.warnings()).toStrictEqual([]);
 		},
 	);
+
+	it("records a found hidden Studio open without waiting for a forge watcher", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const run = hiddenWindowsReadiness({ origin: "found" });
+		run.readiness.onLock();
+		await run.readiness.open;
+
+		expect(run.status()).toBe("open");
+		expect(run.warnings()).toStrictEqual([]);
+	});
 
 	it("warns and records Studio open when its watcher never starts", async ({ expect }) => {
 		expect.assertions(2);

@@ -144,7 +144,7 @@ export async function openPlaceAsync(
  * the five newest (and every one a Studio has open),
  * and open it in Roblox Studio. It runs outside every session and with no
  * Rojo, so it never shares a place file with a session's Studio. Studio
- * starts detached (`seams.studioLauncher`), so it is never a child of forge
+ * starts detached (`seams.studioHost`), so it is never a child of forge
  * and outlives it.
  *
  * @param context - The run: project root, seams, and reporter.

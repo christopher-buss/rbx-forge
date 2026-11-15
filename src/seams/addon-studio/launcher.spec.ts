@@ -1,20 +1,20 @@
 import path from "node:path";
 import { assert, describe, it, vi } from "vitest";
 
-import { createFailingSpawner, createFakeSpawner } from "../../test/helpers/fake-process.ts";
-import type { FakeSpawner, SpawnBehavior } from "../../test/helpers/fake-process.ts";
-import { createManualClock } from "../../test/helpers/manual-clock.ts";
-import type { ManualClock } from "../../test/helpers/manual-clock.ts";
-import type { FakeNative } from "../../test/helpers/native.ts";
-import { createFakeNative } from "../../test/helpers/native.ts";
-import { createMemoryFileSystem, createTestSeams } from "../../test/helpers/seams.ts";
-import { ForgeError } from "../errors.ts";
-import type { AppLaunch, DetachedSpawn, NativeLoader } from "../native/addon.ts";
-import type { ChildProcessRunner } from "../seams/child-process.ts";
-import type { Host } from "../seams/host.ts";
+import { createFailingSpawner, createFakeSpawner } from "../../../test/helpers/fake-process.ts";
+import type { FakeSpawner, SpawnBehavior } from "../../../test/helpers/fake-process.ts";
+import { createManualClock } from "../../../test/helpers/manual-clock.ts";
+import type { ManualClock } from "../../../test/helpers/manual-clock.ts";
+import type { FakeNative } from "../../../test/helpers/native.ts";
+import { createFakeNative } from "../../../test/helpers/native.ts";
+import { createMemoryFileSystem, createTestSeams } from "../../../test/helpers/seams.ts";
+import { ForgeError } from "../../errors.ts";
+import type { AppLaunch, DetachedSpawn, NativeLoader } from "../../native/addon.ts";
+import { KEEP_HIDDEN_FLAG } from "../../studio/keep-hidden.ts";
+import type { StudioLaunch, StudioLauncher } from "../../studio/launcher.ts";
+import type { ChildProcessRunner } from "../child-process.ts";
+import type { Host } from "../host.ts";
 import { findInstalledStudio, MACOS_STUDIO_PATH, STUDIO_REGISTRY_KEYS } from "./discover.ts";
-import { KEEP_HIDDEN_FLAG } from "./keep-hidden.ts";
-import type { StudioLaunch, StudioLauncher } from "./launcher.ts";
 import {
 	createStudioLauncher,
 	LAUNCHER_WAIT_MS,

@@ -2,8 +2,6 @@ import type { IpcTransport } from "../ipc/transport.ts";
 import type { NativeLoader } from "../native/addon.ts";
 import type { ProcessRunner } from "../process/process-runner.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
-import type { InstalledStudio } from "../studio/discover.ts";
-import type { StudioLauncher } from "../studio/launcher.ts";
 import type { DetachedLauncher } from "../supervisor/detached-launcher.ts";
 import type { SupervisorLauncher } from "../supervisor/launcher.ts";
 import type { ChildProcessRunner } from "./child-process.ts";
@@ -40,8 +38,6 @@ export interface Seams {
 	detachedSupervisor: DetachedLauncher;
 	fileSystem: FileSystem;
 	host: Host;
-	/** Finds the Studio the Roblox installer put on this computer. */
-	installedStudio: InstalledStudio;
 	/** Opens and reaches a session's control endpoint. */
 	ipc: IpcTransport;
 	/** The `@rbx-forge/native` addon, loaded on first use. */
@@ -62,8 +58,6 @@ export interface Seams {
 	signals: Signals;
 	/** Async operations on the OS that runs Studio. */
 	studioHost: StudioHost;
-	/** Opens a place in Studio outside every forge-owned process tree. */
-	studioLauncher: StudioLauncher;
 	/** Starts the supervisor process of a `forge start` session. */
 	supervisor: SupervisorLauncher;
 }

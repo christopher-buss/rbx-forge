@@ -92,7 +92,8 @@ async function launchSnapshotWatcherAsync(
 		"..",
 		"..",
 		"src",
-		"studio",
+		"seams",
+		"addon-studio",
 		"snapshot-lighting-launcher.ts",
 	);
 	const entry = path.join(import.meta.dirname, "..", "..", "src", "supervisor.ts");

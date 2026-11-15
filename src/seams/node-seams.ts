@@ -16,12 +16,12 @@ import {
 import { createChildProcessRunner } from "../process/process-runner.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
 import { createReaperLauncher } from "../reaper/reaper-client.ts";
-import type { InstalledStudio } from "../studio/discover.ts";
-import { findInstalledStudio, noInstalledStudio as none } from "../studio/discover.ts";
-import { createStudioLauncher } from "../studio/launcher.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
 import { createDetachedLauncher } from "../supervisor/detached-launcher.ts";
 import { createSupervisorLauncher } from "../supervisor/launcher.ts";
+import type { InstalledStudio } from "./addon-studio/discover.ts";
+import { findInstalledStudio, noInstalledStudio as none } from "./addon-studio/discover.ts";
+import { createStudioLauncher } from "./addon-studio/launcher.ts";
 import { nodeChildProcessRunner } from "./child-process.ts";
 import { nodeClock } from "./clock.ts";
 import { loadConfigFileAsync } from "./config-loader.ts";
@@ -85,7 +85,6 @@ export function createNodeSeams({
 		),
 		fileSystem: nodeFileSystem,
 		host: nodeHost,
-		installedStudio: installedStudioLookup(noInstalledStudio),
 		ipc: createNodeIpcTransport(native),
 		native,
 		network: nodeNetwork,
@@ -96,7 +95,6 @@ export function createNodeSeams({
 		reaper: createNodeReaperLauncher(nativeDirectory, native, requireModule),
 		signals: createSignals(process),
 		studioHost: createNodeStudioHost(native, noInstalledStudio, supervisorEntry),
-		studioLauncher: createNodeStudioLauncher(native, noInstalledStudio, supervisorEntry),
 		supervisor: createSupervisorLauncher(PROCESS_BACKEND, supervisorEntry),
 	};
 }

@@ -9,7 +9,7 @@ import {
 	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
 import type { DetachedSpawn } from "../native/addon.ts";
-import { createSnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
+import { createSnapshotLightingLauncher } from "../seams/addon-studio/snapshot-lighting-launcher.ts";
 import { runSnapshotLightingAsync } from "./snapshot-lighting.ts";
 
 function watchingSnapshot({

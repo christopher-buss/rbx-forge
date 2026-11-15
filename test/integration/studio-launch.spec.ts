@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import process from "node:process";
 import { describe, it } from "vitest";
 
-import { studioLaunchInvocation } from "../../src/studio/launcher.ts";
+import { studioLaunchInvocation } from "../../src/seams/addon-studio/launcher.ts";
 
 describe.skipIf(process.platform !== "win32")("studio launch command line", () => {
 	it("should hand start a place whose path holds %TEMP% unchanged", ({ expect }) => {

@@ -1,12 +1,13 @@
 import path from "node:path";
 import { describe, it } from "vitest";
 
-import { catchForgeError } from "../../test/helpers/errors.ts";
-import { createFakeNative } from "../../test/helpers/native.ts";
-import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
-import { ForgeError } from "../errors.ts";
-import type { NativeAddon } from "../native/addon.ts";
-import type { Environment } from "../seams/seams.ts";
+import { catchForgeError } from "../../../test/helpers/errors.ts";
+import { createFakeNative } from "../../../test/helpers/native.ts";
+import { createMemoryFileSystem, PROJECT } from "../../../test/helpers/seams.ts";
+import { ForgeError } from "../../errors.ts";
+import type { NativeAddon } from "../../native/addon.ts";
+import { STUDIO_PATH_VARIABLE, withStudioPath } from "../../studio/discover.ts";
+import type { Environment } from "../seams.ts";
 import type { DiscoverySeams, InstalledStudio } from "./discover.ts";
 import {
 	commandExecutable,
@@ -14,9 +15,7 @@ import {
 	findStudioExecutable,
 	MACOS_STUDIO_PATH,
 	noInstalledStudio,
-	STUDIO_PATH_VARIABLE,
 	STUDIO_REGISTRY_KEYS,
-	withStudioPath,
 } from "./discover.ts";
 
 const FLAG_EXE = path.join(PROJECT, "flag", "RobloxStudioBeta.exe");

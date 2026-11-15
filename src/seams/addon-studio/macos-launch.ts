@@ -1,8 +1,8 @@
-import type { StudioDesktop } from "../config/schema.ts";
-import { toForgeError } from "../errors.ts";
-import type { NativeLoader } from "../native/addon.ts";
-import type { KeepHiddenLauncher } from "./keep-hidden.ts";
-import type { StudioLaunch, StudioProcess } from "./launcher.ts";
+import type { StudioDesktop } from "../../config/schema.ts";
+import { toForgeError } from "../../errors.ts";
+import type { NativeLoader } from "../../native/addon.ts";
+import type { KeepHiddenLauncher } from "../../studio/keep-hidden.ts";
+import type { StudioLaunch, StudioProcess } from "../../studio/launcher.ts";
 
 /** The app bundle LaunchServices opens for a macOS executable. */
 const APP_EXECUTABLE = /^(?<bundle>.+\.app)\/Contents\/MacOS\/[^/]+$/;

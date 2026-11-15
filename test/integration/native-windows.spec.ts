@@ -52,7 +52,7 @@ async function launchHiddenStudioAsync(onTestFinished: TestContext["onTestFinish
 	const entry = path.resolve("src/supervisor.ts");
 	const source = `import { createNodeSeams } from ${JSON.stringify(nodeSeams)};
 const seams = createNodeSeams({ input: process.stdin, output: process.stderr, nativeDirectory: ${JSON.stringify(NATIVE_DIRECTORY)}, noInstalledStudio: true, supervisorEntry: ${JSON.stringify(entry)} });
-const outcome = await seams.studioLauncher({ cwd: ${JSON.stringify(directory)}, env: { ...process.env, RBX_FORGE_NATIVE_DIR: ${JSON.stringify(NATIVE_DIRECTORY)}, ...${JSON.stringify(studioVariables(executable))}, FIXTURE_STUDIO_WINDOW_TRIGGER: ${JSON.stringify(trigger)} }, place: ${JSON.stringify(place)}, desktop: 'hidden', runScript: ${JSON.stringify(path.join(directory, "session.lua"))} });
+const outcome = await seams.studioHost.launchAsync({ cwd: ${JSON.stringify(directory)}, env: { ...process.env, RBX_FORGE_NATIVE_DIR: ${JSON.stringify(NATIVE_DIRECTORY)}, ...${JSON.stringify(studioVariables(executable))}, FIXTURE_STUDIO_WINDOW_TRIGGER: ${JSON.stringify(trigger)} }, place: ${JSON.stringify(place)}, desktop: 'hidden', runScript: ${JSON.stringify(path.join(directory, "session.lua"))} });
 console.log(JSON.stringify(outcome));`;
 	const result = await new Promise<string>((resolve, reject) => {
 		execFile(
