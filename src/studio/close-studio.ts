@@ -267,11 +267,7 @@ async function recoverAsync(
 ): Promise<RecoveryReport> {
 	const { host } = seams;
 	const platform = await seams.studioHost.platformAsync();
-	const startedMs = startTimeToEpochMs(
-		pinned.startTime,
-		platform,
-		platform === "linux" ? host.bootTimeMs() : 0,
-	);
+	const startedMs = startTimeToEpochMs(pinned.startTime, platform, host.bootTimeMs());
 	if (startedMs === undefined) {
 		return {
 			deleted: [],

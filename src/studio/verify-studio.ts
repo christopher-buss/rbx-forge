@@ -223,7 +223,7 @@ async function queryProcessAsync<T>(pid: number, query: () => Promise<T>): Promi
 	} catch (err) {
 		// The addon throws only `Error`s (`reaper/src/lib.rs`).
 		assert(err instanceof Error);
-		if (err instanceof ForgeError && err.code === "native_missing") {
+		if (err instanceof ForgeError) {
 			throw err;
 		}
 
@@ -255,11 +255,7 @@ async function checkStartTimeAsync(
 ): Promise<void> {
 	const { host } = seams;
 	const platform = await seams.studioHost.platformAsync();
-	const startedMs = startTimeToEpochMs(
-		pinned.startTime,
-		platform,
-		platform === "linux" ? host.bootTimeMs() : 0,
-	);
+	const startedMs = startTimeToEpochMs(pinned.startTime, platform, host.bootTimeMs());
 	if (startedMs === undefined) {
 		throw new ForgeError(
 			"identity_mismatch",

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, it } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import type { FakeProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -124,5 +124,18 @@ describe(findPlaceStudioAsync, () => {
 		});
 
 		await expect(findPlaceStudioAsync(seams, PLACE)).rejects.toThrow(missing);
+	});
+
+	it("preserves Studio host failures during discovery", async ({ expect }) => {
+		expect.assertions(1);
+
+		const seams = seamsWith(
+			`7\nRobloxStudio\n${TEST_HOSTNAME}\n`,
+			() => createFakeNative().addon,
+		);
+		const failure = new ForgeError("windows_helper_unavailable", "helper unavailable");
+		vi.spyOn(seams.studioHost, "pinProcessAsync").mockRejectedValue(failure);
+
+		await expect(findPlaceStudioAsync(seams, PLACE)).rejects.toBe(failure);
 	});
 });
