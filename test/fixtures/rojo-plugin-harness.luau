@@ -1163,3 +1163,66 @@ for _, outcome in { "valid", "delayed", "foreign-project", "foreign-session", "u
 	instance:willUnmount()
 end
 print("PASS: capture bootstrap identity binding")
+
+-- A held identity response cannot revive a disconnected or replaced marker.
+for _, change in { "disconnect", "capture", "marker", "attributes" } do
+	reset()
+	local attributes = {
+		ProjectName = "Game@worktree",
+		SessionId = "",
+		CaptureUrl = "http://127.0.0.1:50002/capture/secret?projectName=Game&sessionId=",
+	}
+	local capture = {
+		IsA = function(_, name)
+			return name == "Configuration"
+		end,
+		GetAttribute = function(_, name)
+			return attributes[name]
+		end,
+		SetAttribute = function(_, name, value)
+			attributes[name] = value
+		end,
+	}
+	local currentCapture = capture
+	services.ServerStorage.FindFirstChild = function()
+		return currentCapture
+	end
+	services.HttpService = {
+		GetAsync = function()
+			tasks.wait(1)
+			return "identity"
+		end,
+		JSONDecode = function()
+			return {
+				projectName = "Game@worktree",
+				sessionId = "launch",
+				url = "http://127.0.0.1:50002/capture/secret?projectName=Game&sessionId=launch",
+			}
+		end,
+	}
+	existing = marker()
+	local instance = app()
+	server()
+	local originalApi = currentApi
+	tasks.spawn(initialSync)
+	assert(attributes.SessionId == "", "the held identity response has not published")
+	if change == "disconnect" then
+		disconnectAction(instance)
+	elseif change == "capture" then
+		currentCapture = nil
+	elseif change == "marker" then
+		world.ChildAdded:Fire(marker({ SessionId = "replacement" }))
+	else
+		attributes.ProjectName = "Replacement"
+	end
+	advance(1)
+	assert(
+		attributes.SessionId == "" and attributes.ConnectedSessionId == nil,
+		"a stale bootstrap response must not publish after " .. change
+	)
+	if change == "disconnect" or change == "marker" then
+		assert(originalApi.__wsClient == nil, "a cancelled bootstrap must not reopen the transport")
+	end
+	instance:willUnmount()
+end
+print("PASS: held capture bootstrap cancellation and replacement")
