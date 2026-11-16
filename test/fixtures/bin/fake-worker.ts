@@ -86,8 +86,9 @@ import { exitOnItsOwn } from "./exit-on-its-own.ts";
 import { listenFixtureRojo } from "./rojo-info.ts";
 import { launchStudio, runStudio } from "./studio-stand-in.ts";
 import { runWatchCompiler } from "./watch-compiler.ts";
+import { installWslPlugin } from "./wsl-plugin.ts";
 
-const ROJO_VERSION = "7.7.0";
+const ROJO_VERSION = process.env["FIXTURE_ROJO_VERSION"] ?? "7.7.0";
 const KEEP_ALIVE_MS = 60_000;
 const IGNORED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"] as const;
 const DEFAULT_STORM_MAX = 20;
@@ -330,7 +331,7 @@ function runGenuineRojo(): boolean {
 
 function runRojo(): void {
 	const [command] = ARGS;
-	if (runGenuineRojo()) {
+	if (runGenuineRojo() || installWslPlugin(ARGS, env)) {
 		return;
 	}
 

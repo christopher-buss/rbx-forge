@@ -145,6 +145,21 @@ describe.skipIf(process.platform !== "win32")("windows helper", () => {
 		expect(pinned.isAlive()).toBeTrue();
 	});
 
+	it("reports the Windows user Plugins folder without writing it", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const helper = startHelper({ onTestFinished });
+		await helper.requestAsync({ op: "handshake", protocol: 1 });
+
+		expect(await helper.requestAsync({ op: "pluginsFolder" })).toHaveProperty(
+			"result",
+			path.join(os.homedir(), "AppData/Local/Roblox/Plugins"),
+		);
+	});
+
 	it("probes capture without acknowledging Studio synchronization", async ({
 		expect,
 		onTestFinished,

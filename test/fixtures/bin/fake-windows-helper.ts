@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
 import { createInterface } from "node:readline";
 
@@ -33,6 +34,18 @@ if (MODE === "path") {
 	);
 } else if (MODE === "studio") {
 	const place = process.argv[3] ?? "";
+	const script = process.argv[4];
+	if (script !== undefined) {
+		const source = readFileSync(script, "utf8");
+		const url = /m:SetAttribute\("ReadyUrl",("[^"\n]+")\)/u.exec(source)?.[1];
+		assert(url !== undefined);
+		const readyUrl: unknown = JSON.parse(url);
+		assert(typeof readyUrl === "string");
+		void fetch(readyUrl).catch((err: unknown) => {
+			throw err;
+		});
+	}
+
 	writeFileSync(`${place}.lock`, `${process.pid + 1_000_000}\nRobloxStudioBeta\nWINDOWS\n`);
 	process.on("SIGTERM", () => {
 		unlinkSync(`${place}.lock`);
@@ -57,9 +70,11 @@ async function probeAsync(request: Request): Promise<Array<number>> {
 	return [...new Uint8Array(await response.arrayBuffer())];
 }
 
-function launch(windowsPlace: string): unknown {
+function launch(windowsPlace: string, windowsScript?: string): unknown {
 	const place = windowsPlace.slice(23).replaceAll("\\", "/");
-	const child = spawn(process.execPath, [import.meta.filename, "studio", place], {
+	const scriptArgs =
+		windowsScript === undefined ? [] : [windowsScript.slice(23).replaceAll("\\", "/")];
+	const child = spawn(process.execPath, [import.meta.filename, "studio", place, ...scriptArgs], {
 		detached: true,
 		stdio: "ignore",
 		windowsHide: true,
@@ -172,13 +187,19 @@ function execute(request: Request): unknown {
 		};
 	}
 
+	if (request.op === "pluginsFolder") {
+		const folder = path.join(path.dirname(STATE_FILE), "windows-plugins");
+		return `\\\\wsl.localhost\\fixture${folder.replaceAll("/", "\\")}`;
+	}
+
 	if (request.op === "launch") {
 		const { args } = request;
 		assert(args !== undefined);
 		const index = args.indexOf("--localPlaceFile");
 		const place = args[index === -1 ? 0 : index + 1];
 		assert(place !== undefined);
-		return launch(place);
+		const scriptIndex = args.indexOf("--runScriptFile");
+		return launch(place, scriptIndex === -1 ? undefined : args[scriptIndex + 1]);
 	}
 
 	return control(request.op, request.visibility);

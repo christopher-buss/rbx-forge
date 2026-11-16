@@ -96,6 +96,9 @@ function setup(
 				case "pin": {
 					return PIN;
 				}
+				case "pluginsFolder": {
+					return WINDOWS;
+				}
 				case "probeHttp": {
 					return options.probeReply;
 				}
@@ -322,13 +325,22 @@ describe("wsl Studio tracer", () => {
 	});
 
 	it("reports a refused native watcher start", async ({ expect }) => {
-		expect.assertions(1);
+		expect.assertions(2);
 
-		const { seams } = setup({ hiding: false });
+		const { now, seams } = setup({ hiding: false });
 		const pin = await seams.studioHost.pinProcessAsync(707);
 		assert(pin !== null);
 
 		await expect(pin.startWindowHidingAsync()).resolves.toBeFalse();
+		expect(now()).toBe(0);
+	});
+
+	it("reports the Windows Plugins folder as a Linux path", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup({ output: "/project/new-plugins" });
+
+		await expect(seams.studioHost.pluginsFolderAsync({})).resolves.toBe("/project/new-plugins");
 	});
 
 	it("reads binary probe responses from the Windows helper", async ({ expect }) => {
@@ -671,7 +683,7 @@ describe("wsl Studio tracer", () => {
 		const { seams } = setup();
 
 		expect(await seams.studioHost.autoSaveDirectoriesAsync({})).toEqual([]);
-		expect(await seams.studioHost.pluginsFolderAsync({})).toBeUndefined();
+		expect(await seams.studioHost.pluginsFolderAsync({})).toBe("/project/Studio.exe");
 		expect(await seams.studioHost.frontmostApplicationAsync()).toBeNull();
 		expect(await seams.studioHost.platformAsync()).toBe("win32");
 		await expect(seams.studioHost.tryLockFileAsync("/project/lock")).rejects.toMatchObject({
