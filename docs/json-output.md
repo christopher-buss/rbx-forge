@@ -50,6 +50,12 @@ Under WSL, helper startup failures exit with code 1 and include `error.hint`:
   Docker workloads, and check that Windows executables run in the distro. forge
   judges interop by the actual launch and handshake.
 
+A known helper operation refusal also uses `windows_helper_unavailable` and
+preserves the Windows error message. If a Studio launch reports job breakaway
+and OS error 5, check the host job policy and executable permissions. A host
+that kills members on close and forbids breakaway cannot support detached
+Studio. forge never retries that launch without breakaway.
+
 A lost Studio launch reply returns `studio_launch_unknown` (exit 1). Studio may
 already be running. forge never repeats that launch or falls back to a platform
 launcher; check Studio before trying again.

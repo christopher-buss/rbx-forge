@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # WSL drives Windows Studio through a Windows helper
@@ -94,17 +94,17 @@ Native Linux, outside WSL, still has no Studio.
 ## Consequences
 
 - The helper is tested on Windows CI. Real Studio under WSL2 gates each release
-  through a [recorded run of the packed package](../wsl-release-gate.md).
-  Acceptance awaits the complete real-Studio matrix; partial local results and a
-  hosted fixture pass do not establish release readiness.
+  through a [recorded run of the packed package](../wsl-release-gate.md). The
+  recorded x64 packed package passes ext4 and drvfs with NAT and mirrored
+  networking, including terminal loss and uncertain mutations. The hosted
+  fixture pass is separate from the local real-Studio gate.
 - A forge older than this decision on the other side does not read the side and
   is not excluded.
-- WSL2 3.0.5, NAT: an interop-started process is in no job, and Studio outlives
-  its parent, the helper, and the Linux process that started it. A helper gets
-  stdin EOF when its Linux writer ends or when the `wsl.exe` that relays its
-  stdio is killed. Studio opens, locks, runs RunScript on, saves, and closes a
-  place under `\\wsl.localhost`. Structured data goes through stdin, never
-  interop argv.
+- In the recorded local WSL2 3.0.5 run, Studio outlives its parent, the helper,
+  and the Linux process that started it. A helper gets stdin EOF when its Linux
+  writer ends or when the `wsl.exe` that relays its stdio is killed. Studio
+  opens, locks, runs RunScript on, saves, and closes a place under
+  `\\wsl.localhost`. Structured data goes through stdin, never interop argv.
 - Mirrored networking reaches a WSL listener on `127.0.0.1` or `0.0.0.0` from
   Windows; NAT with `localhostForwarding=false` reaches none. Closing the
   terminal ends the helper in both modes.
@@ -112,10 +112,10 @@ Native Linux, outside WSL, still has no Studio.
   trying real helper interop with an owned Windows fixture. Its report records
   VM unavailability separately from provisioning and lifecycle failures. A
   lifecycle failure after successful VM execution fails the job. The
-  [hosted report](../validation/wsl-297.md) proves a WSL2 VM and helper
-  handshake on Windows 2025. With WSL 3.0.3 and 3.0.5, its owned fixture's
-  detached launch fails with `CreateProcessW` error 5. The interop job probe
-  records neither explicit nor silent breakaway permission. The helper retains
-  this known OS failure and never retries without breakaway. The job reports
-  this lifecycle failure after VM success, and does not classify it as
-  unsupported WSL2. It establishes no real-Studio gate pass.
+  [hosted report](../validation/wsl-297.md) proves a WSL2 VM and passes the
+  actual helper launch/pin/close lifecycle on Windows 2025. Its outer accounting
+  job reports neither explicit nor silent breakaway permission; the helper's
+  scoped inner job permits the original launch without changing host limits. A
+  protected kill-on-close host without breakaway still retains the original
+  Windows error and is not retried. The hosted job establishes no real-Studio
+  gate pass.

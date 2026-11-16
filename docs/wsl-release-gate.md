@@ -7,8 +7,8 @@ tag**. A Windows helper integration pass, a fake-helper Linux pass, or a hosted
 VM capability report does not replace it. `preversion` runs local checks and
 Windows real Studio; it does not certify this manual matrix. Release CI packages
 and publishes tags, so a tag must not be created while any required cell is
-failed or unrun. [Current evidence](./validation/wsl-297.md) records the open
-gate.
+failed or unrun. [Current evidence](./validation/wsl-297.md) records the
+validated candidate, outcomes and remaining publication prerequisites.
 
 Use the final dependency-complete commit, build its Windows and Linux artifacts,
 and stage the Linux platform package with the matching Windows helper. Use

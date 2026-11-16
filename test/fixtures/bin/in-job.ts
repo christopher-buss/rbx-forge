@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 /**
  * Windows test harness (ADR 0001, "Consequences"): run a command inside a
  * new kill-on-close job, as a host terminal that owns its shells' jobs does.
@@ -16,6 +15,8 @@ import assert from "node:assert/strict";
  * `FIXTURE_JOB_KILL_ON_CLOSE=0` selects an accounting-only job;
  * `FIXTURE_JOB_PIPE_INPUT=1` forwards stdin for the helper protocol.
  */
+
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import process from "node:process";

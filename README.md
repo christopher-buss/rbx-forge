@@ -72,13 +72,13 @@ The bins `forge` and `rbx-forge` are the same. Run forge from the project root.
 
 ## WSL2
 
-WSL Studio support in this branch awaits the
-[recorded release gate](docs/wsl-release-gate.md). The published v2.3.0 predates
-this work. Both Windows and WSL must use the first validated WSL release or
-newer for same-project exclusion; its exact minimum version belongs in the
-release record before publication. Until then, use the same dependency-complete
-WSL build on both sides. An older forge does not read the side record and cannot
-exclude the other side.
+The [recorded packed-package gate](docs/validation/wsl-297.md) validates this
+WSL Studio implementation. The published v2.3.0 predates this work. Both Windows
+and WSL must use the first validated WSL release or newer for same-project
+exclusion; its exact minimum version belongs in the release record before
+publication. Until then, use the same dependency-complete WSL build on both
+sides. An older forge does not read the side record and cannot exclude the other
+side.
 
 Run forge with **Linux Node.js 24.12 or later**, Linux project tools, and
 Windows Studio installed and logged in. Check `node -p process.platform`: it
@@ -97,7 +97,7 @@ writes there; forge downloads no plugins.
 Projects can live on either file system:
 
 ```bash
-cd ~/projects/my-game        # ext4; Studio receives a \wsl.localhost UNC path
+cd ~/projects/my-game        # ext4; Studio receives a \\wsl.localhost UNC path
 forge up --studio
 cd /mnt/d/projects/my-game   # Windows drive; Studio receives a drive path
 forge up --studio

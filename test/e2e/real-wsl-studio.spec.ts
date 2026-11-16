@@ -124,6 +124,9 @@ describe.skipIf(!IS_ENABLED)("packed WSL2 real Studio release checks", () => {
 				status: 0,
 			});
 
+			assert(up.result.data !== undefined);
+			await waitForLoadedAsync(untouched, String(up.result.data["sessionId"]));
+
 			const stop = await runForgeAsync(untouched, ["stop", "--json"], realVariables());
 
 			expect(stop.result).toMatchObject({ error: { code: "studio_found" }, ok: false });

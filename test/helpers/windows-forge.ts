@@ -75,7 +75,7 @@ export async function windowsForgeAsync(
 
 /**
  * Switch the owned fixture to genuine Windows Rojo after its Linux session
- * stops.
+ * stops. The Windows session chooses its port in its own network stack.
  * @param project - The owned fixture directory.
  */
 export async function installWindowsRojoAsync(project: string): Promise<void> {
@@ -88,7 +88,7 @@ export async function installWindowsRojoAsync(project: string): Promise<void> {
 	const rojoAlias = await realStudioHost().toHostPathAsync(executable);
 	writeFileSync(
 		path.join(project, "rbx-forge.config.json"),
-		JSON.stringify({ ...config, rojoAlias }),
+		JSON.stringify({ ...config, rojoAlias, rojoPort: undefined }),
 	);
 }
 
