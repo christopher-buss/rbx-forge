@@ -1,7 +1,7 @@
 import { describe, it } from "vitest";
 
 import type { MutationDependencies, Report, StrykerExit } from "./mutation.ts";
-import { classifyExit, countMutants, runMutation, shouldPublish } from "./mutation.ts";
+import { classifyExit, countMutants, runMutationAsync, shouldPublish } from "./mutation.ts";
 
 const SHARED = "/repo/.git/stryker/incremental.json";
 const LOCAL = "reports/stryker-incremental.json";
@@ -35,7 +35,7 @@ function fake(exit: StrykerExit, initial: Record<string, string> = {}, written?:
 			read: (file) => files.get(file),
 		},
 		localFile: LOCAL,
-		run: () => {
+		run: async () => {
 			order.push("run");
 			if (written !== undefined) {
 				files.set(LOCAL, written);
@@ -127,12 +127,14 @@ describe(shouldPublish, () => {
 	});
 });
 
-describe(runMutation, () => {
-	it("should seed the local report from the shared one before Stryker runs", ({ expect }) => {
+describe(runMutationAsync, () => {
+	it("should seed the local report from the shared one before Stryker runs", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
 		const { dependencies, files, order } = fake({ code: 0 }, { [SHARED]: reportJson(4, true) });
-		runMutation(dependencies);
+		await runMutationAsync(dependencies);
 
 		expect(order.slice(0, 3)).toStrictEqual([
 			"mkdir reports",
@@ -142,12 +144,14 @@ describe(runMutation, () => {
 		expect(files.get(LOCAL)).toBe(reportJson(4, true));
 	});
 
-	it("should publish a complete run marked complete and return Stryker's code", ({ expect }) => {
+	it("should publish a complete run marked complete and return Stryker's code", async ({
+		expect,
+	}) => {
 		expect.assertions(3);
 
 		const { dependencies, order, shared } = fake({ code: 1 }, {}, reportJson(2));
 
-		expect(runMutation(dependencies)).toBe(1);
+		await expect(runMutationAsync(dependencies)).resolves.toBe(1);
 		expect(shared()).toStrictEqual({
 			complete: true,
 			files: { "src/a.ts": { mutants: [{ id: 0 }, { id: 1 }] } },
@@ -155,16 +159,16 @@ describe(runMutation, () => {
 		expect(order).toContain("mkdir /repo/.git/stryker");
 	});
 
-	it("should publish a partial run marked partial", ({ expect }) => {
+	it("should publish a partial run marked partial", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { dependencies, shared } = fake({ code: 130 }, {}, reportJson(2));
 
-		expect(runMutation(dependencies)).toBe(130);
+		await expect(runMutationAsync(dependencies)).resolves.toBe(130);
 		expect(shared()).toMatchObject({ complete: false });
 	});
 
-	it("should leave the shared report alone when Stryker fails", ({ expect }) => {
+	it("should leave the shared report alone when Stryker fails", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { dependencies, files } = fake(
@@ -173,47 +177,47 @@ describe(runMutation, () => {
 			reportJson(5),
 		);
 
-		expect(runMutation(dependencies)).toBe(2);
+		await expect(runMutationAsync(dependencies)).resolves.toBe(2);
 		expect(files.get(SHARED)).toBe(reportJson(1, true));
 	});
 
-	it("should publish nothing when the local report is malformed", ({ expect }) => {
+	it("should publish nothing when the local report is malformed", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { dependencies, files } = fake({ code: 0 }, {}, "{");
-		runMutation(dependencies);
+		await runMutationAsync(dependencies);
 
 		expect(files.has(SHARED)).toBeFalse();
 	});
 
-	it("should publish nothing when Stryker wrote no report", ({ expect }) => {
+	it("should publish nothing when Stryker wrote no report", async ({ expect }) => {
 		expect.assertions(2);
 
 		const { dependencies, files } = fake({ code: null });
 
-		expect(runMutation(dependencies)).toBe(1);
+		await expect(runMutationAsync(dependencies)).resolves.toBe(1);
 		expect(files.has(SHARED)).toBeFalse();
 	});
 
-	it("should leave the shared report alone when a crash leaves the seed in place", ({
+	it("should leave the shared report alone when a crash leaves the seed in place", async ({
 		expect,
 	}) => {
 		expect.assertions(2);
 
 		const { dependencies, files } = fake({ code: 1 }, { [SHARED]: reportJson(3, false) });
 
-		expect(runMutation(dependencies)).toBe(1);
+		await expect(runMutationAsync(dependencies)).resolves.toBe(1);
 		expect(files.get(SHARED)).toBe(reportJson(3, false));
 	});
 
-	it("should publish nothing when an interrupted run leaves a stale local report", ({
+	it("should publish nothing when an interrupted run leaves a stale local report", async ({
 		expect,
 	}) => {
 		expect.assertions(2);
 
 		const { dependencies, files } = fake({ code: 130 }, { [LOCAL]: reportJson(2) });
 
-		expect(runMutation(dependencies)).toBe(130);
+		await expect(runMutationAsync(dependencies)).resolves.toBe(130);
 		expect(files.has(SHARED)).toBeFalse();
 	});
 });

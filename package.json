@@ -81,6 +81,7 @@
 		"@commitlint/config-conventional": "catalog:lint",
 		"@commitlint/types": "catalog:lint",
 		"@isentinel/eslint-config": "catalog:lint",
+		"@isentinel/machine-budget": "catalog:mutation",
 		"@isentinel/tsconfig": "catalog:tsc",
 		"@napi-rs/cli": "catalog:native",
 		"@stryker-mutator/api": "catalog:mutation",
