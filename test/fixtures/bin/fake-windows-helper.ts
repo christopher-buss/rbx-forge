@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 interface Request {
 	id: string;
 	args?: Array<string>;
+	desktop?: string | undefined;
 	op: string;
 	port?: number | undefined;
 	route?: string | undefined;
@@ -16,6 +17,7 @@ interface Request {
 }
 interface State {
 	actualPid: number;
+	desktop?: string | undefined;
 	hidden?: boolean | undefined;
 	hiding?: boolean | undefined;
 	pid: number;
@@ -76,7 +78,7 @@ function writeState(state: State): void {
 	renameSync(temporary, STATE_FILE);
 }
 
-function launch(windowsPlace: string, windowsScript?: string): unknown {
+function launch(windowsPlace: string, windowsScript?: string, desktop?: string): unknown {
 	const place = windowsPlace.slice(23).replaceAll("\\", "/");
 	const scriptArgs =
 		windowsScript === undefined ? [] : [windowsScript.slice(23).replaceAll("\\", "/")];
@@ -89,7 +91,7 @@ function launch(windowsPlace: string, windowsScript?: string): unknown {
 	assert(child.pid !== undefined);
 	const pid = child.pid + 1_000_000;
 	const startTime = String((BigInt(Date.now()) + 11_644_473_600_000n) * 10_000n);
-	writeState({ actualPid: child.pid, pid, place, startTime });
+	writeState({ actualPid: child.pid, desktop, pid, place, startTime });
 	return { pid, pin: "1", startTime };
 }
 
@@ -109,6 +111,8 @@ function readState(): State {
 	);
 	return {
 		actualPid: value.actualPid,
+		desktop:
+			"desktop" in value && typeof value.desktop === "string" ? value.desktop : undefined,
 		hidden: "hidden" in value && value.hidden === true,
 		hiding: "hiding" in value && value.hiding === true,
 		pid: value.pid,
@@ -131,8 +135,21 @@ function control(op: string, visibility?: string): unknown {
 	const state = readState();
 	const operations = new Map<string, () => unknown>([
 		["autoSaveDirectories", () => []],
-		["desktop", () => "user"],
-		["dismissDialog", () => false],
+		["desktop", () => state.desktop ?? "user"],
+		[
+			"dismissDialog",
+			() => {
+				if (process.env["FIXTURE_HELPER_LIGHTING"] !== "1") {
+					return false;
+				}
+
+				writeFileSync(
+					`${STATE_FILE}.lighting`,
+					JSON.stringify({ helperPid: process.pid, watcherPid: process.ppid }),
+				);
+				return true;
+			},
+		],
 		["executablePath", () => process.env["FIXTURE_HELPER_EXECUTABLE"]],
 		["isAlive", () => existsSync(`${state.place}.lock`)],
 		["isBlocked", () => existsSync(`${STATE_FILE}.dialog`)],
@@ -219,7 +236,11 @@ function execute(request: Request): unknown {
 		const place = args[index === -1 ? 0 : index + 1];
 		assert(place !== undefined);
 		const scriptIndex = args.indexOf("--runScriptFile");
-		return launch(place, scriptIndex === -1 ? undefined : args[scriptIndex + 1]);
+		return launch(
+			place,
+			scriptIndex === -1 ? undefined : args[scriptIndex + 1],
+			request.desktop,
+		);
 	}
 
 	return control(request.op, request.visibility);
@@ -242,6 +263,8 @@ function parseRequest(line: string): Request {
 	);
 	return {
 		id: value.id,
+		desktop:
+			"desktop" in value && typeof value.desktop === "string" ? value.desktop : undefined,
 		op: value.op,
 		port: "port" in value && typeof value.port === "number" ? value.port : undefined,
 		route: "route" in value && typeof value.route === "string" ? value.route : undefined,

@@ -10,6 +10,7 @@ import type { ProcessOutcome, ProcessSpec } from "../process/process-runner.ts";
 import { closeStudioAsync, findPlaceStudioAsync } from "../studio/close-studio.ts";
 import type { KeepHiddenLauncher } from "../studio/keep-hidden.ts";
 import { saveStudioAsync } from "../studio/save-studio.ts";
+import type { SnapshotLightingLauncher } from "./addon-studio/snapshot-lighting-launcher.ts";
 import { createWslStudioHost } from "./wsl-studio-host.ts";
 
 const WINDOWS = String.raw`D:\temp\agents\RobloxStudioBeta.exe`;
@@ -37,6 +38,7 @@ function setup(
 		registries?: Array<null | string>;
 		registry?: null | string;
 		result?: ProcessOutcome;
+		snapshotLighting?: SnapshotLightingLauncher;
 		startTime?: null | string;
 	} = {},
 ) {
@@ -168,6 +170,9 @@ function setup(
 			cwd: "/project",
 			environment: { PATH: "/fixture-bin" },
 			...(options.keepHidden === undefined ? {} : { keepHidden: options.keepHidden }),
+			...(options.snapshotLighting === undefined
+				? {}
+				: { snapshotLighting: options.snapshotLighting }),
 		},
 		() => client,
 	);
@@ -1122,5 +1127,106 @@ describe("wsl Studio tracer", () => {
 		await expect(seams.studioHost.toHostPathAsync("/project/game.rbxl")).rejects.toMatchObject({
 			code: "studio_launch_failed",
 		});
+	});
+});
+
+describe("wsl snapshot Lighting", () => {
+	it("starts a detached Linux Lighting watcher with the Windows snapshot identity", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const watches: Array<Parameters<SnapshotLightingLauncher>[0]> = [];
+		const { seams } = setup({
+			snapshotLighting: (watch) => {
+				watches.push(watch);
+				return 900;
+			},
+		});
+
+		await expect(
+			seams.studioHost.launchAsync({
+				cwd: "/project",
+				desktop: "hidden",
+				env: { WSL_DISTRO_NAME: "fixture" },
+				place: "/project/game.rbxl",
+				studioPath: "/project/Studio.exe",
+				watchHiddenLighting: true,
+			}),
+		).resolves.toMatchObject({ studio: { desktop: "hidden", pid: 707 } });
+		expect(watches).toEqual([
+			{
+				cwd: "/project",
+				env: { WSL_DISTRO_NAME: "fixture" },
+				place: "/project/game.rbxl",
+				studio: { desktop: "hidden", os: "win32", pid: 707, startTime: PIN.startTime },
+			},
+		]);
+	});
+
+	it.for([
+		{
+			count: 0,
+			desktop: "user",
+			expected: { desktop: "user", type: "launched" },
+			watchHiddenLighting: true,
+		},
+		{
+			count: 0,
+			desktop: "hidden",
+			expected: { desktop: "hidden", type: "launched" },
+			watchHiddenLighting: false,
+		},
+		{
+			count: 1,
+			desktop: "hidden",
+			expected: {
+				type: "launched",
+				warning:
+					"Studio opened, but its automatic Lighting prompt watcher could not start: Error: spawn denied",
+			},
+			watchHiddenLighting: true,
+		},
+	] as const)(
+		"keeps snapshot watcher failures best effort: %s",
+		async ({ count, desktop, expected, watchHiddenLighting }, { expect }) => {
+			expect.assertions(2);
+
+			let starts = 0;
+			const { seams } = setup({
+				snapshotLighting: () => {
+					starts += 1;
+					throw new Error("spawn denied");
+				},
+			});
+			const result = await seams.studioHost.launchAsync({
+				cwd: "/project",
+				desktop,
+				env: {},
+				place: "/project/game.rbxl",
+				studioPath: "/project/Studio.exe",
+				watchHiddenLighting,
+			});
+
+			expect(starts).toBe(count);
+			expect(result).toMatchObject(expected);
+		},
+	);
+
+	it("allows a snapshot launcher without a detached watcher backend", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup();
+
+		await expect(
+			seams.studioHost.launchAsync({
+				cwd: "/project",
+				desktop: "hidden",
+				env: {},
+				place: "/project/game.rbxl",
+				studioPath: "/project/Studio.exe",
+				watchHiddenLighting: true,
+			}),
+		).resolves.toMatchObject({ type: "launched" });
 	});
 });

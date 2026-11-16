@@ -85,8 +85,11 @@ Plugins folder; managed Rojo installation is verified for Linux Rojo 7.7.1 and
 other versions need a manual connection when the plugin is missing.
 `forge build --plugin` also writes to the Windows Plugins folder. `show`,
 `hide`, hidden session windows and hidden snapshots use Windows Studio placement
-through the helper. The remaining WSL Studio features and release validation are
-tracked in [#297](https://github.com/christopher-buss/rbx-forge/issues/297). See
+through the helper. Hidden snapshots have a detached Lighting prompt watcher;
+`forge save --place <snapshot>` saves them, and `forge open` prunes closed
+snapshots beyond the newest five. The remaining WSL Studio features and release
+validation are tracked in
+[#297](https://github.com/christopher-buss/rbx-forge/issues/297). See
 [JSON output](docs/json-output.md) for Windows PID interpretation and an
 uncertain launch result.
 

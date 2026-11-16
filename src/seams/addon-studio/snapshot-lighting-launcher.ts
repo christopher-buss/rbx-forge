@@ -1,4 +1,5 @@
 import { ForgeError } from "../../errors.ts";
+import { definedOnly } from "../../studio/launch-arguments.ts";
 import type { StudioProcess } from "../../studio/launcher.ts";
 import type { Environment, Seams } from "../seams.ts";
 
@@ -17,23 +18,23 @@ export type SnapshotLightingLauncher = (launch: {
  * @returns A launcher independent of the opening CLI's lifetime.
  */
 export function createSnapshotLightingLauncher(
-	backend: Pick<Seams, "host" | "native">,
+	backend: Pick<Seams, "childProcess" | "host" | "native">,
 	entry: string,
 ): SnapshotLightingLauncher {
 	return ({ cwd, env, place, studio }) => {
-		const environment: Record<string, string> = {};
-		for (const [key, value] of Object.entries(env)) {
-			if (value !== undefined) {
-				environment[key] = value;
-			}
+		const environment = definedOnly(env);
+
+		const args = [
+			entry,
+			"--watch-hidden-lighting",
+			JSON.stringify({ pid: studio.pid, place, startTime: studio.startTime }),
+		];
+		if (backend.host.platform === "linux") {
+			return spawnLinux(backend, args, cwd, environment);
 		}
 
 		const pid = backend.native().spawnDetached?.({
-			args: [
-				entry,
-				"--watch-hidden-lighting",
-				JSON.stringify({ pid: studio.pid, place, startTime: studio.startTime }),
-			],
+			args,
 			cwd,
 			env: environment,
 			program: backend.host.execPath,
@@ -47,4 +48,33 @@ export function createSnapshotLightingLauncher(
 
 		return pid;
 	};
+}
+
+function ignoreError(): void {
+	// The snapshot is already open; an asynchronous spawn failure is best effort.
+}
+
+function spawnLinux(
+	backend: Pick<Seams, "childProcess" | "host">,
+	args: Array<string>,
+	cwd: string,
+	environment: Record<string, string>,
+): number {
+	const child = backend.childProcess.spawn(backend.host.execPath, args, {
+		cwd,
+		detached: true,
+		env: environment,
+		stdio: "ignore",
+		windowsHide: true,
+	});
+	child.once("error", ignoreError);
+	if (child.pid === undefined) {
+		throw new ForgeError(
+			"studio_launch_failed",
+			"The hidden snapshot Lighting watcher could not start.",
+		);
+	}
+
+	child.unref();
+	return child.pid;
 }
