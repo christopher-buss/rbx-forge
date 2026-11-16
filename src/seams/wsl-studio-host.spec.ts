@@ -291,7 +291,7 @@ describe("wsl Studio tracer", () => {
 			studioPath: "/project/Studio.exe",
 		});
 
-		expect(requests.at(-1)).toMatchObject({
+		expect(requests.find((request) => request["op"] === "launch")).toMatchObject({
 			desktop: options.physical,
 			hiddenWindows: options.hiddenWindows,
 		});
@@ -314,7 +314,7 @@ describe("wsl Studio tracer", () => {
 		assert(pin !== null);
 
 		expect(await pin.startWindowHidingAsync()).toBeFalse();
-		expect(now()).toBe(10000);
+		expect(now()).toBe(180000);
 		expect(watches).toEqual([
 			{
 				cwd: "/project",
@@ -341,6 +341,26 @@ describe("wsl Studio tracer", () => {
 		const { seams } = setup({ output: "/project/new-plugins" });
 
 		await expect(seams.studioHost.pluginsFolderAsync({})).resolves.toBe("/project/new-plugins");
+	});
+
+	it("allows the detached Linux watcher to load before reporting startup failure", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		const options = { hiding: false, keepHidden: () => {} };
+		const { seams } = setup(options);
+		let elapsed = 0;
+		seams.clock.now = () => elapsed;
+		seams.clock.sleep = async () => {
+			elapsed += 6000;
+			options.hiding = elapsed >= 18000;
+		};
+
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+
+		await expect(pin.startWindowHidingAsync()).resolves.toBeTrue();
 	});
 
 	it("reads binary probe responses from the Windows helper", async ({ expect }) => {

@@ -6,11 +6,12 @@ import path from "node:path";
 import { ForgeError } from "../errors.ts";
 import type { HelperClient } from "../native/helper-client.ts";
 import { readVariable } from "../process/environment.ts";
+import { STUDIO_OPEN_BOUND_MS } from "../session/studio-readiness.ts";
 import type { StudioExecutable } from "../studio/discover.ts";
 import type { KeepHiddenLauncher } from "../studio/keep-hidden.ts";
 import { studioArguments } from "../studio/launch-arguments.ts";
 import type { StudioLaunch, StudioLaunchOutcome } from "../studio/launcher.ts";
-import { KEEP_HIDDEN_POLL_MS, KEEP_HIDDEN_START_BOUND_MS } from "../studio/window-hiding.ts";
+import { KEEP_HIDDEN_POLL_MS } from "../studio/window-hiding.ts";
 import { commandExecutable, STUDIO_REGISTRY_KEYS } from "./addon-studio/discover.ts";
 import type { Environment, Seams } from "./seams.ts";
 import type { PinnedStudio, StudioHost } from "./studio-host.ts";
@@ -182,7 +183,7 @@ class WslHost {
 			program,
 		});
 		const outcome = launched(result, launch.desktop ?? "user");
-		this.watchLaunch(launch, result);
+		await this.watchLaunchAsync(launch, result);
 
 		return outcome;
 	}
@@ -211,14 +212,14 @@ class WslHost {
 		return shape.assert(await this.client().requestAsync(operation));
 	}
 
-	private async startHidingAsync(identity: typeof pinShape.infer): Promise<boolean> {
+	private async startHidingAsync(identity: typeof pinShape.infer, place = ""): Promise<boolean> {
 		const op = { pin: identity.pin };
 		if (this.backend.keepHidden === undefined) {
 			return this.requestAsync({ ...op, op: "startWindowHiding" }, type("boolean"));
 		}
 
-		this.watch(identity.pid, identity.startTime);
-		const deadline = this.backend.clock.now() + KEEP_HIDDEN_START_BOUND_MS;
+		this.watch(identity.pid, identity.startTime, place);
+		const deadline = this.backend.clock.now() + STUDIO_OPEN_BOUND_MS;
 		while (!(await this.requestAsync({ ...op, op: "windowHiding" }, type("boolean")))) {
 			if (this.backend.clock.now() >= deadline) {
 				return false;
@@ -254,7 +255,7 @@ class WslHost {
 		}
 	}
 
-	private watch(pid: number, startTime: string, place = ""): void {
+	private watch(pid: number, startTime: string, place: string): void {
 		this.backend.keepHidden?.({
 			cwd: this.backend.cwd,
 			env: this.backend.environment,
@@ -262,13 +263,13 @@ class WslHost {
 		});
 	}
 
-	private watchLaunch(launch: StudioLaunch, result: unknown): void {
+	private async watchLaunchAsync(launch: StudioLaunch, result: unknown): Promise<void> {
 		if (launch.runScript === undefined || launch.desktop !== "hidden") {
 			return;
 		}
 
 		const identity = pinShape.assert(result);
-		this.watch(identity.pid, identity.startTime, launch.place);
+		await this.startHidingAsync(identity, launch.place);
 	}
 
 	// eslint-disable-next-line flawless/max-lines-per-function -- Flat mapping of the Studio pin interface.
