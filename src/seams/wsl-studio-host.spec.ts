@@ -26,10 +26,10 @@ const OK: ProcessOutcome = {
 function setup(
 	options: {
 		alive?: boolean;
+		blocked?: boolean;
 		clockStepMs?: number;
 		hiding?: boolean;
 		keepHidden?: KeepHiddenLauncher;
-		blocked?: boolean;
 		launchReply?: unknown;
 		output?: string;
 		probeReply?: unknown;
@@ -76,12 +76,12 @@ function setup(
 			}
 
 			switch (request["op"]) {
+				case "autoSaveDirectories": {
+					return [WINDOWS];
+				}
 				case "desktop":
 				case "windowVisibility": {
 					return "user";
-				}
-				case "autoSaveDirectories": {
-					return [WINDOWS];
 				}
 				case "dismissDialog": {
 					return false;
@@ -118,6 +118,13 @@ function setup(
 				case "readRegistry": {
 					return options.registries?.shift() ?? options.registry ?? null;
 				}
+				case "requestSave": {
+					memory.fileSystem.writeFileSync("/project/game.rbxl", "saved place");
+					return "requested";
+				}
+				case "saveMenuEnabled": {
+					return true;
+				}
 				case "setWindowVisibility":
 				case "startWindowHiding": {
 					return options.hiding ?? true;
@@ -125,13 +132,6 @@ function setup(
 				case "stopWindowHiding":
 				case "windowHiding": {
 					return options.hiding ?? true;
-				}
-				case "requestSave": {
-					memory.fileSystem.writeFileSync("/project/game.rbxl", "saved place");
-					return "requested";
-				}
-				case "saveMenuEnabled": {
-					return true;
 				}
 				default: {
 					throw new Error(`Unexpected operation ${String(request["op"])}`);

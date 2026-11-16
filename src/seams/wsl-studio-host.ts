@@ -15,8 +15,8 @@ import { KEEP_HIDDEN_POLL_MS } from "../studio/window-hiding.ts";
 import { commandExecutable, STUDIO_REGISTRY_KEYS } from "./addon-studio/discover.ts";
 import type { Environment, Seams } from "./seams.ts";
 import type { PinnedStudio, StudioHost } from "./studio-host.ts";
-import { createWslStudioPin } from "./wsl-studio-pin.ts";
 import { convertedOutput, launched, pinnedIdentity } from "./wsl-helper-results.ts";
+import { createWslStudioPin } from "./wsl-studio-pin.ts";
 
 const INVALID_PATH = /[\r\n\0]/;
 const NULLABLE_TEXT = type("string | null");
@@ -203,7 +203,12 @@ class WslHost {
 			return null;
 		}
 
-		return createWslStudioPin(await this.client().requestAsync({ op: "pin", pid, startTime: current }), this.requestAsync.bind(this), this.backend.clock, this.startHidingAsync.bind(this));
+		return createWslStudioPin(
+			await this.client().requestAsync({ op: "pin", pid, startTime: current }),
+			this.requestAsync.bind(this),
+			this.backend.clock,
+			this.startHidingAsync.bind(this),
+		);
 	}
 
 	private async probeHttpAsync(port: number, route: string): Promise<Uint8Array> {
@@ -222,7 +227,10 @@ class WslHost {
 		return shape.assert(await this.client().requestAsync(operation, timeoutMs));
 	}
 
-	private async startHidingAsync(identity: ReturnType<typeof pinnedIdentity>, place = ""): Promise<boolean> {
+	private async startHidingAsync(
+		identity: ReturnType<typeof pinnedIdentity>,
+		place = "",
+	): Promise<boolean> {
 		const op = { pin: identity.pin };
 		if (this.backend.keepHidden === undefined) {
 			return this.requestAsync({ ...op, op: "startWindowHiding" }, type("boolean"));
@@ -281,8 +289,6 @@ class WslHost {
 		const identity = pinnedIdentity(result);
 		await this.startHidingAsync(identity, launch.place);
 	}
-
-
 }
 
 /**

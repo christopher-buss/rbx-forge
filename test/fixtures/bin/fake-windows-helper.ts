@@ -130,8 +130,8 @@ function terminate(pid: number, signal: NodeJS.Signals): boolean {
 function control(op: string, visibility?: string): unknown {
 	const state = readState();
 	const operations = new Map<string, () => unknown>([
-		["desktop", () => "user"],
 		["autoSaveDirectories", () => []],
+		["desktop", () => "user"],
 		["dismissDialog", () => false],
 		["executablePath", () => process.env["FIXTURE_HELPER_EXECUTABLE"]],
 		["isAlive", () => existsSync(`${state.place}.lock`)],

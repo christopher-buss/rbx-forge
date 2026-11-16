@@ -100,42 +100,42 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 			expect(state.services.studio.os).toBe("win32");
 			expect(state.services.studio.pid).toBeGreaterThan(1_000_000);
 
-		const hide = await fixture.forge(["hide", "--json"], environment);
+			const hide = await fixture.forge(["hide", "--json"], environment);
 
-		expect(hide.status, hide.stdout + hide.stderr).toBe(0);
+			expect(hide.status, hide.stdout + hide.stderr).toBe(0);
 
-		function watcherPid() {
-			const value: unknown = JSON.parse(
-				readFileSync(environment.FIXTURE_HELPER_STATE, "utf8"),
-			);
-			assert(
-				typeof value === "object" &&
-					value !== null &&
-					"watcherPid" in value &&
-					typeof value.watcherPid === "number",
-			);
-			return value.watcherPid;
-		}
+			function watcherPid() {
+				const value: unknown = JSON.parse(
+					readFileSync(environment.FIXTURE_HELPER_STATE, "utf8"),
+				);
+				assert(
+					typeof value === "object" &&
+						value !== null &&
+						"watcherPid" in value &&
+						typeof value.watcherPid === "number",
+				);
+				return value.watcherPid;
+			}
 
-		await expect.poll(() => watcherPid()).not.toBe(state.pid);
+			await expect.poll(() => watcherPid()).not.toBe(state.pid);
 
-		const watcher = watcherPid();
+			const watcher = watcherPid();
 
-		expect(() => process.kill(watcher, 0)).not.toThrow();
+			expect(() => process.kill(watcher, 0)).not.toThrow();
 
-		const show = await fixture.forge(["show", "--json"], environment);
+			const show = await fixture.forge(["show", "--json"], environment);
 
-		expect(show.status, show.stdout + show.stderr).toBe(0);
-		await expect
-			.poll(() => {
-				try {
-					process.kill(watcher, 0);
-					return true;
-				} catch {
-					return false;
-				}
-			})
-			.toBeFalse();
+			expect(show.status, show.stdout + show.stderr).toBe(0);
+			await expect
+				.poll(() => {
+					try {
+						process.kill(watcher, 0);
+						return true;
+					} catch {
+						return false;
+					}
+				})
+				.toBeFalse();
 
 			const save = await fixture.forge(["save", "--json"], environment);
 

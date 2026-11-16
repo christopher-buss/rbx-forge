@@ -35,6 +35,7 @@ export function convertedOutput(result: ProcessOutcome, input: string): string {
 /**
  * Decode a completed Windows launch without assuming an uncertain PID.
  * @param value - Helper reply.
+ * @param desktop - The requested Studio placement.
  * @returns The launched Studio identity.
  * @rejects An unusable launch identity.
  */
