@@ -1,4 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { openMachineBudget, watchTree } from "@isentinel/machine-budget";
+
+import { spawn, spawnSync } from "node:child_process";
 import {
 	copyFileSync,
 	existsSync,
@@ -9,12 +11,13 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import os from "node:os";
+import os, { availableParallelism } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
 import strykerConfig from "../../stryker.config.ts";
-import { runMutation } from "./mutation.ts";
+import { runAdaptiveStrykerAsync, startTicking } from "./adaptive.ts";
+import { runMutationAsync } from "./mutation.ts";
 
 // Ctrl+C reaches Stryker through the process group; this one stays to publish.
 for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"] as const) {
@@ -52,32 +55,51 @@ function writeAtomically(file: string, contents: string): void {
 	}
 }
 
-process.exitCode = runMutation({
-	files: {
-		copy: copyFileSync,
-		mkdir: (directory) => {
-			mkdirSync(directory, { recursive: true });
-		},
-		publish: writeAtomically,
-		read: (file) => (existsSync(file) ? readFileSync(file, "utf8") : undefined),
-	},
-	localFile: strykerConfig.incrementalFile,
-	run: () => {
-		const { signal, status } = spawnSync(
-			process.execPath,
-			[STRYKER_ENTRY, "run", "stryker.config.ts"],
-			{
-				stdio: "inherit",
-				windowsHide: true,
-			},
-		);
-		if (signal === null) {
-			return { code: status };
-		}
+const GROW_INTERVAL_MS = 1000;
 
-		// An unknown signal name still counts as an interruption.
-		const { signals } = os.constants;
-		return { code: Object.hasOwn(signals, signal) ? 128 + signals[signal] : null };
-	},
-	sharedFile: path.join(COMMON_DIRECTORY, "stryker", "incremental.json"),
+const budget = openMachineBudget({
+	log: console.error,
+	workspaceRoot: path.resolve(import.meta.dirname, "../.."),
 });
+try {
+	process.exitCode = await runMutationAsync({
+		files: {
+			copy: copyFileSync,
+			mkdir: (directory) => {
+				mkdirSync(directory, { recursive: true });
+			},
+			publish: writeAtomically,
+			read: (file) => (existsSync(file) ? readFileSync(file, "utf8") : undefined),
+		},
+		localFile: strykerConfig.incrementalFile,
+		run: async () => {
+			const { code, signal } = await runAdaptiveStrykerAsync({
+				budget,
+				log: console.error,
+				parallelism: availableParallelism(),
+				project: "rbx-forge",
+				schedule: (tick) => startTicking(tick, GROW_INTERVAL_MS),
+				spawn: (environment) => {
+					// The IPC channel carries the capacity messages of the
+					// patched Stryker.
+					return spawn(process.execPath, [STRYKER_ENTRY, "run", "stryker.config.ts"], {
+						env: { ...process.env, ...environment },
+						stdio: ["inherit", "inherit", "inherit", "ipc"],
+						windowsHide: true,
+					});
+				},
+				watchTree,
+			});
+			if (signal === null) {
+				return { code };
+			}
+
+			// An unknown signal name still counts as an interruption.
+			const { signals } = os.constants;
+			return { code: Object.hasOwn(signals, signal) ? 128 + signals[signal] : null };
+		},
+		sharedFile: path.join(COMMON_DIRECTORY, "stryker", "incremental.json"),
+	});
+} finally {
+	budget.close();
+}

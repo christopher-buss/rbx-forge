@@ -35,7 +35,7 @@ copy the `.worktreeinclude` files, then run `pnpm build:all` in the background.
 | `pnpm build:reaper`           | the `forge-reaper` binary, next to the addon    |
 | `pnpm build:plugin`           | the forge Studio plugin (rbxtsc, then rojo)     |
 | `pnpm test:plugin`            | plugin specs in a Studio jest-roblox starts     |
-| `pnpm mutation`               | Stryker mutation testing                        |
+| `pnpm mutation`               | Stryker, on workers the machine budget leases   |
 | `pnpm release`                | pick a version, run the gate, then tag          |
 
 ## Before a commit
@@ -50,6 +50,11 @@ The agent pre-push hook runs mutation tests only when `src/` differs from the
 merge-base with `origin/main`, including pushes to a remote URL. Keep
 `origin/main` available and current with `git fetch origin`. Knip runs on every
 push. CI runs the full checks for every change that is not docs-only.
+
+`pnpm mutation` leases its Stryker workers from `@isentinel/machine-budget`, a
+budget every tool of this user on this machine shares. It waits when the machine
+is busy and grows while memory allows. `MACHINE_BUDGET=off` grants every worker
+at once; any `CI` value other than `false` does the same.
 
 On Windows, pre-push also runs `build:all`, then the `integration-real-studio`
 and `e2e-real-studio` projects in order with `RBX_FORGE_TEST_REAL_STUDIO=1` when
