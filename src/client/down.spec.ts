@@ -97,7 +97,7 @@ function makeWorld({ holdsLock = true, supervisor = {} }: WorldSetup = {}): Worl
 		[SUPERVISOR]: { alive: true, executablePath: "/node", ...supervisor },
 	});
 	const lock = holdsLock ? native.addon.tryLockFile(FORGE.lock, "exclusive") : null;
-	const session = findSession(memory.fileSystem, FORGE);
+	const session = findSession(memory.fileSystem, FORGE, createTestSeams().host);
 	assert(session !== undefined);
 	const onSleep: World["onSleep"] = [];
 	return {

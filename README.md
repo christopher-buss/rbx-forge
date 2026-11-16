@@ -312,6 +312,18 @@ With the skill, an agent:
 A session that no one uses stops after `session.idleTimeout` minutes, so a
 forgotten agent session does not stay open.
 
+## Mixing Windows and WSL sessions
+
+Both installations must use the release introducing WSL Windows-helper support
+(spec #297) or later, including Side ownership (#311). Version 2.3.0 and earlier
+cannot safely share a project between Windows and WSL. A session belongs to
+Windows or the WSL distro that started it. Run `forge down` on that side before
+starting it elsewhere, including when using `--force`. Keep the session files
+until cleanup succeeds on their own side.
+
+For projects on a Windows drive, WSL also holds the native Windows singleton
+lock through its helper. Linux file system projects do not take a Windows lock.
+
 ## Contributing
 
 Tools are pinned in `mise.toml`: `mise install`, then `pnpm install`. Read

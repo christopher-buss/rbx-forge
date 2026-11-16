@@ -17,6 +17,7 @@ import { convertedOutput, launched, pinnedIdentity } from "./wsl-helper-results.
 const INVALID_PATH = /[\r\n\0]/;
 const NULLABLE_TEXT = type("string | null");
 const PATHS = type("string[]");
+const WINDOWS_DRIVE = /^[a-z]:[\\/]/i;
 const windowsAbsolute = /^(?:[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/i;
 
 type WslBackend = Pick<Seams, "clock" | "fileSystem" | "processRunner"> & {
@@ -56,12 +57,7 @@ class WslHost {
 				return this.requestAsync({ op: "processStartTime", pid }, NULLABLE_TEXT);
 			},
 			toHostPathAsync: async (file) => this.convertAsync(file, true),
-			tryLockFileAsync: async () => {
-				throw new ForgeError(
-					"windows_helper_unavailable",
-					"Windows singleton locking is not supported by the tracer.",
-				);
-			},
+			tryLockFileAsync: this.tryLockFileAsync.bind(this),
 		};
 	}
 
@@ -108,7 +104,7 @@ class WslHost {
 			);
 		}
 
-		if (windows && !this.backend.fileSystem.existsSync(input)) {
+		if (windows && mustExist && !this.backend.fileSystem.existsSync(input)) {
 			throw new ForgeError("studio_launch_failed", `The Linux path is unavailable: ${input}`);
 		}
 
@@ -210,6 +206,26 @@ class WslHost {
 		timeoutMs?: number,
 	): Promise<T> {
 		return shape.assert(await this.client().requestAsync(operation, timeoutMs));
+	}
+
+	private async tryLockFileAsync(
+		file: string,
+	): Promise<import("./studio-host.ts").StudioHostLock | null> {
+		const windows = await this.convertAsync(file, true, false);
+		// Windows cannot lock Linux files exposed through the WSL UNC
+		// share.
+		if (!WINDOWS_DRIVE.test(windows)) {
+			return null;
+		}
+
+		const lock = await this.requestAsync({ op: "tryLockFile", path: windows }, NULLABLE_TEXT);
+		return lock === null
+			? null
+			: {
+					releaseAsync: async () => {
+						await this.requestAsync({ lock, op: "releaseLock" }, type("boolean"));
+					},
+				};
 	}
 
 	private validateConverted(

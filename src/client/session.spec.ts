@@ -3,7 +3,7 @@ import { describe, it, vi } from "vitest";
 
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { LET_GO, makeStatus, serveFakeSessionAsync } from "../../test/helpers/fake-session.ts";
-import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
+import { createMemoryFileSystem, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import {
 	addPartsAsync,
@@ -52,7 +52,7 @@ describe(findSession, () => {
 			".forge/sessions/s1/token": "secret",
 		});
 
-		expect(findSession(memory.fileSystem, FORGE)).toMatchObject({
+		expect(findSession(memory.fileSystem, FORGE, createTestSeams().host)).toMatchObject({
 			files: { sessionId: "s1" },
 			identity: IDENTITY,
 			token: "secret",
@@ -73,7 +73,9 @@ describe(findSession, () => {
 	] as const)("should find none with %s", ([, files], { expect }) => {
 		expect.assertions(1);
 
-		expect(findSession(createMemoryFileSystem(files).fileSystem, FORGE)).toBeUndefined();
+		expect(
+			findSession(createMemoryFileSystem(files).fileSystem, FORGE, createTestSeams().host),
+		).toBeUndefined();
 	});
 });
 
@@ -85,7 +87,7 @@ describe(fetchStatusAsync, () => {
 		const transport = createMemoryTransport();
 		const fake = await serveFakeSessionAsync(memory, transport);
 		fake.answer = { running: "yes" };
-		const session = findSession(memory.fileSystem, FORGE);
+		const session = findSession(memory.fileSystem, FORGE, createTestSeams().host);
 		const fetched = fetchStatusAsync(transport, session!);
 
 		await expect(fetched).rejects.toMatchObject({
@@ -109,7 +111,7 @@ describe(addPartsAsync, () => {
 			return { added: ["compiler", "studio", "rojo"] };
 		};
 
-		const session = findSession(memory.fileSystem, FORGE)!;
+		const session = findSession(memory.fileSystem, FORGE, createTestSeams().host)!;
 
 		await expect(
 			addPartsAsync(transport, session, { parts: ["compiler", "studio"] }, 1000),
@@ -134,7 +136,7 @@ describe(addPartsAsync, () => {
 		fake.addParts = () => ({ added: ["syncback"] });
 		const added = addPartsAsync(
 			transport,
-			findSession(memory.fileSystem, FORGE)!,
+			findSession(memory.fileSystem, FORGE, createTestSeams().host)!,
 			{ parts: [] },
 			1000,
 		);
@@ -171,7 +173,7 @@ describe(restartPartsAsync, () => {
 		await expect(
 			restartPartsAsync(
 				transport,
-				findSession(memory.fileSystem, FORGE)!,
+				findSession(memory.fileSystem, FORGE, createTestSeams().host)!,
 				{ force: true, studioPath: "/opt/S" },
 				1000,
 			),
@@ -188,7 +190,7 @@ describe(restartPartsAsync, () => {
 		fake.restartParts = () => ({ added: [], kept: [] });
 		const restarted = restartPartsAsync(
 			transport,
-			findSession(memory.fileSystem, FORGE)!,
+			findSession(memory.fileSystem, FORGE, createTestSeams().host)!,
 			{ force: false },
 			1000,
 		);
@@ -219,7 +221,7 @@ describe(joinSessionAsync, () => {
 		const asked = join.mock.calls;
 		const joined = joinSessionAsync(
 			transport,
-			findSession(memory.fileSystem, FORGE)!,
+			findSession(memory.fileSystem, FORGE, createTestSeams().host)!,
 			{ parts: ["compiler"] },
 			{ signal, waitMs: 1000 },
 		);
@@ -315,7 +317,10 @@ describe(probeSessionAsync, () => {
 		const fake = await serveFakeSessionAsync(memory, ipc, makeStatus({ phase: "starting" }));
 
 		await expect(
-			probeSessionAsync({ fileSystem: memory.fileSystem, ipc }, FORGE),
+			probeSessionAsync(
+				{ fileSystem: memory.fileSystem, host: createTestSeams().host, ipc },
+				FORGE,
+			),
 		).resolves.toMatchObject({
 			session: { identity: fake.identity },
 			status: { phase: "starting" },
@@ -327,7 +332,10 @@ describe(probeSessionAsync, () => {
 
 		const memory = createMemoryFileSystem();
 		const ipc = createMemoryTransport();
-		const none = await probeSessionAsync({ fileSystem: memory.fileSystem, ipc }, FORGE);
+		const none = await probeSessionAsync(
+			{ fileSystem: memory.fileSystem, host: createTestSeams().host, ipc },
+			FORGE,
+		);
 
 		expect(none).toBeUndefined();
 
@@ -335,7 +343,10 @@ describe(probeSessionAsync, () => {
 		await fake.stop();
 
 		await expect(
-			probeSessionAsync({ fileSystem: memory.fileSystem, ipc }, FORGE),
+			probeSessionAsync(
+				{ fileSystem: memory.fileSystem, host: createTestSeams().host, ipc },
+				FORGE,
+			),
 		).resolves.toBeUndefined();
 	});
 
@@ -348,7 +359,10 @@ describe(probeSessionAsync, () => {
 		fake.answer = {};
 
 		await expect(
-			probeSessionAsync({ fileSystem: memory.fileSystem, ipc }, FORGE),
+			probeSessionAsync(
+				{ fileSystem: memory.fileSystem, host: createTestSeams().host, ipc },
+				FORGE,
+			),
 		).rejects.toMatchObject({
 			code: "internal_error",
 		});

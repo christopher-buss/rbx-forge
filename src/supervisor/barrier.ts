@@ -8,6 +8,7 @@ import type { LockSeams } from "./locks.ts";
 import { LEASE_POLL_MS } from "./locks.ts";
 import type { ForgeFiles, SessionFiles } from "./session-files.ts";
 import { listSessions, removeSession, sessionFiles } from "./session-files.ts";
+import { assertOwnSession } from "./side.ts";
 
 /**
  * How long a new session waits for an old session's workers beyond their
@@ -74,11 +75,12 @@ export function targetOf(files: SessionFiles): SessionTarget {
  *   the bound passed; `undefined` when `signal` aborted first.
  */
 export async function waitForBarrierAsync(
-	seams: Pick<LockSeams, "clock" | "native">,
+	seams: LockSeams,
 	files: SessionFiles,
 	boundMs: number,
 	signal: AbortSignal,
 ): Promise<Barrier | undefined> {
+	assertOwnSession(seams.host, seams.fileSystem, files.identity);
 	const target = targetOf(files);
 	const deadline = seams.clock.now() + boundMs;
 	for (;;) {
@@ -141,7 +143,7 @@ export async function clearOldSessionsAsync(
 			cleanups.push(cleanup);
 		}
 
-		removeSession(seams.fileSystem, forge, sessionId);
+		removeSession(seams.fileSystem, forge, sessionId, seams.host);
 	}
 
 	return cleanups;
@@ -184,7 +186,7 @@ export async function finalBarrierAsync(
 		);
 	}
 
-	removeSession(seams.fileSystem, forge, files.sessionId);
+	removeSession(seams.fileSystem, forge, files.sessionId, seams.host);
 }
 
 function pidsOf(seams: Pick<LockSeams, "native">, target: SessionTarget): Array<number> {
@@ -234,10 +236,11 @@ function stillAlive(sessionId: string, directory: string, pids: Array<number>): 
  *   when processes survived it.
  */
 async function forceAsync(
-	seams: Pick<LockSeams, "clock" | "native">,
+	seams: LockSeams,
 	files: SessionFiles,
 	signal: AbortSignal,
 ): Promise<ForcedCleanup | undefined> {
+	assertOwnSession(seams.host, seams.fileSystem, files.identity);
 	const report = await seams.native().forceCleanup(targetOf(files), FORCED_CLEANUP_MS);
 	const cleanup = { ...report, sessionId: files.sessionId };
 	if (report.unverifiable.length > 0) {

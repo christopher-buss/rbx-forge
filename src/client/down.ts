@@ -10,6 +10,7 @@ import type { Barrier } from "../supervisor/barrier.ts";
 import { SETTLE_MS, targetOf, waitForBarrierAsync } from "../supervisor/barrier.ts";
 import type { ForgeFiles, SessionFiles } from "../supervisor/session-files.ts";
 import { removeSession } from "../supervisor/session-files.ts";
+import { assertOwnSession, assertOwnSide } from "../supervisor/side.ts";
 import type { DownParts, DownStudio } from "./down-parts.ts";
 import { askPartStopsAsync, downStudio } from "./down-parts.ts";
 import type { KnownSession } from "./session.ts";
@@ -135,6 +136,8 @@ export async function stopSessionAsync(
 	session: KnownSession,
 	options: DownOptions,
 ): Promise<DownReport> {
+	assertOwnSide(seams.host, session.identity.side);
+	assertOwnSession(seams.host, seams.fileSystem, session.files.identity);
 	const target: Target = { forge, pin: pinSupervisor(seams, session), session };
 	const stops = isGone(target) ? undefined : await askPartStopsAsync(seams.ipc, session, options);
 	const parts = stops === undefined ? null : { kept: stops.kept, stopped: stops.stopped };
@@ -410,6 +413,7 @@ async function clearBarrierAsync(
 		throw stillAlive(files, barrier.pids);
 	}
 
+	assertOwnSession(seams.host, seams.fileSystem, files.identity);
 	const cleanup = await seams.native().forceCleanup(targetOf(files), FORCED_CLEANUP_MS);
 	if (cleanup.unverifiable.length > 0) {
 		throw new ForgeError(
@@ -451,7 +455,7 @@ function removeUnderLock(seams: DownSeams, forge: ForgeFiles, files: SessionFile
 	}
 
 	try {
-		removeSession(seams.fileSystem, forge, files.sessionId);
+		removeSession(seams.fileSystem, forge, files.sessionId, seams.host);
 		return true;
 	} finally {
 		lock.release();

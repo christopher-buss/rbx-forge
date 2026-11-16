@@ -65,7 +65,7 @@ export async function runRestartAsync(
 ): Promise<CommandResult> {
 	const { cwd, seams } = context;
 	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
-	const session = findSession(seams.fileSystem, forgeFiles(cwd));
+	const session = findSession(seams.fileSystem, forgeFiles(cwd), seams.host);
 	if (session === undefined) {
 		throw new ForgeError("not_running", "No session runs for this project.", {
 			hint: 'Start one with "forge up".',

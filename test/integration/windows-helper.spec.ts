@@ -174,6 +174,52 @@ describe.skipIf(process.platform !== "win32")("windows helper", () => {
 		);
 	});
 
+	it("shares singleton exclusion with the native addon in both directions", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(6);
+
+		const helper = startHelper({ onTestFinished });
+		await helper.requestAsync({ op: "handshake", protocol: 1 });
+		const file = path.join(makeTemporaryDirectory(), "supervisor.lock");
+		const native = loadRealNative();
+		const reply = await helper.requestAsync({ op: "tryLockFile", path: file });
+		assert("result" in reply && typeof reply.result === "string");
+
+		expect(native.tryLockFile(file, "exclusive")).toBeNull();
+		expect(native.tryLockFile(file, "shared")).toBeNull();
+		expect(await helper.requestAsync({ lock: reply.result, op: "releaseLock" })).toHaveProperty(
+			"result",
+			true,
+		);
+
+		const held = native.tryLockFile(file, "exclusive");
+		assert(held !== null);
+		onTestFinished(() => {
+			held.release();
+		});
+
+		expect(await helper.requestAsync({ op: "tryLockFile", path: file })).toHaveProperty(
+			"result",
+			null,
+		);
+
+		held.release();
+		const again = await helper.requestAsync({ op: "tryLockFile", path: file });
+		assert("result" in again && typeof again.result === "string");
+
+		expect(again.result).toBeTypeOf("string");
+
+		helper.child.stdin.end();
+		await waitForExitAsync(helper.child);
+		const released = native.tryLockFile(file, "exclusive");
+		assert(released !== null);
+		released.release();
+
+		expect(native.isLockFree(file)).toBe(true);
+	});
+
 	it("reports the Windows user Plugins folder without writing it", async ({
 		expect,
 		onTestFinished,

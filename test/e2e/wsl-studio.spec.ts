@@ -13,6 +13,12 @@ import { NATIVE_DIRECTORY } from "../helpers/real-native.ts";
 
 const HELPER = path.resolve(import.meta.dirname, "../fixtures/bin/fake-windows-helper.ts");
 
+function installPathConverter(fixture: FixtureProject): void {
+	const converter = path.join(fixture.project, "fixture-bin/wslpath");
+	writeFileSync(converter, `#!/bin/sh\nexec "${process.execPath}" "${HELPER}" path "$@"\n`);
+	chmodSync(converter, 0o755);
+}
+
 describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 	it("fails up when Windows cannot reach the WSL listener", async ({
 		expect,
@@ -21,6 +27,7 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 		expect.assertions(2);
 
 		const fixture = makeFixtureProject({ config: { projectType: "luau" } });
+		installPathConverter(fixture);
 		const environment = {
 			FIXTURE_HELPER_UNREACHABLE: "1",
 			RBX_FORGE_TEST_WINDOWS_HELPER: HELPER,
@@ -47,12 +54,7 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 					studio: { desktop: "user", saveMethod: "menu" },
 				},
 			});
-			const converter = path.join(fixture.project, "fixture-bin/wslpath");
-			writeFileSync(
-				converter,
-				`#!/bin/sh\nexec "${process.execPath}" "${HELPER}" path "$@"\n`,
-			);
-			chmodSync(converter, 0o755);
+			installPathConverter(fixture);
 			const executable = path.join(fixture.project, "RobloxStudioBeta.exe");
 			copyFileSync(process.execPath, executable);
 			const environment = {

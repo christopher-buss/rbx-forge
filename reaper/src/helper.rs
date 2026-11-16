@@ -22,6 +22,12 @@ enum Operation {
         protocol: u32,
     },
     PluginsFolder,
+    TryLockFile {
+        path: String,
+    },
+    ReleaseLock {
+        lock: String,
+    },
     ProbeHttp {
         port: u16,
         route: String,
@@ -98,6 +104,7 @@ struct Session {
     ready: bool,
     serial: u64,
     pins: HashMap<String, PinnedProcess>,
+    locks: HashMap<String, crate::os::lock::FileLock>,
 }
 
 impl Session {
@@ -136,6 +143,22 @@ impl Session {
         }
         match op {
             Operation::Handshake { .. } => unreachable!(),
+            Operation::TryLockFile { path } => {
+                let lock = crate::os::lock::FileLock::try_acquire(
+                    std::path::Path::new(&path),
+                    crate::os::lock::LockMode::Exclusive,
+                )?;
+                Ok(match lock {
+                    Some(lock) => {
+                        self.serial += 1;
+                        let key = self.serial.to_string();
+                        self.locks.insert(key.clone(), lock);
+                        json!(key)
+                    }
+                    None => Value::Null,
+                })
+            }
+            Operation::ReleaseLock { lock } => Ok(json!(self.locks.remove(&lock).is_some())),
             Operation::PluginsFolder => {
                 let home = std::env::var_os("USERPROFILE")
                     .ok_or_else(|| io::Error::other("Windows user profile is unavailable"))?;
@@ -329,6 +352,7 @@ pub fn serve(mut input: impl BufRead, mut output: impl Write) -> io::Result<()> 
         ready: false,
         serial: 0,
         pins: HashMap::new(),
+        locks: HashMap::new(),
     };
     loop {
         let mut line = Vec::new();

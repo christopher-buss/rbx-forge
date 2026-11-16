@@ -11,6 +11,7 @@ import { assert, describe, it } from "vitest";
 import type { KnownSession } from "../../src/client/session.ts";
 import { findSession } from "../../src/client/session.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
+import { nodeHost } from "../../src/seams/host.ts";
 import type { ReporterEvent } from "../../src/seams/reporter.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
@@ -91,7 +92,7 @@ async function waitForStatusAsync(
 	isDone: (status: SessionStatus) => boolean,
 ): Promise<SessionStatus> {
 	const started = Date.now();
-	let session = findSession(nodeFs, forgeFiles(project.project));
+	let session = findSession(nodeFs, forgeFiles(project.project), nodeHost);
 	let lastStatus: SessionStatus | undefined;
 	let outcome: Settled | undefined;
 	let eventsBeforeRequest = run.events.length;
@@ -120,7 +121,7 @@ async function waitForStatusAsync(
 			await sleep(100);
 		}
 	} catch (err) {
-		session ??= findSession(nodeFs, forgeFiles(project.project));
+		session ??= findSession(nodeFs, forgeFiles(project.project), nodeHost);
 		const pin = session === undefined ? null : native.pinProcess(session.identity.pid);
 		const evidence = {
 			elapsedMs: Date.now() - started,

@@ -265,14 +265,14 @@ function createSessionState(
  * @rejects `endpoint_in_use`.
  */
 async function listenOrRemoveAsync(
-	seams: Pick<ControlSeams, "fileSystem" | "ipc">,
+	seams: Pick<ControlSeams, "fileSystem" | "host" | "ipc">,
 	{ forge, identity }: Pick<ControlSetup, "forge" | "identity">,
 	sessionId: string,
 ): Promise<IpcListener> {
 	try {
 		return await seams.ipc.listenAsync(identity.endpoint);
 	} catch (err) {
-		removeSession(seams.fileSystem, forge, sessionId);
+		removeSession(seams.fileSystem, forge, sessionId, seams.host);
 		throw err;
 	}
 }

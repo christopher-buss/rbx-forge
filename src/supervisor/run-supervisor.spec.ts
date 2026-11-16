@@ -35,6 +35,7 @@ import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import type { StudioHost } from "../seams/studio-host.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { Pause, PausePoint } from "../session/pause.ts";
 import { neverPauseAsync } from "../session/pause.ts";
@@ -65,11 +66,12 @@ const OLD_LEASE = path.join(PROJECT, ".forge", "sessions", "old", "workers.lock"
 /** The identity record of every run, but its endpoint. */
 const IDENTITY: Pick<
 	IdentityRecord,
-	"pid" | "processStartTime" | "sessionId" | "startedAt" | "version"
+	"pid" | "processStartTime" | "sessionId" | "side" | "startedAt" | "version"
 > = {
 	pid: 4242,
 	processStartTime: "4242",
 	sessionId: "session-1",
+	side: "linux",
 	startedAt: "2026-01-01T00:00:00.000Z",
 	version: "9.9.9",
 };
@@ -130,8 +132,10 @@ interface StartSetup {
 	reaper?: FakeReaperOptions;
 	/** The config file's `rojoPort`; 4000 by default. */
 	rojoPort?: "unset" | number;
+	studioHost?: StudioHost;
 	/** The addon's private file writer (Windows). */
 	writePrivateFile?: (file: string, text: string) => void;
+	wslDistro?: string | undefined;
 }
 
 interface StartRun {
@@ -1162,7 +1166,9 @@ function startCommand({
 	projectType = "luau",
 	reaper = {},
 	rojoPort = 4000,
+	studioHost,
 	writePrivateFile,
+	wslDistro,
 }: StartSetup = {}): StartRun {
 	const memory = createMemoryFileSystem({
 		"default.project.json": '{"name":"Example","tree":{"$className":"DataModel"}}',
@@ -1223,7 +1229,7 @@ function startCommand({
 			clock: clock.clock,
 			configLoader,
 			fileSystem: memory.fileSystem,
-			host: { ...seams.host, platform },
+			host: { ...seams.host, platform, wslDistro },
 			ipc,
 			native: () => {
 				return {
@@ -1242,6 +1248,7 @@ function startCommand({
 			randomId: () => "session-1",
 			reaper: fake.launch,
 			studioLauncher,
+			...(studioHost === undefined ? {} : { studioHost }),
 		}),
 	});
 
@@ -1721,15 +1728,15 @@ describe(runSupervisorAsync, () => {
 			reloads: true,
 		},
 		{
-			filename: "aß.project.json",
+			filename: "aÃƒÆ’Ã…Â¸.project.json",
 			platform: "win32" as const,
-			projectPath: "Aß.project.json",
+			projectPath: "AÃƒÆ’Ã…Â¸.project.json",
 			reloads: true,
 		},
 		{
 			filename: "ass.project.json",
 			platform: "win32" as const,
-			projectPath: "Aß.project.json",
+			projectPath: "AÃƒÆ’Ã…Â¸.project.json",
 			reloads: false,
 		},
 	])(
@@ -1890,7 +1897,7 @@ describe(runSupervisorAsync, () => {
 	}) => {
 		expect.assertions(1);
 
-		const name = 'A "quoted" project\\name\\u1234\u0001雪';
+		const name = 'A "quoted" project\\name\\u1234\u0001ÃƒÂ©Ã¢â‚¬ÂºÃ‚Âª';
 		const run = startCommand({
 			files: {
 				...TOOL_FILES,
@@ -1911,7 +1918,7 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(marker).toContain(
-			`m:SetAttribute("ProjectName","A \\\"quoted\\\" project\\\\name\\\\u1234\\u{0001}雪@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("ReadyUrl","http://127.0.0.1:50001/ready/test?projectName=Example&sessionId=rojo-session");m:SetAttribute("SessionId","id\\\"\\\\\\n")`,
+			`m:SetAttribute("ProjectName","A \\\"quoted\\\" project\\\\name\\\\u1234\\u{0001}ÃƒÂ©Ã¢â‚¬ÂºÃ‚Âª@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("ReadyUrl","http://127.0.0.1:50001/ready/test?projectName=Example&sessionId=rojo-session");m:SetAttribute("SessionId","id\\\"\\\\\\n")`,
 		);
 	});
 
@@ -3372,6 +3379,156 @@ describe("forge start hooks and syncback", () => {
 });
 
 describe("forge start session files", () => {
+	it.for([
+		["win32", undefined, "wsl:Ubuntu"],
+		["linux", "Ubuntu", "windows"],
+		["linux", "Ubuntu", "wsl:Debian"],
+	] as const)(
+		"refuses foreign startup cleanup on %s even with force",
+		async ([platform, wslDistro, side], { expect }) => {
+			expect.assertions(3);
+
+			const identity = JSON.stringify({ ...IDENTITY, side });
+			const run = startCommand({
+				files: { ...TOOL_FILES, ".forge/sessions/old/supervisor.id": identity },
+				flags: { force: true },
+				platform,
+				wslDistro,
+			});
+
+			await expect(run.result).rejects.toMatchObject({ code: "identity_mismatch" });
+			expect(run.memory.files()[".forge/sessions/old/supervisor.id"]).toBe(identity);
+			expect(run.fake.launches).toStrictEqual([]);
+		},
+	);
+
+	it.for([
+		["win32", "wsl:Ubuntu"],
+		["linux", "windows"],
+	] as const)("rechecks an old side at startup on %s", async ([platform, side], { expect }) => {
+		expect.assertions(2);
+
+		const record = JSON.stringify({ side });
+		const run = startCommand({
+			files: WITH_OLD,
+			flags: { force: true, open: false },
+			pause: () => async (point) => {
+				const actions = {
+					admitted: () => {},
+					control: () => {},
+					created: () => {},
+					leased: () => {},
+					lock: () => {
+						run.memory.fileSystem.writeFileSync(
+							path.join(PROJECT, ".forge/sessions/old/supervisor.id"),
+							record,
+						);
+					},
+				};
+				actions[point]();
+			},
+			platform,
+		});
+
+		await expect(run.result).rejects.toHaveProperty("code", "identity_mismatch");
+		expect(run.memory.files()[".forge/sessions/old/supervisor.id"]).toBe(record);
+	});
+
+	it("records Windows ownership even with a WSL distro in the environment", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		let recorded: Record<string, null | string> = {};
+		const run = startCommand({
+			flags: { open: false },
+			platform: "win32",
+			reaper: {
+				onLaunch: () => {
+					recorded = run.memory.files();
+				},
+			},
+			writePrivateFile: () => {},
+			wslDistro: "Ubuntu",
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(identityIn(recorded)).toHaveProperty("side", "windows");
+	});
+
+	it("refuses a busy Windows drive singleton under WSL", async ({ expect }) => {
+		expect.assertions(1);
+
+		const host = createTestSeams().studioHost;
+		const run = startCommand({
+			flags: { open: false },
+			studioHost: {
+				...host,
+				toHostPathAsync: async () => String.raw`D:\project\.forge\supervisor.lock`,
+				tryLockFileAsync: async () => null,
+			},
+			wslDistro: "Ubuntu",
+		});
+
+		await expect(run.result).rejects.toMatchObject({
+			code: "session_running",
+			hint: 'Run "forge down" on the side that started it.',
+			message: "A session already runs for this project.",
+		});
+	});
+
+	it("runs with a Windows drive singleton under WSL", async ({ expect }) => {
+		expect.assertions(3);
+
+		const windowsNative = createFakeNative();
+		const host = createTestSeams({ native: () => windowsNative.addon }).studioHost;
+		let recorded: Record<string, null | string> = {};
+		const run = startCommand({
+			flags: { open: false },
+			reaper: {
+				onLaunch: () => {
+					recorded = run.memory.files();
+				},
+			},
+			studioHost: {
+				...host,
+				toHostPathAsync: async () => String.raw`D:\project\.forge\supervisor.lock`,
+			},
+			wslDistro: "Ubuntu",
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+
+		expect(identityIn(recorded)).toHaveProperty("side", "wsl:Ubuntu");
+		await expect(run.result).resolves.toHaveProperty("data.reason", "SIGINT");
+		await expect(host.tryLockFileAsync(SINGLETON)).resolves.not.toBeNull();
+	});
+
+	it("runs on a Linux filesystem without Windows locking", async ({ expect }) => {
+		expect.assertions(1);
+
+		const host = createTestSeams().studioHost;
+		const run = startCommand({
+			flags: { open: false },
+			studioHost: {
+				...host,
+				toHostPathAsync: async () => {
+					return String.raw`\\wsl.localhost\Ubuntu\home\project\.forge\supervisor.lock`;
+				},
+				tryLockFileAsync: async () => {
+					throw new Error("Windows cannot lock Linux files");
+				},
+			},
+			wslDistro: "Ubuntu",
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toHaveProperty("data.reason", "SIGINT");
+	});
+
 	it("should write the identity record, token, and current hint before the reaper starts", async ({
 		expect,
 	}) => {

@@ -5,6 +5,7 @@ import { callSessionAsync, ownSessionAsync } from "../ipc/client.ts";
 import { IPC_WAIT_MS } from "../ipc/protocol.ts";
 import type { IpcTransport } from "../ipc/transport.ts";
 import type { FileSystem } from "../seams/file-system.ts";
+import type { Host } from "../seams/host.ts";
 import type { OwnerJoin, OwnerRelease } from "../session/ownership.ts";
 import type { PartRequest } from "../session/part-requests.ts";
 import type { PartRestarts, RestartRequest } from "../session/part-restarts.ts";
@@ -14,6 +15,7 @@ import type { PartId, SessionStatus } from "../session/status.ts";
 import { parseStatus } from "../session/status.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "../supervisor/session-files.ts";
 import { sessionFiles } from "../supervisor/session-files.ts";
+import { assertOwnSession } from "../supervisor/side.ts";
 
 /** A session the `.forge` files name, with what reaches it. */
 export interface KnownSession {
@@ -34,12 +36,13 @@ const OTHER_VERSION = "The session may run another forge version. Stop it, then 
 
 const identityLine = type("string.json.parse").pipe(
 	type({
-		endpoint: "string",
-		pid: "number.integer",
-		processStartTime: "string",
-		sessionId: "string",
-		startedAt: "string",
-		version: "string",
+		"endpoint": "string",
+		"pid": "number.integer",
+		"processStartTime": "string",
+		"sessionId": "string",
+		"side?": "string",
+		"startedAt": "string",
+		"version": "string",
 	}),
 );
 
@@ -65,11 +68,13 @@ export function readIdentity(
  *
  * @param fileSystem - Reads the files.
  * @param forge - The project's `.forge` files.
+ * @param host - The local side, checked before accessing the session.
  * @returns The session, or `undefined` when no complete session is named.
  */
 export function findSession(
 	fileSystem: Pick<FileSystem, "readFileSync">,
 	forge: ForgeFiles,
+	host: Host,
 ): KnownSession | undefined {
 	const sessionId = readText(fileSystem, forge.current)?.trim();
 	if (sessionId === undefined) {
@@ -77,6 +82,7 @@ export function findSession(
 	}
 
 	const files = sessionFiles(forge, sessionId);
+	assertOwnSession(host, fileSystem, files.identity);
 	const identity = readIdentity(fileSystem, files.identity);
 	const token = readText(fileSystem, files.token);
 	if (identity === undefined || token === undefined) {
@@ -334,10 +340,10 @@ export async function restartPartsAsync(
  *   other than a status.
  */
 export async function probeSessionAsync(
-	seams: { fileSystem: Pick<FileSystem, "readFileSync">; ipc: IpcTransport },
+	seams: { fileSystem: Pick<FileSystem, "readFileSync">; host: Host; ipc: IpcTransport },
 	forge: ForgeFiles,
 ): Promise<undefined | { session: KnownSession; status: SessionStatus }> {
-	const session = findSession(seams.fileSystem, forge);
+	const session = findSession(seams.fileSystem, forge, seams.host);
 	if (session === undefined) {
 		return undefined;
 	}

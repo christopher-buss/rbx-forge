@@ -7,6 +7,7 @@ import nodeFs from "node:fs";
 import { describe, it } from "vitest";
 
 import { findSession } from "../../src/client/session.ts";
+import { nodeHost } from "../../src/seams/host.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { openStudioStandInAsync, pidOf } from "../helpers/real-native.ts";
 import { readWorkerLog, waitForDeathAsync } from "../helpers/worker-log.ts";
@@ -56,7 +57,7 @@ describe("attach an open Studio", () => {
 		const fixture = await makeFixtureAsync(BUILD_FIRST, { studio: true });
 		const first = startSession(fixture, START);
 		await waitForOutputAsync(first, OPEN_TEXT);
-		const supervisor = findSession(nodeFs, forgeFiles(fixture.project))!.identity.pid;
+		const supervisor = findSession(nodeFs, forgeFiles(fixture.project), nodeHost)!.identity.pid;
 		first.child.kill();
 		await first.closed;
 		await waitForDeathAsync([supervisor]);

@@ -3,7 +3,7 @@ import { assert, describe, it } from "vitest";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { FakeSessionProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
-import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
+import { createMemoryFileSystem, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import { clearOldSessionsAsync, SETTLE_MS, targetOf, waitForBarrierAsync } from "./barrier.ts";
 import type { LockSeams } from "./locks.ts";
@@ -27,6 +27,7 @@ function makeSeams(files: Record<string, string> = {}) {
 	const seams: LockSeams = {
 		clock: manual.clock,
 		fileSystem: memory.fileSystem,
+		host: createTestSeams().host,
 		native: () => native.addon,
 	};
 	return { manual, memory, native, seams };
@@ -82,6 +83,23 @@ describe(targetOf, () => {
 });
 
 describe(waitForBarrierAsync, () => {
+	it.for([
+		["win32", "wsl:Ubuntu"],
+		["linux", "windows"],
+	] as const)("refuses a foreign scan on %s", async ([platform, side], { expect }) => {
+		expect.assertions(1);
+
+		const { seams } = makeSeams({
+			".forge/sessions/old/supervisor.id": JSON.stringify({ side }),
+		});
+		seams.host.platform = platform;
+
+		await expect(waitForBarrierAsync(seams, OLD, 0, NEVER_ABORTS)).rejects.toHaveProperty(
+			"code",
+			"identity_mismatch",
+		);
+	});
+
 	it("should clear at once when the lease is free and no process is left, holding nothing", async ({
 		expect,
 	}) => {
@@ -164,6 +182,22 @@ describe(waitForBarrierAsync, () => {
 });
 
 describe(clearOldSessionsAsync, () => {
+	it("refuses a side replaced before startup forced cleanup", async ({ expect }) => {
+		expect.assertions(2);
+
+		const { memory, native, seams } = makeSeams({ ".forge/sessions/old/supervisor.id": "{}" });
+		native.sessions.set("old", [{ pid: 77 }]);
+		native.addon.isLockFree = () => {
+			memory.fileSystem.writeFileSync(OLD.identity, JSON.stringify({ side: "windows" }));
+			return false;
+		};
+
+		await expect(
+			clearOldSessionsAsync(seams, FORGE, { boundMs: 0, force: true, signal: NEVER_ABORTS }),
+		).rejects.toHaveProperty("code", "identity_mismatch");
+		expect(native.sessions.get("old")).toStrictEqual([{ pid: 77 }]);
+	});
+
 	it("should delete every old session whose barrier is clear, and the hint", async ({
 		expect,
 	}) => {

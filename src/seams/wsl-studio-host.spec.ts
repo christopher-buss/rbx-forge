@@ -26,6 +26,7 @@ function setup(
 		alive?: boolean;
 		blocked?: boolean;
 		launchReply?: unknown;
+		lockReply?: null | string;
 		output?: string;
 		probeReply?: unknown;
 		registries?: Array<null | string>;
@@ -53,6 +54,7 @@ function setup(
 		fileSystem: memory.fileSystem,
 	});
 	let isAlive = options.alive ?? true;
+	let isLockHeld = false;
 	const client: HelperClient = {
 		identity: Promise.resolve(IDENTITY),
 		requestAsync: async (request) => {
@@ -96,12 +98,21 @@ function setup(
 				case "readRegistry": {
 					return options.registries?.shift() ?? options.registry ?? null;
 				}
+				case "releaseLock": {
+					isLockHeld = false;
+					return true;
+				}
 				case "requestSave": {
 					memory.fileSystem.writeFileSync("/project/game.rbxl", "saved place");
 					return "requested";
 				}
 				case "saveMenuEnabled": {
 					return true;
+				}
+				case "tryLockFile": {
+					const lock = isLockHeld ? null : (options.lockReply ?? null);
+					isLockHeld = lock !== null;
+					return lock;
 				}
 				case "windowVisibility": {
 					return "user";
@@ -132,6 +143,29 @@ function setup(
 }
 
 describe("wsl Studio tracer", () => {
+	it("holds and releases a Windows drive singleton through the helper", async ({ expect }) => {
+		expect.assertions(3);
+
+		const { seams } = setup({ lockReply: "held-lock" });
+		const lock = await seams.studioHost.tryLockFileAsync("/project/lock");
+		assert(lock !== null);
+
+		expect(lock).toHaveProperty("releaseAsync");
+		await expect(lock.releaseAsync()).resolves.toBeUndefined();
+		await expect(seams.studioHost.tryLockFileAsync("/project/lock")).resolves.not.toBeNull();
+	});
+
+	it("does not ask Windows to lock a Linux filesystem path", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup({
+			lockReply: "held-lock",
+			output: String.raw`\\wsl.localhost\Ubuntu\home\project\lock`,
+		});
+
+		expect(await seams.studioHost.tryLockFileAsync("/project/lock")).toBeNull();
+	});
+
 	it("reports the Windows Plugins folder as a Linux path", async ({ expect }) => {
 		expect.assertions(1);
 
@@ -554,9 +588,7 @@ describe("wsl Studio tracer", () => {
 		expect(await seams.studioHost.pluginsFolderAsync({})).toBe("/project/Studio.exe");
 		expect(await seams.studioHost.frontmostApplicationAsync()).toBeNull();
 		expect(await seams.studioHost.platformAsync()).toBe("win32");
-		await expect(seams.studioHost.tryLockFileAsync("/project/lock")).rejects.toMatchObject({
-			code: "windows_helper_unavailable",
-		});
+		expect(await seams.studioHost.tryLockFileAsync("/project/lock")).toBeNull();
 
 		const pin = await seams.studioHost.pinProcessAsync(707);
 		assert(pin !== null);
@@ -754,13 +786,9 @@ describe("wsl Studio tracer", () => {
 	});
 
 	it("explains unsupported operations", async ({ expect }) => {
-		expect.assertions(2);
+		expect.assertions(1);
 
 		const { seams } = setup();
-
-		await expect(seams.studioHost.tryLockFileAsync("/project/lock")).rejects.toThrow(
-			"Windows singleton locking is not supported by the tracer.",
-		);
 
 		const pin = await seams.studioHost.pinProcessAsync(707);
 		assert(pin !== null);

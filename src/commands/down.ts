@@ -79,7 +79,7 @@ export async function runDownAsync(
 ): Promise<CommandResult> {
 	const timeoutMs = timeoutOf(input.flags["timeout"]);
 	const forge = forgeFiles(context.cwd);
-	const session = findSession(context.seams.fileSystem, forge);
+	const session = findSession(context.seams.fileSystem, forge, context.seams.host);
 	if (session === undefined) {
 		throw new ForgeError("not_running", "No session runs for this project.", {
 			hint: 'Start one with "forge up".',

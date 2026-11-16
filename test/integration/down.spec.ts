@@ -65,7 +65,7 @@ interface Replacement {
  */
 async function downAsync(project: Project, options: DownOptions = SHORT): Promise<Outcome> {
 	const forge = forgeFiles(project.project);
-	const session = findSession(nodeFs, forge);
+	const session = findSession(nodeFs, forge, nodeHost);
 	assert(session !== undefined, "no session is named");
 	try {
 		const report = await stopSessionAsync(
@@ -315,7 +315,7 @@ describe("forge down", () => {
 		const project = await makeProjectAsync();
 		const run = launchUnowned(project, COMPILER_ONLY);
 		await waitForReadyAsync(run);
-		const session = findSession(nodeFs, forgeFiles(project.project));
+		const session = findSession(nodeFs, forgeFiles(project.project), nodeHost);
 		assert(session !== undefined, "no session is named");
 		const stops = await stopPartsAsync(
 			realTransport(),

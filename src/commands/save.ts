@@ -74,7 +74,11 @@ async function savePlaceAsync(
 }
 
 async function saveSessionAsync(context: CommandContext, timeoutMs: number): Promise<StudioSave> {
-	const session = findSession(context.seams.fileSystem, forgeFiles(context.cwd));
+	const session = findSession(
+		context.seams.fileSystem,
+		forgeFiles(context.cwd),
+		context.seams.host,
+	);
 	if (session === undefined) {
 		throw new ForgeError("studio_not_open", "No session Studio is open.", {
 			hint: 'Open one with "forge up --studio".',

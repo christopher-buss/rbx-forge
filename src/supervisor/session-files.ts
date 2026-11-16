@@ -1,6 +1,8 @@
 import path from "node:path";
 
 import type { FileSystem } from "../seams/file-system.ts";
+import type { Host } from "../seams/host.ts";
+import { assertOwnSession } from "./side.ts";
 
 /**
  * The session files of a project, under `.forge`.
@@ -66,6 +68,8 @@ export interface IdentityRecord {
 	/** Its OS start time, from the native addon (`processStartTime`). */
 	processStartTime: string;
 	sessionId: string;
+	/** Absent only in records from versions before side ownership. */
+	side?: string;
 	/** When the session started, as an ISO date. */
 	startedAt: string;
 	/** The forge version that runs it. */
@@ -171,12 +175,15 @@ export function createSession(
  * @param fileSystem - Deletes the files.
  * @param forge - The project's `.forge` files.
  * @param sessionId - The session to delete.
+ * @param host - The local side, checked before accessing the session.
  */
 export function removeSession(
 	fileSystem: Pick<FileSystem, "existsSync" | "readFileSync" | "rmSync">,
 	forge: ForgeFiles,
 	sessionId: string,
+	host: Host,
 ): void {
+	assertOwnSession(host, fileSystem, sessionFiles(forge, sessionId).identity);
 	fileSystem.rmSync(sessionFiles(forge, sessionId).directory, { force: true, recursive: true });
 	if (
 		fileSystem.existsSync(forge.current) &&

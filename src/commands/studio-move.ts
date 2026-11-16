@@ -33,7 +33,11 @@ export async function runStudioMoveAsync(
 	_input: CommandInput,
 	desktop: StudioDesktop,
 ): Promise<CommandResult> {
-	const session = findSession(context.seams.fileSystem, forgeFiles(context.cwd));
+	const session = findSession(
+		context.seams.fileSystem,
+		forgeFiles(context.cwd),
+		context.seams.host,
+	);
 	if (session === undefined) {
 		throw new ForgeError("studio_not_open", "No session Studio is open.");
 	}

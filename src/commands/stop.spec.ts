@@ -369,6 +369,25 @@ async function catchStopErrorAsync(
 }
 
 describe(runStopAsync, () => {
+	it("refuses a foreign session before closing any snapshot Studio", async ({ expect }) => {
+		expect.assertions(2);
+
+		const project = makeProject({
+			files: {
+				...SESSION_FILES,
+				".forge/sessions/s1/supervisor.id": JSON.stringify({ side: "windows" }),
+				[`.forge/snapshots/${SNAPSHOT_A}.lock`]: studioLock(7),
+				[`.forge/snapshots/${SNAPSHOT_A}`]: "place",
+			},
+			processes: { 7: snapshotStudio(() => project, path.join(SNAPSHOTS, SNAPSHOT_A)) },
+		});
+
+		await expect(
+			runStopAsync(project.context, { config: {}, flags: { force: true } }),
+		).rejects.toHaveProperty("code", "identity_mismatch");
+		expect(project.processes.get(7)).toHaveProperty("alive", true);
+	});
+
 	it("should close a verified Studio with a close request and remove its lock file", async ({
 		expect,
 	}) => {

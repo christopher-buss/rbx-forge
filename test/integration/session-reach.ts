@@ -5,6 +5,7 @@ import type { KnownSession } from "../../src/client/session.ts";
 import { findSession } from "../../src/client/session.ts";
 import { ForgeError } from "../../src/errors.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
+import { nodeHost } from "../../src/seams/host.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
 import type { Project } from "./session-harness.ts";
@@ -23,7 +24,7 @@ const WAIT_MS = 30_000;
 export async function waitForSessionAsync(project: Project): Promise<KnownSession> {
 	const deadline = Date.now() + WAIT_MS;
 	for (;;) {
-		const session = findSession(nodeFs, forgeFiles(project.project));
+		const session = findSession(nodeFs, forgeFiles(project.project), nodeHost);
 		if (session !== undefined && (await answersAsync(session))) {
 			return session;
 		}
