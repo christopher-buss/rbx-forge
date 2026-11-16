@@ -198,8 +198,13 @@ class WslHost {
 			return null;
 		}
 
+		const reply = await this.recovery.requestAsync({ op: "pin", pid, startTime: current });
+		if (reply === null) {
+			return null;
+		}
+
 		const pinned = createWslStudioPin(
-			await this.recovery.requestAsync({ op: "pin", pid, startTime: current }),
+			reply,
 			this.requestAsync.bind(this),
 			this.backend.clock,
 			this.startHidingAsync.bind(this),

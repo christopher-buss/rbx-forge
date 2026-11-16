@@ -5,6 +5,7 @@ import path from "node:path";
 import { assert, describe, it, vi } from "vitest";
 
 import { createFakeCapture } from "../../test/helpers/fake-capture.ts";
+import { createHelperProbe } from "../../test/helpers/helper-probe.ts";
 import {
 	createCommandContext,
 	createMemoryFileSystem,
@@ -12,6 +13,7 @@ import {
 	PROJECT,
 } from "../../test/helpers/seams.ts";
 import { resolveConfig } from "../config/resolve.ts";
+import type { Seams } from "../seams/seams.ts";
 import { waitForRojoAsync } from "./rojo-part.ts";
 
 const INFO = {
@@ -20,6 +22,17 @@ const INFO = {
 	serverVersion: "7.7.1",
 	sessionId: "session",
 };
+
+function readiness(seams: Seams, controller: AbortController) {
+	const service = vi.fn<() => void>();
+	const pending = waitForRojoAsync(
+		{ context: createCommandContext({ seams }), status: { rojoPort: () => {}, service } },
+		{ signal: controller.signal, track: () => {} },
+		{ stop: () => {} },
+		{ part: { stopped: new Promise<void>(() => {}) }, port: 34872 },
+	);
+	return { pending, service };
+}
 
 function fixture(mode: string) {
 	const controller = new AbortController();
@@ -32,6 +45,13 @@ function fixture(mode: string) {
 			async () => {
 				controller.abort(new Error("canceled"));
 				return encode(INFO);
+			},
+		],
+		[
+			"canceledFailure",
+			async (): Promise<Uint8Array> => {
+				controller.abort(new Error("canceled"));
+				throw new Error("connection refused");
 			},
 		],
 		["invalid", async () => new Uint8Array([193])],
@@ -49,19 +69,22 @@ function fixture(mode: string) {
 	]);
 	const reply = replies.get(mode);
 	assert(reply !== undefined);
-	seams.studioHost.probeHttpAsync = async (_port, route) => {
+	seams.studioHost.probeHttpAsync = createHelperProbe(async (route) => {
 		assert(route === "/api/rojo");
 		return reply();
-	};
+	});
 
-	const service = vi.fn<() => void>();
-	const pending = waitForRojoAsync(
-		{ context: createCommandContext({ seams }), status: { rojoPort: () => {}, service } },
-		{ signal: controller.signal, track: () => {} },
-		{ stop: () => {} },
-		{ part: { stopped: new Promise<void>(() => {}) }, port: 34872 },
-	);
-	return { pending, service };
+	return readiness(seams, controller);
+}
+
+function helperFixture(launch?: string) {
+	const seams = createTestSeams();
+	seams.network.isListeningAsync = async () => true;
+	seams.network.getRojoInfoAsync = async () => INFO;
+	seams.studioHost.probeHttpAsync = createHelperProbe(async () => {
+		throw new Error("connection refused");
+	}, launch);
+	return readiness(seams, new AbortController());
 }
 
 describe("windows reachability before Rojo readiness", () => {
@@ -147,6 +170,76 @@ describe("windows reachability before Rojo readiness", () => {
 				exitCode: 1,
 			});
 			expect(service).not.toHaveBeenCalled();
+		},
+	);
+
+	it("reports a probe the Windows helper ran and failed as unreachable networking", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const { pending, service } = helperFixture(undefined);
+
+		await expect(pending).rejects.toMatchObject({
+			cause: { message: "connection refused" },
+			code: "wsl_network_unreachable",
+		});
+		expect(service).not.toHaveBeenCalled();
+	});
+
+	it.for([
+		{ code: "windows_helper_unavailable", launch: "ENOENT" },
+		{ code: "wsl_interop_unavailable", launch: "EIO" },
+	])(
+		"keeps a $launch helper start failure as $code, not a network failure",
+		async ({ code, launch }, { expect }) => {
+			expect.assertions(2);
+
+			const { pending, service } = helperFixture(launch);
+
+			await expect(pending).rejects.toMatchObject({ code });
+			expect(service).not.toHaveBeenCalled();
+		},
+	);
+
+	it("keeps cancellation while the Windows helper fails the probe", async ({ expect }) => {
+		expect.assertions(2);
+
+		const { pending, service } = fixture("canceledFailure");
+
+		await expect(pending).rejects.toThrow("canceled");
+		expect(service).not.toHaveBeenCalled();
+	});
+
+	it.for([
+		{
+			name: "unreachable",
+			cancel: (_controller: AbortController) => {},
+			expected: { code: "wsl_network_unreachable" },
+		},
+		{
+			name: "canceled",
+			cancel: (controller: AbortController) => {
+				controller.abort(new Error("canceled"));
+			},
+			expected: { message: "canceled" },
+		},
+	])(
+		"keeps a $name failed Rojo identity read before the Windows probe",
+		async ({ cancel, expected }, { expect }) => {
+			expect.assertions(1);
+
+			const controller = new AbortController();
+			const seams = createTestSeams();
+			seams.network.isListeningAsync = async () => true;
+			seams.network.getRojoInfoAsync = async () => {
+				cancel(controller);
+				throw new Error("Rojo server info returned HTTP 503.");
+			};
+
+			seams.studioHost.probeHttpAsync = createHelperProbe(async () => encode(INFO));
+
+			await expect(readiness(seams, controller).pending).rejects.toMatchObject(expected);
 		},
 	);
 

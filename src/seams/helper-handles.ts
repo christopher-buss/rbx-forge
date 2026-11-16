@@ -32,6 +32,10 @@ export class HelperHandles {
 
 	// eslint-disable-next-line flawless/max-lines-per-function -- Validates and records complete identity replies.
 	public remember(operation: Record<string, unknown>, result: unknown): unknown {
+		if (result === null && operation["op"] === "pin") {
+			return null;
+		}
+
 		if (operation["op"] === "pin" || operation["op"] === "launch") {
 			let identity: ReturnType<typeof pinnedIdentity>;
 			try {
@@ -123,12 +127,17 @@ export class HelperHandles {
 			return;
 		}
 
-		const value = pinnedIdentity(
-			await next.requestAsync(
-				{ op: "pin", pid: pin.pid, startTime: pin.startTime },
-				Math.max(1, deadline - this.clock.now()),
-			),
+		const reply = await next.requestAsync(
+			{ op: "pin", pid: pin.pid, startTime: pin.startTime },
+			Math.max(1, deadline - this.clock.now()),
 		);
+		if (reply === null) {
+			// The helper proved exit or PID reuse after the start lookup.
+			pin.pin = null;
+			return;
+		}
+
+		const value = pinnedIdentity(reply);
 		if (value.pid !== pin.pid || value.startTime !== pin.startTime) {
 			throw new ForgeError(
 				"windows_helper_unavailable",

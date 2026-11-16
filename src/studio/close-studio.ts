@@ -157,10 +157,24 @@ export async function closeStudioAsync(
  * Kill a verified Studio and wait for it to exit.
  *
  * @param pinned - The pinned Studio process.
- * @rejects {ForgeError} `process_failed` when it does not exit in time.
+ * @rejects {ForgeError} `process_failed` when it does not exit in time or
+ *   the kill result is lost without verified exit.
  */
 async function killStudioAsync(pinned: PinnedStudio): Promise<void> {
-	await pinned.killAsync();
+	try {
+		await pinned.killAsync();
+	} catch (err) {
+		if (!isHelperChannelLoss(err)) {
+			throw err;
+		}
+
+		throw new ForgeError(
+			"process_failed",
+			"The Studio kill result is unknown; Studio exit is unverified.",
+			{ cause: err },
+		);
+	}
+
 	if (!(await pinned.waitForExitAsync(STUDIO_EXIT_TIMEOUT_MS))) {
 		throw new ForgeError(
 			"process_failed",

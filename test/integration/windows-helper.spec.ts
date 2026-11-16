@@ -540,7 +540,7 @@ describe.skipIf(process.platform !== "win32")("windows helper", () => {
 		expect,
 		onTestFinished,
 	}) => {
-		expect.assertions(5);
+		expect.assertions(8);
 
 		const { pinned, program, requestAsync, result } = await launchStudioAsync({
 			onTestFinished,
@@ -551,7 +551,14 @@ describe.skipIf(process.platform !== "win32")("windows helper", () => {
 		).resolves.toHaveProperty("result.pid", result.pid);
 		await expect(
 			requestAsync({ op: "pin", pid: result.pid, startTime: "1" }),
-		).resolves.toHaveProperty("error.message", "process identity mismatch");
+		).resolves.toHaveProperty("result", null);
+		await expect(
+			requestAsync({ op: "pin", pid: result.pid, startTime: "not a start time" }),
+		).resolves.toHaveProperty("error.code");
+		// System denies this access; denial never proves exit.
+		await expect(requestAsync({ op: "pin", pid: 4, startTime: "1" })).resolves.toHaveProperty(
+			"error.code",
+		);
 		await expect(
 			requestAsync({ op: "executablePath", pin: result.pin }),
 		).resolves.toHaveProperty("result", program);
@@ -560,6 +567,9 @@ describe.skipIf(process.platform !== "win32")("windows helper", () => {
 			true,
 		);
 		await expect.poll(() => pinned.isAlive()).toBeFalse();
+		await expect(
+			requestAsync({ op: "pin", pid: result.pid, startTime: result.startTime }),
+		).resolves.toHaveProperty("result", null);
 	});
 
 	it("should kill only the pinned Studio", async ({ expect, onTestFinished }) => {

@@ -98,10 +98,7 @@ class Channel {
 		try {
 			return await response;
 		} catch (err) {
-			if (
-				operation["op"] === "launch" &&
-				(!(err instanceof Error) || !operationFailures.has(err))
-			) {
+			if (operation["op"] === "launch" && !isHelperOperationFailure(err)) {
 				throw new ForgeError(
 					"studio_launch_unknown",
 					"The Studio launch reply was lost. Check Studio before trying again.",
@@ -218,6 +215,15 @@ class Channel {
 			}
 		});
 	}
+}
+
+/**
+ * Identify a failure the helper reported for a delivered command.
+ * @param error - A command failure.
+ * @returns Whether the helper ran the operation and refused or failed it.
+ */
+export function isHelperOperationFailure(error: unknown): error is ForgeError {
+	return error instanceof ForgeError && operationFailures.has(error);
 }
 
 /**

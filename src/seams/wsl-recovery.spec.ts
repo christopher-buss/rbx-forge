@@ -61,7 +61,11 @@ interface RecoveryOptions {
 	lateExit?: boolean;
 	lockFailed?: boolean;
 	minimumSaveMs?: number;
+	pinDenied?: boolean;
+	pinGone?: "all" | "replacement";
+	refuseAlive?: boolean;
 	refuseClose?: boolean;
+	refuseKill?: boolean;
 	responseDelayMs?: number;
 	retryLoss?: boolean;
 	reused?: boolean;
@@ -72,6 +76,25 @@ interface RecoveryOptions {
 	withoutEvents?: boolean;
 	wrongPin?: boolean;
 	wrongStart?: boolean;
+}
+
+function pinResult(
+	options: RecoveryOptions,
+	{ generation, isReplacement, pid }: { generation: number; isReplacement: boolean; pid: number },
+): unknown {
+	if (options.pinGone === "all" || (isReplacement && options.pinGone === "replacement")) {
+		return null;
+	}
+
+	if (options.badPin === true) {
+		return {};
+	}
+
+	return {
+		pid: isReplacement && options.wrongPin === true ? 709 : pid,
+		pin: `${generation}:${pid}`,
+		startTime: isReplacement && options.wrongStart === true ? "999" : START,
+	};
 }
 
 function helperResults(
@@ -85,6 +108,7 @@ function helperResults(
 ): Record<string, unknown> {
 	const startTime = isReplacement && options.reused === true ? "999" : START;
 	return {
+		autoSaveDirectories: [],
 		desktop: options.desktop ?? "user",
 		dismissDialog: false,
 		executablePath: `D:\\temp\\agents\\${pid}\\RobloxStudioBeta.exe`,
@@ -96,14 +120,8 @@ function helperResults(
 		},
 		isAlive,
 		isBlocked: false,
-		pin:
-			options.badPin === true
-				? {}
-				: {
-						pid: isReplacement && options.wrongPin === true ? 709 : pid,
-						pin: `${generation}:${pid}`,
-						startTime: isReplacement && options.wrongStart === true ? "999" : START,
-					},
+		kill: true,
+		pin: pinResult(options, { generation, isReplacement, pid }),
 		processStartTime: isAlive ? startTime : null,
 		releaseLock: true,
 		requestClose: true,
@@ -213,9 +231,23 @@ function world(drop: string, options: RecoveryOptions = {}) {
 				isAlive = aliveQueries < 2;
 			}
 
-			if (options.refuseClose === true && request.op === "requestClose") {
+			const refusal = [
+				{
+					isRefused: options.refuseClose === true,
+					message: "close refused",
+					op: "requestClose",
+				},
+				{ isRefused: options.pinDenied === true, message: "Access is denied.", op: "pin" },
+				{ isRefused: options.refuseKill === true, message: "kill refused", op: "kill" },
+				{
+					isRefused: isReplacement && options.refuseAlive === true,
+					message: "Access is denied.",
+					op: "isAlive",
+				},
+			].find((candidate) => candidate.isRefused && candidate.op === request.op);
+			if (refusal !== undefined) {
 				child.stdout.write(
-					`${JSON.stringify({ id: request.id, error: { code: "refused", message: "close refused" } })}\n`,
+					`${JSON.stringify({ id: request.id, error: { code: "operation_failed", message: refusal.message } })}\n`,
 				);
 				return;
 			}
@@ -1257,6 +1289,108 @@ describe("windows helper recovery", () => {
 			code: "identity_mismatch",
 			message: "The pinned Windows Studio has exited.",
 		});
+	});
+
+	it("proves a lost kill through verified exit without killing again", async ({ expect }) => {
+		expect.assertions(2);
+
+		const run = world("kill", { dead: true });
+
+		await expect(
+			closeStudioAsync(
+				run.seams,
+				{ place: PLACE, process: PROCESS },
+				{ env: {}, mode: "delete", recoveryDirectory: path.join(PROJECT, "recovery") },
+			),
+		).resolves.toMatchObject({ end: "timeout", forced: true, status: "stopped" });
+		expect(run.requests.filter((op) => op === "kill")).toHaveLength(1);
+	});
+
+	it.for([
+		{ case: "Studio still runs", options: {} },
+		{ case: "the exit proof fails", options: { refuseAlive: true } },
+		{ case: "recovery fails", options: { retryLoss: true } },
+	])(
+		"reports an unknown kill result without killing again when $case",
+		async ({ options }, { expect }) => {
+			expect.assertions(3);
+
+			const run = world("kill", options);
+
+			await expect(
+				closeStudioAsync(
+					run.seams,
+					{ place: PLACE, process: PROCESS },
+					{ env: {}, mode: "delete", recoveryDirectory: path.join(PROJECT, "recovery") },
+				),
+			).rejects.toMatchObject({
+				cause: { message: "Windows helper EOF." },
+				code: "process_failed",
+				message: "The Studio kill result is unknown; Studio exit is unverified.",
+			});
+			expect(run.requests.filter((op) => op === "kill")).toHaveLength(1);
+			expect(run.seams.fileSystem.existsSync(`${PLACE}.lock`)).toBe(true);
+		},
+	);
+
+	it("keeps a kill the helper refused as its own failure", async ({ expect }) => {
+		expect.assertions(1);
+
+		const run = world("unused", { refuseKill: true });
+
+		await expect(
+			closeStudioAsync(
+				run.seams,
+				{ place: PLACE, process: PROCESS },
+				{ env: {}, mode: "delete", recoveryDirectory: path.join(PROJECT, "recovery") },
+			),
+		).rejects.toMatchObject({ code: "windows_helper_unavailable", message: "kill refused" });
+	});
+
+	it("treats a Studio that exits between its start lookup and pin as not running", async ({
+		expect,
+	}) => {
+		expect.assertions(4);
+
+		const run = world("unused", { pinGone: "all" });
+		const session = retainedSession(run);
+
+		await expect(run.seams.studioHost.pinProcessAsync(707, START)).resolves.toBeNull();
+		await expect(
+			runDownAsync(session.context, { config: {}, flags: {} }),
+		).resolves.toMatchObject({ data: { removed: true } });
+		expect(run.seams.fileSystem.existsSync(session.files.identity)).toBe(false);
+		expect(run.states).toEqual(["ready"]);
+	});
+
+	it("marks a Studio gone when its replacement pin proves exit after the start lookup", async ({
+		expect,
+	}) => {
+		expect.assertions(4);
+
+		const run = world("setWindowVisibility", { pinGone: "replacement" });
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+
+		await expect(pin.setWindowVisibilityAsync("hidden")).rejects.toThrow();
+		await expect(pin.isAliveAsync()).resolves.toBe(false);
+		await expect(pin.killAsync()).rejects.toHaveProperty("code", "identity_mismatch");
+		expect(run.states).toEqual(["ready", "recovering", "ready"]);
+	});
+
+	it("retains a Studio record when the helper cannot open its process", async ({ expect }) => {
+		expect.assertions(3);
+
+		const run = world("unused", { pinDenied: true });
+		const session = retainedSession(run);
+
+		await expect(run.seams.studioHost.pinProcessAsync(707, START)).rejects.toThrow(
+			"Access is denied.",
+		);
+		await expect(
+			runDownAsync(session.context, { config: {}, flags: {} }),
+		).rejects.toMatchObject({ code: "cleanup_in_progress" });
+		expect(run.seams.fileSystem.existsSync(session.files.identity)).toBe(true);
 	});
 
 	it("explains why a live Studio retains its record after fresh control", async ({ expect }) => {

@@ -3,6 +3,7 @@ import path from "node:path";
 import { assert, describe, it, vi } from "vitest";
 
 import { createFakeCapture } from "../../test/helpers/fake-capture.ts";
+import { createHelperProbe } from "../../test/helpers/helper-probe.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import {
 	createCommandContext,
@@ -75,11 +76,22 @@ function snapshotSave() {
 
 describe("snapshot capture saves", () => {
 	it.for([
-		{ message: "refused", mode: "failed" },
-		{ message: "Windows reached a different capture listener.", mode: "wrong" },
+		{ code: "wsl_network_unreachable", launch: undefined, message: "refused", mode: "failed" },
+		{
+			code: "wsl_network_unreachable",
+			launch: undefined,
+			message: "Windows reached a different capture listener.",
+			mode: "wrong",
+		},
+		{
+			code: "windows_helper_unavailable",
+			launch: "ENOENT",
+			message: "spawn ENOENT",
+			mode: "missing",
+		},
 	])(
 		"rejects $mode Windows probe on a snapshot save bind",
-		async ({ message, mode }, { expect }) => {
+		async ({ code, launch, message, mode }, { expect }) => {
 			expect.assertions(3);
 
 			const save = snapshotSave();
@@ -90,18 +102,16 @@ describe("snapshot capture saves", () => {
 						throw new Error("refused");
 					},
 				],
+				["missing", async () => Buffer.from("unused")],
 				["wrong", async () => Buffer.from("wrong")],
 			]);
 			const reply = replies.get(mode);
 			assert(reply !== undefined);
-			save.context.seams.studioHost.probeHttpAsync = reply;
+			save.context.seams.studioHost.probeHttpAsync = createHelperProbe(reply, launch);
 
 			await expect(
 				runSaveAsync(save.context, { config: {}, flags: { place: PLACE } }),
-			).rejects.toMatchObject({
-				cause: { message },
-				code: "wsl_network_unreachable",
-			});
+			).rejects.toMatchObject({ cause: { message }, code });
 			expect(save.memory.files()["snapshot.rbxl"]).toBe("original");
 			expect(save.close).toHaveBeenCalledOnce();
 		},
@@ -120,9 +130,9 @@ describe("snapshot capture saves", () => {
 
 		expect(save.memory.files()["snapshot.rbxl"]).toBe("captured snapshot");
 
-		save.context.seams.studioHost.probeHttpAsync = async () => {
+		save.context.seams.studioHost.probeHttpAsync = createHelperProbe(async () => {
 			throw new Error("forwarding stopped");
-		};
+		});
 
 		await expect(
 			runSaveAsync(save.context, { config: {}, flags: { place: PLACE } }),

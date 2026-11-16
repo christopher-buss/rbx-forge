@@ -220,10 +220,13 @@ impl Session {
             }
             Operation::Pin { pid, start_time } => {
                 let start: u64 = start_time.parse().map_err(io::Error::other)?;
-                let pin = PinnedProcess::open(pid)?
-                    .filter(|pin| pin.start_time() == start)
-                    .ok_or_else(|| io::Error::other("process identity mismatch"))?;
-                Ok(self.retain(pin))
+                // Null only for a verified exit or PID reuse; access errors stay errors.
+                Ok(
+                    match PinnedProcess::open(pid)?.filter(|pin| pin.start_time() == start) {
+                        Some(pin) => self.retain(pin),
+                        None => Value::Null,
+                    },
+                )
             }
             Operation::Launch {
                 program,
@@ -470,6 +473,43 @@ mod tests {
         assert!(replies[0]["result"]["windowsArch"].is_string());
         assert_ne!(replies[0], Value::Null);
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn pin_is_null_only_for_a_verified_exit_or_reused_identity() {
+        let mut child = std::process::Command::new("cmd.exe")
+            .args(["/c", "exit"])
+            .spawn()
+            .unwrap();
+        let exited = child.id();
+        child.wait().unwrap();
+        let current = std::process::id();
+        let handshake =
+            "{\"id\":\"h\",\"deadlineMs\":4102444800000,\"op\":\"handshake\",\"protocol\":1}\n";
+        let pin = |id: &str, pid: u32, start: &str| {
+            format!(
+                "{{\"id\":\"{id}\",\"deadlineMs\":4102444800000,\"op\":\"pin\",\"pid\":{pid},\"startTime\":\"{start}\"}}\n"
+            )
+        };
+        let replies = exchange(&format!(
+            "{handshake}{}{}{}{}",
+            pin("reused", current, "1"),
+            pin("exited", exited, "1"),
+            pin("malformed", current, "x"),
+            pin("denied", 4, "1"),
+        ));
+        assert_eq!(
+            replies[1],
+            serde_json::json!({"id": "reused", "result": null})
+        );
+        assert_eq!(
+            replies[2],
+            serde_json::json!({"id": "exited", "result": null})
+        );
+        assert!(replies[3]["error"].is_object());
+        assert!(replies[4]["error"].is_object());
+    }
+
     #[test]
     fn expired_requests_have_no_side_effect_and_keep_the_id() {
         let replies =

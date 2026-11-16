@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import path from "node:path";
 import { describe, it, vi } from "vitest";
 
+import { createHelperProbe } from "../../test/helpers/helper-probe.ts";
 import {
 	createCommandContext,
 	createMemoryFileSystem,
@@ -177,9 +178,9 @@ describe(runOpenAsync, () => {
 
 		const run = makeOpen({ file: { studio: { saveMethod: "capture" } } });
 		run.context.seams.randomId = () => "snapshot-id";
-		run.context.seams.studioHost.probeHttpAsync = async () => {
+		run.context.seams.studioHost.probeHttpAsync = createHelperProbe(async () => {
 			throw new Error("refused");
-		};
+		});
 
 		vi.spyOn(run.context.seams.network, "listenForCaptureAsync").mockResolvedValue({
 			captureAsync: async () => ({ model: new Uint8Array(), services: [] }),

@@ -61,6 +61,8 @@ function setup(
 		},
 		fileSystem: memory.fileSystem,
 	});
+	// A default applies only when absent: a null reply stays null.
+	const { launchReply = PIN } = options;
 	let isAlive = options.alive ?? true;
 	let desktop = "user";
 	let visibility = "user";
@@ -116,7 +118,7 @@ function setup(
 				case "launch": {
 					desktop = request["desktop"] === "hidden" ? "hidden" : "user";
 					visibility = request["hiddenWindows"] === true ? "hidden" : "user";
-					return options.launchReply ?? PIN;
+					return launchReply;
 				}
 				case "pin": {
 					return PIN;
@@ -1101,27 +1103,28 @@ describe("wsl Studio tracer", () => {
 		);
 	});
 
-	it("reports an unusable launch identity as unknown without launching again", async ({
-		expect,
-	}) => {
-		expect.assertions(1);
+	it.for([{ launchReply: { pid: 707 } }, { launchReply: null }])(
+		"reports an unusable launch identity %j as unknown without launching again",
+		async ({ launchReply }, { expect }) => {
+			expect.assertions(1);
 
-		const { seams } = setup({ launchReply: { pid: 707 } });
+			const { seams } = setup({ launchReply });
 
-		await expect(
-			seams.studioHost.launchAsync({
-				cwd: "/project",
-				env: {},
-				place: "/project/game.rbxl",
-				studioPath: "/project/Studio.exe",
-			}),
-		).rejects.toMatchObject({
-			cause: { name: "TraversalError" },
-			code: "studio_launch_unknown",
-			message:
-				"The Windows helper returned no usable Studio launch identity. Check Studio before trying again.",
-		});
-	});
+			await expect(
+				seams.studioHost.launchAsync({
+					cwd: "/project",
+					env: {},
+					place: "/project/game.rbxl",
+					studioPath: "/project/Studio.exe",
+				}),
+			).rejects.toMatchObject({
+				cause: { name: "TraversalError" },
+				code: "studio_launch_unknown",
+				message:
+					"The Windows helper returned no usable Studio launch identity. Check Studio before trying again.",
+			});
+		},
+	);
 
 	it("rejects a missing Windows PID without a requested start time", async ({ expect }) => {
 		expect.assertions(1);

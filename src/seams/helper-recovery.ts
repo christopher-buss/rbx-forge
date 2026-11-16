@@ -223,9 +223,12 @@ export class HelperRecovery {
 			}
 		}
 
+		// Verified exit proves a close or kill; neither is ever replayed.
 		if (
-			operation["op"] === "requestClose" &&
-			(await this.performAsync({ op: "isAlive", pin }, remaining)) === false
+			(operation["op"] === "requestClose" || operation["op"] === "kill") &&
+			!(await this.performAsync({ op: "isAlive", pin }, remaining)
+				.then((isAlive) => isAlive !== false)
+				.catch(() => true))
 		) {
 			return true;
 		}
