@@ -38,7 +38,7 @@ overrides:
   "@typescript-eslint/utils": 8.72.2
 
 patchedDependencies:
-  "@stryker-mutator/vitest-runner@10.0.0": patches/@stryker-mutator__vitest-runner@10.0.0.patch
+  "@stryker-mutator/core@10.1.1": patches/@stryker-mutator__core@10.1.1.patch
 
 catalogs:
   build:
@@ -60,10 +60,11 @@ catalogs:
     oxlint-tsgolint: 7.0.2003
     publint: 0.3.25
   mutation:
-    "@stryker-mutator/api": 10.0.0
-    "@stryker-mutator/core": 10.0.0
-    "@stryker-mutator/typescript-checker": 10.0.0
-    "@stryker-mutator/vitest-runner": 10.0.0
+    "@isentinel/machine-budget": 0.1.0
+    "@stryker-mutator/api": 10.1.1
+    "@stryker-mutator/core": 10.1.1
+    "@stryker-mutator/typescript-checker": 10.1.1
+    "@stryker-mutator/vitest-runner": 10.1.1
   native:
     "@napi-rs/cli": 3.10.12
   plugin:
@@ -97,4 +98,5 @@ catalogs:
 
 allowBuilds:
   esbuild: true
+  koffi: false
   unrs-resolver: true
