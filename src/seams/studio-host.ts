@@ -60,6 +60,8 @@ export interface StudioHost {
 	pinProcessAsync: (pid: number, startTime?: string) => Promise<null | PinnedStudio>;
 	platformAsync: () => Promise<NodeJS.Platform>;
 	pluginsFolderAsync: (environment: Environment) => Promise<string | undefined>;
+	/** Windows-side reachability capability, present only under WSL. */
+	probeHttpAsync?: (port: number, route: string) => Promise<Uint8Array>;
 	processStartTimeAsync: (pid: number) => Promise<null | string>;
 	/**
 	 * Native paths are unchanged; the WSL implementation converts at this

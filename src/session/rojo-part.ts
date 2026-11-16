@@ -5,6 +5,7 @@ import type { RojoPort } from "../rojo/rojo-port.ts";
 import { watchRojoProject } from "../rojo/watch-project.ts";
 import { rojoWrapperPath, writeRojoWrapper } from "../rojo/wrapper-project.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
+import { probeCaptureAsync, probeRojoAsync } from "../studio/network-probe.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { RunningPart, ServiceInvocation, ServiceParts } from "./service-parts.ts";
 import type { StatusRecorder } from "./status.ts";
@@ -125,6 +126,7 @@ export async function waitForRojoAsync(
 				return false;
 			}
 
+			await probeRojoAsync(setup.context.seams, port, scope.signal);
 			await prepareCaptureAsync(setup, scope.signal, port);
 
 			setup.status.service("rojo", "ready");
@@ -161,6 +163,7 @@ async function prepareCaptureAsync(
 		...(await setup.context.seams.network.listenForCaptureAsync(identity, signal)),
 		rojoPort: port,
 	};
+	await probeCaptureAsync(setup.context.seams, setup.capture);
 	writeRojoWrapper(setup.context, setup.config, setup.directory, setup.capture);
 }
 

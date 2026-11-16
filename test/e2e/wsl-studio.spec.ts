@@ -14,6 +14,27 @@ import { NATIVE_DIRECTORY } from "../helpers/real-native.ts";
 const HELPER = path.resolve(import.meta.dirname, "../fixtures/bin/fake-windows-helper.ts");
 
 describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
+	it("fails up when Windows cannot reach the WSL listener", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const fixture = makeFixtureProject({ config: { projectType: "luau" } });
+		const environment = {
+			FIXTURE_HELPER_UNREACHABLE: "1",
+			RBX_FORGE_TEST_WINDOWS_HELPER: HELPER,
+			WSL_DISTRO_NAME: "forge-test",
+		};
+		registerStop(fixture, environment, onTestFinished);
+		const up = await fixture.forge(["up", "--no-compiler", "--studio", "--json"], environment);
+
+		expect(up.status).toBe(1);
+		expect(parseResult(up.stdout)).toMatchObject({
+			error: { code: "wsl_network_unreachable" },
+		});
+	});
+
 	it.for(["0", "1"])(
 		"saves Windows Studio and closes it with dialog=%s",
 		async (dialog, { expect, onTestFinished }) => {

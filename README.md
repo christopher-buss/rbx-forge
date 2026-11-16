@@ -76,8 +76,11 @@ dialog also handles its Windows AutoSaves recovery files. The helper reports
 Windows process identities; native Linux outside WSL keeps its existing
 behavior. `--studio-path` and `RBX_FORGE_STUDIO_PATH` accept absolute Windows
 drive or UNC paths, or Linux paths accessible through `wslpath`. WSL interop
-must be enabled. Studio opens on the user's desktop; the remaining WSL Studio
-features and release validation are tracked in
+must be enabled. Windows must reach WSL through IPv4 localhost forwarding or
+mirrored networking. An unreachable Rojo or capture listener fails with
+`wsl_network_unreachable`; check forwarding, networking mode, and firewall
+settings. Studio opens on the user's desktop; the remaining WSL Studio features
+and release validation are tracked in
 [#297](https://github.com/christopher-buss/rbx-forge/issues/297). See
 [JSON output](docs/json-output.md) for Windows PID interpretation and an
 uncertain launch result.

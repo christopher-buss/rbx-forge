@@ -17,6 +17,7 @@ import { convertedOutput } from "./wsl-path-output.ts";
 const pinShape = type({ pid: "number.integer > 0", pin: "string > 0", startTime: "string > 0" });
 const INVALID_PATH = /[\r\n\0]/;
 const NULLABLE_TEXT = type("string | null");
+const PATHS = type("string[]");
 const windowsAbsolute = /^(?:[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/i;
 
 type WslBackend = Pick<Seams, "clock" | "fileSystem" | "processRunner"> & {
@@ -51,6 +52,7 @@ class WslHost {
 				// The tracer leaves managed plugin installation to the
 				// subsequent WSL slice.
 			},
+			probeHttpAsync: this.probeHttpAsync.bind(this),
 			processStartTimeAsync: async (pid) => {
 				return this.requestAsync({ op: "processStartTime", pid }, NULLABLE_TEXT);
 			},
@@ -65,10 +67,7 @@ class WslHost {
 	}
 
 	private async autoSaveDirectoriesAsync(): Promise<Array<string>> {
-		const directories = await this.requestAsync(
-			{ op: "autoSaveDirectories" },
-			type("string[]"),
-		);
+		const directories = await this.requestAsync({ op: "autoSaveDirectories" }, PATHS);
 		return Promise.all(
 			directories.map(async (directory) => this.convertAsync(directory, false, false)),
 		);
@@ -196,6 +195,14 @@ class WslHost {
 		}
 
 		return this.wrap(await this.client().requestAsync({ op: "pin", pid, startTime: current }));
+	}
+
+	private async probeHttpAsync(port: number, route: string): Promise<Uint8Array> {
+		const bytes = await this.requestAsync(
+			{ op: "probeHttp", port, route },
+			type("(0 <= number.integer <= 255)[]"),
+		);
+		return new Uint8Array(bytes);
 	}
 
 	private async requestAsync<T>(

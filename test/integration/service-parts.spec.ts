@@ -56,7 +56,7 @@ async function crashAsync(role: string) {
 	const part = role === "rojo" ? "rojo" : "compiler";
 	const deadline = Date.now() + WAIT_MS;
 	let status: SessionStatus | undefined;
-	while (status?.services[part].status !== "failed") {
+	while (status?.services[part].status !== "failed" || status.phase !== "ready") {
 		assert(Date.now() < deadline, `the ${part} part never failed`);
 		await sleep(POLL_MS);
 		status = parseStatus(

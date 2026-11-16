@@ -148,6 +148,8 @@ describe(rojoServeArgs, () => {
 			"default.project.json",
 			"--port",
 			"34872",
+			"--address",
+			"127.0.0.1",
 		]);
 	});
 });

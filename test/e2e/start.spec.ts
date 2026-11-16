@@ -157,7 +157,7 @@ describe("forge start", () => {
 			"rojo syncback --help",
 			"rbxtsc",
 			`rojo build default.project.json --output ${PLACE}`,
-			`rojo serve ${wrapperPath(fixture)} --port ${fixture.port}`,
+			`rojo serve ${wrapperPath(fixture)} --port ${fixture.port} --address 127.0.0.1`,
 			"rbxtsc -w",
 			...STUDIO_PLUGIN_INSTALL,
 			`rojo syncback default.project.json --input ${PLACE} --non-interactive`,
@@ -274,7 +274,14 @@ describe("forge start --no-compiler", () => {
 		await session.closed;
 
 		expect(records[0]).toMatchObject({
-			args: ["serve", wrapperPath(fixture), "--port", String(fixture.port)],
+			args: [
+				"serve",
+				wrapperPath(fixture),
+				"--port",
+				String(fixture.port),
+				"--address",
+				"127.0.0.1",
+			],
 			role: "rojo",
 		});
 		expect(records.map(({ markers }) => markers.worker)).toStrictEqual([
