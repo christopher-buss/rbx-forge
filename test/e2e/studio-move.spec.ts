@@ -6,7 +6,13 @@ import { assert, describe, it } from "vitest";
 import { EXIT_NOT_RUNNING } from "../../src/exit-codes.ts";
 import { parseResult } from "../helpers/output.ts";
 import { makeProject, runBinAsync } from "./run-bin.ts";
-import { IS_WINDOWS, makeFixtureAsync, START_STUDIO, startReadyAsync } from "./session-fixture.ts";
+import {
+	IS_WINDOWS,
+	makeFixtureAsync,
+	START_STUDIO,
+	startReadyAsync,
+	waitForOutputAsync,
+} from "./session-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
 describe("forge show and hide", () => {
@@ -35,7 +41,8 @@ describe("forge show and hide", () => {
 				{ open: { buildFirst: true } },
 				{ studio: true },
 			);
-			await startReadyAsync(fixture, START_STUDIO);
+			const { session } = await startReadyAsync(fixture, START_STUDIO);
+			await waitForOutputAsync(session, "Roblox Studio has");
 			const before = await runForgeAsync(fixture, ["status", "--json"]);
 			chmodSync(fixture.place, 0o444);
 			onTestFinished(() => {
@@ -44,7 +51,15 @@ describe("forge show and hide", () => {
 			const moved = await runForgeAsync(fixture, [command, "--json"]);
 			const after = await runForgeAsync(fixture, ["status", "--json"]);
 
-			expect(moved.status).toBe(0);
+			expect(
+				moved.status,
+				JSON.stringify({
+					after: after.result,
+					before: before.result,
+					moved: moved.result,
+					session: session.stdout(),
+				}),
+			).toBe(0);
 			expect(moved.result).toMatchObject({ command, ok: true });
 			expect(moved.result.data).not.toHaveProperty("save");
 

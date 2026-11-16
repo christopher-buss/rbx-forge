@@ -1,3 +1,5 @@
+import { fromPartial } from "@total-typescript/shoehorn";
+
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -8,7 +10,8 @@ import type { TestContext } from "vitest";
 import { assert, describe, it } from "vitest";
 
 import type { PinnedProcess } from "../../src/native/addon.ts";
-import { studioProcess } from "../../src/studio/launcher.ts";
+import { createAddonStudioHost } from "../../src/seams/studio-host.ts";
+import { studioProcessAsync } from "../../src/studio/launcher.ts";
 import {
 	loadRealNative,
 	makeRunScriptStudioExecutable,
@@ -89,7 +92,8 @@ async function launchSnapshotWatcherAsync(
 		"..",
 		"..",
 		"src",
-		"studio",
+		"seams",
+		"addon-studio",
 		"snapshot-lighting-launcher.ts",
 	);
 	const entry = path.join(import.meta.dirname, "..", "..", "src", "supervisor.ts");
@@ -140,7 +144,7 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 			desktop: "user",
 			visibility: "hidden",
 		});
-		expect(studioProcess(pin)).toMatchObject({ desktop: "hidden" });
+		expect(await locatedStudioAsync(pin)).toMatchObject({ desktop: "hidden" });
 	});
 
 	it("keeps snapshots on the hidden desktop when their windows are shown there", async ({
@@ -153,7 +157,7 @@ describe.skipIf(process.platform !== "win32")("shared hidden desktop", () => {
 		assert(pin.setWindowVisibility("user"));
 
 		await expect.poll(() => pin.windowVisibility()).toBe("user");
-		expect(studioProcess(pin)).toMatchObject({ desktop: "hidden" });
+		expect(await locatedStudioAsync(pin)).toMatchObject({ desktop: "hidden" });
 	});
 
 	it.for([0, 7000])(
@@ -402,4 +406,11 @@ function snapshotDiagnostics({
 
 function snapshotCheck(hasCompleted: boolean, observed: SnapshotObservation) {
 	return hasCompleted || snapshotDiagnostics(observed);
+}
+
+async function locatedStudioAsync(pin: PinnedProcess) {
+	const host = createAddonStudioHost(fromPartial({ native: loadRealNative }));
+	const pinned = await host.pinProcessAsync(pin.pid, pin.startTime);
+	assert(pinned !== null);
+	return studioProcessAsync(pinned);
 }

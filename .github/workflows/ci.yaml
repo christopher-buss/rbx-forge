@@ -182,3 +182,37 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     timeout-minutes: 20
+
+  wsl-capability:
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
+    name: WSL2 capability (Windows 2025)
+    needs: changes
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: vm
+        name: Prove an actual WSL2 VM runs
+        run: ./.github/scripts/wsl-capability.ps1 -Provision -Update
+        shell: pwsh
+
+      - if: steps.vm.outputs.state == 'vm-available'
+        uses: ./.github/actions/setup
+        with:
+          tools: node rust
+
+      - if: steps.vm.outputs.state == 'vm-available'
+        name: Build the real Windows helper and owned Studio fixture
+        run: pnpm build:reaper
+
+      - if: steps.vm.outputs.state == 'vm-available'
+        name: Exercise real interop lifecycle
+        run: ./.github/scripts/wsl-capability.ps1 -Lifecycle
+        shell: pwsh
+
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wsl-capability-windows-2025
+          path: ${{ runner.temp }}/wsl-capability
+    timeout-minutes: 20

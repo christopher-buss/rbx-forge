@@ -15,6 +15,11 @@ The compiler, Rojo, or Studio of a session. Rojo is a part only together with an
 attached Studio.\
 _Avoid_: component, piece
 
+**Side**:\
+Where a forge process runs: Windows, or one WSL distro. A session belongs to the
+side that started it; the other side never joins or cleans it up.\
+_Avoid_: runtime, domain, host (alone)
+
 **Owner**:\
 The `start` terminal responsible for a part's lifetime.\
 _Avoid_: holder, creator
@@ -152,6 +157,12 @@ starts without activation and a watcher hides new windows; each save briefly
 shows the File menu and moves keyboard focus. On macOS, a background
 LaunchServices launch stays hidden apart from its first save (priming save).\
 _Avoid_: hidden desktop (for a session Studio)
+
+**Windows helper**:\
+The Windows process that a forge process under WSL starts to find, launch, pin,
+and control Windows Studio. Each forge process has its own; it never closes
+Studio when it ends.\
+_Avoid_: bridge, proxy, shim
 
 **Snapshot**:\
 A copy of the place that `forge open` builds and opens, outside every session

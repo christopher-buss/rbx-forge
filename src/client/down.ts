@@ -10,6 +10,8 @@ import type { Barrier } from "../supervisor/barrier.ts";
 import { SETTLE_MS, targetOf, waitForBarrierAsync } from "../supervisor/barrier.ts";
 import type { ForgeFiles, SessionFiles } from "../supervisor/session-files.ts";
 import { removeSession } from "../supervisor/session-files.ts";
+import { assertOwnSession, assertOwnSide } from "../supervisor/side.ts";
+import { proveStudioCleanupAsync } from "../supervisor/studio-cleanup-proof.ts";
 import type { DownParts, DownStudio } from "./down-parts.ts";
 import { askPartStopsAsync, downStudio } from "./down-parts.ts";
 import type { KnownSession } from "./session.ts";
@@ -28,7 +30,10 @@ const DOWN_POLL_MS = 100;
 const NEVER = AbortSignal.any([]);
 
 /** The seams `down` runs with. */
-export type DownSeams = Pick<Seams, "clock" | "fileSystem" | "host" | "ipc" | "native">;
+export type DownSeams = Pick<
+	Seams,
+	"clock" | "fileSystem" | "host" | "ipc" | "native" | "studioHost"
+>;
 
 /** Where a test can hold `down` up: before the barrier, before the delete. */
 export type DownPoint = "barrier" | "delete";
@@ -135,6 +140,8 @@ export async function stopSessionAsync(
 	session: KnownSession,
 	options: DownOptions,
 ): Promise<DownReport> {
+	assertOwnSide(seams.host, session.identity.side);
+	assertOwnSession(seams.host, seams.fileSystem, session.files.identity);
 	const target: Target = { forge, pin: pinSupervisor(seams, session), session };
 	const stops = isGone(target) ? undefined : await askPartStopsAsync(seams.ipc, session, options);
 	const parts = stops === undefined ? null : { kept: stops.kept, stopped: stops.stopped };
@@ -144,14 +151,14 @@ export async function stopSessionAsync(
 		return { parts, sessionId, status: "running", studio };
 	}
 
-	const stoppedBy = await stopSupervisorAsync(seams, target, options);
+	const stoppedBy = await stopSupervisorAsync(seams, target, options, stops?.ending === true);
 	await options.pause?.("barrier");
 	const cleanup = await clearBarrierAsync(seams, session.files, options);
 	await options.pause?.("delete");
 	return {
 		...(cleanup === undefined ? {} : { cleanup }),
 		parts,
-		removed: removeUnderLock(seams, forge, session.files),
+		removed: await removeUnderLockAsync(seams, forge, session.files),
 		sessionId,
 		status: "stopped",
 		stoppedBy,
@@ -303,6 +310,7 @@ function unresponsive({ session }: Target, force: boolean): ForgeError {
  * @param seams - The clock, transport, and native addon.
  * @param target - The session and its pinned supervisor.
  * @param options - `--force` and the wait.
+ * @param didStopParts - Its part-stop reply acknowledged that it is ending.
  * @returns How the supervisor went.
  * @rejects {ForgeError} `supervisor_unresponsive`; `session_replaced`.
  */
@@ -310,9 +318,10 @@ async function stopSupervisorAsync(
 	seams: DownSeams,
 	target: Target,
 	options: DownOptions,
+	didStopParts: boolean,
 ): Promise<StoppedBy> {
 	if (isGone(target)) {
-		return "gone";
+		return didStopParts ? "shutdown" : "gone";
 	}
 
 	if (await requestStopAsync(seams, target, false, options.timeoutMs)) {
@@ -410,6 +419,7 @@ async function clearBarrierAsync(
 		throw stillAlive(files, barrier.pids);
 	}
 
+	assertOwnSession(seams.host, seams.fileSystem, files.identity);
 	const cleanup = await seams.native().forceCleanup(targetOf(files), FORCED_CLEANUP_MS);
 	if (cleanup.unverifiable.length > 0) {
 		throw new ForgeError(
@@ -440,7 +450,11 @@ async function clearBarrierAsync(
  * @param files - The target's files.
  * @returns Whether it deleted them.
  */
-function removeUnderLock(seams: DownSeams, forge: ForgeFiles, files: SessionFiles): boolean {
+async function removeUnderLockAsync(
+	seams: DownSeams,
+	forge: ForgeFiles,
+	files: SessionFiles,
+): Promise<boolean> {
 	if (!seams.fileSystem.existsSync(files.directory)) {
 		return false;
 	}
@@ -451,7 +465,8 @@ function removeUnderLock(seams: DownSeams, forge: ForgeFiles, files: SessionFile
 	}
 
 	try {
-		removeSession(seams.fileSystem, forge, files.sessionId);
+		await proveStudioCleanupAsync(seams, files);
+		removeSession(seams.fileSystem, forge, files.sessionId, seams.host);
 		return true;
 	} finally {
 		lock.release();

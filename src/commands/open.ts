@@ -10,8 +10,8 @@ import { ForgeError } from "../errors.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
 import { runWithHooksAsync } from "../hooks/run-hooks.ts";
 import type { CommandResult } from "../seams/reporter.ts";
-import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
-import { installForgePlugin } from "../studio/forge-plugin.ts";
+import { resolveStudioPath, STUDIO_PATH_FLAG } from "../studio/discover.ts";
+import { installForgePluginAsync } from "../studio/forge-plugin.ts";
 import type { StudioLaunchOutcome, StudioProcess } from "../studio/launcher.ts";
 import { pruneSnapshots, snapshotName } from "../studio/snapshots.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
@@ -144,7 +144,7 @@ export async function openPlaceAsync(
  * the five newest (and every one a Studio has open),
  * and open it in Roblox Studio. It runs outside every session and with no
  * Rojo, so it never shares a place file with a session's Studio. Studio
- * starts detached (`seams.studioLauncher`), so it is never a child of forge
+ * starts detached (`seams.studioHost`), so it is never a child of forge
  * and outlives it.
  *
  * @param context - The run: project root, seams, and reporter.
@@ -160,8 +160,8 @@ export async function runOpenAsync(
 ): Promise<CommandResult> {
 	const { cwd, reporter, seams } = context;
 	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
-	const desktop = resolveStudioDesktop(config, seams.host.platform, "user");
-	const studioPath = input.flags["studio-path"];
+	const desktop = resolveStudioDesktop(config, await seams.studioHost.platformAsync(), "user");
+	const studioPath = snapshotStudioPath(context, input.flags["studio-path"]);
 	const { snapshots } = forgeFiles(cwd);
 	const place = path.join(snapshots, snapshotName(seams.clock.now(), openPlacePath(config)));
 
@@ -180,8 +180,9 @@ export async function runOpenAsync(
 			...(config.studio.saveMethod === "capture"
 				? { runScript: await prepareSnapshotCaptureAsync(context, place) }
 				: {}),
-			studioPath: typeof studioPath === "string" ? path.resolve(cwd, studioPath) : undefined,
-			watchHiddenLighting: seams.host.platform === "win32" && desktop === "hidden",
+			studioPath,
+			watchHiddenLighting:
+				(await seams.studioHost.platformAsync()) === "win32" && desktop === "hidden",
 		});
 
 		return { build: { ...build.value, hooks: build.hooks }, pruned, ...launched };
@@ -288,7 +289,7 @@ function withForgePlugin(
 ): () => Promise<void> {
 	return async () => {
 		await beforeLaunch?.();
-		installForgePlugin(context);
+		await installForgePluginAsync(context);
 	};
 }
 
@@ -308,7 +309,7 @@ async function launchAsync(
 ): Promise<Pick<OpenedPlace, "desktop" | "studio">> {
 	const { cwd, env, reporter, seams } = context;
 	reporter.emit({ name: STEP, status: "started", type: "step" });
-	const outcome = await seams.studioLauncher({
+	const outcome = await seams.studioHost.launchAsync({
 		cwd,
 		env,
 		place,
@@ -336,4 +337,8 @@ async function launchAsync(
 	}
 
 	return reportLaunch(reporter, outcome);
+}
+
+function snapshotStudioPath(context: CommandContext, flag: unknown): string | undefined {
+	return typeof flag === "string" ? resolveStudioPath(context, flag) : undefined;
 }

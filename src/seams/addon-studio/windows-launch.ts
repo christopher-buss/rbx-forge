@@ -1,5 +1,6 @@
-import { definedOnly, studioArguments } from "./launch-arguments.ts";
-import type { StudioLaunch, StudioLaunchBackend } from "./launcher.ts";
+import { definedOnly, studioArguments } from "../../studio/launch-arguments.ts";
+import type { StudioLaunch } from "../../studio/launcher.ts";
+import type { StudioLaunchBackend } from "./launcher.ts";
 
 /**
  * Windows: start Studio through the addon, out of this process's job.

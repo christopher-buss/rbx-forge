@@ -13,7 +13,6 @@ import type { PinnedProcess } from "../../src/native/addon.ts";
 import { readVariable } from "../../src/process/environment.ts";
 import { rojoWrapperPath, writeRojoWrapper } from "../../src/rojo/wrapper-project.ts";
 import type { StudioReadyListener } from "../../src/seams/network.ts";
-import { findStudioExecutable } from "../../src/studio/discover.ts";
 import { writeSessionMarkerAsync } from "../../src/studio/session-marker.ts";
 import { waitForExitAsync } from "./real-native.ts";
 import type { Observation } from "./real-studio-sync-fixture.ts";
@@ -87,14 +86,15 @@ async function runtimeAsync(): Promise<Runtime> {
 	const rojo = genuineRojo();
 	const directory = makeTemporaryDirectory();
 	const context = createSyncContext(directory);
-	const executable = findStudioExecutable(context.seams, { env: context.env });
+	const { env, seams } = context;
+	const executable = await seams.studioHost.findStudioExecutableAsync({ env });
 	assert(executable !== undefined, "Install and log in to Studio before running sync tests");
-	const home = readVariable(context.env, "USERPROFILE", "win32");
+	const home = readVariable(env, "USERPROFILE", "win32");
 	assert(home !== undefined);
 	const token = randomBytes(32).toString("hex");
 	const plugin = path.join(home, "AppData/Local/Roblox/Plugins", `ForgeSyncTest-${token}.rbxm`);
 	const observations: Array<Observation> = [];
-	const port = await context.seams.network.freePortAsync();
+	const port = await seams.network.freePortAsync();
 	return {
 		child: undefined,
 		collector: await syncCollectorAsync(observations),

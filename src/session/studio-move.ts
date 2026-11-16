@@ -1,10 +1,12 @@
 import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
-import type { PinnedProcess } from "../native/addon.ts";
-import { findPlaceStudio } from "../studio/close-studio.ts";
+import type { PinnedStudio } from "../seams/studio-host.ts";
+import { findPlaceStudioAsync } from "../studio/close-studio.ts";
 import type { LocatedStudio } from "../studio/launcher.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { StudioSetup } from "./studio-part.ts";
+
+export { watchStudioControl } from "./studio-control.ts";
 
 /** A serialized visibility change of the session Studio. */
 export interface StudioMoveRequest {
@@ -30,15 +32,15 @@ export function createStudioMover(setup: StudioSetup, scope: SessionScope): Stud
 	return async (request) => {
 		const { seams } = setup.context;
 		const started = seams.clock.now();
-		return Promise.resolve().then(() => {
+		return Promise.resolve().then(async () => {
 			try {
 				scope.signal.throwIfAborted();
-				const { pinned, place, previous } = sessionStudio(setup);
+				const { pinned, place, previous } = await sessionStudioAsync(setup);
 				scope.signal.throwIfAborted();
 				const from =
-					seams.host.platform === "darwin"
-						? changeMacVisibility(pinned, request.desktop)
-						: changeWindowVisibility(pinned, request.desktop);
+					(await seams.studioHost.platformAsync()) === "darwin"
+						? await changeMacVisibilityAsync(pinned, request.desktop)
+						: await changeWindowVisibilityAsync(pinned, request.desktop);
 				setup.status.studio("open", place, {
 					...previous,
 					desktop: request.desktop,
@@ -56,11 +58,11 @@ export function createStudioMover(setup: StudioSetup, scope: SessionScope): Stud
 	};
 }
 
-function sessionStudio(setup: StudioSetup): {
-	pinned: PinnedProcess;
+async function sessionStudioAsync(setup: StudioSetup): Promise<{
+	pinned: PinnedStudio;
 	place: string;
 	previous: LocatedStudio;
-} {
+}> {
 	const { phase, services } = setup.status.snapshot();
 	if (phase === "stopped" || phase === "stopping") {
 		throw new ForgeError("not_running", "The session is stopping.");
@@ -72,8 +74,9 @@ function sessionStudio(setup: StudioSetup): {
 	}
 
 	const { seams } = setup.context;
-	const previous = findPlaceStudio(seams, recorded.place);
-	const pinned = previous === undefined ? null : seams.native().pinProcess(previous.pid);
+	const previous = await findPlaceStudioAsync(seams, recorded.place);
+	const pinned =
+		previous === undefined ? null : await seams.studioHost.pinProcessAsync(previous.pid);
 	if (
 		previous === undefined ||
 		pinned === null ||
@@ -87,15 +90,18 @@ function sessionStudio(setup: StudioSetup): {
 	return { pinned, place: recorded.place, previous };
 }
 
-function changeMacVisibility(pinned: PinnedProcess, desktop: StudioDesktop): StudioDesktop {
-	const isHidden = pinned.appHidden();
+async function changeMacVisibilityAsync(
+	pinned: PinnedStudio,
+	desktop: StudioDesktop,
+): Promise<StudioDesktop> {
+	const isHidden = await pinned.appHiddenAsync();
 	if (isHidden === null) {
 		throw new ForgeError("studio_not_open", "The Studio app is no longer open.");
 	}
 
 	const from = isHidden ? "hidden" : "user";
 	if (from !== desktop) {
-		if (!pinned.setAppHidden(desktop === "hidden")) {
+		if (!(await pinned.setAppHiddenAsync(desktop === "hidden"))) {
 			throw new ForgeError(
 				"studio_launch_failed",
 				"Studio could not change its app visibility.",
@@ -105,22 +111,25 @@ function changeMacVisibility(pinned: PinnedProcess, desktop: StudioDesktop): Stu
 		// An unhidden Studio launched hidden has no window on screen until
 		// active.
 		if (desktop === "user") {
-			pinned.activateApp();
+			await pinned.activateAppAsync();
 		}
 	}
 
 	return from;
 }
 
-function changeWindowVisibility(pinned: PinnedProcess, desktop: StudioDesktop): StudioDesktop {
-	const from = pinned.windowVisibility();
+async function changeWindowVisibilityAsync(
+	pinned: PinnedStudio,
+	desktop: StudioDesktop,
+): Promise<StudioDesktop> {
+	const from = await pinned.windowVisibilityAsync();
 	if (from === null) {
 		throw new ForgeError("studio_not_open", "The Studio windows are no longer open.");
 	}
 
 	if (
 		from !== desktop &&
-		!pinned.setWindowVisibility(desktop === "hidden" ? "hidden" : "active")
+		!(await pinned.setWindowVisibilityAsync(desktop === "hidden" ? "hidden" : "active"))
 	) {
 		throw new ForgeError(
 			"studio_launch_failed",
@@ -128,7 +137,7 @@ function changeWindowVisibility(pinned: PinnedProcess, desktop: StudioDesktop): 
 		);
 	}
 
-	if (desktop === "hidden" && !pinned.startWindowHiding()) {
+	if (desktop === "hidden" && !(await pinned.startWindowHidingAsync())) {
 		throw new ForgeError(
 			"studio_launch_failed",
 			"Studio could not start its window hiding watcher.",

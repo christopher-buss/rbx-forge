@@ -142,6 +142,57 @@ async function dispatchedUrlAsync(
 }
 
 describe("capture listener", () => {
+	it("never acknowledges Studio synchronization when a capture probe is received", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const readyBackend = createFakeNetworkBackend();
+		const ready = await createNodeNetwork(readyBackend.backend).listenForStudioReadyAsync(
+			IDENTITY,
+		);
+		const fake = createCaptureBackend();
+		const capture = await createNodeNetwork(fake.backend).listenForCaptureAsync(IDENTITY);
+		onTestFinished(() => {
+			ready.close();
+			capture.close();
+		});
+		const url = new URL(capture.url);
+		const reply = await fake.request(`${url.pathname}/probe/nonce${url.search}`).finished;
+
+		expect(reply.status).toBe(200);
+
+		ready.close();
+
+		await expect(ready.ready).resolves.toBe(false);
+	});
+
+	it.for([
+		{ method: "GET", status: 200 },
+		{ method: "POST", status: 404 },
+	])(
+		"answers $method probes independently of capture polling",
+		async ({ method, status }, { expect }) => {
+			expect.assertions(1);
+
+			const fake = createCaptureBackend();
+			const network = createNodeNetwork(fake.backend);
+			const listener = await network.listenForCaptureAsync(IDENTITY);
+			const url = new URL(listener.url);
+			url.pathname += "/probe/challenge";
+			const reply = await fake.request(url.pathname + url.search, method).finished;
+
+			listener.close();
+
+			expect(reply).toMatchObject({
+				body: "challenge",
+				headers: { "content-length": 9 },
+				status,
+			});
+		},
+	);
+
 	it.for([
 		{ options: {}, port: 0, secret: "ab".repeat(32) },
 		{ options: { address: { port: 50123, secret: "saved" } }, port: 50123, secret: "saved" },
@@ -931,4 +982,34 @@ describe("capture listener", () => {
 			await expect(posting.finished).resolves.toMatchObject({ status });
 		},
 	);
+});
+
+describe("capture bootstrap identity", () => {
+	it("resolves current identity only through the secret route and a read-only request", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(4);
+
+		const run = await fixtureAsync({ onTestFinished });
+		const bootstrap = new URL(run.listener.url);
+		bootstrap.searchParams.set("sessionId", "");
+		bootstrap.searchParams.set("identity", "1");
+
+		const reply = run.request(bootstrap.href);
+
+		await expect(reply.finished).resolves.toMatchObject({
+			body: JSON.stringify({ ...IDENTITY, url: run.listener.url }),
+			headers: { "content-type": "application/json" },
+			status: 200,
+		});
+		expect(reply.ends).toHaveLength(1);
+		await expect(run.request(bootstrap.href, "POST").finished).resolves.toMatchObject({
+			status: 404,
+		});
+
+		bootstrap.pathname += "-wrong-secret";
+
+		await expect(run.request(bootstrap.href).finished).resolves.toMatchObject({ status: 404 });
+	});
 });

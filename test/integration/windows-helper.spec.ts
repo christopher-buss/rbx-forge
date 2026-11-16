@@ -1,0 +1,601 @@
+import { fromAny } from "@total-typescript/shoehorn";
+
+import { type } from "arktype";
+import type { SpawnOptionsWithoutStdio } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+import { createInterface } from "node:readline";
+import type { TestContext } from "vitest";
+import { assert, describe, it } from "vitest";
+
+import { createHelperClient } from "../../src/native/helper-client.ts";
+import { nodeChildProcessRunner } from "../../src/seams/child-process.ts";
+import { nodeClock } from "../../src/seams/clock.ts";
+import { nodeNetwork } from "../../src/seams/network.ts";
+import type { StudioControl } from "../../src/seams/studio-host.ts";
+import { createWslStudioHost } from "../../src/seams/wsl-studio-host.ts";
+import {
+	loadRealNative,
+	makeRunScriptStudioExecutable,
+	NATIVE_DIRECTORY,
+	studioVariables,
+	waitForExitAsync,
+	waitForFileAsync,
+} from "../helpers/real-native.ts";
+import { createTestSeams } from "../helpers/seams.ts";
+import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
+
+function startHelper({ onTestFinished }: Pick<TestContext, "onTestFinished">) {
+	const child = spawn(path.join(NATIVE_DIRECTORY, "forge-windows-helper.exe"), [], {
+		stdio: "pipe",
+		windowsHide: true,
+	});
+	const lines = createInterface({ input: child.stdout });
+	const iterator = lines[Symbol.asyncIterator]();
+	onTestFinished(async () => {
+		child.kill();
+		lines.close();
+		await waitForExitAsync(child);
+	});
+	let serial = 0;
+	async function requestAsync(operation: Record<string, unknown>) {
+		serial += 1;
+		const id = String(serial);
+		child.stdin.write(
+			`${JSON.stringify({ id, deadlineMs: Date.now() + 10_000, ...operation })}\n`,
+		);
+		const line = await iterator.next();
+		assert(line.done !== true);
+		const reply: unknown = JSON.parse(line.value);
+		assert(typeof reply === "object" && reply !== null && "id" in reply && reply.id === id);
+		return reply;
+	}
+
+	return { child, requestAsync };
+}
+
+async function launchStudioAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
+	environment: Record<string, string> = {},
+	desktop = "user",
+) {
+	const helper = startHelper(testContext);
+	await helper.requestAsync({ op: "handshake", protocol: 1 });
+	const native = loadRealNative();
+	const program = makeRunScriptStudioExecutable();
+	const place = path.join(makeTemporaryDirectory(), "helper.rbxl");
+	const reply = await helper.requestAsync({
+		args: [place],
+		cwd: path.dirname(place),
+		desktop,
+		env: { ...studioVariables(program), ...environment },
+		op: "launch",
+		program,
+	});
+	assert("result" in reply);
+	const { result } = reply;
+	assert(
+		typeof result === "object" &&
+			result !== null &&
+			"pid" in result &&
+			"pin" in result &&
+			"startTime" in result,
+	);
+	assert(typeof result.pid === "number");
+	const pinned = native.pinProcess(result.pid);
+	assert(pinned !== null);
+	testContext.onTestFinished(() => {
+		pinned.kill();
+	});
+	await waitForFileAsync(`${place}.lock`);
+	return { ...helper, pinned, program, result };
+}
+
+describe.skipIf(process.platform !== "win32")("windows helper", () => {
+	it.for(["close", "save", "hide"] as const)(
+		"recovers after a killed helper loses a %s reply",
+		async (operation, { expect, onTestFinished }) => {
+			expect.assertions(2);
+
+			const fixture = await launchStudioAsync({ onTestFinished });
+			const children: Array<ReturnType<typeof spawn>> = [];
+			const seams = createTestSeams();
+			const states: Array<StudioControl> = [];
+			const host = createWslStudioHost(
+				{ ...seams, clock: nodeClock, cwd: process.cwd(), environment: {} },
+				() => {
+					return createHelperClient(
+						{
+							childProcess: {
+								spawn: fromAny(
+									(
+										file: string,
+										args: Array<string>,
+										options: SpawnOptionsWithoutStdio,
+									) => {
+										const child = spawn(file, args, options);
+										children.push(child);
+										onTestFinished(() => {
+											child.kill();
+										});
+										return child;
+									},
+								),
+							},
+							clock: nodeClock,
+						},
+						() => {
+							return {
+								args: [],
+								file: path.join(NATIVE_DIRECTORY, "forge-windows-helper.exe"),
+							};
+						},
+						process.arch,
+					);
+				},
+			);
+			host.onControl!((state) => {
+				states.push(state);
+			});
+			const pin = await host.pinProcessAsync(fixture.pinned.pid, fixture.pinned.startTime);
+			assert(pin !== null);
+			const first = children[0];
+			assert(first !== undefined && first.stdout !== null);
+			first.stdout.pause();
+			const mutations = {
+				close: async () => pin.requestCloseAsync(),
+				hide: async () => pin.setWindowVisibilityAsync("hidden"),
+				save: async () => pin.requestSaveAsync(1000),
+			};
+			const pending = mutations[operation]().catch(() => false);
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 25);
+			});
+			first.kill();
+			await pending;
+			await host.hostnameAsync();
+
+			expect(states).toEqual(["ready", "recovering", "ready"]);
+			expect(await pin.isAliveAsync()).toBe(fixture.pinned.isAlive());
+		},
+	);
+
+	it("launches Studio on the shared hidden snapshot desktop", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const { pinned, requestAsync, result } = await launchStudioAsync(
+			{ onTestFinished },
+			{},
+			"hidden",
+		);
+
+		await expect(requestAsync({ op: "desktop", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			"hidden",
+		);
+		expect(pinned.isAlive()).toBeTrue();
+	});
+
+	it("hides and shows the same pinned Studio and stops its watcher", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(9);
+
+		const { pinned, requestAsync, result } = await launchStudioAsync({ onTestFinished });
+
+		await expect(requestAsync({ op: "desktop", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			"user",
+		);
+		await expect(
+			requestAsync({ op: "setWindowVisibility", pin: result.pin, visibility: "hidden" }),
+		).resolves.toHaveProperty("result", true);
+		await expect(
+			requestAsync({ op: "startWindowHiding", pin: result.pin }),
+		).resolves.toHaveProperty("result", true);
+		await expect(
+			requestAsync({ op: "windowVisibility", pin: result.pin }),
+		).resolves.toHaveProperty("result", "hidden");
+		await expect(requestAsync({ op: "windowHiding", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			true,
+		);
+		await expect(
+			requestAsync({ op: "stopWindowHiding", pin: result.pin }),
+		).resolves.toHaveProperty("result", true);
+		await expect(
+			requestAsync({ op: "setWindowVisibility", pin: result.pin, visibility: "active" }),
+		).resolves.toHaveProperty("result", true);
+		await expect(requestAsync({ op: "windowHiding", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			false,
+		);
+		expect(pinned.isAlive()).toBeTrue();
+	});
+
+	it("checks and dismisses only the pinned Studio's exact dialog", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(5);
+
+		const { requestAsync, result } = await launchStudioAsync(
+			{ onTestFinished },
+			{ FIXTURE_STUDIO_DIALOG_DELAY_MS: "0" },
+		);
+
+		await expect
+			.poll(async () => requestAsync({ op: "isBlocked", pin: result.pin }))
+			.toHaveProperty("result", true);
+		await expect(
+			requestAsync({
+				button: "Continue",
+				desktop: "user",
+				op: "dismissDialog",
+				pin: result.pin,
+				timeoutMs: 5000,
+				title: "Other dialog",
+			}),
+		).resolves.toHaveProperty("result", false);
+		await expect(
+			requestAsync({
+				button: "Continue",
+				desktop: "user",
+				op: "dismissDialog",
+				pin: result.pin,
+				timeoutMs: 5000,
+				title: "Lighting Technology Migration",
+			}),
+		).resolves.toHaveProperty("result", true);
+		await expect
+			.poll(async () => requestAsync({ op: "isBlocked", pin: result.pin }))
+			.toHaveProperty("result", false);
+		await expect(
+			requestAsync({
+				button: "Continue",
+				desktop: "user",
+				op: "dismissDialog",
+				pin: "missing",
+				timeoutMs: 5000,
+				title: "Lighting Technology Migration",
+			}),
+		).resolves.toHaveProperty("error.message", "unknown pin");
+	});
+
+	it("runs the shared save menu operation and respects its deadline", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(3);
+
+		const { requestAsync, result } = await launchStudioAsync({ onTestFinished });
+
+		await expect(
+			requestAsync({ op: "requestSave", pin: result.pin, timeoutMs: 0 }),
+		).resolves.toHaveProperty("result", "timeout");
+		await expect(
+			requestAsync({ op: "saveMenuEnabled", pin: result.pin, timeoutMs: 5000 }),
+		).resolves.toHaveProperty("result", true);
+		await expect(
+			requestAsync({ op: "requestSave", pin: result.pin, timeoutMs: 5000 }),
+		).resolves.toHaveProperty("result", "no_menu_item");
+	});
+
+	it("reports Windows AutoSaves folders from the helper environment", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const { requestAsync } = startHelper({ onTestFinished });
+		await requestAsync({ op: "handshake", protocol: 1 });
+
+		await expect(requestAsync({ op: "autoSaveDirectories" })).resolves.toHaveProperty(
+			"result",
+			[
+				path.join(process.env["LOCALAPPDATA"]!, "Roblox/RobloxStudio/AutoSaves"),
+				path.join(process.env["USERPROFILE"]!, "Documents/ROBLOX/AutoSaves"),
+			],
+		);
+	});
+
+	it("shares singleton exclusion with the native addon in both directions", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(6);
+
+		const helper = startHelper({ onTestFinished });
+		await helper.requestAsync({ op: "handshake", protocol: 1 });
+		const file = path.join(makeTemporaryDirectory(), "supervisor.lock");
+		const native = loadRealNative();
+		const reply = await helper.requestAsync({ op: "tryLockFile", path: file });
+		assert("result" in reply && typeof reply.result === "string");
+
+		expect(native.tryLockFile(file, "exclusive")).toBeNull();
+		expect(native.tryLockFile(file, "shared")).toBeNull();
+		expect(await helper.requestAsync({ lock: reply.result, op: "releaseLock" })).toHaveProperty(
+			"result",
+			true,
+		);
+
+		const held = native.tryLockFile(file, "exclusive");
+		assert(held !== null);
+		onTestFinished(() => {
+			held.release();
+		});
+
+		expect(await helper.requestAsync({ op: "tryLockFile", path: file })).toHaveProperty(
+			"result",
+			null,
+		);
+
+		held.release();
+		const again = await helper.requestAsync({ op: "tryLockFile", path: file });
+		assert("result" in again && typeof again.result === "string");
+
+		expect(again.result).toBeTypeOf("string");
+
+		helper.child.stdin.end();
+		await waitForExitAsync(helper.child);
+		const released = native.tryLockFile(file, "exclusive");
+		assert(released !== null);
+		released.release();
+
+		expect(native.isLockFree(file)).toBe(true);
+	});
+
+	it("reports the Windows user Plugins folder without writing it", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const helper = startHelper({ onTestFinished });
+		await helper.requestAsync({ op: "handshake", protocol: 1 });
+
+		expect(await helper.requestAsync({ op: "pluginsFolder" })).toHaveProperty(
+			"result",
+			path.join(os.homedir(), "AppData/Local/Roblox/Plugins"),
+		);
+	});
+
+	it("probes capture without acknowledging Studio synchronization", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const identity = { projectName: "probe", sessionId: "generation" };
+		const capture = await nodeNetwork.listenForCaptureAsync(identity);
+		const ready = await nodeNetwork.listenForStudioReadyAsync(identity);
+		onTestFinished(() => {
+			capture.close();
+			ready.close();
+		});
+		const url = new URL(capture.url);
+		const { requestAsync } = startHelper({ onTestFinished });
+		await requestAsync({ op: "handshake", protocol: 1 });
+
+		expect(
+			await requestAsync({
+				op: "probeHttp",
+				port: Number(url.port),
+				route: `${url.pathname}/probe/nonce${url.search}`,
+			}),
+		).toMatchObject({ result: [110, 111, 110, 99, 101] });
+
+		ready.close();
+
+		await expect(ready.ready).resolves.toBe(false);
+	});
+
+	it("probes HTTP from Windows IPv4 loopback and reports failures", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(4);
+
+		let status = 200;
+		const server = createServer((_request, response) => {
+			response.writeHead(status, { "content-length": 5 }).end("nonce");
+		});
+		onTestFinished(() => {
+			server.close();
+			server.closeAllConnections();
+		});
+		await new Promise<void>((resolve) => {
+			server.listen(0, "127.0.0.1", resolve);
+		});
+		const address = server.address();
+		assert(address !== null && typeof address === "object");
+		const { port } = address;
+		const { requestAsync } = startHelper({ onTestFinished });
+		await requestAsync({ op: "handshake", protocol: 1 });
+
+		expect(await requestAsync({ op: "probeHttp", port, route: "/api/rojo" })).toMatchObject({
+			result: [110, 111, 110, 99, 101],
+		});
+
+		status = 404;
+
+		expect(
+			await requestAsync({ op: "probeHttp", port, route: "/capture/secret/probe/nonce" }),
+		).toMatchObject({ error: { code: "operation_failed" } });
+		expect(await requestAsync({ op: "probeHttp", port, route: "/ready/secret" })).toMatchObject(
+			{ error: { code: "operation_failed" } },
+		);
+
+		server.close();
+		server.closeAllConnections();
+
+		expect(await requestAsync({ op: "probeHttp", port, route: "/api/rojo" })).toMatchObject({
+			error: { code: "operation_failed" },
+		});
+	});
+
+	it("reads a Windows registry command through the helper", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const key = `Software\\rbx-forge-test\\${randomUUID()}`;
+		const fullKey = `HKCU\\${key}`;
+		const command = `"${path.join(makeTemporaryDirectory(), "Studio with spaces.exe")}" "%1"`;
+		execFileSync("reg.exe", ["add", fullKey, "/ve", "/t", "REG_SZ", "/d", command, "/f"], {
+			windowsHide: true,
+		});
+		onTestFinished(() => {
+			execFileSync("reg.exe", ["delete", fullKey, "/f"], { windowsHide: true });
+		});
+		const { requestAsync } = startHelper({ onTestFinished });
+		await requestAsync({ op: "handshake", protocol: 1 });
+
+		await expect(requestAsync({ key, op: "readRegistry" })).resolves.toHaveProperty(
+			"result",
+			command,
+		);
+		await expect(
+			requestAsync({ key: `${key}\\missing`, op: "readRegistry" }),
+		).resolves.toHaveProperty("result", null);
+	});
+
+	it("uses the TypeScript client against the real helper protocol", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(5);
+
+		const client = createHelperClient(
+			{ childProcess: nodeChildProcessRunner, clock: nodeClock },
+			() => ({ args: [], file: path.join(NATIVE_DIRECTORY, "forge-windows-helper.exe") }),
+			process.arch,
+		);
+
+		const identity = await client.identity;
+
+		expect(identity.hostname.toLowerCase()).toBe(os.hostname().toLowerCase());
+
+		const program = makeRunScriptStudioExecutable();
+		const place = path.join(makeTemporaryDirectory(), "client.rbxl");
+		const result = type({ pid: "number", pin: "string", startTime: "string" }).assert(
+			await client.requestAsync({
+				args: [place],
+				cwd: path.dirname(place),
+				env: studioVariables(program),
+				op: "launch",
+				program,
+			}),
+		);
+		const pinned = loadRealNative().pinProcess(result.pid);
+		assert(pinned !== null);
+		onTestFinished(() => {
+			pinned.kill();
+		});
+		await waitForFileAsync(`${place}.lock`);
+
+		await expect(
+			client.requestAsync({ op: "processStartTime", pid: result.pid }),
+		).resolves.toBe(result.startTime);
+		await expect(
+			client.requestAsync({ key: "Software\\rbx-forge-test-missing", op: "readRegistry" }),
+		).resolves.toBeNull();
+		await expect(client.requestAsync({ op: "requestClose", pin: result.pin })).resolves.toBe(
+			true,
+		);
+		await expect.poll(() => pinned.isAlive()).toBeFalse();
+	});
+
+	it("should report a versioned Windows identity", async ({ expect, onTestFinished }) => {
+		expect.assertions(2);
+
+		const { requestAsync } = startHelper({ onTestFinished });
+		const reply = await requestAsync({ op: "handshake", protocol: 1 });
+
+		expect(reply).toMatchObject({
+			result: { helperArch: process.arch, protocol: 1, windowsArch: process.arch },
+		});
+
+		assert(
+			"result" in reply &&
+				typeof reply.result === "object" &&
+				reply.result !== null &&
+				"hostname" in reply.result &&
+				typeof reply.result.hostname === "string",
+		);
+
+		expect(reply.result.hostname.toLowerCase()).toBe(os.hostname().toLowerCase());
+	});
+
+	it("should launch, re-pin by Windows identity, refuse a reused identity and close", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(8);
+
+		const { pinned, program, requestAsync, result } = await launchStudioAsync({
+			onTestFinished,
+		});
+
+		await expect(
+			requestAsync({ op: "pin", pid: result.pid, startTime: result.startTime }),
+		).resolves.toHaveProperty("result.pid", result.pid);
+		await expect(
+			requestAsync({ op: "pin", pid: result.pid, startTime: "1" }),
+		).resolves.toHaveProperty("result", null);
+		await expect(
+			requestAsync({ op: "pin", pid: result.pid, startTime: "not a start time" }),
+		).resolves.toHaveProperty("error.code");
+		// System denies this access; denial never proves exit.
+		await expect(requestAsync({ op: "pin", pid: 4, startTime: "1" })).resolves.toHaveProperty(
+			"error.code",
+		);
+		await expect(
+			requestAsync({ op: "executablePath", pin: result.pin }),
+		).resolves.toHaveProperty("result", program);
+		await expect(requestAsync({ op: "requestClose", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			true,
+		);
+		await expect.poll(() => pinned.isAlive()).toBeFalse();
+		await expect(
+			requestAsync({ op: "pin", pid: result.pid, startTime: result.startTime }),
+		).resolves.toHaveProperty("result", null);
+	});
+
+	it("should kill only the pinned Studio", async ({ expect, onTestFinished }) => {
+		expect.assertions(3);
+
+		const { pinned, requestAsync, result } = await launchStudioAsync({ onTestFinished });
+
+		await expect(requestAsync({ op: "isAlive", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			true,
+		);
+		await expect(requestAsync({ op: "kill", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			true,
+		);
+		await expect.poll(() => pinned.isAlive()).toBeFalse();
+	});
+
+	it("should leave Studio running after stdin EOF", async ({ expect, onTestFinished }) => {
+		expect.assertions(2);
+
+		const { child, pinned } = await launchStudioAsync({ onTestFinished });
+		child.stdin.end();
+		await waitForExitAsync(child);
+
+		expect(child.exitCode).toBe(0);
+		expect(pinned.isAlive()).toBeTrue();
+	});
+});

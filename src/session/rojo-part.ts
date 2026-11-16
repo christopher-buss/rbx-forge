@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { CaptureListener } from "../capture/protocol.ts";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
@@ -5,6 +7,7 @@ import type { RojoPort } from "../rojo/rojo-port.ts";
 import { watchRojoProject } from "../rojo/watch-project.ts";
 import { rojoWrapperPath, writeRojoWrapper } from "../rojo/wrapper-project.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
+import { probeCaptureAsync, probeRojoAsync } from "../studio/network-probe.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { RunningPart, ServiceInvocation, ServiceParts } from "./service-parts.ts";
 import type { StatusRecorder } from "./status.ts";
@@ -78,7 +81,20 @@ export async function startRojoAsync(
 	parts: Pick<ServiceParts, "startAsync">,
 	{ port, service }: RojoService,
 ): Promise<RunningRojo | undefined> {
-	writeRojoWrapper(setup.context, setup.config, setup.directory);
+	const projectName = writeRojoWrapper(setup.context, setup.config, setup.directory);
+	if (setup.config.studio.saveMethod === "capture") {
+		setup.capture?.close();
+		setup.capture = {
+			...(await setup.context.seams.network.listenForCaptureAsync(
+				{ projectName, sessionId: "" },
+				scope.signal,
+			)),
+			rojoPort: port,
+		};
+		// Publish before the initial read, without relying on filesystem events.
+		writeRojoWrapper(setup.context, setup.config, setup.directory, setup.capture);
+	}
+
 	setup.status.rojoPort(port);
 	const part = await parts.startAsync(service, { initial: "starting" });
 	if (part !== undefined && !scope.signal.aborted) {
@@ -125,6 +141,7 @@ export async function waitForRojoAsync(
 				return false;
 			}
 
+			await probeRojoAsync(setup.context.seams, port, scope.signal);
 			await prepareCaptureAsync(setup, scope.signal, port);
 
 			setup.status.service("rojo", "ready");
@@ -156,11 +173,17 @@ async function prepareCaptureAsync(
 	}
 
 	const identity = await setup.context.seams.network.getRojoInfoAsync(port, signal);
+	const bootstrap = setup.capture === undefined ? undefined : new URL(setup.capture.url);
 	setup.capture?.close();
+	const address =
+		bootstrap === undefined
+			? undefined
+			: { port: Number(bootstrap.port), secret: path.basename(bootstrap.pathname) };
 	setup.capture = {
-		...(await setup.context.seams.network.listenForCaptureAsync(identity, signal)),
+		...(await setup.context.seams.network.listenForCaptureAsync(identity, signal, address)),
 		rojoPort: port,
 	};
+	await probeCaptureAsync(setup.context.seams, setup.capture);
 	writeRojoWrapper(setup.context, setup.config, setup.directory, setup.capture);
 }
 

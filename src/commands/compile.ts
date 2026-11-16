@@ -161,7 +161,7 @@ function counts({ diagnostics, errors }: CompileReport): string {
  */
 async function runningSessionAsync(context: CommandContext): Promise<KnownSession | undefined> {
 	const { fileSystem, ipc } = context.seams;
-	const session = findSession(fileSystem, forgeFiles(context.cwd));
+	const session = findSession(fileSystem, forgeFiles(context.cwd), context.seams.host);
 	if (session === undefined) {
 		return undefined;
 	}

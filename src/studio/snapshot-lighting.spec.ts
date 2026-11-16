@@ -9,7 +9,7 @@ import {
 	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
 import type { DetachedSpawn } from "../native/addon.ts";
-import { createSnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
+import { createSnapshotLightingLauncher } from "../seams/addon-studio/snapshot-lighting-launcher.ts";
 import { runSnapshotLightingAsync } from "./snapshot-lighting.ts";
 
 function watchingSnapshot({
@@ -119,6 +119,10 @@ describe("hidden snapshot Lighting watcher", () => {
 		};
 
 		const watching = runSnapshotLightingAsync(run.seams, run.payload, run.traceFile);
+
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(run.events().at(-1)).toStrictEqual({ at: 0, event: "dismiss-start" });
 
@@ -274,7 +278,10 @@ describe("snapshot Lighting helper launch", () => {
 		};
 
 		const launch = createSnapshotLightingLauncher(
-			createTestSeams({ native: () => native.addon }),
+			createTestSeams({
+				host: { ...createTestSeams().host, platform: "win32" },
+				native: () => native.addon,
+			}),
 			"/forge/supervisor.mjs",
 		);
 
@@ -307,7 +314,10 @@ describe("snapshot Lighting helper launch", () => {
 		const variants = { denied: () => null, missing: undefined };
 		Object.assign(native.addon, { spawnDetached: variants[kind] });
 		const launch = createSnapshotLightingLauncher(
-			createTestSeams({ native: () => native.addon }),
+			createTestSeams({
+				host: { ...createTestSeams().host, platform: "win32" },
+				native: () => native.addon,
+			}),
 			"/forge/supervisor.mjs",
 		);
 

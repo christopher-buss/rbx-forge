@@ -48,7 +48,11 @@ export async function runSyncAsync(context: CommandContext): Promise<CommandResu
 }
 
 async function syncAsync(context: CommandContext): Promise<CommandResult> {
-	const session = findSession(context.seams.fileSystem, forgeFiles(context.cwd));
+	const session = findSession(
+		context.seams.fileSystem,
+		forgeFiles(context.cwd),
+		context.seams.host,
+	);
 	if (session === undefined) {
 		throw new ForgeError("not_running", "No session runs for this project.", {
 			hint: 'Start one with "forge up", or run "forge syncback" without a session.',

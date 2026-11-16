@@ -6,6 +6,7 @@ import { assert, describe, it, vi } from "vitest";
 
 import olderPlugin from "../../test/fixtures/rojo-plugin-v2.json" with { type: "json" };
 import previousPlugin from "../../test/fixtures/rojo-plugin-v3.json" with { type: "json" };
+import lastPlugin from "../../test/fixtures/rojo-plugin-v4.json" with { type: "json" };
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createFakeReaper, createFakeSignals } from "../../test/helpers/fake-reaper.ts";
@@ -35,6 +36,7 @@ import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
+import type { StudioControl, StudioHost } from "../seams/studio-host.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { Pause, PausePoint } from "../session/pause.ts";
 import { neverPauseAsync } from "../session/pause.ts";
@@ -65,11 +67,12 @@ const OLD_LEASE = path.join(PROJECT, ".forge", "sessions", "old", "workers.lock"
 /** The identity record of every run, but its endpoint. */
 const IDENTITY: Pick<
 	IdentityRecord,
-	"pid" | "processStartTime" | "sessionId" | "startedAt" | "version"
+	"pid" | "processStartTime" | "sessionId" | "side" | "startedAt" | "version"
 > = {
 	pid: 4242,
 	processStartTime: "4242",
 	sessionId: "session-1",
+	side: "linux",
 	startedAt: "2026-01-01T00:00:00.000Z",
 	version: "9.9.9",
 };
@@ -130,8 +133,10 @@ interface StartSetup {
 	reaper?: FakeReaperOptions;
 	/** The config file's `rojoPort`; 4000 by default. */
 	rojoPort?: "unset" | number;
+	studioHost?: StudioHost;
 	/** The addon's private file writer (Windows). */
 	writePrivateFile?: (file: string, text: string) => void;
+	wslDistro?: string | undefined;
 }
 
 interface StartRun {
@@ -328,6 +333,7 @@ describe("managed Rojo plugin lifecycle", () => {
 
 		expect(run.fake.calls).not.toContain("stop rojo 3000");
 
+		await passAsync(run, FILE_POLL_MS);
 		await passAsync(run, FILE_POLL_MS);
 		run.fake.exit("rojo", OK);
 		await passAsync(run, OUTPUT_POLL_MS);
@@ -681,10 +687,10 @@ describe("managed Rojo plugin lifecycle", () => {
 		await run.result;
 
 		expect(sources[0]).toContain(
-			"-- rbx-forge patch 4 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+			"-- rbx-forge patch 5 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
 		);
 		expect(sources[1]).toContain(
-			"-- rbx-forge patch 4 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+			"-- rbx-forge patch 5 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
 		);
 	});
 
@@ -700,16 +706,17 @@ describe("managed Rojo plugin lifecycle", () => {
 		await endPluginSessionAsync(run);
 
 		expect(sources[0].split("\n", 1)[0]).toBe(
-			"-- rbx-forge patch 4 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+			"-- rbx-forge patch 5 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
 		);
 		expect(sources[1]!.split("\n", 1)[0]).toBe(
-			"-- rbx-forge patch 4 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+			"-- rbx-forge patch 5 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
 		);
 	});
 
 	it.for([
 		{ plugin: olderPlugin, version: 2 },
 		{ plugin: previousPlugin, version: 3 },
+		{ plugin: lastPlugin, version: 4 },
 	])(
 		"should upgrade genuine plugin patch $version sources coherently",
 		async ({ plugin, version }, { expect }) => {
@@ -723,8 +730,8 @@ describe("managed Rojo plugin lifecycle", () => {
 			const run = startPluginSession(sources);
 			await endPluginSessionAsync(run);
 
-			expect(sources[0]).toContain("-- rbx-forge patch 4 stock");
-			expect(sources[1]).toContain("-- rbx-forge patch 4 stock");
+			expect(sources[0]).toContain("-- rbx-forge patch 5 stock");
+			expect(sources[1]).toContain("-- rbx-forge patch 5 stock");
 		},
 	);
 
@@ -891,7 +898,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		await endPluginSessionAsync(run);
 
 		expect(run.fake.spawned.map(({ args }) => args)).not.toContainEqual(["plugin", "install"]);
-		expect(sources[0]).toStartWith("-- rbx-forge patch 4");
+		expect(sources[0]).toStartWith("-- rbx-forge patch 5");
 	});
 
 	it.for(["", undefined])(
@@ -998,7 +1005,7 @@ describe("managed Rojo plugin lifecycle", () => {
 				file: path.join(TOOLS, "custom-rojo"),
 			}),
 		);
-		expect(sources[0]).toStartWith("-- rbx-forge patch 4");
+		expect(sources[0]).toStartWith("-- rbx-forge patch 5");
 	});
 
 	it("should fail on a protocol mismatch before changing the plugin or launching", async ({
@@ -1161,7 +1168,9 @@ function startCommand({
 	projectType = "luau",
 	reaper = {},
 	rojoPort = 4000,
+	studioHost,
 	writePrivateFile,
+	wslDistro,
 }: StartSetup = {}): StartRun {
 	const memory = createMemoryFileSystem({
 		"default.project.json": '{"name":"Example","tree":{"$className":"DataModel"}}',
@@ -1222,7 +1231,7 @@ function startCommand({
 			clock: clock.clock,
 			configLoader,
 			fileSystem: memory.fileSystem,
-			host: { ...seams.host, platform },
+			host: { ...seams.host, platform, wslDistro },
 			ipc,
 			native: () => {
 				return {
@@ -1241,6 +1250,7 @@ function startCommand({
 			randomId: () => "session-1",
 			reaper: fake.launch,
 			studioLauncher,
+			...(studioHost === undefined ? {} : { studioHost }),
 		}),
 	});
 
@@ -1407,7 +1417,100 @@ function spawnedIds(fake: FakeReaper): Array<string> {
 }
 
 describe(runSupervisorAsync, () => {
-	it("should declare an inert capture instance before Rojo starts serving", async ({
+	it("leaves a found Studio open when shutdown loses Windows control", async ({ expect }) => {
+		expect.assertions(2);
+
+		const windows = createFakeNative(OPEN_STUDIO);
+		const seams = createTestSeams({ native: () => windows.addon });
+		let listener: ((state: StudioControl) => void) | undefined;
+		const run = startCommand({
+			...ATTACHED,
+			flags: NO_COMPILER,
+			studioHost: {
+				...seams.studioHost,
+				onControl: (next) => {
+					listener = next;
+					next("ready");
+					return () => {
+						listener = undefined;
+					};
+				},
+			},
+		});
+		await flushAsync();
+		assert(listener !== undefined);
+		listener("unavailable");
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
+		expect(run.memory.fileSystem.existsSync(path.join(SESSION, "supervisor.id"))).toBe(false);
+	});
+
+	it("keeps the session and Studio status while reporting control loss and recovery", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(6);
+
+		let listener: ((state: StudioControl) => void) | undefined;
+		const seams = createTestSeams();
+		const run = startCommand({
+			flags: { compiler: false, open: false },
+			studioHost: {
+				...seams.studioHost,
+				onControl: (next) => {
+					listener = next;
+					next("ready");
+					return () => {
+						listener = undefined;
+					};
+				},
+			},
+		});
+		onTestFinished(async () => {
+			run.signals.fire("SIGINT");
+			await run.result;
+		});
+		await flushAsync();
+		assert(listener !== undefined);
+		listener("recovering");
+
+		expect(stateOf(run)).toMatchObject({
+			running: true,
+			services: { studio: { control: "recovering", status: "off" } },
+		});
+
+		listener("ready");
+
+		expect(stateOf(run)).toMatchObject({ services: { studio: { control: "ready" } } });
+
+		listener("recovering");
+		listener("unavailable");
+
+		expect(stateOf(run)).toMatchObject({
+			running: true,
+			services: { studio: { control: "unavailable", status: "off" } },
+		});
+		expect(run.reporter.events.filter((event) => event.type === "warning")).toEqual([
+			{ message: "Windows Studio control was lost; recovering.", type: "warning" },
+			{ message: "Windows Studio control was lost; recovering.", type: "warning" },
+			{
+				message: "Windows Studio control is unavailable; recovery stopped.",
+				type: "warning",
+			},
+		]);
+		expect(run.reporter.events.filter((event) => event.type === "info")).toEqual([
+			{ message: 'Stop it with "forge down".', type: "info" },
+			{ message: "Windows Studio control recovered.", type: "info" },
+		]);
+
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(listener).toBeUndefined();
+	});
+
+	it("should publish the capture bootstrap endpoint before Rojo starts serving", async ({
 		expect,
 		onTestFinished,
 	}) => {
@@ -1416,6 +1519,13 @@ describe(runSupervisorAsync, () => {
 		const run = startCommand({
 			file: { studio: { saveMethod: "capture" } },
 			isListening: async () => false,
+			listenForCapture: async () => {
+				return {
+					captureAsync: async () => ({ model: new Uint8Array(), services: [] }),
+					close: () => {},
+					url: "http://127.0.0.1:50002/capture/bootstrap?projectName=Example&sessionId=",
+				};
+			},
 		});
 		onTestFinished(async () => {
 			run.signals.fire("SIGINT");
@@ -1427,10 +1537,11 @@ describe(runSupervisorAsync, () => {
 
 		expect(JSON.parse(wrapper)).toHaveProperty("tree.ServerStorage.ForgeCapture", {
 			$attributes: {
-				CaptureUrl: "",
+				CaptureUrl:
+					"http://127.0.0.1:50002/capture/bootstrap?projectName=Example&sessionId=",
 				ForgeSessionId: "session-1",
-				ProjectName: "",
-				RojoPort: 0,
+				ProjectName: "Example",
+				RojoPort: 4000,
 				SessionId: "",
 			},
 			$className: "Configuration",
@@ -1504,7 +1615,7 @@ describe(runSupervisorAsync, () => {
 		run.signals.fire("SIGINT");
 		await run.result;
 
-		expect(close).toHaveBeenCalledOnce();
+		expect(close).toHaveBeenCalledTimes(2);
 	});
 
 	it("should replace the capture endpoint and identity when the session repairs Rojo", async ({
@@ -1573,12 +1684,12 @@ describe(runSupervisorAsync, () => {
 			RojoPort: 4000,
 			SessionId: "second-rojo-session",
 		});
-		expect(closed).toStrictEqual(new Set(["first-rojo-session"]));
+		expect(closed).toStrictEqual(new Set(["", "first-rojo-session"]));
 
 		run.signals.fire("SIGINT");
 		await run.result;
 
-		expect(closed).toStrictEqual(new Set(["first-rojo-session", "second-rojo-session"]));
+		expect(closed).toStrictEqual(new Set(["", "first-rojo-session", "second-rojo-session"]));
 	});
 
 	it("should release a stopped Rojo's cancellation listener before the session ends", async ({
@@ -1720,15 +1831,15 @@ describe(runSupervisorAsync, () => {
 			reloads: true,
 		},
 		{
-			filename: "aß.project.json",
+			filename: "aÃƒÆ’Ã…Â¸.project.json",
 			platform: "win32" as const,
-			projectPath: "Aß.project.json",
+			projectPath: "AÃƒÆ’Ã…Â¸.project.json",
 			reloads: true,
 		},
 		{
 			filename: "ass.project.json",
 			platform: "win32" as const,
-			projectPath: "Aß.project.json",
+			projectPath: "AÃƒÆ’Ã…Â¸.project.json",
 			reloads: false,
 		},
 	])(
@@ -1889,7 +2000,7 @@ describe(runSupervisorAsync, () => {
 	}) => {
 		expect.assertions(1);
 
-		const name = 'A "quoted" project\\name\\u1234\u0001雪';
+		const name = 'A "quoted" project\\name\\u1234\u0001ÃƒÂ©Ã¢â‚¬ÂºÃ‚Âª';
 		const run = startCommand({
 			files: {
 				...TOOL_FILES,
@@ -1910,7 +2021,7 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(marker).toContain(
-			`m:SetAttribute("ProjectName","A \\\"quoted\\\" project\\\\name\\\\u1234\\u{0001}雪@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("ReadyUrl","http://127.0.0.1:50001/ready/test?projectName=Example&sessionId=rojo-session");m:SetAttribute("SessionId","id\\\"\\\\\\n")`,
+			`m:SetAttribute("ProjectName","A \\\"quoted\\\" project\\\\name\\\\u1234\\u{0001}ÃƒÂ©Ã¢â‚¬ÂºÃ‚Âª@${endpointKey(PROJECT, "game.rbxl")}");m:SetAttribute("ReadyUrl","http://127.0.0.1:50001/ready/test?projectName=Example&sessionId=rojo-session");m:SetAttribute("SessionId","id\\\"\\\\\\n")`,
 		);
 	});
 
@@ -2064,6 +2175,8 @@ describe(runSupervisorAsync, () => {
 			path.join(SESSION, "rojo.project.json"),
 			"--port",
 			"4000",
+			"--address",
+			"127.0.0.1",
 		]);
 	});
 
@@ -2120,7 +2233,7 @@ describe(runSupervisorAsync, () => {
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: ",
 			"start-2: build default.project.json --output game.rbxl",
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"compiler: -w",
 		]);
 		expect(run.fake.calls[0]).toBe("go");
@@ -2188,7 +2301,14 @@ describe(runSupervisorAsync, () => {
 		expect(run.fake.spawned).toStrictEqual([
 			{
 				id: "rojo",
-				args: ["serve", path.join(SESSION, "rojo.project.json"), "--port", "4000"],
+				args: [
+					"serve",
+					path.join(SESSION, "rojo.project.json"),
+					"--port",
+					"4000",
+					"--address",
+					"127.0.0.1",
+				],
 				cwd: PROJECT,
 				env: { PATH: TOOLS },
 				file: path.join(TOOLS, "rojo"),
@@ -2339,7 +2459,7 @@ describe(runSupervisorAsync, () => {
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"start-1: build default.project.json --output game.rbxl",
 		]);
 		expect(run.studioLauncher).toHaveBeenCalledOnce();
@@ -2391,7 +2511,7 @@ describe(runSupervisorAsync, () => {
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: build default.project.json --output game.rbxl",
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"compiler: watch",
 		]);
 	});
@@ -2475,7 +2595,7 @@ describe(runSupervisorAsync, () => {
 		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
 		expect(spawnedIds(run.fake)).toStrictEqual([
 			"start-1: ",
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"compiler: -w",
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
@@ -3042,7 +3162,7 @@ describe(runSupervisorAsync, () => {
 
 		await expect(run.result).resolves.toMatchObject({ data: { port: FREE_PORT } });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT} --address 127.0.0.1`,
 		]);
 	});
 
@@ -3156,7 +3276,7 @@ describe("forge start hooks and syncback", () => {
 		await run.result;
 
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 		]);
 	});
 
@@ -3362,6 +3482,156 @@ describe("forge start hooks and syncback", () => {
 });
 
 describe("forge start session files", () => {
+	it.for([
+		["win32", undefined, "wsl:Ubuntu"],
+		["linux", "Ubuntu", "windows"],
+		["linux", "Ubuntu", "wsl:Debian"],
+	] as const)(
+		"refuses foreign startup cleanup on %s even with force",
+		async ([platform, wslDistro, side], { expect }) => {
+			expect.assertions(3);
+
+			const identity = JSON.stringify({ ...IDENTITY, side });
+			const run = startCommand({
+				files: { ...TOOL_FILES, ".forge/sessions/old/supervisor.id": identity },
+				flags: { force: true },
+				platform,
+				wslDistro,
+			});
+
+			await expect(run.result).rejects.toMatchObject({ code: "identity_mismatch" });
+			expect(run.memory.files()[".forge/sessions/old/supervisor.id"]).toBe(identity);
+			expect(run.fake.launches).toStrictEqual([]);
+		},
+	);
+
+	it.for([
+		["win32", "wsl:Ubuntu"],
+		["linux", "windows"],
+	] as const)("rechecks an old side at startup on %s", async ([platform, side], { expect }) => {
+		expect.assertions(2);
+
+		const record = JSON.stringify({ side });
+		const run = startCommand({
+			files: WITH_OLD,
+			flags: { force: true, open: false },
+			pause: () => async (point) => {
+				const actions = {
+					admitted: () => {},
+					control: () => {},
+					created: () => {},
+					leased: () => {},
+					lock: () => {
+						run.memory.fileSystem.writeFileSync(
+							path.join(PROJECT, ".forge/sessions/old/supervisor.id"),
+							record,
+						);
+					},
+				};
+				actions[point]();
+			},
+			platform,
+		});
+
+		await expect(run.result).rejects.toHaveProperty("code", "identity_mismatch");
+		expect(run.memory.files()[".forge/sessions/old/supervisor.id"]).toBe(record);
+	});
+
+	it("records Windows ownership even with a WSL distro in the environment", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		let recorded: Record<string, null | string> = {};
+		const run = startCommand({
+			flags: { open: false },
+			platform: "win32",
+			reaper: {
+				onLaunch: () => {
+					recorded = run.memory.files();
+				},
+			},
+			writePrivateFile: () => {},
+			wslDistro: "Ubuntu",
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(identityIn(recorded)).toHaveProperty("side", "windows");
+	});
+
+	it("refuses a busy Windows drive singleton under WSL", async ({ expect }) => {
+		expect.assertions(1);
+
+		const host = createTestSeams().studioHost;
+		const run = startCommand({
+			flags: { open: false },
+			studioHost: {
+				...host,
+				toHostPathAsync: async () => String.raw`D:\project\.forge\supervisor.lock`,
+				tryLockFileAsync: async () => null,
+			},
+			wslDistro: "Ubuntu",
+		});
+
+		await expect(run.result).rejects.toMatchObject({
+			code: "session_running",
+			hint: 'Run "forge down" on the side that started it.',
+			message: "A session already runs for this project.",
+		});
+	});
+
+	it("runs with a Windows drive singleton under WSL", async ({ expect }) => {
+		expect.assertions(3);
+
+		const windowsNative = createFakeNative();
+		const host = createTestSeams({ native: () => windowsNative.addon }).studioHost;
+		let recorded: Record<string, null | string> = {};
+		const run = startCommand({
+			flags: { open: false },
+			reaper: {
+				onLaunch: () => {
+					recorded = run.memory.files();
+				},
+			},
+			studioHost: {
+				...host,
+				toHostPathAsync: async () => String.raw`D:\project\.forge\supervisor.lock`,
+			},
+			wslDistro: "Ubuntu",
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+
+		expect(identityIn(recorded)).toHaveProperty("side", "wsl:Ubuntu");
+		await expect(run.result).resolves.toHaveProperty("data.reason", "SIGINT");
+		await expect(host.tryLockFileAsync(SINGLETON)).resolves.not.toBeNull();
+	});
+
+	it("runs on a Linux filesystem without Windows locking", async ({ expect }) => {
+		expect.assertions(1);
+
+		const host = createTestSeams().studioHost;
+		const run = startCommand({
+			flags: { open: false },
+			studioHost: {
+				...host,
+				toHostPathAsync: async () => {
+					return String.raw`\\wsl.localhost\Ubuntu\home\project\.forge\supervisor.lock`;
+				},
+				tryLockFileAsync: async () => {
+					throw new Error("Windows cannot lock Linux files");
+				},
+			},
+			wslDistro: "Ubuntu",
+		});
+		await flushAsync();
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).resolves.toHaveProperty("data.reason", "SIGINT");
+	});
+
 	it("should write the identity record, token, and current hint before the reaper starts", async ({
 		expect,
 	}) => {
@@ -4228,7 +4498,7 @@ describe("forge up parts", () => {
 
 		expect(answer).toStrictEqual({ added: ["compiler"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"compiler: -w",
 		]);
 		expect([before, after]).toMatchObject([
@@ -4515,7 +4785,7 @@ describe("forge up --studio", () => {
 
 		expect(answer).toStrictEqual({ added: ["studio", "rojo"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"start-1: build default.project.json --output game.rbxl",
 		]);
 		expect(run.studioLauncher).toHaveBeenCalledExactlyOnceWith(
@@ -4548,7 +4818,7 @@ describe("forge up --studio", () => {
 
 		await expect(answer).resolves.toStrictEqual({ added: ["studio", "rojo"] });
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 		]);
 		expect(run.studioLauncher).not.toHaveBeenCalled();
 	});
@@ -4610,8 +4880,8 @@ describe("forge up --studio", () => {
 
 		expect([first, repair]).toStrictEqual([{ added: ["studio", "rojo"] }, { added: ["rojo"] }]);
 		expect(spawnedIds(run.fake).filter((id) => id.startsWith("rojo"))).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT}`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT} --address 127.0.0.1`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port ${FREE_PORT} --address 127.0.0.1`,
 		]);
 		expect(result.data).toMatchObject({ port: FREE_PORT });
 	});
@@ -4919,7 +5189,7 @@ describe("forge sync control channel", () => {
 			project: "default.project.json",
 		});
 		expect(spawnedIds(run.fake)).toStrictEqual([
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 			"start-1: build default.project.json --output game.rbxl",
 			"syncback-1: syncback --help",
 			"syncback-2: syncback default.project.json --input game.rbxl --non-interactive",
@@ -6079,7 +6349,7 @@ describe("forge restart control channel", () => {
 
 		expect(spawnedIds(run.fake).slice(before)).toStrictEqual([
 			"compiler: -w",
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 		]);
 		await expect(answer).resolves.toStrictEqual({
 			added: ["compiler", "rojo"],
@@ -6257,7 +6527,7 @@ describe("forge restart control channel", () => {
 		expect(spawnedIds(run.fake).slice(before)).toStrictEqual([
 			"compiler: -w",
 			"start-2: build default.project.json --output game.rbxl",
-			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000`,
+			`rojo: serve ${path.join(SESSION, "rojo.project.json")} --port 4000 --address 127.0.0.1`,
 		]);
 		await expect(answer).resolves.toMatchObject({
 			added: ["compiler", "studio", "rojo"],

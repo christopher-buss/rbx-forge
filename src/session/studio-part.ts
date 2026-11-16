@@ -8,9 +8,8 @@ import { ForgeError } from "../errors.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import type { StudioReadyListener } from "../seams/network.ts";
 import { watchHiddenLightingAsync } from "../studio/lighting-dialog.ts";
-import { studioLockPath } from "../studio/lock-file.ts";
 import type { OpenedStudio } from "./attach.ts";
-import { attachStudio } from "./attach.ts";
+import { attachStudioAsync } from "./attach.ts";
 import type { BuildWatch } from "./build-watch.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "./build-watch.ts";
 import type { IdleTracker } from "./idle.ts";
@@ -21,8 +20,8 @@ import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
 import type { PartId, StatusRecorder, StatusStore } from "./status.ts";
 import { openStudioAsync } from "./studio-launch.ts";
+import { studioLock } from "./studio-lock-watch.ts";
 import { createStudioReadiness, STUDIO_OPEN_BOUND_MS } from "./studio-readiness.ts";
-import type { StudioLockWatch } from "./watch.ts";
 import { waitForStudioCloseAsync, watchSaves } from "./watch.ts";
 import { watchOptions } from "./worker-context.ts";
 
@@ -51,7 +50,8 @@ export interface StudioSetup extends RojoSetup {
 	config: ResolvedConfig;
 	/** Gets each save of the session's Studio as activity. */
 	idle: Pick<IdleTracker, "activity">;
-	status: Pick<StatusRecorder, "rojoPort" | "service" | "studio"> & Pick<StatusStore, "snapshot">;
+	status: Pick<StatusRecorder, "rojoPort" | "service" | "studio" | "studioControl"> &
+		Pick<StatusStore, "snapshot">;
 }
 
 /** A place prepared for Studio, without launching a new Studio yet. */
@@ -101,7 +101,7 @@ export async function prepareStudioAsync(
 	steps: CommandContext,
 	{ build }: Pick<OpenOptions, "build">,
 ): Promise<PreparedStudio> {
-	const attached = attachStudio(context, config);
+	const attached = await attachStudioAsync(context, config);
 	if (build && attached?.place !== path.resolve(context.cwd, config.buildOutputPath)) {
 		await buildPlaceAsync(steps, config);
 	}
@@ -233,6 +233,7 @@ export function createStudioAdder(
 			? await prepareStudioAsync(setup, attach.steps, { build: hasCompiler })
 			: undefined;
 		let opening = followPreparedStudio(setup, scope, attach, prepared);
+		await opening?.open;
 		const isRojoStarted = await serveRojoAsync(setup, scope, attach.parts, rojo);
 		if (prepared !== undefined && opening === undefined && !hasEnded(scope)) {
 			opening = await attachAsync(setup, scope, attach, { ...request, prepared });
@@ -265,7 +266,7 @@ async function watchStartupLightingAsync(
 	opened: OpenedStudio,
 	signal: AbortSignal,
 ): Promise<void> {
-	return context.seams.host.platform === "win32"
+	return (await context.seams.studioHost.platformAsync()) === "win32"
 		? watchHiddenLightingAsync(
 				context.seams,
 				{ place: opened.place, process: opened.studio ?? undefined },
@@ -275,27 +276,6 @@ async function watchStartupLightingAsync(
 				},
 			)
 		: undefined;
-}
-
-/**
- * The lock file of the place, and the Studio it must name while that
- * Studio runs.
- *
- * @param context - Reads process start times.
- * @param opened - The place and its Studio.
- * @returns The lock watch.
- */
-function studioLock(context: CommandContext, { place, studio }: OpenedStudio): StudioLockWatch {
-	return {
-		isAlive: () => {
-			return (
-				studio === null ||
-				context.seams.native().processStartTime(studio.pid) === studio.startTime
-			);
-		},
-		path: studioLockPath(place),
-		pid: studio?.pid,
-	};
 }
 
 /**

@@ -215,6 +215,23 @@ function encodeSequences(value: unknown): CaptureValue | undefined {
 	return undefined;
 }
 
+function encodeContent(value: unknown): CaptureValue | undefined {
+	if (typeIs(value, "Content")) {
+		if (value.SourceType === Enum.ContentSourceType.None) {
+			return { Content: "None" };
+		}
+
+		if (value.SourceType === Enum.ContentSourceType.Uri) {
+			return { Content: { Uri: value.Uri } };
+		}
+
+		// Object content needs a referent in the serialized model, just like Ref.
+		return undefined;
+	}
+
+	return undefined;
+}
+
 function encodeSpecial(value: unknown, context: ValueContext): CaptureValue | undefined {
 	if (typeIs(value, "Instance")) {
 		return context.reference(value);
@@ -258,6 +275,7 @@ function encodeValue(
 		encodeVectors(value) ??
 		encodeDimensions(value) ??
 		encodeSequences(value) ??
+		encodeContent(value) ??
 		encodeSpecial(value, context) ??
 		error(`${location}: unsupported capture value ${typeOf(value)} (${engineType})`)
 	);

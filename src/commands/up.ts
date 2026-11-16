@@ -13,7 +13,7 @@ import { ADD_PARTS_WAIT_MS } from "../session/part-restarts.ts";
 import { isPartRunning } from "../session/part-stops.ts";
 import type { PartId, ServiceId, SessionStatus } from "../session/status.ts";
 import { isReady } from "../session/status.ts";
-import { STUDIO_PATH_FLAG } from "../studio/discover.ts";
+import { resolveStudioPath, STUDIO_PATH_FLAG } from "../studio/discover.ts";
 import type { SessionRequest, SupervisorMessage } from "../supervisor/channel.ts";
 import { failureError, parseMessage } from "../supervisor/channel.ts";
 import type { ForgeFiles } from "../supervisor/session-files.ts";
@@ -206,7 +206,7 @@ function wantedParts(context: CommandContext, { config, flags }: CommandInput): 
 		...(config.studio?.desktop === undefined ? {} : { desktop: config.studio.desktop }),
 		parts: hasStudio ? [...parts, "studio"] : parts,
 		...(typeof studioPath === "string"
-			? { studioPath: path.resolve(context.cwd, studioPath) }
+			? { studioPath: resolveStudioPath(context, studioPath) }
 			: {}),
 	};
 }

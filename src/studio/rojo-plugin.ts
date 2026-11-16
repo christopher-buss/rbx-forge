@@ -5,10 +5,11 @@ import path from "node:path";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
-import { runRojoAsync } from "../rojo/rojo.ts";
+import { isWsl } from "../process/wsl.ts";
+import { rojoInvocation, runRojoAsync } from "../rojo/rojo.ts";
 import type { RojoServerInfo } from "../seams/network.ts";
-import { studioPluginsFolder } from "./plugins-folder.ts";
 import patched from "./rojo-plugin/patched.json" with { type: "json" };
+import { installWslPluginAsync, PLUGIN_INSTALL_ARGS } from "./wsl-plugin-install.ts";
 
 /**
  * Whether forge can guarantee automatic sync and acknowledge its completion.
@@ -20,27 +21,30 @@ export interface PluginCapabilities {
 }
 
 /** Current patch version, shared with the readable source distribution. */
-export const VERSION = 4;
+export const VERSION = 5;
 /** Script bodies and provenance for the source distribution. */
 export const SCRIPTS: ReadonlyArray<{
 	hash: string;
 	name: string;
 	olderHash: string;
+	oldestHash: string;
 	previousHash: string;
 	source: string;
 }> = [
 	{
 		name: "App",
 		hash: "f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
-		olderHash: "6f2c0bc5ca581f2d0dd62da344fee033821a44ead7d55d800247f071f113bae9",
+		olderHash: "4000a9940ca1584d58cb9c748cec7084e818e2d5b17e99ebe11bd34584898c9f",
+		oldestHash: "6f2c0bc5ca581f2d0dd62da344fee033821a44ead7d55d800247f071f113bae9",
 		previousHash: "4000a9940ca1584d58cb9c748cec7084e818e2d5b17e99ebe11bd34584898c9f",
 		source: patched.App,
 	},
 	{
 		name: "ServeSession",
 		hash: "e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
-		olderHash: "0ae6058c41a198e5a5cee72918809e9f67733669732895e3fee208dd0f6e1318",
-		previousHash: "2ed6224bb7fc40c4daff5f4b06adf0c22e2b9e0314b5341a1d00e464a5cf2592",
+		olderHash: "2ed6224bb7fc40c4daff5f4b06adf0c22e2b9e0314b5341a1d00e464a5cf2592",
+		oldestHash: "0ae6058c41a198e5a5cee72918809e9f67733669732895e3fee208dd0f6e1318",
+		previousHash: "0c20c88433f3eed71733e932634a1eb65918f885d0d0e6a03046cb4f27652c54",
 		source: patched.ServeSession,
 	},
 ];
@@ -74,34 +78,45 @@ export async function prepareRojoPluginAsync(
 	server: Pick<RojoServerInfo, "protocolVersion" | "serverVersion">,
 	signal: AbortSignal,
 ): Promise<PluginCapabilities> {
-	const model = pluginPath(context);
+	const model = await pluginPathAsync(context);
 	if (model === undefined) {
 		return MANUAL;
 	}
 
 	if (!context.seams.fileSystem.existsSync(model)) {
-		await runRojoAsync(context, config, ["plugin", "install"]);
+		if (isWsl(context.seams.host.platform, context.env)) {
+			const reason = unverifiedInstaller(context, config, server.serverVersion);
+			if (reason !== undefined) {
+				return manual(context, reason);
+			}
+
+			return installWslPluginAsync(context, config, {
+				prepare: (staged) => prepareModel(context, staged, server, signal),
+				signal,
+				target: model,
+			});
+		}
+
+		await runRojoAsync(context, config, PLUGIN_INSTALL_ARGS);
 		signal.throwIfAborted();
 	}
 
-	const sources = readSources(context, model);
-	if (sources === undefined) {
-		return MANUAL;
-	}
-
-	const decision = decide(context, model, sources, server);
-	if (decision !== "patch") {
-		return decision;
-	}
-
-	signal.throwIfAborted();
-	writeSources(context, model);
-	return FORGE;
+	return prepareModel(context, model, server, signal);
 }
 
-function pluginPath(context: CommandContext): string | undefined {
-	const folder = studioPluginsFolder(context);
-	return folder === undefined ? undefined : path.join(folder, "RojoManagedPlugin.rbxm");
+function unverifiedInstaller(
+	context: CommandContext,
+	config: Pick<ResolvedConfig, "rojoAlias">,
+	version: string,
+): string | undefined {
+	if (version !== "7.7.1") {
+		return `Rojo ${version} plugin installation under WSL is not verified.`;
+	}
+
+	const invocation = rojoInvocation(context, config, PLUGIN_INSTALL_ARGS);
+	return [".com", ".exe"].includes(path.extname(invocation.file).toLowerCase())
+		? "The Windows Rojo installer is not verified with Linux staging paths."
+		: undefined;
 }
 
 function manual(context: CommandContext, reason: string): PluginCapabilities {
@@ -148,9 +163,16 @@ function recognizes(
 	{
 		hash,
 		olderHash,
+		oldestHash,
 		previousHash,
 		source: original,
-	}: { hash: string; olderHash: string; previousHash: string; source: string },
+	}: {
+		hash: string;
+		olderHash: string;
+		oldestHash: string;
+		previousHash: string;
+		source: string;
+	},
 	source: string,
 ): boolean {
 	const mark = MARK.exec(source);
@@ -163,6 +185,7 @@ function recognizes(
 	const legacyHashes = new Map([
 		[VERSION - 1, previousHash],
 		[VERSION - 2, olderHash],
+		[VERSION - 3, oldestHash],
 	]);
 	const legacyHash = legacyHashes.get(version) ?? hash;
 	const isKnownBody =
@@ -270,4 +293,30 @@ function writeSources(context: CommandContext, model: string): void {
 			{ cause: err, hint: "Check permissions on RojoManagedPlugin.rbxm and retry." },
 		);
 	}
+}
+
+function prepareModel(
+	context: CommandContext,
+	model: string,
+	server: Pick<RojoServerInfo, "protocolVersion" | "serverVersion">,
+	signal: AbortSignal,
+): PluginCapabilities {
+	const sources = readSources(context, model);
+	if (sources === undefined) {
+		return MANUAL;
+	}
+
+	const decision = decide(context, model, sources, server);
+	if (decision !== "patch") {
+		return decision;
+	}
+
+	signal.throwIfAborted();
+	writeSources(context, model);
+	return FORGE;
+}
+
+async function pluginPathAsync(context: CommandContext): Promise<string | undefined> {
+	const folder = await context.seams.studioHost.pluginsFolderAsync(context.env);
+	return folder === undefined ? undefined : path.join(folder, "RojoManagedPlugin.rbxm");
 }

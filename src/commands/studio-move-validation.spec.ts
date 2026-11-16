@@ -65,6 +65,17 @@ describe("move command validation", () => {
 		expect(reporter.events).toStrictEqual([]);
 	});
 
+	it("shows Windows Studio from a Linux host", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { context } = await movingSessionAsync("linux");
+		context.seams.studioHost.platformAsync = async () => "win32";
+
+		await expect(runShowAsync(context, { config: {}, flags: {} })).resolves.toMatchObject({
+			data: MOVED,
+		});
+	});
+
 	it("uses the normal IPC response deadline", async ({ expect }) => {
 		expect.assertions(1);
 

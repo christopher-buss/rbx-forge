@@ -4,7 +4,7 @@ import { describe, it } from "vitest";
 import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import { createMemoryFileSystem, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
-import { createStudioLauncher } from "./launcher.ts";
+import { createStudioLauncher } from "../seams/addon-studio/launcher.ts";
 
 function hiddenSessionLauncher() {
 	const memory = createMemoryFileSystem({ "RobloxStudioBeta.exe": "" });

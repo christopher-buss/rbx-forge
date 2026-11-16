@@ -1,39 +1,23 @@
-import assert from "node:assert/strict";
-
 import type { AutoRecoveryMode } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
-import type { PinnedProcess } from "../native/addon.ts";
+import { isHelperChannelLoss } from "../native/helper-client.ts";
 import { startTimeToEpochMs } from "../native/start-time.ts";
-import type { Host } from "../seams/host.ts";
 import type { Environment, Seams } from "../seams/seams.ts";
+import type { PinnedStudio } from "../seams/studio-host.ts";
 import type { RecoveryReport } from "./auto-recovery.ts";
-import { autoSaveDirectories, handleAutoRecoveryAsync } from "./auto-recovery.ts";
+import { handleAutoRecoveryAsync } from "./auto-recovery.ts";
 import { studioCloseMs } from "./close-timeout.ts";
-import type { LocatedStudio, StudioProcess } from "./launcher.ts";
-import { studioProcess } from "./launcher.ts";
-import type { StudioLock } from "./lock-file.ts";
-import {
-	isLockHost,
-	isMissingFile,
-	isStudioExecutable,
-	parseStudioLock,
-	readLockFile,
-	studioLockPath,
-} from "./lock-file.ts";
+import type { StudioProcess } from "./launcher.ts";
+import { readLockFile, studioLockPath } from "./lock-file.ts";
+import { checkOwnAsync, checkStudioAsync, readStudioLockAsync } from "./verify-studio.ts";
+
+export { findPlaceStudioAsync, STUDIO_START_SLACK_MS } from "./verify-studio.ts";
 
 /** How often forge looks at a closing Studio. */
 export const STUDIO_CLOSE_POLL_MS = 50;
 
 /** How long forge waits for an ended Studio to exit. */
 export const STUDIO_EXIT_TIMEOUT_MS = 10_000;
-
-/**
- * How much later than the lock file's modification time Studio's start time
- * may be. Studio starts before it writes the lock file, but file systems
- * round modification times (FAT to 2 s) and Linux start times are 10 ms
- * ticks since a boot time that drifts with the wall clock.
- */
-export const STUDIO_START_SLACK_MS = 2000;
 
 /**
  * How Studio went:
@@ -91,19 +75,7 @@ export interface RecoveryOptions {
 }
 
 /** The seams that find and close Studio. */
-export type StudioSeams = Pick<Seams, "clock" | "fileSystem" | "host" | "native">;
-
-const NOTHING_KILLED = "Nothing was killed.";
-const STALE_HINT =
-	"The lock file is stale. Delete it if Roblox Studio does not have the place open.";
-
-/** The Studio process a lock file names, once verified. */
-type StudioCheck =
-	| { pinned: PinnedProcess; status: "studio" }
-	| { status: "closed" }
-	| { status: "exited" };
-
-const EXITED: StudioCheck = { status: "exited" };
+export type StudioSeams = Pick<Seams, "clock" | "fileSystem" | "host" | "studioHost">;
 
 /** How ending a verified Studio went. */
 interface Ended {
@@ -148,16 +120,15 @@ export async function closeStudioAsync(
 	recovery: RecoveryOptions,
 ): Promise<StudioStop> {
 	const lockPath = studioLockPath(target.place);
-	let pinned =
-		target.process === undefined ? undefined : checkOwn(seams, target.process, lockPath);
+	let pinned = await checkOwnAsync(seams, target.process, lockPath);
 	if (pinned === undefined) {
 		const text = readLockFile(seams.fileSystem, lockPath);
 		if (text === undefined) {
 			return { status: "not_open" };
 		}
 
-		const { pid } = readStudioLock(seams, text, lockPath);
-		const check = checkStudio(seams, pid, lockPath);
+		const { pid } = await readStudioLockAsync(seams, text, lockPath);
+		const check = await checkStudioAsync(seams, pid, lockPath);
 		if (check.status !== "studio") {
 			return { pid, status: check.status === "exited" ? "exited" : "closed_first" };
 		}
@@ -183,95 +154,28 @@ export async function closeStudioAsync(
 }
 
 /**
- * The Studio that has a place open, verified as {@link closeStudioAsync}
- * verifies the one its lock file names: a lock file this computer wrote,
- * naming the Studio executable, which started before the lock file.
- *
- * @param seams - The clock, file system, OS, and native addon.
- * @param place - The absolute path of the place file.
- * @returns The Studio; `undefined` when the place has no lock file, or one
- *   that names no verified Studio.
- * @throws {ForgeError} `native_missing`.
- */
-export function findPlaceStudio(seams: StudioSeams, place: string): LocatedStudio | undefined {
-	const lockPath = studioLockPath(place);
-	const text = readLockFile(seams.fileSystem, lockPath);
-	if (text === undefined) {
-		return undefined;
-	}
-
-	try {
-		const { pid } = readStudioLock(seams, text, lockPath);
-		const check = checkStudio(seams, pid, lockPath);
-		return check.status === "studio" ? studioProcess(check.pinned) : undefined;
-	} catch (err) {
-		if (err instanceof ForgeError && err.code === "identity_mismatch") {
-			return undefined;
-		}
-
-		throw err;
-	}
-}
-
-/**
- * Check that the lock file was written on this computer: a PID from another
- * computer names an unrelated process here.
- *
- * @param lockHost - The computer the lock file names.
- * @param hostname - This computer's name.
- * @param lockPath - The lock file, for messages.
- * @throws {ForgeError} `identity_mismatch` when it names no computer or
- *   another one.
- */
-function checkHost(lockHost: string | undefined, hostname: string, lockPath: string): void {
-	if (lockHost === undefined) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} names no computer, so forge cannot tell that it is this one (${hostname}). ${NOTHING_KILLED}`,
-		);
-	}
-
-	if (!isLockHost(lockHost, hostname)) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} was written on ${lockHost}, not on this computer (${hostname}). ${NOTHING_KILLED}`,
-			{ hint: "Stop Roblox Studio on the computer that has the place open." },
-		);
-	}
-}
-
-/**
- * Parse a lock file and check that this computer wrote it.
- *
- * @param seams - This computer.
- * @param text - The lock file's content.
- * @param lockPath - The lock file, for messages.
- * @returns The PID and computer the lock file names.
- * @throws {ForgeError} `identity_mismatch` when it names no PID, or no
- *   computer or another one.
- */
-function readStudioLock(seams: StudioSeams, text: string, lockPath: string): StudioLock {
-	const lock = parseStudioLock(text);
-	if (lock === undefined) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} names no process. ${NOTHING_KILLED}`,
-		);
-	}
-
-	checkHost(lock.host, seams.host.hostname, lockPath);
-	return lock;
-}
-
-/**
  * Kill a verified Studio and wait for it to exit.
  *
  * @param pinned - The pinned Studio process.
- * @throws {ForgeError} `process_failed` when it does not exit in time.
+ * @rejects {ForgeError} `process_failed` when it does not exit in time or
+ *   the kill result is lost without verified exit.
  */
-function killStudio(pinned: PinnedProcess): void {
-	pinned.kill();
-	if (!pinned.waitForExit(STUDIO_EXIT_TIMEOUT_MS)) {
+async function killStudioAsync(pinned: PinnedStudio): Promise<void> {
+	try {
+		await pinned.killAsync();
+	} catch (err) {
+		if (!isHelperChannelLoss(err)) {
+			throw err;
+		}
+
+		throw new ForgeError(
+			"process_failed",
+			"The Studio kill result is unknown; Studio exit is unverified.",
+			{ cause: err },
+		);
+	}
+
+	if (!(await pinned.waitForExitAsync(STUDIO_EXIT_TIMEOUT_MS))) {
 		throw new ForgeError(
 			"process_failed",
 			`Roblox Studio (PID ${pinned.pid}) did not exit within ${STUDIO_EXIT_TIMEOUT_MS} ms.`,
@@ -279,21 +183,49 @@ function killStudio(pinned: PinnedProcess): void {
 	}
 }
 
-function killed(pinned: PinnedProcess, end: StudioEnd): Ended {
-	killStudio(pinned);
-	return { end, forced: end !== "lock_released", killed: true };
+async function killedAsync(pinned: PinnedStudio, end: StudioEnd): Promise<Ended> {
+	return killStudioAsync(pinned).then(() => {
+		return { end, forced: end !== "lock_released", killed: true };
+	});
 }
 
 /**
  * Ask Studio to close. An OS that refuses the request leaves the kill.
  *
  * @param pinned - The pinned Studio process.
+ * @param helper - Whether channel failures must preserve an uncertain result.
  * @returns Whether a close request went out.
+ * @rejects An uncertain close without verified exit.
  */
-function askToClose(pinned: PinnedProcess): boolean {
+async function askToCloseAsync(pinned: PinnedStudio, helper: boolean): Promise<boolean> {
 	try {
-		return pinned.requestClose();
-	} catch {
+		return await pinned.requestCloseAsync();
+	} catch (err) {
+		if (isHelperChannelLoss(err)) {
+			let hasExited = false;
+			try {
+				hasExited = await pinned.waitForExitAsync(STUDIO_EXIT_TIMEOUT_MS);
+			} catch {
+				// Missing fresh control proves no exit.
+			}
+
+			if (hasExited) {
+				// Stryker disable next-line BooleanLiteral: exit is already
+				// proved.
+				return true;
+			}
+
+			throw new ForgeError(
+				"process_failed",
+				"The Studio close result is unknown; Studio was not killed.",
+				{ cause: err },
+			);
+		}
+
+		if (helper) {
+			throw err;
+		}
+
 		return false;
 	}
 }
@@ -305,9 +237,9 @@ function askToClose(pinned: PinnedProcess): boolean {
  * @param pinned - The pinned Studio process.
  * @returns What the addon reports.
  */
-function isBlocked(pinned: PinnedProcess): boolean {
+async function isBlockedAsync(pinned: PinnedStudio): Promise<boolean> {
 	try {
-		return pinned.isBlocked();
+		return await pinned.isBlockedAsync();
 	} catch {
 		return false;
 	}
@@ -328,32 +260,32 @@ function isBlocked(pinned: PinnedProcess): boolean {
  * @rejects {ForgeError} `process_failed` when it does not exit in time.
  */
 async function endStudioAsync(
-	{ clock, fileSystem, host }: StudioSeams,
-	pinned: PinnedProcess,
+	{ clock, fileSystem, studioHost }: StudioSeams,
+	pinned: PinnedStudio,
 	{ lockPath, wasLocked }: { lockPath: string; wasLocked: boolean },
 ): Promise<Ended> {
-	if (!askToClose(pinned)) {
-		return pinned.isAlive()
-			? killed(pinned, "no_window")
+	if (!(await askToCloseAsync(pinned, studioHost.onControl !== undefined))) {
+		return (await pinned.isAliveAsync())
+			? killedAsync(pinned, "no_window")
 			: { end: "exited", forced: false, killed: false };
 	}
 
-	const deadline = clock.now() + studioCloseMs(host.platform);
+	const deadline = clock.now() + studioCloseMs(await studioHost.platformAsync());
 	for (;;) {
-		if (!pinned.isAlive()) {
+		if (!(await pinned.isAliveAsync())) {
 			return { end: "exited", forced: false, killed: false };
 		}
 
 		if (wasLocked && !fileSystem.existsSync(lockPath)) {
-			return killed(pinned, "lock_released");
+			return killedAsync(pinned, "lock_released");
 		}
 
-		if (isBlocked(pinned)) {
-			return killed(pinned, "dialog");
+		if (await isBlockedAsync(pinned)) {
+			return killedAsync(pinned, "dialog");
 		}
 
 		if (clock.now() >= deadline) {
-			return killed(pinned, "timeout");
+			return killedAsync(pinned, "timeout");
 		}
 
 		await clock.sleep(STUDIO_CLOSE_POLL_MS);
@@ -371,183 +303,27 @@ async function endStudioAsync(
  */
 async function recoverAsync(
 	seams: StudioSeams,
-	pinned: PinnedProcess,
+	pinned: PinnedStudio,
 	place: string,
 	{ env, mode, recoveryDirectory }: RecoveryOptions,
 ): Promise<RecoveryReport> {
 	const { host } = seams;
-	const startedMs = startTimeToEpochMs(pinned.startTime, host.platform, host.bootTimeMs());
+	const platform = await seams.studioHost.platformAsync();
+	const startedMs = startTimeToEpochMs(pinned.startTime, platform, host.bootTimeMs());
 	if (startedMs === undefined) {
 		return {
 			deleted: [],
 			mode,
 			moved: [],
-			warnings: [`forge cannot read process start times on ${host.platform}.`],
+			warnings: [`forge cannot read process start times on ${platform}.`],
 		};
 	}
 
 	return handleAutoRecoveryAsync(seams, {
-		directories: autoSaveDirectories(env, host.platform),
+		directories: await seams.studioHost.autoSaveDirectoriesAsync(env),
 		mode,
 		place,
 		recoveryDirectory,
 		startedMs,
 	});
-}
-
-/**
- * Run one addon query about a process, turning an OS refusal into
- * `identity_mismatch`: a process forge cannot check is never killed.
- *
- * @template T - What the query returns.
- * @param pid - The PID, for the message.
- * @param query - The addon call.
- * @returns What the call returned.
- * @throws {ForgeError} `identity_mismatch` when the call throws.
- */
-function queryProcess<T>(pid: number, query: () => T): T {
-	try {
-		return query();
-	} catch (err) {
-		// The addon throws only `Error`s (`reaper/src/lib.rs`).
-		assert(err instanceof Error);
-		throw new ForgeError(
-			"identity_mismatch",
-			`Could not verify PID ${pid}: ${err.message} ${NOTHING_KILLED}`,
-			{ cause: err },
-		);
-	}
-}
-
-/**
- * Pin the Studio forge started, and check the lock file against it.
- *
- * @param seams - The addon, the OS, and the file system.
- * @param process - Its PID and start time, as recorded at the start.
- * @param lockPath - The place's lock file.
- * @returns The pinned Studio; `undefined` when it is gone (its PID has no
- *   process, or one that started at another time).
- * @throws {ForgeError} `identity_mismatch` when the lock file names another
- *   process or computer, or the OS refuses the check.
- */
-function checkOwn(
-	seams: StudioSeams,
-	{ pid, startTime }: StudioProcess,
-	lockPath: string,
-): PinnedProcess | undefined {
-	const native = seams.native();
-	const pinned = queryProcess(pid, () => native.pinProcess(pid));
-	if (pinned?.startTime !== startTime) {
-		return undefined;
-	}
-
-	const text = readLockFile(seams.fileSystem, lockPath);
-	const lock = text === undefined ? undefined : readStudioLock(seams, text, lockPath);
-	if (lock !== undefined && lock.pid !== pid) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} names PID ${lock.pid}, not the Roblox Studio forge started (PID ${pid}). ${NOTHING_KILLED}`,
-			{ hint: "Close the other Roblox Studio that has the place open by hand." },
-		);
-	}
-
-	return pinned;
-}
-
-/**
- * Check that Studio started before its lock file was written. A Studio that
- * started later reused the PID of the Studio that wrote it.
- *
- * @param pinned - The pinned Studio process.
- * @param host - The OS, for the start time's unit.
- * @param lock - The lock file and its modification time.
- * @param lock.lockPath - The lock file, for messages.
- * @param lock.lockWrittenMs - When it was last written, in milliseconds since
- *   the Unix epoch.
- * @throws {ForgeError} `identity_mismatch` when it started later, or forge
- *   cannot read start times on this OS.
- */
-function checkStartTime(
-	pinned: PinnedProcess,
-	host: Host,
-	{ lockPath, lockWrittenMs }: { lockPath: string; lockWrittenMs: number },
-): void {
-	const startedMs = startTimeToEpochMs(pinned.startTime, host.platform, host.bootTimeMs());
-	if (startedMs === undefined) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`Could not verify PID ${pinned.pid}: forge cannot read process start times on ${host.platform}. ${NOTHING_KILLED}`,
-		);
-	}
-
-	if (startedMs > lockWrittenMs + STUDIO_START_SLACK_MS) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} names PID ${pinned.pid}, but that Roblox Studio started after the lock file was written, so it reused the PID. ${NOTHING_KILLED}`,
-			{ hint: STALE_HINT },
-		);
-	}
-}
-
-/**
- * When a lock file was last written.
- *
- * @param seams - The file system.
- * @param lockPath - The lock file.
- * @returns Its modification time, in milliseconds since the Unix epoch;
- *   `undefined` once Studio deleted it.
- */
-function lockWrittenAt(seams: StudioSeams, lockPath: string): number | undefined {
-	try {
-		return seams.fileSystem.statSync(lockPath).mtimeMs;
-	} catch (err) {
-		if (isMissingFile(err)) {
-			return undefined;
-		}
-
-		throw err;
-	}
-}
-
-/**
- * Pin the process a lock file names and check that it is the Studio that
- * wrote the lock file.
- *
- * @param seams - The addon, the OS, and the file system.
- * @param pid - The PID from the lock file.
- * @param lockPath - The lock file, for messages.
- * @returns The pinned Studio; `exited` when no process has the PID;
- *   `closed` when Studio deleted the lock file meanwhile.
- * @throws {ForgeError} `identity_mismatch` when the process is not Studio,
- *   started after the lock file was written, or the OS refuses the check.
- */
-function checkStudio(seams: StudioSeams, pid: number, lockPath: string): StudioCheck {
-	// Load the addon outside `queryProcess`: `native_missing` must not become
-	// `identity_mismatch`.
-	const native = seams.native();
-	const pinned = queryProcess(pid, () => native.pinProcess(pid));
-	if (pinned === null) {
-		return EXITED;
-	}
-
-	const executable = queryProcess(pid, () => pinned.executablePath());
-	if (executable === null) {
-		return EXITED;
-	}
-
-	if (!isStudioExecutable(executable)) {
-		throw new ForgeError(
-			"identity_mismatch",
-			`${lockPath} names PID ${pid}, but that process is ${executable}, not Roblox Studio. ${NOTHING_KILLED}`,
-			{ hint: STALE_HINT },
-		);
-	}
-
-	const lockWrittenMs = lockWrittenAt(seams, lockPath);
-	if (lockWrittenMs === undefined) {
-		return { status: "closed" };
-	}
-
-	checkStartTime(pinned, seams.host, { lockPath, lockWrittenMs });
-	return { pinned, status: "studio" };
 }

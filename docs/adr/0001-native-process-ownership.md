@@ -7,7 +7,8 @@ status: accepted
 ## Context
 
 All process ownership is in one Rust crate (`reaper/`): the `forge-reaper`
-binary and the `@rbx-forge/native` addon. Four questions shape its design:
+binary, the `forge-windows-helper` binary, and the `@rbx-forge/native` addon.
+Four questions shape its design:
 
 1. Does job breakaway work for a detached `up` in Windows Terminal, the VS Code
    terminal, and an agent shell?
@@ -236,23 +237,39 @@ Window states after `WM_CLOSE` to the main window:
   `scripts/release/release.ts`:
   1. For each `package.json#napi` target it stages
      `@rbx-forge/native-<platform>`: the `.node` file, `forge-reaper` (`.exe` on
-     Windows), and a generated `package.json` that lists both in `files`. It
-     packs each package and sets the reaper entry to mode 0755 in the tarball.
-     Artifact downloads and a pack on Windows both drop the exec bit, so the
-     tarball, not the file system, carries the mode.
+     Windows), and a generated `package.json` that lists them in `files`. Each
+     Linux package also stages `forge-windows-helper.exe` from the matching
+     Windows build (x64 or arm64, for both glibc and musl). It packs each
+     package and sets the reaper and Linux helper entries to mode 0755 in the
+     tarball. Artifact downloads and a pack on Windows both drop the exec bit,
+     so the tarball, not the file system, carries the mode.
   2. It publishes each platform package, then `rbx-forge` with them as
      `optionalDependencies`. Those are written only for the publish, so the
      lockfile never names a version that is not on npm. `pnpm pack` writes each
      tarball (it resolves `catalog:` versions) and `npm publish` sends it with
      its README. `packageName` `@rbx-forge/native` is only the name prefix;
      there is no separate umbrella package.
+- **Windows helper.** `forge-windows-helper` compiles the plain Rust Windows
+  Studio modules without napi. The addon retains thin wrappers over the same
+  detached launcher and pinned-process primitives. Each WSL forge process owns
+  one helper and keeps Studio pins there; Windows creation times remain decimal
+  FILETIME strings. Helper EOF drops handles and exits without closing Studio.
+  Studio launches use the helper's Windows environment plus named overrides, and
+  the same detached launch policy as the addon. Each Linux package carries the
+  matching Windows architecture's helper (ADR 0009). A helper directly inside a
+  non-killing accounting job joins its own inner breakaway job before launch,
+  matching the Windows Node launch context. It preserves host limits and never
+  adapts a kill-on-close job that forbids breakaway. Studio still launches once
+  with explicit breakaway.
 - **Loader.** A TypeScript module in the native-bindings area (no napi generated
   JS; the build already uses `--no-js`) picks the package from
   `process.platform`, `process.arch`, and glibc or musl. It loads the addon with
-  `createRequire`, and resolves the reaper path from the package's
-  `package.json`. If the package is missing or the reaper is not executable, it
-  returns the typed error `native_missing`. It does not `chmod` at run time,
-  because pnpm hard-links package files from its shared store.
+  `createRequire`, and resolves the reaper and Windows helper paths from the
+  package's `package.json`. If the package is missing or the reaper is not
+  executable, it returns `reaper_unavailable`; a missing or incompatible Windows
+  helper returns `windows_helper_unavailable`. Broken WSL launch or handshake
+  returns `wsl_interop_unavailable`. It does not `chmod` at run time, because
+  pnpm hard-links package files from its shared store.
 - **Development and tests.** The loader takes an explicit directory through its
   seam. Tests and local runs point it at `reaper/target` output.
 - **Targets.** The eight targets in `package.json#napi` stay. CI loads the addon

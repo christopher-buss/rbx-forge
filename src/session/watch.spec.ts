@@ -158,7 +158,7 @@ describe(waitForStudioCloseAsync, () => {
 		let isRunning = true;
 		const watch = watching({ "game.rbxl.lock": "7\nRobloxStudioBeta\nhost\n" });
 		const onOpen = vi.fn<() => void>();
-		const lock = { ...STUDIO_7, isAlive: () => isRunning };
+		const lock = { ...STUDIO_7, isAlive: async () => isRunning };
 		const closed = waitForStudioCloseAsync(watch.options, lock, onOpen);
 		await watch.tickAsync();
 		isRunning = false;
@@ -176,7 +176,7 @@ describe(waitForStudioCloseAsync, () => {
 		let isRunning = true;
 		const watch = watching();
 		const onOpen = vi.fn<() => void>();
-		const lock = { ...STUDIO_7, isAlive: () => isRunning };
+		const lock = { ...STUDIO_7, isAlive: async () => isRunning };
 		const closed = waitForStudioCloseAsync(watch.options, lock, onOpen);
 		await watch.tickAsync();
 		isRunning = false;

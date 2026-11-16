@@ -1,7 +1,9 @@
+import { Buffer } from "node:buffer";
 import path from "node:path";
 import { assert, describe, it, vi } from "vitest";
 
 import { createFakeCapture } from "../../test/helpers/fake-capture.ts";
+import { createHelperProbe } from "../../test/helpers/helper-probe.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import {
 	createCommandContext,
@@ -73,6 +75,70 @@ function snapshotSave() {
 }
 
 describe("snapshot capture saves", () => {
+	it.for([
+		{ code: "wsl_network_unreachable", launch: undefined, message: "refused", mode: "failed" },
+		{
+			code: "wsl_network_unreachable",
+			launch: undefined,
+			message: "Windows reached a different capture listener.",
+			mode: "wrong",
+		},
+		{
+			code: "windows_helper_unavailable",
+			launch: "ENOENT",
+			message: "spawn ENOENT",
+			mode: "missing",
+		},
+	])(
+		"rejects $mode Windows probe on a snapshot save bind",
+		async ({ code, launch, message, mode }, { expect }) => {
+			expect.assertions(3);
+
+			const save = snapshotSave();
+			const replies = new Map([
+				[
+					"failed",
+					async (): Promise<Uint8Array> => {
+						throw new Error("refused");
+					},
+				],
+				["missing", async () => Buffer.from("unused")],
+				["wrong", async () => Buffer.from("wrong")],
+			]);
+			const reply = replies.get(mode);
+			assert(reply !== undefined);
+			save.context.seams.studioHost.probeHttpAsync = createHelperProbe(reply, launch);
+
+			await expect(
+				runSaveAsync(save.context, { config: {}, flags: { place: PLACE } }),
+			).rejects.toMatchObject({ cause: { message }, code });
+			expect(save.memory.files()["snapshot.rbxl"]).toBe("original");
+			expect(save.close).toHaveBeenCalledOnce();
+		},
+	);
+
+	it("verifies Windows reachability again for each snapshot save", async ({ expect }) => {
+		expect.assertions(2);
+
+		const save = snapshotSave();
+		save.context.seams.studioHost.probeHttpAsync = async (_port, route) => {
+			assert(route.includes("/probe/base?"));
+			return Buffer.from("base");
+		};
+
+		await runSaveAsync(save.context, { config: {}, flags: { place: PLACE } });
+
+		expect(save.memory.files()["snapshot.rbxl"]).toBe("captured snapshot");
+
+		save.context.seams.studioHost.probeHttpAsync = createHelperProbe(async () => {
+			throw new Error("forwarding stopped");
+		});
+
+		await expect(
+			runSaveAsync(save.context, { config: {}, flags: { place: PLACE } }),
+		).rejects.toMatchObject({ code: "wsl_network_unreachable" });
+	});
+
 	it("refuses a snapshot whose Studio is no longer open", async ({ expect }) => {
 		expect.assertions(1);
 

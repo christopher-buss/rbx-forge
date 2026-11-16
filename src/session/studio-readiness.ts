@@ -40,7 +40,7 @@ export function createStudioReadiness(
 	};
 
 	const signal = AbortSignal.any([scope.signal, cancel.signal]);
-	const hiding = hideWindows(setup.context, opened, signal);
+	const hiding = hideWindowsAsync(setup.context, opened, signal);
 
 	function markOpen(): void {
 		recordStudioOpen(setup, opened);
@@ -68,12 +68,12 @@ export function createStudioReadiness(
 }
 
 async function markOpenOnceHiddenAsync(
-	hiding: Promise<void>,
+	hiding: Promise<boolean>,
 	signal: AbortSignal,
 	markOpen: () => void,
 ): Promise<void> {
-	await hiding;
-	if (!signal.aborted) {
+	const didWaitForHiding = await hiding;
+	if (!didWaitForHiding || !signal.aborted) {
 		markOpen();
 	}
 }
@@ -93,18 +93,12 @@ function openAfterLock(
 		open,
 		signal,
 	}: {
-		hiding: Promise<void> | undefined;
+		hiding: Promise<boolean>;
 		markOpen: () => void;
 		open: () => void;
 		signal: AbortSignal;
 	},
 ): void {
-	if (hiding === undefined) {
-		markOpen();
-		open();
-		return;
-	}
-
 	scope.track(markOpenOnceHiddenAsync(hiding, signal, markOpen).finally(open));
 }
 
@@ -120,11 +114,11 @@ async function waitForHiddenWindowsAsync(
 	studio: StudioProcess,
 	signal: AbortSignal,
 ): Promise<void> {
-	const pinned = context.seams.native().pinProcess(studio.pid);
+	const pinned = await context.seams.studioHost.pinProcessAsync(studio.pid);
 	// Only a Studio on the user's desktop has its windows hidden by the watcher.
 	if (
 		pinned?.startTime !== studio.startTime ||
-		pinned.desktop() !== "user" ||
+		(await pinned.desktopAsync()) !== "user" ||
 		(await waitForWindowHidingAsync(pinned, context.seams.clock, signal))
 	) {
 		return;
@@ -146,16 +140,21 @@ async function waitForHiddenWindowsAsync(
  * @param signal - Ends the wait.
  * @returns The wait; `undefined` when `open` waits for no watcher.
  */
-function hideWindows(
+async function hideWindowsAsync(
 	context: CommandContext,
 	{ origin, studio }: OpenedStudio,
 	signal: AbortSignal,
-): Promise<void> | undefined {
-	return origin === "forge" &&
-		context.seams.host.platform === "win32" &&
-		studio?.desktop === "hidden"
-		? waitForHiddenWindowsAsync(context, studio, signal)
-		: undefined;
+): Promise<boolean> {
+	if (
+		origin !== "forge" ||
+		studio?.desktop !== "hidden" ||
+		(await context.seams.studioHost.platformAsync()) !== "win32"
+	) {
+		return false;
+	}
+
+	await waitForHiddenWindowsAsync(context, studio, signal);
+	return true;
 }
 
 /**

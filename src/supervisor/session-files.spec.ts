@@ -1,7 +1,7 @@
 import path from "node:path";
 import { describe, it } from "vitest";
 
-import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
+import { createMemoryFileSystem, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
 import type { IdentityRecord } from "./session-files.ts";
 import {
 	createSession,
@@ -139,7 +139,7 @@ describe(removeSession, () => {
 			".forge/sessions/s-1/supervisor.id": "",
 			".forge/sessions/s-2/supervisor.id": "",
 		});
-		removeSession(memory.fileSystem, FORGE, "s-1");
+		removeSession(memory.fileSystem, FORGE, "s-1", createTestSeams().host);
 
 		expect(memory.files()).toStrictEqual({ ".forge/sessions/s-2/supervisor.id": "" });
 	});
@@ -151,7 +151,7 @@ describe(removeSession, () => {
 			".forge/current": "s-2\n",
 			".forge/sessions/s-1/supervisor.id": "",
 		});
-		removeSession(memory.fileSystem, FORGE, "s-1");
+		removeSession(memory.fileSystem, FORGE, "s-1", createTestSeams().host);
 
 		expect(memory.files()).toStrictEqual({
 			".forge/current": "s-2\n",
@@ -163,7 +163,7 @@ describe(removeSession, () => {
 		expect.assertions(1);
 
 		const memory = createMemoryFileSystem();
-		removeSession(memory.fileSystem, FORGE, "s-1");
+		removeSession(memory.fileSystem, FORGE, "s-1", createTestSeams().host);
 
 		expect(memory.files()).toStrictEqual({});
 	});

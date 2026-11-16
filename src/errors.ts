@@ -64,11 +64,15 @@ export type ForgeErrorCode =
 	| "studio_busy"
 	| "studio_found"
 	| "studio_launch_failed"
+	| "studio_launch_unknown"
 	| "studio_not_open"
 	| "studio_owned"
 	| "supervisor_unresponsive"
 	| "syncback_unsupported"
-	| "usage";
+	| "usage"
+	| "windows_helper_unavailable"
+	| "wsl_interop_unavailable"
+	| "wsl_network_unreachable";
 
 /** What an error code means and the exit code it maps to. */
 export interface ErrorCodeInfo {
@@ -227,6 +231,10 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		exitCode: EXIT_FAILURE,
 		text: "The platform launcher could not open the place in Roblox Studio.",
 	},
+	studio_launch_unknown: {
+		exitCode: EXIT_FAILURE,
+		text: "The Studio launch reply was lost; check Studio before trying again.",
+	},
 	studio_not_open: { exitCode: EXIT_NOT_RUNNING, text: "No Studio has the target place open." },
 	studio_owned: {
 		exitCode: EXIT_FAILURE,
@@ -241,6 +249,18 @@ export const ERROR_CODES: Readonly<Record<ForgeErrorCode, ErrorCodeInfo>> = {
 		text: "The Rojo command has no syncback support.",
 	},
 	usage: { exitCode: EXIT_USAGE, text: "The command line could not be read." },
+	windows_helper_unavailable: {
+		exitCode: EXIT_FAILURE,
+		text: "The Windows helper is missing, cannot run, or does not match this install.",
+	},
+	wsl_interop_unavailable: {
+		exitCode: EXIT_FAILURE,
+		text: "WSL could not launch and establish a channel to the Windows helper.",
+	},
+	wsl_network_unreachable: {
+		exitCode: EXIT_FAILURE,
+		text: "Windows cannot reach the WSL session on IPv4 loopback.",
+	},
 };
 
 /** Options that {@link ForgeError} takes beyond its code and message. */

@@ -3,9 +3,11 @@ import type { Stats } from "node:fs";
 import type { CaptureWarning } from "../capture/protocol.ts";
 import type { SaveMethod } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
-import type { PinnedProcess, SaveOutcome } from "../native/addon.ts";
+import type { SaveOutcome } from "../native/addon.ts";
+import { isHelperChannelLoss } from "../native/helper-client.ts";
+import type { PinnedStudio } from "../seams/studio-host.ts";
 import type { StudioSeams, StudioTarget } from "./close-studio.ts";
-import { findPlaceStudio } from "./close-studio.ts";
+import { findPlaceStudioAsync } from "./close-studio.ts";
 import { dismissLightingDialogAsync } from "./lighting-dialog.ts";
 
 export interface StudioSave {
@@ -37,6 +39,7 @@ export const PRIME_LIMIT_MS = 5000;
  * @returns The saved file metadata and Studio identity.
  * @rejects A stable Studio or save error.
  */
+// eslint-disable-next-line flawless/max-lines-per-function -- Keeps the original save proof across transport loss.
 export async function saveStudioAsync(
 	seams: StudioSeams,
 	target: StudioTarget,
@@ -44,15 +47,36 @@ export async function saveStudioAsync(
 	signal?: AbortSignal,
 ): Promise<StudioSave> {
 	const started = seams.clock.now();
-	const pinned = pinSaveStudio(seams, target);
+	const pinned = await pinSaveStudioAsync(seams, target);
 
 	const before = writableMtime(seams, target.place);
 
 	try {
-		await requestStudioSaveAsync(seams, pinned, target.place, {
-			deadline: started + timeoutMs,
-			signal,
-		});
+		try {
+			await requestStudioSaveAsync(seams, pinned, target.place, {
+				deadline: started + timeoutMs,
+				signal,
+			});
+		} catch (err) {
+			if (!isHelperChannelLoss(err)) {
+				throw err;
+			}
+
+			try {
+				return await waitForSaveAsync(seams, pinned, target, {
+					before,
+					signal,
+					started,
+					timeoutMs,
+				});
+			} catch {
+				throw new ForgeError(
+					"save_failed",
+					"The Studio save result is unknown. Check the place before saving again.",
+					{ cause: err, details: { place: target.place, reason: "unknown" } },
+				);
+			}
+		}
 
 		return await waitForSaveAsync(seams, pinned, target, {
 			before,
@@ -76,18 +100,19 @@ function saveFailure(
 	});
 }
 
-function restoreFocus(
+async function restoreFocusAsync(
 	seams: StudioSeams,
-	pinned: PinnedProcess,
+	pinned: PinnedStudio,
 	{ front, wasHidden }: { front: null | number; wasHidden: boolean },
-): void {
+): Promise<void> {
 	if (wasHidden) {
-		pinned.setAppHidden(true);
+		await pinned.setAppHiddenAsync(true);
 	}
 
 	// Activating Studio itself would unhide it again.
 	if (front !== null && front !== pinned.pid) {
-		seams.native().pinProcess(front)?.activateApp();
+		const previous = await seams.studioHost.pinProcessAsync(front);
+		await previous?.activateAppAsync();
 	}
 }
 
@@ -103,19 +128,18 @@ function restoreFocus(
  */
 async function primeStudioAsync(
 	seams: StudioSeams,
-	pinned: PinnedProcess,
+	pinned: PinnedStudio,
 	place: string,
 	{ deadline, signal }: { deadline: number; signal: AbortSignal | undefined },
 ): Promise<void> {
-	const native = seams.native();
-	const front = native.frontmostApplication();
-	const wasHidden = pinned.appHidden() === true;
+	const front = await seams.studioHost.frontmostApplicationAsync();
+	const wasHidden = (await pinned.appHiddenAsync()) === true;
 	const primeDeadline = Math.min(deadline, seams.clock.now() + PRIME_LIMIT_MS);
 	try {
 		for (;;) {
 			// The keep-hidden watcher may hide Studio before it is active.
-			if (pinned.appActive() !== true) {
-				pinned.activateApp();
+			if ((await pinned.appActiveAsync()) !== true) {
+				await pinned.activateAppAsync();
 			}
 
 			const remainingMs = deadline - seams.clock.now();
@@ -123,7 +147,7 @@ async function primeStudioAsync(
 				throw saveFailure(place, "timeout");
 			}
 
-			if (await pinned.saveMenuEnabled(remainingMs)) {
+			if (await pinned.saveMenuEnabledAsync(remainingMs)) {
 				return;
 			}
 
@@ -136,13 +160,20 @@ async function primeStudioAsync(
 			await seams.clock.sleep(Math.min(PRIME_POLL_MS, primeMs), signal);
 		}
 	} finally {
-		restoreFocus(seams, pinned, { front, wasHidden });
+		await restoreFocusAsync(seams, pinned, { front, wasHidden });
 	}
+}
+
+function saveRequestBudget(pinned: PinnedStudio, remainingMs: number): number {
+	// Leave time to prove the original file write if the helper reply is lost.
+	return pinned.os === "win32"
+		? Math.max(1, Math.floor(remainingMs - Math.max(STABLE_MS + POLL_MS, remainingMs / 4)))
+		: remainingMs;
 }
 
 async function requestStudioSaveAsync(
 	seams: StudioSeams,
-	pinned: PinnedProcess,
+	pinned: PinnedStudio,
 	place: string,
 	{ deadline, signal }: { deadline: number; signal: AbortSignal | undefined },
 ): Promise<void> {
@@ -158,11 +189,11 @@ async function requestStudioSaveAsync(
 		throw saveFailure(place, "timeout");
 	}
 
-	if (pinned.isBlocked()) {
+	if (await pinned.isBlockedAsync()) {
 		throw new ForgeError("studio_busy", "A modal dialog blocks Roblox Studio.");
 	}
 
-	let outcome = await pinned.requestSave(remainingMs);
+	let outcome = await pinned.requestSaveAsync(saveRequestBudget(pinned, remainingMs));
 	if (outcome === "menu_disabled") {
 		await primeStudioAsync(seams, pinned, place, { deadline, signal });
 		const primedMs = deadline - seams.clock.now();
@@ -170,7 +201,7 @@ async function requestStudioSaveAsync(
 			throw saveFailure(place, "timeout");
 		}
 
-		outcome = await pinned.requestSave(primedMs);
+		outcome = await pinned.requestSaveAsync(primedMs);
 	}
 
 	if (outcome !== "requested") {
@@ -178,15 +209,15 @@ async function requestStudioSaveAsync(
 	}
 }
 
-function savedResult(
+async function savedResultAsync(
 	target: StudioTarget,
-	pinned: PinnedProcess,
+	pinned: PinnedStudio,
 	stat: Stats,
 	durationMs: number,
-): StudioSave {
+): Promise<StudioSave> {
 	return {
 		bytes: stat.size,
-		desktop: pinned.desktop(),
+		desktop: await pinned.desktopAsync(),
 		durationMs,
 		method: "menu",
 		mtime: stat.mtime.toISOString(),
@@ -198,7 +229,7 @@ function savedResult(
 
 async function waitForSaveAsync(
 	seams: StudioSeams,
-	pinned: PinnedProcess,
+	pinned: PinnedStudio,
 	target: StudioTarget,
 	options: {
 		before: number;
@@ -211,7 +242,7 @@ async function waitForSaveAsync(
 	let changedAt = options.started;
 	for (;;) {
 		options.signal?.throwIfAborted();
-		if (!pinned.isAlive() || pinned.isBlocked()) {
+		if (!(await pinned.isAliveAsync()) || (await pinned.isBlockedAsync())) {
 			throw saveFailure(target.place, "studio_error");
 		}
 
@@ -222,12 +253,12 @@ async function waitForSaveAsync(
 			changedAt = now;
 		}
 
-		if (last !== options.before && now - changedAt >= STABLE_MS) {
-			return savedResult(target, pinned, stat, now - options.started);
-		}
-
 		if (now - options.started >= options.timeoutMs) {
 			throw saveFailure(target.place, "timeout");
+		}
+
+		if (last !== options.before && now - changedAt >= STABLE_MS) {
+			return savedResultAsync(target, pinned, stat, now - options.started);
 		}
 
 		await seams.clock.sleep(
@@ -254,8 +285,8 @@ function writableMtime({ fileSystem }: StudioSeams, place: string): number {
 	}
 }
 
-function pinSaveStudio(seams: StudioSeams, target: StudioTarget): PinnedProcess {
-	const process = findPlaceStudio(seams, target.place);
+async function pinSaveStudioAsync(seams: StudioSeams, target: StudioTarget): Promise<PinnedStudio> {
+	const process = await findPlaceStudioAsync(seams, target.place);
 	if (
 		process === undefined ||
 		(target.process !== undefined &&
@@ -267,8 +298,12 @@ function pinSaveStudio(seams: StudioSeams, target: StudioTarget): PinnedProcess 
 		);
 	}
 
-	const pinned = seams.native().pinProcess(process.pid);
-	if (pinned === null || !pinned.isAlive() || pinned.startTime !== process.startTime) {
+	const pinned = await seams.studioHost.pinProcessAsync(process.pid);
+	if (
+		pinned === null ||
+		!(await pinned.isAliveAsync()) ||
+		pinned.startTime !== process.startTime
+	) {
 		throw new ForgeError(
 			"studio_not_open",
 			`Roblox Studio does not have ${target.place} open.`,

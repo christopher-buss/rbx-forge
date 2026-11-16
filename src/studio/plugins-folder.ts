@@ -12,7 +12,10 @@ import { readVariable } from "../process/environment.ts";
 export function studioPluginsFolder({
 	env,
 	seams,
-}: Pick<CommandContext, "env" | "seams">): string | undefined {
+}: {
+	env: CommandContext["env"];
+	seams: Pick<CommandContext["seams"], "host">;
+}): string | undefined {
 	const { platform } = seams.host;
 	const home = readVariable(env, platform === "win32" ? "USERPROFILE" : "HOME", platform);
 	if (home === undefined || home === "") {

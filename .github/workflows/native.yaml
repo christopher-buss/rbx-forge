@@ -64,6 +64,11 @@ jobs:
         run: cargo build --manifest-path reaper/Cargo.toml --release --bin forge-reaper --target ${{ matrix.target }}
         shell: bash
 
+      - if: runner.os == 'Windows'
+        name: Build Windows helper
+        run: cargo build --manifest-path reaper/Cargo.toml --release --bin forge-windows-helper --target ${{ matrix.target }}
+        shell: bash
+
       # musl targets build in Alpine, where the C toolchain is musl's own: a
       # glibc host links the glibc loader into the addon, and Ubuntu's
       # musl-gcc has no `libgcc_s`. A Node addon must link the C runtime
@@ -103,6 +108,14 @@ jobs:
         env:
           LOAD: ${{ env.LOAD_ADDON }}
 
+      - if: runner.os == 'Windows'
+        name: Windows helper integration
+        run: |
+          pnpm build:reaper
+          cargo test --manifest-path reaper/Cargo.toml --bin forge-windows-helper helper::tests
+          pnpm exec vitest run --project integration test/integration/windows-helper.spec.ts test/integration/windows-helper-jobs.spec.ts
+        shell: bash
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-${{ matrix.target }}
@@ -110,6 +123,7 @@ jobs:
             reaper/target/napi/*.node
             reaper/target/${{ matrix.target }}/release/forge-reaper
             reaper/target/${{ matrix.target }}/release/forge-reaper.exe
+            reaper/target/${{ matrix.target }}/release/forge-windows-helper.exe
     timeout-minutes: 30
     strategy:
       matrix:

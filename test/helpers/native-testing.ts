@@ -19,7 +19,7 @@ export interface NativeTestAddon extends NativeAddon {
 	connectPipeAs?: (path: string, user: string, password: string, write: boolean) => number;
 	currentUserSid?: () => string;
 	fileSecurity?: (path: string) => NativeSecurity;
-	joinNewJob?: (breakawayOk: boolean) => void;
+	joinNewJob?: (breakawayOk: boolean, killOnClose?: boolean) => void;
 }
 
 /** A control endpoint served for one test. */

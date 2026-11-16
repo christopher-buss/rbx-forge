@@ -32,6 +32,19 @@ function makeStore(start: StatusStart = START) {
 const NO_PARTS: StatusStart = { ...START, compiler: false, open: false };
 
 describe(createStatusStore, () => {
+	it("preserves Studio control when recording a visibility change", ({ expect }) => {
+		expect.assertions(1);
+
+		const { store } = makeStore();
+		store.studioControl("recovering");
+		store.studio("open", "/game.rbxl", { desktop: "user", pid: 707, startTime: "123" });
+
+		expect(store.snapshot().services.studio).toMatchObject({
+			control: "recovering",
+			status: "open",
+		});
+	});
+
 	it("should report the user desktop for a platform launch", ({ expect }) => {
 		expect.assertions(1);
 

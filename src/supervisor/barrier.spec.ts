@@ -1,12 +1,12 @@
 import { assert, describe, it } from "vitest";
 
+import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { FakeSessionProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
-import { createMemoryFileSystem, PROJECT } from "../../test/helpers/seams.ts";
+import { createMemoryFileSystem, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import { clearOldSessionsAsync, SETTLE_MS, targetOf, waitForBarrierAsync } from "./barrier.ts";
-import type { LockSeams } from "./locks.ts";
 import { LEASE_POLL_MS } from "./locks.ts";
 import { forgeFiles, sessionFiles } from "./session-files.ts";
 
@@ -24,10 +24,12 @@ function makeSeams(files: Record<string, string> = {}) {
 	const memory = createMemoryFileSystem(files);
 	const manual = createManualClock();
 	const native = createFakeNative();
-	const seams: LockSeams = {
+	const seams = {
 		clock: manual.clock,
 		fileSystem: memory.fileSystem,
+		host: createTestSeams().host,
 		native: () => native.addon,
+		studioHost: createTestSeams().studioHost,
 	};
 	return { manual, memory, native, seams };
 }
@@ -82,6 +84,23 @@ describe(targetOf, () => {
 });
 
 describe(waitForBarrierAsync, () => {
+	it.for([
+		["win32", "wsl:Ubuntu"],
+		["linux", "windows"],
+	] as const)("refuses a foreign scan on %s", async ([platform, side], { expect }) => {
+		expect.assertions(1);
+
+		const { seams } = makeSeams({
+			".forge/sessions/old/supervisor.id": JSON.stringify({ side }),
+		});
+		seams.host.platform = platform;
+
+		await expect(waitForBarrierAsync(seams, OLD, 0, NEVER_ABORTS)).rejects.toHaveProperty(
+			"code",
+			"identity_mismatch",
+		);
+	});
+
 	it("should clear at once when the lease is free and no process is left, holding nothing", async ({
 		expect,
 	}) => {
@@ -164,6 +183,139 @@ describe(waitForBarrierAsync, () => {
 });
 
 describe(clearOldSessionsAsync, () => {
+	it("does not treat a PID without its start time as proof of Windows Studio exit", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const status = makeStatus();
+		status.services.studio = { control: "unavailable", owner: null, pid: 707, status: "open" };
+		const run = makeSeams({
+			...OLD_FILES,
+			".forge/sessions/old/state.json": JSON.stringify(status),
+		});
+
+		await expect(
+			clearOldSessionsAsync(run.seams, FORGE, {
+				boundMs: 0,
+				force: true,
+				signal: NEVER_ABORTS,
+			}),
+		).rejects.toMatchObject({
+			cause: { message: "Studio identity is unknown." },
+			code: "cleanup_in_progress",
+		});
+		expect(run.memory.fileSystem.existsSync(OLD.identity)).toBe(true);
+	});
+
+	it("explains an unknown retained Studio identity without deleting the record", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		const status = makeStatus();
+		status.services.studio = { control: "unavailable", owner: null, status: "opening" };
+		const run = makeSeams({
+			...OLD_FILES,
+			".forge/sessions/old/state.json": JSON.stringify(status),
+		});
+
+		await expect(
+			clearOldSessionsAsync(run.seams, FORGE, {
+				boundMs: 0,
+				force: true,
+				signal: NEVER_ABORTS,
+			}),
+		).rejects.toMatchObject({
+			cause: { message: "Studio identity is unknown." },
+			code: "cleanup_in_progress",
+			message:
+				"Windows Studio cleanup is unverified; the session identity record is retained.",
+		});
+	});
+
+	it.for([
+		["unavailable", "open", "cleanup_in_progress", true],
+		["recovering", "opening", "cleanup_in_progress", true],
+		["unavailable", "off", "cleared", false],
+		["unavailable", "closed", "cleared", false],
+	] as const)(
+		"retains unverified Windows Studio identity: %o",
+		async ([control, studioStatus, expected, retained], { expect }) => {
+			expect.assertions(2);
+
+			const status = makeStatus();
+			status.services.studio = { control, owner: null, status: studioStatus };
+			const run = makeSeams({
+				...OLD_FILES,
+				".forge/sessions/old/state.json": JSON.stringify(status),
+			});
+			const outcome = await clearOldSessionsAsync(run.seams, FORGE, {
+				boundMs: 0,
+				force: true,
+				signal: NEVER_ABORTS,
+			})
+				.then(() => "cleared")
+				.catch((err: unknown) => {
+					assert(err instanceof Error && "code" in err);
+					return err.code;
+				});
+
+			expect(outcome).toBe(expected);
+			expect(run.memory.fileSystem.existsSync(OLD.identity)).toBe(retained);
+		},
+	);
+
+	it.for([
+		["win32", "wsl:Ubuntu"],
+		["linux", "windows"],
+	] as const)(
+		"retains an unreadable foreign identity on %s",
+		async ([platform, side], { expect }) => {
+			expect.assertions(2);
+
+			const { memory, seams } = makeSeams({
+				".forge/current": "old",
+				".forge/sessions/old/supervisor.id": JSON.stringify({ side }),
+			});
+			seams.host.platform = platform;
+			const before = memory.files();
+			seams.fileSystem.readFileSync = () => {
+				throw Object.assign(new Error("read denied"), { code: "EACCES" });
+			};
+
+			await expect(
+				clearOldSessionsAsync(seams, FORGE, {
+					boundMs: 0,
+					force: true,
+					signal: NEVER_ABORTS,
+				}),
+			).rejects.toMatchObject({
+				code: "identity_mismatch",
+				hint: 'Restore access to supervisor.id and run "forge down" on the side that started it.',
+				message:
+					"The session side cannot be verified because its identity record could not be read.",
+			});
+			expect(memory.files()).toStrictEqual(before);
+		},
+	);
+
+	it("refuses a side replaced before startup forced cleanup", async ({ expect }) => {
+		expect.assertions(2);
+
+		const { memory, native, seams } = makeSeams({ ".forge/sessions/old/supervisor.id": "{}" });
+		native.sessions.set("old", [{ pid: 77 }]);
+		native.addon.isLockFree = () => {
+			memory.fileSystem.writeFileSync(OLD.identity, JSON.stringify({ side: "windows" }));
+			return false;
+		};
+
+		await expect(
+			clearOldSessionsAsync(seams, FORGE, { boundMs: 0, force: true, signal: NEVER_ABORTS }),
+		).rejects.toHaveProperty("code", "identity_mismatch");
+		expect(native.sessions.get("old")).toStrictEqual([{ pid: 77 }]);
+	});
+
 	it("should delete every old session whose barrier is clear, and the hint", async ({
 		expect,
 	}) => {

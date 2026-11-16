@@ -3,6 +3,7 @@ import { assert, describe, it } from "vitest";
 
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
+import { makeStatus } from "../../test/helpers/fake-session.ts";
 import type { FakeNative, FakeProcess, FakeSessionProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import type { MemoryFileSystem } from "../../test/helpers/seams.ts";
@@ -97,7 +98,7 @@ function makeWorld({ holdsLock = true, supervisor = {} }: WorldSetup = {}): Worl
 		[SUPERVISOR]: { alive: true, executablePath: "/node", ...supervisor },
 	});
 	const lock = holdsLock ? native.addon.tryLockFile(FORGE.lock, "exclusive") : null;
-	const session = findSession(memory.fileSystem, FORGE);
+	const session = findSession(memory.fileSystem, FORGE, createTestSeams().host);
 	assert(session !== undefined);
 	const onSleep: World["onSleep"] = [];
 	return {
@@ -296,11 +297,23 @@ async function downAsync(world: World, options: Partial<DownOptions> = {}): Prom
 			host: createTestSeams().host,
 			ipc: world.ipc,
 			native: () => world.native.addon,
+			studioHost: createTestSeams({ native: () => world.native.addon }).studioHost,
 		},
 		FORGE,
 		world.session,
 		{ force: false, keepStudio: false, recovery: "keep", timeoutMs: TIMEOUT_MS, ...options },
 	);
+}
+
+function foreignBeforeDelete(world: World): NonNullable<DownOptions["pause"]> {
+	return async (point) => {
+		if (point === "delete") {
+			world.memory.fileSystem.writeFileSync(
+				FILES.identity,
+				JSON.stringify({ ...IDENTITY, side: "foreign" }),
+			);
+		}
+	};
 }
 
 function exitOnShutdown(_parameters: Record<string, unknown>, world: World): void {
@@ -392,6 +405,51 @@ async function unlockAsync(world: World): Promise<void> {
 }
 
 describe(stopSessionAsync, () => {
+	it("refuses a record that becomes foreign before fresh Windows cleanup proof", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const world = makeWorld({ holdsLock: false, supervisor: { alive: false } });
+		world.native.processes.set(707, {
+			alive: true,
+			executablePath: "RobloxStudioBeta.exe",
+			startTime: "123",
+		});
+		const status = makeStatus();
+		status.services.studio = {
+			control: "unavailable",
+			owner: null,
+			pid: 707,
+			startTime: "123",
+			status: "open",
+		};
+		world.memory.fileSystem.writeFileSync(FILES.state, JSON.stringify(status));
+
+		await expect(downAsync(world, { pause: foreignBeforeDelete(world) })).rejects.toMatchObject(
+			{ code: "identity_mismatch" },
+		);
+		expect(world.memory.fileSystem.existsSync(FILES.identity)).toBe(true);
+	});
+
+	it("reports shutdown when its acknowledged part stop exits the supervisor before the reply", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const world = makeWorld();
+		await serveAsync({ onTestFinished }, world, exitOnShutdown, {
+			status: READY_STATUS,
+			stopParts: () => {
+				world.exit();
+				return { ...CLOSED_STOPS };
+			},
+		});
+
+		await expect(downAsync(world)).resolves.toHaveProperty("stoppedBy", "shutdown");
+	});
+
 	it("should stop the session on shutdown and report its supervisor's exit", async ({
 		expect,
 		onTestFinished,

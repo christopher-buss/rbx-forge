@@ -83,7 +83,7 @@ export function captureOutput(): CapturedOutput {
 
 const openedSnapshot = type({
 	place: "string",
-	studio: type({ pid: "number" }).or("null"),
+	studio: type({ pid: "number", startTime: "string" }).or("null"),
 });
 
 /** What `forge open --json` reports: the snapshot and its Studio. */

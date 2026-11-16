@@ -28,6 +28,7 @@ const OPTIONS = { artifacts: "artifacts", root: "repo", staging: "staging" } sat
 const PACKED = gzippedTarball([
 	{ name: "package/forge-reaper", size: 1 },
 	{ name: "package/forge-reaper.exe", size: 1 },
+	{ name: "package/forge-windows-helper.exe", size: 1 },
 ]);
 const ROOT_PACK = ["pnpm --dir repo pack --pack-destination", path.join("..", "staging")].join(" ");
 const RUN_LIST =
@@ -112,9 +113,24 @@ function artifactFiles(): Record<string, string> {
 		NATIVE_TARGETS.flatMap((target) => {
 			const artifact = path.join("artifacts", `native-${target.rust}`);
 			const reaper = target.os === "win32" ? "forge-reaper.exe" : "forge-reaper";
+			const helper: Array<readonly [string, string]> =
+				target.os === "win32"
+					? [
+							[
+								path.join(
+									artifact,
+									target.rust,
+									"release",
+									"forge-windows-helper.exe",
+								),
+								target.cpu,
+							],
+						]
+					: [];
 			return [
 				[path.join(artifact, "napi", `forge-native.${target.target}.node`), "addon"],
 				[path.join(artifact, target.rust, "release", reaper), "reaper"],
+				...helper,
 			];
 		}),
 	);
@@ -177,7 +193,7 @@ describe(platformManifest, () => {
 		expect(platformManifest({ license: "MIT" }, target, "2.0.0")).toMatchObject({
 			name: "@rbx-forge/native-linux-x64-musl",
 			cpu: ["x64"],
-			files: ["forge-native.linux-x64-musl.node", "forge-reaper"],
+			files: ["forge-native.linux-x64-musl.node", "forge-reaper", "forge-windows-helper.exe"],
 			libc: ["musl"],
 			license: "MIT",
 			main: "forge-native.linux-x64-musl.node",
@@ -390,6 +406,37 @@ describe(publishRelease, () => {
 		expect(entryMode(tarball!, entry)).toBe("0000755");
 	});
 
+	it.for([
+		{ arch: "x64", target: "linux-x64-gnu" },
+		{ arch: "x64", target: "linux-x64-musl" },
+		{ arch: "arm64", target: "linux-arm64-gnu" },
+		{ arch: "arm64", target: "linux-arm64-musl" },
+	])(
+		"should ship the matching executable Windows helper for $target",
+		({ arch, target }, { expect }) => {
+			expect.assertions(3);
+
+			const { bytes, contents, dependencies } = publishSetup();
+			publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
+
+			expect(contents.get(path.join("staging", target, "forge-windows-helper.exe"))).toBe(
+				arch,
+			);
+			expect(
+				JSON.parse(contents.get(path.join("staging", target, "package.json"))!),
+			).toHaveProperty("files", [
+				`forge-native.${target}.node`,
+				"forge-reaper",
+				"forge-windows-helper.exe",
+			]);
+
+			const packed = bytes.get(path.join("staging", `rbx-forge-native-${target}-1.0.0.tgz`));
+			assert(packed !== undefined);
+
+			expect(entryMode(packed, 2)).toBe("0000755");
+		},
+	);
+
 	it("should publish the root with the platform packages as optional dependencies, then restore it", ({
 		expect,
 	}) => {
@@ -448,6 +495,25 @@ describe(publishRelease, () => {
 		expect(() => {
 			publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
 		}).toThrow(`missing native artifacts:\n${addon}`);
+		expect(processes.runs).toBeEmpty();
+	});
+
+	it("should refuse a release missing the Windows helper before publishing", ({ expect }) => {
+		expect.assertions(2);
+
+		const { contents, dependencies, processes } = publishSetup();
+		const helper = path.join(
+			"artifacts",
+			"native-aarch64-pc-windows-msvc",
+			"aarch64-pc-windows-msvc",
+			"release",
+			"forge-windows-helper.exe",
+		);
+		contents.delete(helper);
+
+		expect(() => {
+			publishRelease(dependencies, { ...OPTIONS, tag: "latest", version: "1.0.0" });
+		}).toThrow(helper);
 		expect(processes.runs).toBeEmpty();
 	});
 

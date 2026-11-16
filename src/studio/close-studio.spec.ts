@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, it } from "vitest";
+import { describe, it, vi } from "vitest";
 
 import type { FakeProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -9,33 +9,33 @@ import {
 	PROJECT,
 	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
+import { createFakeStudioHost } from "../../test/helpers/studio-host.ts";
 import { ForgeError } from "../errors.ts";
 import type { NativeLoader } from "../native/addon.ts";
 import type { StudioSeams } from "./close-studio.ts";
-import { findPlaceStudio } from "./close-studio.ts";
+import { findPlaceStudioAsync } from "./close-studio.ts";
 
 const PLACE = path.join(PROJECT, "game.rbxl");
 const STUDIO: FakeProcess = { alive: true, executablePath: "/opt/RobloxStudio", startTime: "0" };
 
 function seamsWith(lock: string, native: NativeLoader): StudioSeams {
-	const seams = createTestSeams();
+	const seams = createTestSeams({ native });
 	return {
 		...seams,
 		fileSystem: createMemoryFileSystem({ "game.rbxl.lock": lock }).fileSystem,
-		native,
 	};
 }
 
-describe(findPlaceStudio, () => {
+describe(findPlaceStudioAsync, () => {
 	it.for(["user", "hidden"] as const)(
 		"should return the verified Studio on the %s desktop",
-		(desktop, { expect }) => {
+		async (desktop, { expect }) => {
 			expect.assertions(1);
 
 			const native = createFakeNative({ 7: { ...STUDIO, desktop } });
 			const seams = seamsWith(`7\nRobloxStudio\n${TEST_HOSTNAME}\n`, () => native.addon);
 
-			expect(findPlaceStudio(seams, PLACE)).toStrictEqual({
+			expect(await findPlaceStudioAsync(seams, PLACE)).toStrictEqual({
 				desktop,
 				pid: 7,
 				startTime: "0",
@@ -43,7 +43,9 @@ describe(findPlaceStudio, () => {
 		},
 	);
 
-	it("reports hidden session visibility independently of its physical desktop", ({ expect }) => {
+	it("reports hidden session visibility independently of its physical desktop", async ({
+		expect,
+	}) => {
 		expect.assertions(1);
 
 		const native = createFakeNative({
@@ -51,14 +53,14 @@ describe(findPlaceStudio, () => {
 		});
 
 		expect(
-			findPlaceStudio(
+			await findPlaceStudioAsync(
 				seamsWith(`7\nRobloxStudio\n${TEST_HOSTNAME}\n`, () => native.addon),
 				PLACE,
 			),
 		).toStrictEqual({ desktop: "hidden", pid: 7, startTime: "0" });
 	});
 
-	it("keeps a snapshot on its hidden physical desktop even when its windows are shown there", ({
+	it("keeps a snapshot on its hidden physical desktop even when its windows are shown there", async ({
 		expect,
 	}) => {
 		expect.assertions(1);
@@ -68,23 +70,52 @@ describe(findPlaceStudio, () => {
 		});
 
 		expect(
-			findPlaceStudio(
+			await findPlaceStudioAsync(
 				seamsWith(`7\nRobloxStudio\n${TEST_HOSTNAME}\n`, () => native.addon),
 				PLACE,
 			),
 		).toStrictEqual({ desktop: "hidden", pid: 7, startTime: "0" });
 	});
 
-	it("should return undefined when the lock file names another computer", ({ expect }) => {
+	it("verifies Windows Studio start times and hostname while forge runs on Linux", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		const memory = createMemoryFileSystem({
+			"game.rbxl.lock": "7\nRobloxStudioBeta\nwindows-pc\n",
+		});
+		memory.setModifiedTime("game.rbxl.lock", 1767225600000);
+		const seams = createTestSeams({ fileSystem: memory.fileSystem });
+		const studio = createFakeStudioHost(
+			{ ...seams, host: { ...seams.host, hostname: "windows-pc", platform: "win32" } },
+			{
+				7: {
+					alive: true,
+					executablePath: path.join(PROJECT, "RobloxStudioBeta.exe"),
+					startTime: "134116992000000000",
+				},
+			},
+		);
+		seams.studioHost = studio.studioHost;
+
+		expect(await findPlaceStudioAsync(seams, PLACE)).toStrictEqual({
+			desktop: "user",
+			pid: 7,
+			startTime: "134116992000000000",
+		});
+	});
+
+	it("should return undefined when the lock file names another computer", async ({ expect }) => {
 		expect.assertions(1);
 
 		const native = createFakeNative({ 7: STUDIO });
 		const seams = seamsWith("7\nRobloxStudio\nelsewhere\n", () => native.addon);
 
-		expect(findPlaceStudio(seams, PLACE)).toBeUndefined();
+		expect(await findPlaceStudioAsync(seams, PLACE)).toBeUndefined();
 	});
 
-	it("should throw native_missing when the addon is missing", ({ expect }) => {
+	it("should throw native_missing when the addon is missing", async ({ expect }) => {
 		expect.assertions(1);
 
 		const missing = new ForgeError("native_missing", "no addon");
@@ -92,6 +123,19 @@ describe(findPlaceStudio, () => {
 			throw missing;
 		});
 
-		expect(() => findPlaceStudio(seams, PLACE)).toThrow(missing);
+		await expect(findPlaceStudioAsync(seams, PLACE)).rejects.toThrow(missing);
+	});
+
+	it("preserves Studio host failures during discovery", async ({ expect }) => {
+		expect.assertions(1);
+
+		const seams = seamsWith(
+			`7\nRobloxStudio\n${TEST_HOSTNAME}\n`,
+			() => createFakeNative().addon,
+		);
+		const failure = new ForgeError("windows_helper_unavailable", "helper unavailable");
+		vi.spyOn(seams.studioHost, "pinProcessAsync").mockRejectedValue(failure);
+
+		await expect(findPlaceStudioAsync(seams, PLACE)).rejects.toBe(failure);
 	});
 });

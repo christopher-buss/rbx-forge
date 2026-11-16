@@ -9,6 +9,7 @@ import type { CommandContext } from "../../src/commands/context.ts";
 import type { IpcTransport } from "../../src/ipc/transport.ts";
 import type { ProcessRunner } from "../../src/process/process-runner.ts";
 import type { ReaperLauncher } from "../../src/reaper/reaper-client.ts";
+import { noInstalledStudio } from "../../src/seams/addon-studio/discover.ts";
 import type { Clock } from "../../src/seams/clock.ts";
 import type { ConfigLoader } from "../../src/seams/config-loader.ts";
 import type { FileSystem } from "../../src/seams/file-system.ts";
@@ -23,12 +24,14 @@ import type {
 } from "../../src/seams/reporter.ts";
 import type { Seams } from "../../src/seams/seams.ts";
 import type { Signals } from "../../src/seams/signals.ts";
-import { noInstalledStudio } from "../../src/studio/discover.ts";
+import type { AddonStudioHostBackend } from "../../src/seams/studio-host.ts";
+import { createAddonStudioHost } from "../../src/seams/studio-host.ts";
 import type { StudioLauncher } from "../../src/studio/launcher.ts";
 import type { DetachedLauncher } from "../../src/supervisor/detached-launcher.ts";
 import type { SupervisorLauncher } from "../../src/supervisor/launcher.ts";
 import { createFakeFileWatch } from "./fake-file-watch.ts";
 import type { FakeFileWatch } from "./fake-file-watch.ts";
+import { createFakeStudioHost } from "./studio-host.ts";
 
 /** The project directory of every in-memory test project. */
 export const PROJECT = path.resolve("/project");
@@ -91,8 +94,10 @@ export function createMemoryFileSystem(files: Record<string, string> = {}): Memo
  * @param overrides - The seams this test provides.
  * @returns A full seam record.
  */
-export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
-	return {
+export function createTestSeams(
+	overrides: Partial<AddonStudioHostBackend & Seams> = {},
+): AddonStudioHostBackend & Seams {
+	const seams = {
 		childProcess: { spawn: unreachable("child process") },
 		// A clock that stands still: `sleep` resolves at once.
 		clock: {
@@ -120,6 +125,7 @@ export function createTestSeams(overrides: Partial<Seams> = {}): Seams {
 		supervisor: vi.fn<SupervisorLauncher>(unreachable("supervisor")),
 		...overrides,
 	};
+	return withStudioHost(seams, overrides);
 }
 
 /**
@@ -163,6 +169,19 @@ export function createCommandContext(overrides: Partial<CommandContext> = {}): C
 		seams: createTestSeams(),
 		...overrides,
 	};
+}
+
+function withStudioHost(
+	seams: AddonStudioHostBackend & Pick<Seams, Exclude<keyof Seams, "studioHost">>,
+	overrides: Partial<AddonStudioHostBackend & Seams>,
+): AddonStudioHostBackend & Seams {
+	const result: AddonStudioHostBackend & Seams = { ...seams, studioHost: fromAny(undefined) };
+	result.studioHost =
+		overrides.studioHost ??
+		(overrides.native === undefined
+			? createFakeStudioHost(result).studioHost
+			: createAddonStudioHost(result));
+	return result;
 }
 
 function unreachable(seam: string): () => never {

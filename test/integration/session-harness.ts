@@ -421,7 +421,7 @@ function resumeAll(pauses: string): void {
  * @param project - Where it runs.
  */
 async function shutdownAsync(project: Project): Promise<void> {
-	const session = findSession(nodeFs, forgeFiles(project.project));
+	const session = findSession(nodeFs, forgeFiles(project.project), nodeHost);
 	if (session === undefined) {
 		return;
 	}

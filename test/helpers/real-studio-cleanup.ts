@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { onTestFinished } from "vitest";
 
-import type { PinnedProcess } from "../../src/native/addon.ts";
+import type { PinnedStudio } from "../../src/seams/studio-host.ts";
 import { parseStatus } from "../../src/session/status.ts";
-import { pinNow } from "./worker-log.ts";
+import { realStudioHost } from "./real-studio-host.ts";
 
 /**
  * Register ownership before launch so a failed CLI still leaves bounded
@@ -16,28 +16,25 @@ import { pinNow } from "./worker-log.ts";
  */
 export function studioCleanup(
 	project?: string,
-): (studio: { pid: number; startTime?: string }) => PinnedProcess {
-	let pinned: PinnedProcess | undefined;
-	onTestFinished(() => {
-		pinned ??= project === undefined ? undefined : sessionStudioPin(project);
-		pinned?.kill();
-		pinned?.waitForExit(10_000);
+): (studio: { pid: number; startTime: string }) => Promise<PinnedStudio> {
+	let pinned: null | PinnedStudio = null;
+	onTestFinished(async () => {
+		pinned ??= project === undefined ? null : await sessionStudioPinAsync(project);
+		await pinned?.killAsync();
+		await pinned?.waitForExitAsync(10_000);
 	});
-	return ({ pid, startTime }) => {
-		const candidate = pinNow(pid);
-		assert(
-			candidate !== undefined &&
-				(startTime === undefined || candidate.startTime === startTime),
-		);
+	return async ({ pid, startTime }) => {
+		const candidate = await realStudioHost().pinProcessAsync(pid, startTime);
+		assert(candidate?.startTime === startTime);
 		pinned = candidate;
 		return candidate;
 	};
 }
 
-function sessionStudioPin(project: string): PinnedProcess | undefined {
+async function sessionStudioPinAsync(project: string): Promise<null | PinnedStudio> {
 	const current = path.join(project, ".forge/current");
 	if (!existsSync(current)) {
-		return undefined;
+		return null;
 	}
 
 	const state = path.join(
@@ -47,14 +44,13 @@ function sessionStudioPin(project: string): PinnedProcess | undefined {
 		"state.json",
 	);
 	if (!existsSync(state)) {
-		return undefined;
+		return null;
 	}
 
 	const studio = parseStatus(JSON.parse(readFileSync(state, "utf8")))?.services.studio;
 	if (studio?.pid === undefined || studio.startTime === undefined) {
-		return undefined;
+		return null;
 	}
 
-	const pinned = pinNow(studio.pid);
-	return pinned?.startTime === studio.startTime ? pinned : undefined;
+	return realStudioHost().pinProcessAsync(studio.pid, studio.startTime);
 }

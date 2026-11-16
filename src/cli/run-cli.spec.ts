@@ -1,4 +1,4 @@
-import { describe, it, vi } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { captureOutput } from "../../test/helpers/output.ts";
 import type { CapturedOutput } from "../../test/helpers/output.ts";
@@ -8,6 +8,7 @@ import { ForgeError } from "../errors.ts";
 import { EXIT_FAILURE, EXIT_NEEDS_CONFIRMATION, EXIT_SUCCESS, EXIT_USAGE } from "../exit-codes.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Environment, Seams } from "../seams/seams.ts";
+import type { StudioControl } from "../seams/studio-host.ts";
 import type { CommandDefinition } from "./commands.ts";
 import { COMMANDS } from "./commands.ts";
 import type { FlagDefinition } from "./flags.ts";
@@ -92,6 +93,45 @@ const portFlag: FlagDefinition = {
 };
 
 describe(runCliAsync, () => {
+	it("reports helper recovery and exhaustion for standalone commands and releases the subscription", async ({
+		expect,
+	}) => {
+		expect.assertions(3);
+
+		const seams = createTestSeams();
+		let listener: ((state: StudioControl) => void) | undefined;
+		seams.studioHost.onControl = (next) => {
+			listener = next;
+			next("ready");
+			return () => {
+				listener = undefined;
+			};
+		};
+
+		const command = probe(async () => {
+			assert(listener !== undefined);
+			listener("recovering");
+			listener("ready");
+			listener("recovering");
+			listener("unavailable");
+			throw new ForgeError("windows_helper_unavailable", "helper exhausted");
+		});
+		const cli = makeCli({ commands: [command], seams });
+
+		await expect(cli.run("probe", "--json")).resolves.toBe(EXIT_FAILURE);
+		expect(cli.captured.jsonLines()).toMatchObject([
+			{ message: "Windows Studio control was lost; recovering.", type: "warning" },
+			{ message: "Windows Studio control recovered.", type: "info" },
+			{ message: "Windows Studio control was lost; recovering.", type: "warning" },
+			{
+				message: "Windows Studio control is unavailable; recovery stopped.",
+				type: "warning",
+			},
+			{ error: { code: "windows_helper_unavailable" }, ok: false, type: "result" },
+		]);
+		expect(listener).toBeUndefined();
+	});
+
 	describe("pages", () => {
 		it.for(["--version", "-v"])("should print the version for %s", async (flag, { expect }) => {
 			expect.assertions(2);

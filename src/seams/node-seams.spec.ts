@@ -3,12 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { PassThrough } from "node:stream";
-import { describe, it } from "vitest";
+import type { TestContext } from "vitest";
+import { assert, describe, it, vi } from "vitest";
 
 import { catchForgeError } from "../../test/helpers/errors.ts";
+import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import { REAPER_PATH } from "../../test/helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../../test/helpers/temporary-directory.ts";
-import { findInstalledStudio, noInstalledStudio } from "../studio/discover.ts";
+import { nodeChildProcessRunner } from "./child-process.ts";
+import { nodeHost } from "./host.ts";
 import { nodeNetwork } from "./network.ts";
 import { createNodeSeams } from "./node-seams.ts";
 
@@ -154,11 +157,20 @@ describe(createNodeSeams, () => {
 		await expect(launch).rejects.toThrow(/^Could not find @rbx-forge\/native-/);
 	});
 
-	it("should find the installed Studio unless told there is none", ({ expect }) => {
+	it("should discover Studio through the host when installed discovery is disabled", async ({
+		expect,
+	}) => {
 		expect.assertions(2);
 
-		expect(makeSeams().installedStudio).toBe(findInstalledStudio);
-		expect(makeSeams(undefined, true).installedStudio).toBe(noInstalledStudio);
+		await expect(
+			makeSeams(undefined, true).studioHost.findStudioExecutableAsync({ env: {} }),
+		).resolves.toBeUndefined();
+		await expect(
+			makeSeams(undefined, true).studioHost.findStudioExecutableAsync({
+				env: {},
+				studioPath: "/missing-studio",
+			}),
+		).rejects.toMatchObject({ code: "studio_launch_failed" });
 	});
 
 	it("should make random session ids", ({ expect }) => {
@@ -210,4 +222,124 @@ describe(createNodeSeams, () => {
 
 		await expect(answer).resolves.toBeTrue();
 	});
+
+	it.for([false, true])(
+		"selects and handshakes the WSL helper with fake locator %s",
+		async (fake, { expect, onTestFinished }) => {
+			expect.assertions(2);
+
+			wslHost(onTestFinished);
+			const directory = makeTemporaryDirectory();
+			writeFileSync(path.join(directory, "forge-windows-helper.exe"), "fixture", {
+				mode: 0o755,
+			});
+			vi.stubEnv("RBX_FORGE_TEST_WINDOWS_HELPER", fakeHelperPath(fake, directory));
+			const spawner = createFakeSpawner((child) => {
+				child.stdin.on("data", () => {
+					child.stdout.write(
+						`${JSON.stringify({ id: "1", result: { helperArch: process.arch, hostname: "WINDOWS", protocol: 1, windowsArch: process.arch } })}\n`,
+					);
+				});
+			});
+			vi.spyOn(nodeChildProcessRunner, "spawn").mockImplementation(spawner.runner.spawn);
+
+			await expect(makeSeams(directory).studioHost.hostnameAsync()).resolves.toBe("WINDOWS");
+			expect(spawner.calls).toEqual([helperSpawn(fake, directory)]);
+		},
+	);
+
+	it.for([
+		{ children: 2, entry: "session" },
+		{ children: 1, entry: "--keep-studio-hidden" },
+	])(
+		"owns a helper without recursively launching watchers: %j",
+		async ({ children, entry }, { expect, onTestFinished }) => {
+			expect.assertions(2);
+
+			wslHost(onTestFinished);
+			const original = process.argv;
+			process.argv = ["node", "supervisor", entry];
+			onTestFinished(() => {
+				process.argv = original;
+			});
+			vi.stubEnv("RBX_FORGE_TEST_WINDOWS_HELPER", "/fake/helper.ts");
+			const spawner = createFakeSpawner((child) => {
+				child.stdin.on("data", (line: string) => {
+					const request: unknown = JSON.parse(line);
+					assert(
+						typeof request === "object" &&
+							request !== null &&
+							"id" in request &&
+							"op" in request &&
+							typeof request.op === "string",
+					);
+					const results = new Map<string, unknown>([
+						[
+							"handshake",
+							{
+								helperArch: process.arch,
+								hostname: "WINDOWS",
+								protocol: 1,
+								windowsArch: process.arch,
+							},
+						],
+						["pin", { pid: 42, pin: "held", startTime: "42" }],
+						["processStartTime", "42"],
+						["startWindowHiding", true],
+						["windowHiding", true],
+					]);
+					child.stdout.write(
+						`${JSON.stringify({ id: request.id, result: results.get(request.op) })}\n`,
+					);
+				});
+			});
+			vi.spyOn(nodeChildProcessRunner, "spawn").mockImplementation(spawner.runner.spawn);
+			const pin = await makeSeams().studioHost.pinProcessAsync(42);
+			assert(pin !== null);
+
+			await expect(pin.startWindowHidingAsync()).resolves.toBeTrue();
+			expect(spawner.calls).toHaveLength(children);
+		},
+	);
+
+	it("locates the packaged helper lazily on WSL", async ({ expect, onTestFinished }) => {
+		expect.assertions(1);
+
+		wslHost(onTestFinished);
+		const original = process.argv;
+		process.argv = ["node", "supervisor", "--keep-studio-hidden"];
+		onTestFinished(() => {
+			process.argv = original;
+		});
+		vi.stubEnv("RBX_FORGE_TEST_WINDOWS_HELPER", undefined);
+
+		await expect(makeSeams().studioHost.hostnameAsync()).rejects.toMatchObject({
+			code: "windows_helper_unavailable",
+		});
+	});
 });
+
+function wslHost(onTestFinished: TestContext["onTestFinished"]): void {
+	const original = nodeHost.platform;
+	const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+	assert(descriptor !== undefined);
+	nodeHost.platform = "linux";
+	Object.defineProperty(process, "platform", { value: "linux" });
+	vi.stubEnv("WSL_DISTRO_NAME", "forge-test");
+	onTestFinished(() => {
+		nodeHost.platform = original;
+		Object.defineProperty(process, "platform", descriptor);
+	});
+}
+
+function fakeHelperPath(fake: boolean, directory: string): string | undefined {
+	return fake ? path.join(directory, "fake.ts") : undefined;
+}
+
+function helperSpawn(fake: boolean, directory: string) {
+	return {
+		args: fake ? [path.join(directory, "fake.ts")] : [],
+		file: fake ? nodeHost.execPath : path.join(directory, "forge-windows-helper.exe"),
+		options: { stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+	};
+}

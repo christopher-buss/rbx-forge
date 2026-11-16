@@ -90,15 +90,15 @@ export async function runStopAsync(
 	input: CommandInput,
 ): Promise<CommandResult> {
 	const { cwd, env, seams } = context;
-	const { platform } = seams.host;
+	const platform = await seams.studioHost.platformAsync();
 	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, input.config);
-	const forge = forgeFiles(cwd);
+	findSession(seams.fileSystem, forgeFiles(cwd), seams.host);
 	const request: SessionStop = {
 		force: input.flags["force"] === true,
 		place: placeOf(cwd, input.flags["place"]),
 		recovery: config.studio.autoRecovery,
 	};
-	const recovery = recoveryOptions(env, forge, config);
+	const recovery = recoveryOptions(env, forgeFiles(cwd), config);
 	const snapshots =
 		request.place === undefined ? await closeSnapshotsAsync(context, recovery) : [];
 
@@ -211,7 +211,7 @@ async function closeSnapshotsAsync(
 	{ cwd, seams }: CommandContext,
 	recovery: RecoveryOptions,
 ): Promise<Array<CommandResult>> {
-	const { platform } = seams.host;
+	const platform = await seams.studioHost.platformAsync();
 	const results: Array<CommandResult> = [];
 	for (const place of listSnapshots(seams.fileSystem, forgeFiles(cwd).snapshots)) {
 		if (seams.fileSystem.existsSync(studioLockPath(place))) {
@@ -291,7 +291,7 @@ async function askSessionAsync(
 	graceMs: number,
 ): Promise<SessionAnswer | undefined> {
 	const { fileSystem, ipc } = context.seams;
-	const session = findSession(fileSystem, forgeFiles(context.cwd));
+	const session = findSession(fileSystem, forgeFiles(context.cwd), context.seams.host);
 	if (session === undefined) {
 		return undefined;
 	}

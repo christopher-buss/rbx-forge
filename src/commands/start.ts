@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import type { FlagDefinition } from "../cli/flags.ts";
 import type { JoinedSession, KnownSession } from "../client/session.ts";
 import { JOIN_SILENCE_MS, joinSessionAsync, probeSessionAsync } from "../client/session.ts";
@@ -12,7 +10,7 @@ import { releasedResult } from "../session/ownership.ts";
 import { listParts } from "../session/part-names.ts";
 import type { AddablePart, PartRequest } from "../session/part-requests.ts";
 import { STOP_PARTS_WAIT_MS } from "../session/part-stops.ts";
-import { STUDIO_PATH_FLAG, withStudioPath } from "../studio/discover.ts";
+import { resolveStudioPath, STUDIO_PATH_FLAG, withStudioPath } from "../studio/discover.ts";
 import { forgeFiles } from "../supervisor/session-files.ts";
 import type { CommandContext, CommandInput } from "./context.ts";
 
@@ -168,7 +166,7 @@ function wantedParts(
 		desktop,
 		parts,
 		...(typeof studioPath === "string"
-			? { studioPath: path.resolve(context.cwd, studioPath) }
+			? { studioPath: resolveStudioPath(context, studioPath) }
 			: {}),
 	};
 }

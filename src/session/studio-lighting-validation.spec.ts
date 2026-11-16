@@ -176,9 +176,9 @@ describe("startup Lighting identity checks", () => {
 			desktop: "user",
 			hiddenWindows: true,
 		});
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(run.studio.dialog).toBeUndefined();
 		expect(run.studio.blocked).toBeFalse();
@@ -193,16 +193,16 @@ describe("startup Lighting identity checks", () => {
 		const { manual, studio } = followingLightingStudio(onTestFinished, {
 			dismissFailsOnce: true,
 		});
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(studio.blocked).toBeTrue();
 
 		manual.advance(500);
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(studio.blocked).toBeFalse();
 	});
@@ -216,9 +216,9 @@ describe("startup Lighting identity checks", () => {
 			expect.assertions(1);
 
 			const { studio } = followingLightingStudio(onTestFinished, { identity });
-			for (let tick = 0; tick < 20; tick++) {
-				await Promise.resolve();
-			}
+			await new Promise<void>((resolve) => {
+				setImmediate(resolve);
+			});
 
 			expect(studio.blocked).toBeTrue();
 		},
@@ -231,17 +231,17 @@ describe("startup Lighting identity checks", () => {
 		expect.assertions(2);
 
 		const { manual, studio } = followingLightingStudio(onTestFinished, { desktop: "user" });
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(studio.blocked).toBeTrue();
 
 		studio.desktop = "hidden";
 		manual.advance(500);
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(studio.blocked).toBeTrue();
 	});
@@ -253,9 +253,9 @@ describe("startup Lighting identity checks", () => {
 		expect.assertions(1);
 
 		const { studio } = followingLightingStudio(onTestFinished, { aborted: true });
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(studio.blocked).toBeTrue();
 	});
@@ -267,16 +267,16 @@ describe("startup Lighting identity checks", () => {
 		expect.assertions(1);
 
 		const { manual, studio } = followingLightingStudio(onTestFinished, { hasDialog: false });
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		studio.blocked = true;
 		studio.dialog = { button: "Continue", title: "Lighting Technology Migration" };
 		manual.advance(30_000);
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(studio.blocked).toBeTrue();
 	});
@@ -288,21 +288,21 @@ describe("startup Lighting identity checks", () => {
 		expect.assertions(1);
 
 		const { manual, studio } = followingLightingStudio(onTestFinished, { hasDialog: false });
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		manual.advance(15_000);
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		studio.blocked = true;
 		studio.dialog = { button: "Continue", title: "Lighting Technology Migration" };
 		manual.advance(15_000);
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(studio.blocked).toBeTrue();
 	});
@@ -314,18 +314,18 @@ describe("startup Lighting identity checks", () => {
 		expect.assertions(2);
 
 		const { manual, studio } = followingLightingStudio(onTestFinished);
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(studio.blocked).toBeFalse();
 
 		studio.blocked = true;
 		studio.dialog = { button: "Continue", title: "Lighting Technology Migration" };
 		manual.advance(500);
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(studio.blocked).toBeTrue();
 	});
@@ -339,18 +339,18 @@ describe("startup Lighting identity checks", () => {
 		const { manual, memory, studio } = followingLightingStudio(onTestFinished, {
 			hasLock: false,
 		});
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		memory.fileSystem.writeFileSync(
 			path.join(PROJECT, "game.rbxl.lock"),
 			`42\nRobloxStudioBeta\n${TEST_HOSTNAME}\n`,
 		);
 		manual.advance(180_000);
-		for (let tick = 0; tick < 20; tick++) {
-			await Promise.resolve();
-		}
+		await new Promise<void>((resolve) => {
+			setImmediate(resolve);
+		});
 
 		expect(studio.blocked).toBeTrue();
 	});
@@ -361,9 +361,9 @@ describe("startup Lighting identity checks", () => {
 			expect.assertions(2);
 
 			const { studio } = followingLightingStudio(onTestFinished, { kind });
-			for (let tick = 0; tick < 20; tick++) {
-				await Promise.resolve();
-			}
+			await new Promise<void>((resolve) => {
+				setImmediate(resolve);
+			});
 
 			expect(studio.blocked).toBeTrue();
 			expect(studio.dialog).toStrictEqual({

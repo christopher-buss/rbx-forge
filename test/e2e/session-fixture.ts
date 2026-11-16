@@ -17,6 +17,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { assert, expect, onTestFinished } from "vitest";
 
 import { findSession } from "../../src/client/session.ts";
+import { nodeHost } from "../../src/seams/host.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
 import { createFixtureBinDirectory } from "../helpers/fixture-bin.ts";
@@ -283,7 +284,7 @@ export async function startReadyAsync(
 ): Promise<{ session: Session; sessionId: string }> {
 	const session = startSession(fixture, argv, variables);
 	await waitForOutputAsync(session, "Press Ctrl+C to stop.");
-	const known = findSession(nodeFs, forgeFiles(fixture.project));
+	const known = findSession(nodeFs, forgeFiles(fixture.project), nodeHost);
 	assert(known !== undefined, "expected the session's files");
 	return { session, sessionId: known.identity.sessionId };
 }

@@ -99,7 +99,7 @@ export function resolveConfig(file: ForgeConfig, flags: ConfigLayer): ResolvedCo
  * Resolve a command's Studio desktop after flag and file precedence.
  *
  * @param config - The file and flag config layers, resolved.
- * @param platform - The host OS; Linux has no hidden desktop.
+ * @param platform - Studio's OS; native Linux has no hidden desktop.
  * @param defaultDesktop - The command's choice when no layer sets it.
  * @param override - A later client's desktop flag when attaching Studio.
  * @returns The effective desktop.

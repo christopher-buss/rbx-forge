@@ -70,6 +70,88 @@ there.
 
 The bins `forge` and `rbx-forge` are the same. Run forge from the project root.
 
+## WSL2
+
+The [recorded packed-package gate](docs/validation/wsl-297.md) validates this
+WSL Studio implementation. The published v2.3.0 predates this work. Both Windows
+and WSL must use the first validated WSL release or newer for same-project
+exclusion; its exact minimum version belongs in the release record before
+publication. Until then, use the same dependency-complete WSL build on both
+sides. An older forge does not read the side record and cannot exclude the other
+side.
+
+Run forge with **Linux Node.js 24.12 or later**, Linux project tools, and
+Windows Studio installed and logged in. Check `node -p process.platform`: it
+must print `linux`. WSL1 and native Linux Studio are unsupported. WSL interop
+must run Windows executables; check `cmd.exe /c ver` from the distro. Keep npm
+optional dependencies enabled: the Linux native package supplies a Windows
+helper of the matching x64 or arm64 architecture, with executable permission. No
+separate Windows Node or forge installation is needed to control Studio.
+
+Use genuine Linux Rojo on `PATH` or in the project. Managed plugin installation
+is verified for Linux Rojo 7.7.1; an unverified installer needs a manual
+connection when its plugin is missing. forge installs its own plugin and the
+managed Rojo plugin into the Windows Plugins folder. `forge build --plugin` also
+writes there; forge downloads no plugins.
+
+Projects can live on either file system:
+
+```bash
+cd ~/projects/my-game        # ext4; Studio receives a \\wsl.localhost UNC path
+forge up --studio
+cd /mnt/d/projects/my-game   # Windows drive; Studio receives a drive path
+forge up --studio
+```
+
+Studio discovery reads the Windows registry. `--studio-path` and
+`RBX_FORGE_STUDIO_PATH` also accept an absolute Linux path, Windows drive path,
+or UNC path. Quote Windows paths in the Linux shell. Paths must be reachable
+through `wslpath`; a bad explicit path fails instead of using another Studio.
+
+Windows must reach the distro's **IPv4 loopback** listeners. NAT needs
+`localhostForwarding=true`; mirrored networking also works through `127.0.0.1`.
+IPv6 `::1` is not used. Check the active mode with `wslinfo --networking-mode`,
+and check Windows firewall rules. forge probes Rojo and captures from Windows
+before waiting for Studio. It supplies no relay. Changing `.wslconfig` can
+require `wsl --shutdown`, which stops every distro: save work and coordinate
+other WSL and Docker workloads first.
+
+| Error                              | Repair                                                                                                                              |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `wsl_interop_unavailable`          | Enable `[interop] enabled=true` in `/etc/wsl.conf`, restart WSL when safe, and verify `cmd.exe /c ver` works.                       |
+| `windows_helper_unavailable`       | If the message says busy, wait for the current operation. Otherwise check optional dependencies, architecture, helper and protocol. |
+| `wsl_network_unreachable`          | Enable NAT localhost forwarding or use mirrored networking; verify IPv4 loopback access and firewall rules.                         |
+| `studio_launch_unknown`            | Check Studio and `forge status` before another launch: Studio may already be open. forge never repeats the lost launch.             |
+| `identity_mismatch` (foreign side) | Run `forge down` on the Windows side or distro named in the error. `--force` does not override side ownership.                      |
+
+A Windows host that forbids job breakaway and kills its members on close cannot
+support detached Studio. A known launch failure preserves the Windows error.
+When it names job breakaway and error 5, check the host's job policy and
+executable permissions. forge does not retry the launch without breakaway.
+
+Attach, stop, restart, saves, show/hide, Windows AutoSaves handling, hidden
+session windows, and hidden snapshots use Windows process identities through the
+helper. A found Studio stays open on stop or restart unless `--force` is set.
+Hidden snapshots have a detached Lighting prompt watcher;
+`forge save --place <snapshot>` saves them, and `forge open` prunes closed
+snapshots beyond the newest five. Configuration follows Studio's Windows OS,
+including `studio.desktop` and `studio.saveMethod`. See
+[Studio](docs/studio.md).
+
+Closing the terminal that ran `forge up` can interrupt the helper's channel. The
+detached session continues and forge attempts bounded recovery, with a new
+handshake, Windows lock and verified Studio pins. `status --json` reports
+`services.studio.os: "win32"` and `control: "ready"`, `"recovering"`, or
+`"unavailable"`. Never pass Studio's Windows PID to Linux `kill`.
+
+Repair interop or the helper installation before retrying unavailable control. A
+lost save needs its original completion proof; otherwise it returns
+`save_failed` with reason `unknown`. Lost close and hide results require
+verified exit and visibility respectively. forge never repeats an uncertain
+mutation or kills Studio to resolve an uncertain close. A retained own-side
+record can be removed by a later `forge down` only after fresh helper control
+proves its Studio has exited. See [JSON output](docs/json-output.md).
+
 ## Commands
 
 Session commands:
@@ -293,6 +375,18 @@ With the skill, an agent:
 
 A session that no one uses stops after `session.idleTimeout` minutes, so a
 forgotten agent session does not stay open.
+
+## Mixing Windows and WSL sessions
+
+Both installations must use the release introducing WSL Windows-helper support
+(spec #297) or later, including Side ownership (#311). Version 2.3.0 and earlier
+cannot safely share a project between Windows and WSL. A session belongs to
+Windows or the WSL distro that started it. Run `forge down` on that side before
+starting it elsewhere, including when using `--force`. Keep the session files
+until cleanup succeeds on their own side.
+
+For projects on a Windows drive, WSL also holds the native Windows singleton
+lock through its helper. Linux file system projects do not take a Windows lock.
 
 ## Contributing
 

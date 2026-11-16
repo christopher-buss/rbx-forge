@@ -23,7 +23,7 @@ import type { SessionSync } from "./session-sync.ts";
 import type { SyncbackCheck } from "./session-syncback.ts";
 import { checkSyncbackOnce, startSyncback, watchSavesForSyncback } from "./session-syncback.ts";
 import type { PartOwner, StatusRecorder, StatusStore } from "./status.ts";
-import { createStudioMover } from "./studio-move.ts";
+import { createStudioMover, watchStudioControl } from "./studio-move.ts";
 import type { PreparedStudio, StudioSetup, StudioState } from "./studio-part.ts";
 import {
 	createStudioAdder,
@@ -108,6 +108,7 @@ const ALL_PARTS = ["studio", "rojo", "compiler"] as const;
  */
 export function createSessionBody(session: SessionSetup): (scope: SessionScope) => Promise<void> {
 	return async (scope) => {
+		watchStudioControl(session, scope.signal);
 		const requireSyncback = checkSyncbackOnce(session.config);
 		const steps = workerContext(session, scope, "start");
 		const prepared = await runStepsAsync(session, { requireSyncback, steps });
@@ -118,7 +119,7 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
 			steps,
 			studio: { isAttached: false },
 		};
-		followPreparedStudio(session, scope, state, prepared);
+		await followPreparedStudioAsync(session, scope, state, prepared);
 
 		const served = await runServicesAsync(session, scope, state);
 		if (served === undefined) {
@@ -146,15 +147,18 @@ export function createSessionBody(session: SessionSetup): (scope: SessionScope) 
  * @param state - The Studio state and parts.
  * @param prepared - The prepared place, when requested.
  */
-function followPreparedStudio(
+async function followPreparedStudioAsync(
 	session: SessionSetup,
 	scope: SessionScope,
 	state: BodyState,
 	prepared: PreparedStudio | undefined,
-): void {
-	if (prepared?.attached !== undefined) {
-		followSessionStudio(session, scope, { ...state, state: state.studio }, prepared.attached);
+): Promise<void> {
+	if (prepared?.attached === undefined) {
+		return;
 	}
+
+	const follow = { ...state, state: state.studio };
+	await followSessionStudio(session, scope, follow, prepared.attached).open;
 }
 
 /**
@@ -364,7 +368,8 @@ async function waitAttachedStudioAsync(
 }
 
 /**
- * Expose part requests after the initial Studio launch, then mark startup done.
+ * Expose part requests after the initial Studio launch, then mark startup
+ * done.
  *
  * @param session - The config and part requests.
  * @param scope - Its end signal and watches.

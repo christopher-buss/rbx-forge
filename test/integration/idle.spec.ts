@@ -11,6 +11,7 @@ import { assert, describe, it } from "vitest";
 import type { KnownSession } from "../../src/client/session.ts";
 import { findSession } from "../../src/client/session.ts";
 import { callSessionAsync } from "../../src/ipc/client.ts";
+import { nodeHost } from "../../src/seams/host.ts";
 import type { ReporterEvent } from "../../src/seams/reporter.ts";
 import type { SessionStatus } from "../../src/session/status.ts";
 import { parseStatus } from "../../src/session/status.ts";
@@ -91,7 +92,7 @@ async function waitForStatusAsync(
 	isDone: (status: SessionStatus) => boolean,
 ): Promise<SessionStatus> {
 	const started = Date.now();
-	let session = findSession(nodeFs, forgeFiles(project.project));
+	let session = findSession(nodeFs, forgeFiles(project.project), nodeHost);
 	let lastStatus: SessionStatus | undefined;
 	let outcome: Settled | undefined;
 	let eventsBeforeRequest = run.events.length;
@@ -120,7 +121,7 @@ async function waitForStatusAsync(
 			await sleep(100);
 		}
 	} catch (err) {
-		session ??= findSession(nodeFs, forgeFiles(project.project));
+		session ??= findSession(nodeFs, forgeFiles(project.project), nodeHost);
 		const pin = session === undefined ? null : native.pinProcess(session.identity.pid);
 		const evidence = {
 			elapsedMs: Date.now() - started,
@@ -155,8 +156,10 @@ async function keepActiveAsync(
 	act: () => Promise<void> | void,
 ): Promise<void> {
 	let isSettled = false;
-	void run.settled.finally(() => {
+	let outcome: Settled | undefined;
+	void run.settled.then((result) => {
 		isSettled = true;
+		outcome = result;
 	});
 	const until = Date.now() + ACTIVE_MS;
 	while (Date.now() < until) {
@@ -164,7 +167,7 @@ async function keepActiveAsync(
 		await sleep(ACTIVITY_EVERY_MS);
 	}
 
-	testContext.expect(isSettled).toBeFalse();
+	testContext.expect(isSettled, JSON.stringify({ events: run.events, outcome })).toBeFalse();
 }
 
 /**
@@ -213,7 +216,10 @@ describe("idle timeout", () => {
 	it("should start the time again on each compile start", async ({ expect }) => {
 		expect.assertions(2);
 
-		const { run, watched } = await startUpAsync(TIMEOUT);
+		const { project, run, watched } = await startUpAsync(TIMEOUT);
+		await waitForStatusAsync(project, run, ({ services }) => {
+			return services.compiler.lastBuild !== undefined;
+		});
 		let edits = 0;
 		await keepActiveAsync({ expect }, run, () => {
 			edits += 1;

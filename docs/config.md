@@ -288,7 +288,13 @@ defineConfig({
 
 The Studio executable is not a config option: its path differs per computer. Use
 `--studio-path` or `RBX_FORGE_STUDIO_PATH` (see
-[Opening Studio](./studio.md#opening-studio)).
+[Opening Studio](./studio.md#opening-studio)). Under WSL, both accept a Linux
+path (`/mnt/c/Users/me/RobloxStudioBeta.exe`) or an absolute Windows drive or
+UNC path (`C:\Users\me\RobloxStudioBeta.exe` or
+`\\server\share\RobloxStudioBeta.exe`). Quote paths containing spaces. forge
+converts Windows paths before checking the file from Linux. The flag wins over
+the environment variable, then forge checks the Windows registry. An invalid
+explicit path fails; it never falls back to the installed Studio.
 
 ### `session`
 
@@ -359,8 +365,9 @@ either, the command selects its default. On Windows, `hidden` keeps a session
 Studio on the user's desktop with its windows hidden; a hidden snapshot from
 `open` uses a separate desktop object. On macOS, it is a background
 LaunchServices launch, kept hidden and activated only briefly for its first
-save. On Linux Studio always runs on the user's desktop. An already open Studio
-keeps its placement. See [Hidden desktop](./studio.md#hidden-desktop).
+save. On native Linux the effective desktop is always `user`; WSL uses Windows
+Studio placement through the helper. An already open Studio keeps its placement.
+See [Hidden desktop](./studio.md#hidden-desktop).
 
 ```ts
 defineConfig({

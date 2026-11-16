@@ -60,6 +60,32 @@ fn spawn_with_desktop(
     detached: &Detached<'_>,
     open_hidden: impl FnOnce() -> io::Result<super::desktop::Desktop>,
 ) -> io::Result<Option<u32>> {
+    spawn_and_then(detached, open_hidden, Ok, true)
+}
+
+/// Pin while the create handle still prevents PID reuse.
+pub fn spawn_pinned(
+    detached: &Detached<'_>,
+) -> io::Result<Option<crate::os::process::PinnedProcess>> {
+    super::helper_job::prepare()
+        .map_err(|err| io::Error::other(format!("prepare Windows helper job: {err}")))?;
+    spawn_and_then(
+        detached,
+        super::desktop::inherit_hidden,
+        |pid| {
+            crate::os::process::PinnedProcess::open(pid)?
+                .ok_or_else(|| io::Error::other("launched process exited"))
+        },
+        false,
+    )
+}
+
+fn spawn_and_then<T>(
+    detached: &Detached<'_>,
+    open_hidden: impl FnOnce() -> io::Result<super::desktop::Desktop>,
+    finish: impl FnOnce(u32) -> io::Result<T>,
+    fallback: bool,
+) -> io::Result<Option<T>> {
     let stdin = inheritable(File::open("NUL")?)?;
     let output = inheritable(match detached.output {
         Some(path) => OpenOptions::new().append(true).create(true).open(path)?,
@@ -70,7 +96,8 @@ fn spawn_with_desktop(
         // No process exists yet: the caller can safely use its platform launcher.
         match open_hidden() {
             Ok(desktop) => Some(desktop),
-            Err(_) => return Ok(None),
+            Err(_) if fallback => return Ok(None),
+            Err(err) => return Err(io::Error::other(format!("open hidden desktop: {err}"))),
         }
     } else {
         None
@@ -137,8 +164,14 @@ fn spawn_with_desktop(
     });
     drop(attributes);
     match created {
-        Err(err) if err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => return Ok(None),
-        Err(err) => return Err(err),
+        Err(err) if fallback && err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
+            return Ok(None);
+        }
+        Err(err) => {
+            return Err(io::Error::other(format!(
+                "CreateProcessW with job breakaway: {err}"
+            )));
+        }
         Ok(()) => {}
     }
 
@@ -146,7 +179,7 @@ fn spawn_with_desktop(
     // close here, and the process runs on.
     let _process = unsafe { OwnedHandle::from_raw_handle(info.hProcess.cast()) };
     let _thread = unsafe { OwnedHandle::from_raw_handle(info.hThread.cast()) };
-    Ok(Some(info.dwProcessId))
+    finish(info.dwProcessId).map(Some)
 }
 
 #[cfg(test)]
@@ -171,6 +204,19 @@ mod tests {
             Err(io::Error::from_raw_os_error(ERROR_ACCESS_DENIED as i32))
         });
         assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn strict_launch_retains_hidden_desktop_error() {
+        let error = spawn_and_then(
+            &missing_studio(Some("hidden")),
+            || Err(io::Error::from_raw_os_error(ERROR_ACCESS_DENIED as i32)),
+            Ok,
+            false,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("open hidden desktop"));
+        assert!(error.to_string().contains("os error 5"));
     }
 
     #[test]

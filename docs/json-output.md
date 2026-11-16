@@ -35,6 +35,38 @@ takes a safe default or fails with `needs_confirmation`.
 Error codes are stable: a code is never renamed or reused. The full list is in
 [`src/errors.ts`](../src/errors.ts).
 
+Under WSL, `wsl_network_unreachable` exits with code 1 when Windows cannot reach
+the session Rojo or capture listener on IPv4 loopback. Its `error.hint` points
+to localhost forwarding, networking mode, and firewall settings.
+
+Under WSL, helper startup failures exit with code 1 and include `error.hint`:
+
+- `windows_helper_unavailable`: the packaged `forge-windows-helper.exe` is
+  missing, cannot run, or reports an incompatible protocol or architecture.
+  Reinstall forge with optional dependencies and the matching architecture.
+- `wsl_interop_unavailable`: launching or handshaking with the Windows helper
+  fails. Enable `[interop] enabled=true` in `/etc/wsl.conf`, run
+  `wsl --shutdown` from Windows after saving and coordinating other distro and
+  Docker workloads, and check that Windows executables run in the distro. forge
+  judges interop by the actual launch and handshake.
+
+A known helper operation refusal also uses `windows_helper_unavailable` and
+preserves the Windows error message. If a Studio launch reports job breakaway
+and OS error 5, check the host job policy and executable permissions. A host
+that kills members on close and forbids breakaway cannot support detached
+Studio. forge never retries that launch without breakaway.
+
+A lost Studio launch reply returns `studio_launch_unknown` (exit 1). Studio may
+already be running. forge never repeats that launch or falls back to a platform
+launcher; check Studio before trying again.
+
+A session belonging to Windows or another WSL distro fails with
+`identity_mismatch` (exit 5) before process control, IPC, or cleanup. The hint
+names the side on which to run `forge down`; `--force` does not override it.
+Both sides need the first validated WSL release or newer. Published v2.3.0
+predates this guarantee; the [release record](./wsl-release-gate.md) must name
+the exact minimum version before publication.
+
 ## Session results
 
 The fields of the session commands. The agent workflow is in the
@@ -124,6 +156,27 @@ it joined a running session, its result names what letting go did:
 
 A `start` that joined reports `Joined session <id>: …` first. When the session
 ends while it holds it, it returns `data.ending: true` with no other field.
+
+When present, `services.studio.os` identifies Studio's OS. Under WSL it is
+`"win32"`: Studio's `pid` and `startTime` identify a Windows process, while the
+session's top-level PID identifies the Linux supervisor. Do not pass Studio's
+Windows PID to Linux process-control tools. Older sessions and native hosts may
+omit `os`.
+
+`services.studio.isLaunchUnknown: true` records a Windows launch whose reply did
+not provide a usable identity. It survives Studio being set to `off`; cleanup
+retains the Side record because the Windows process cannot be proved gone.
+
+Studio under WSL also has optional `services.studio.control`: `ready`,
+`recovering`, or `unavailable`. This describes the Windows helper channel;
+Studio's existing status and the session's lifetime remain independent. One
+warning announces channel loss, one info event announces successful recovery,
+and one warning announces stopped recovery. A replacement verifies its Windows
+host, retakes supported Windows locks and re-pins Studio by PID and start time
+before accepting commands. Missing helpers, disabled interop, invalid protocol,
+malformed data and changed Windows hosts stop recovery. Lost mutation results
+are never replayed. A save without its original completion proof fails with
+`save_failed` and `details.reason: "unknown"`.
 
 ## Fresh builds: `status --wait`
 

@@ -12,7 +12,7 @@ import {
 	PROJECT,
 	TEST_HOSTNAME,
 } from "../../test/helpers/seams.ts";
-import { createStudioLauncher } from "../studio/launcher.ts";
+import { createStudioLauncher } from "../seams/addon-studio/launcher.ts";
 import { runSnapshotLightingAsync } from "../studio/snapshot-lighting.ts";
 import { runOpenAsync } from "./open.ts";
 

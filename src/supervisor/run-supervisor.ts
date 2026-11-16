@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { CommandContext } from "../commands/context.ts";
 import { loadProjectConfigAsync } from "../config/load.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
+import { ForgeError } from "../errors.ts";
 import type { ReaperEnd } from "../reaper/reaper-client.ts";
 import type { RojoPort } from "../rojo/rojo-port.ts";
 import { createRojoPort } from "../rojo/rojo-port.ts";
@@ -34,7 +35,8 @@ import { resolveServices } from "./services.ts";
 import type { ControlSetup } from "./session-control.ts";
 import { openSessionAsync } from "./session-control.ts";
 import type { ForgeFiles, IdentityRecord, SessionFiles } from "./session-files.ts";
-import { forgeFiles, removeSession } from "./session-files.ts";
+import { forgeFiles, listSessions, sessionFiles } from "./session-files.ts";
+import { assertOwnSession, sideOf } from "./side.ts";
 
 /** The warning for each escalation of the reaper's end. */
 const ESCALATIONS: Readonly<Record<NonNullable<ReaperEnd["escalation"]>, string>> = {
@@ -136,6 +138,11 @@ export async function runSupervisorAsync(
 	await pause("created", stop.signal);
 	const { config } = await loadProjectConfigAsync(cwd, seams.configLoader, request.config);
 	const plan = planSession(config, request);
+	const forgeBefore = forgeFiles(cwd);
+	for (const id of listSessions(seams.fileSystem, forgeBefore)) {
+		assertOwnSession(seams.host, seams.fileSystem, sessionFiles(forgeBefore, id).identity);
+	}
+
 	const owner = options.owner === undefined ? null : "start";
 	const services = resolveServices(context, config, { owner, plan });
 	await pause("lock", stop.signal);
@@ -145,18 +152,39 @@ export async function runSupervisorAsync(
 	}
 
 	const forge = forgeFiles(cwd);
-	const singleton = acquireSingleton(seams, forge);
-	try {
-		return await runLockedAsync(context, options, {
-			config,
-			force: request.force === true,
-			forge,
-			parts,
-			services,
-		});
-	} finally {
-		singleton.release();
+
+	return runWithLocksAsync(context, options, {
+		config,
+		force: request.force === true,
+		forge,
+		parts,
+		services,
+	});
+}
+
+const WINDOWS_DRIVE = /^[a-z]:[\\/]/i;
+
+async function windowsLockAsync(
+	seams: CommandContext["seams"],
+	forge: ForgeFiles,
+): Promise<import("../seams/studio-host.ts").StudioHostLock | null> {
+	if (seams.host.platform !== "linux" || seams.host.wslDistro === undefined) {
+		return null;
 	}
+
+	const windowsPath = await seams.studioHost.toHostPathAsync(forge.lock);
+	if (!WINDOWS_DRIVE.test(windowsPath)) {
+		return null;
+	}
+
+	const lock = await seams.studioHost.tryLockFileAsync(forge.lock);
+	if (lock === null) {
+		throw new ForgeError("session_running", "A session already runs for this project.", {
+			hint: 'Run "forge down" on the side that started it.',
+		});
+	}
+
+	return lock;
 }
 
 function reasonName(request: StopRequest): string {
@@ -210,6 +238,7 @@ function identityOf(
 		pid: host.pid,
 		processStartTime,
 		sessionId: seams.randomId(),
+		side: sideOf(host),
 		startedAt: startedAt.toISOString(),
 		version,
 	};
@@ -296,7 +325,7 @@ async function runSessionOnceAsync(
 			createSessionBody({ ...services, ...body, directory: files.directory }),
 		);
 	} catch (err) {
-		removeSession(seams.fileSystem, forge, files.sessionId);
+		await finalBarrierAsync(seams, forge, files, []);
 		throw err;
 	}
 }
@@ -409,5 +438,25 @@ async function runLockedAsync(
 		links.parts.close();
 		links.sync.close();
 		await closeAsync();
+	}
+}
+
+async function runWithLocksAsync(
+	context: CommandContext,
+	options: SupervisorOptions,
+	session: Pick<OwnSession, "config" | "forge" | "parts" | "services"> & { force: boolean },
+): Promise<CommandResult> {
+	const { seams } = context;
+	const singleton = acquireSingleton(seams, session.forge);
+	let windowsLock: import("../seams/studio-host.ts").StudioHostLock | null = null;
+	try {
+		windowsLock = await windowsLockAsync(seams, session.forge);
+		return await runLockedAsync(context, options, session);
+	} finally {
+		try {
+			await windowsLock?.releaseAsync();
+		} finally {
+			singleton.release();
+		}
 	}
 }

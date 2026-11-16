@@ -4,6 +4,7 @@ import { type } from "arktype";
 import type { Diagnostic } from "../compiler/diagnostics.ts";
 import type { StudioDesktop } from "../config/schema.ts";
 import type { HookResult } from "../hooks/run-hooks.ts";
+import type { StudioControl } from "../seams/studio-host.ts";
 import type { StudioProcess } from "../studio/launcher.ts";
 import { createPartRecorder, createStudioRecorder } from "./status-recorders.ts";
 
@@ -99,12 +100,16 @@ export type StudioOrigin = "forge" | "found";
 
 /** The Studio of a session. */
 export interface SessionStudio {
+	control?: StudioControl;
 	/**
 	 * The actual launch desktop, or on macOS the last forge app visibility.
 	 * Absent before launch and in older sessions.
 	 */
 	desktop?: StudioDesktop;
+	/** A Windows launch completed without a usable identity. */
+	isLaunchUnknown?: true;
 	origin?: StudioOrigin;
+	os?: NodeJS.Platform;
 	owner: null | PartOwner;
 	pid?: number;
 	place?: string;
@@ -174,6 +179,7 @@ export interface StatusRecorder {
 		process: null | StudioProcess,
 		origin?: StudioOrigin,
 	) => void;
+	studioControl: (control: StudioControl, isLaunchUnknown?: true) => void;
 	/**
 	 * The session let go of its Studio, which stays open: `off`, with no
 	 * owner.
@@ -388,8 +394,11 @@ const statusSchema: Type<SessionStatus> = type({
 		}),
 		rojo: servicePart.and({ "port?": INTEGER }),
 		studio: {
+			"control?": "'ready' | 'recovering' | 'unavailable'",
 			"desktop?": "'user' | 'hidden'",
+			"isLaunchUnknown?": "true",
 			"origin?": "'forge' | 'found'",
+			"os?": "'win32' | 'darwin' | 'linux' | 'aix' | 'android' | 'freebsd' | 'haiku' | 'openbsd' | 'sunos' | 'cygwin' | 'netbsd'",
 			"owner": OWNER,
 			"pid?": INTEGER,
 			"place?": TEXT,

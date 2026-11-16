@@ -26,7 +26,7 @@ export interface StudioLockWatch {
 	 * Whether the recorded Studio still runs: a Studio that exits leaves its
 	 * lock file, so its end closes the place too.
 	 */
-	isAlive: () => boolean;
+	isAlive: () => boolean | Promise<boolean>;
 	/** The place's lock file. */
 	path: string;
 	/**
@@ -53,16 +53,21 @@ export async function waitForStudioCloseAsync(
 	onOpen: () => void,
 ): Promise<boolean> {
 	const { fileSystem } = options;
-	if (!(await pollAsync(options, () => !lock.isAlive() || holdsLock(fileSystem, lock)))) {
+	if (
+		!(await pollAsync(
+			options,
+			async () => !(await lock.isAlive()) || holdsLock(fileSystem, lock),
+		))
+	) {
 		return false;
 	}
 
-	if (!lock.isAlive()) {
+	if (!(await lock.isAlive())) {
 		return true;
 	}
 
 	onOpen();
-	return pollAsync(options, () => !lock.isAlive() || !holdsLock(fileSystem, lock));
+	return pollAsync(options, async () => !(await lock.isAlive()) || !holdsLock(fileSystem, lock));
 }
 
 /**
@@ -114,10 +119,10 @@ function holdsLock(fileSystem: FileSystem, { path, pid }: StudioLockWatch): bool
  */
 async function pollAsync(
 	{ clock, intervalMs, signal }: WatchOptions,
-	check: () => boolean,
+	check: () => Promise<boolean>,
 ): Promise<boolean> {
 	while (!signal.aborted) {
-		if (check()) {
+		if (await check()) {
 			return true;
 		}
 
@@ -138,10 +143,14 @@ async function pollAsync(
  * @param check - Looks once.
  */
 async function watchUntilEndAsync(options: WatchOptions, check: () => void): Promise<void> {
-	await pollAsync(options, () => {
+	while (!options.signal.aborted) {
 		check();
-		return false;
-	});
+		try {
+			await options.clock.sleep(options.intervalMs, options.signal);
+		} catch {
+			// The watch ended while it waited.
+		}
+	}
 }
 
 /**

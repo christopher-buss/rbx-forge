@@ -291,11 +291,7 @@ function letGoForDown(
 	stopper: StopperParts,
 	{ isFound, keepStudio }: { isFound: boolean; keepStudio: boolean },
 ): void {
-	if (keepStudio) {
-		stopper.state.isAttached = false;
-	}
-
-	if (isFound) {
+	if (isFound || (keepStudio && setup.status.snapshot().services.studio.owner === null)) {
 		leaveStudio(stopper.state, setup.status);
 	}
 }

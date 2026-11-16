@@ -1,7 +1,8 @@
-import type { PinnedProcess } from "../native/addon.ts";
+import { isHelperChannelLoss } from "../native/helper-client.ts";
+import type { PinnedStudio } from "../seams/studio-host.ts";
 import type { StudioSeams, StudioTarget } from "./close-studio.ts";
-import { findPlaceStudio } from "./close-studio.ts";
-import { studioProcess } from "./launcher.ts";
+import { findPlaceStudioAsync } from "./close-studio.ts";
+import { studioProcessAsync } from "./launcher.ts";
 
 /** Boundaries of a hidden Studio's migration prompt watch. */
 export type LightingWatchEvent =
@@ -21,15 +22,16 @@ export type LightingWatchEvent =
  * @returns Whether its migration prompt was dismissed.
  */
 export async function dismissLightingDialogAsync(
-	pinned: PinnedProcess,
+	pinned: PinnedStudio,
 	timeoutMs = 1000,
 ): Promise<boolean> {
+	const studio = await studioProcessAsync(pinned);
 	return (
-		studioProcess(pinned).desktop === "hidden" &&
-		(await pinned.dismissDialog(
+		studio.desktop === "hidden" &&
+		(await pinned.dismissDialogAsync(
 			"Lighting Technology Migration",
 			"Continue",
-			pinned.desktop(),
+			await pinned.desktopAsync(),
 			timeoutMs,
 		))
 	);
@@ -41,6 +43,7 @@ export async function dismissLightingDialogAsync(
  * @param target - The launched or attached place and identity.
  * @param options - Opening deadline, cancellation, and optional diagnostic observer.
  */
+// eslint-disable-next-line sonar/cognitive-complexity, flawless/max-lines-per-function -- The bounded watcher distinguishes uncertain mutations from transient accessibility errors.
 export async function watchHiddenLightingAsync(
 	seams: StudioSeams,
 	target: StudioTarget,
@@ -59,7 +62,7 @@ export async function watchHiddenLightingAsync(
 	trace?.({ deadline, event: "opening" });
 	while (!signal.aborted && seams.clock.now() < deadline) {
 		try {
-			const pinned = pinLightingStudio(seams, target);
+			const pinned = await pinLightingStudioAsync(seams, target);
 			if (pinned !== null) {
 				if (!hasLock) {
 					deadline = seams.clock.now() + 30_000;
@@ -72,8 +75,10 @@ export async function watchHiddenLightingAsync(
 				}
 			}
 		} catch (err) {
-			// Accessibility providers can fail while Studio is still loading.
 			trace?.({ event: "error", message: String(err) });
+			if (isHelperChannelLoss(err)) {
+				return;
+			}
 		}
 
 		try {
@@ -88,10 +93,11 @@ export async function watchHiddenLightingAsync(
 }
 
 async function dismissWatchedLightingAsync(
-	pinned: PinnedProcess,
+	pinned: PinnedStudio,
 	trace: ((event: LightingWatchEvent) => void) | undefined,
 ): Promise<boolean> {
-	if (studioProcess(pinned).desktop !== "hidden") {
+	const studio = await studioProcessAsync(pinned);
+	if (studio.desktop !== "hidden") {
 		trace?.({ event: "end", reason: "visible" });
 		return true;
 	}
@@ -106,8 +112,11 @@ async function dismissWatchedLightingAsync(
 	return wasDismissed;
 }
 
-function pinLightingStudio(seams: StudioSeams, target: StudioTarget): null | PinnedProcess {
-	const studio = findPlaceStudio(seams, target.place);
+async function pinLightingStudioAsync(
+	seams: StudioSeams,
+	target: StudioTarget,
+): Promise<null | PinnedStudio> {
+	const studio = await findPlaceStudioAsync(seams, target.place);
 	if (
 		studio === undefined ||
 		(target.process !== undefined &&
@@ -116,6 +125,6 @@ function pinLightingStudio(seams: StudioSeams, target: StudioTarget): null | Pin
 		return null;
 	}
 
-	const pinned = seams.native().pinProcess(studio.pid);
+	const pinned = await seams.studioHost.pinProcessAsync(studio.pid);
 	return pinned?.startTime === studio.startTime ? pinned : null;
 }

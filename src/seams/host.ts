@@ -1,6 +1,8 @@
 import os from "node:os";
 import process from "node:process";
 
+import { readVariable } from "../process/environment.ts";
+
 /**
  * Facts about the forge process and the OS it runs on, plus the one signal
  * call forge makes. Unit tests pass a fake, so each OS path runs on every OS.
@@ -21,6 +23,8 @@ export interface Host {
 	platform: NodeJS.Platform;
 	/** POSIX: the user id this process runs as. Windows: `undefined`. */
 	userId: number | undefined;
+	/** The WSL distro, absent on native hosts. */
+	wslDistro?: string | undefined;
 }
 
 export const nodeHost: Host = {
@@ -33,4 +37,5 @@ export const nodeHost: Host = {
 	pid: process.pid,
 	platform: process.platform,
 	userId: process.getuid?.(),
+	wslDistro: readVariable(process.env, "WSL_DISTRO_NAME", process.platform),
 };

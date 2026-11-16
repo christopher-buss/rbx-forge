@@ -127,8 +127,8 @@ describe("forge restart", () => {
 		}).toStrictEqual({
 			compiler: 2,
 			rojo: [
-				`serve ${wrapperPath(fixture)} --port ${fixture.port}`,
-				`serve ${wrapperPath(fixture)} --port ${fixture.port}`,
+				`serve ${wrapperPath(fixture)} --port ${fixture.port} --address 127.0.0.1`,
+				`serve ${wrapperPath(fixture)} --port ${fixture.port} --address 127.0.0.1`,
 			],
 			studio: 2,
 		});

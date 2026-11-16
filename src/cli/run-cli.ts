@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { parseArgs } from "node:util";
 
-import type { CommandContext } from "../commands/context.ts";
+import type { CommandContext, CommandInput } from "../commands/context.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
 import { EXIT_SUCCESS } from "../exit-codes.ts";
 import type { ExitCode } from "../exit-codes.ts";
 import { createReporter } from "../output/reporters.ts";
-import type { OutputStreams, Reporter } from "../seams/reporter.ts";
+import type { CommandResult, OutputStreams, Reporter } from "../seams/reporter.ts";
 import type { Environment, Seams } from "../seams/seams.ts";
+import { observeStudioControl } from "../studio/control-events.ts";
 import type { CommandDefinition } from "./commands.ts";
 import type { FlagValues } from "./flags.ts";
 import { configLayerFromFlags, GLOBAL_FLAGS, parserOptions } from "./flags.ts";
@@ -57,7 +58,7 @@ export async function runCliAsync(
 			return EXIT_SUCCESS;
 		}
 
-		const result = await command.run(commandContext(context, reporter, isJson), {
+		const result = await runCommandAsync(command, commandContext(context, reporter, isJson), {
 			...(argument === undefined ? {} : { argument }),
 			config: configLayerFromFlags(command.flags, values),
 			flags: values,
@@ -66,6 +67,19 @@ export async function runCliAsync(
 		return EXIT_SUCCESS;
 	} catch (err) {
 		return reportFailure(reporter, command?.name, err);
+	}
+}
+
+async function runCommandAsync(
+	command: CommandDefinition,
+	context: CommandContext,
+	input: CommandInput,
+): Promise<CommandResult> {
+	const dispose = observeStudioControl(context.seams.studioHost, context.reporter);
+	try {
+		return await command.run(context, input);
+	} finally {
+		dispose?.();
 	}
 }
 

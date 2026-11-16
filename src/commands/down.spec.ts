@@ -88,7 +88,7 @@ function makeContext({
 		native: () => native.addon,
 	});
 	const context = createCommandContext({
-		seams: { ...seams, host: { ...seams.host, ...host } },
+		seams: Object.assign(seams, { host: { ...seams.host, ...host } }),
 	});
 	return { context, elapsed: () => now, native };
 }

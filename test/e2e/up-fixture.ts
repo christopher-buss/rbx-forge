@@ -7,6 +7,7 @@ import nodeFs from "node:fs";
 import { assert, onTestFinished } from "vitest";
 
 import { findSession } from "../../src/client/session.ts";
+import { nodeHost } from "../../src/seams/host.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import type { ResultLine } from "../helpers/output.ts";
 import { parseResult } from "../helpers/output.ts";
@@ -39,7 +40,7 @@ export interface UpRun extends BinRun {
  * @param timeoutMs - The cleanup command's deadline, before the hook deadline.
  */
 export async function stopDetachedAsync(fixture: Fixture, timeoutMs = 15_000): Promise<void> {
-	const session = findSession(nodeFs, forgeFiles(fixture.project));
+	const session = findSession(nodeFs, forgeFiles(fixture.project), nodeHost);
 	if (session === undefined) {
 		return;
 	}

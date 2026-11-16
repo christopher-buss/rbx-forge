@@ -47,7 +47,11 @@ export async function runStatusAsync(
 	input: CommandInput = NO_INPUT,
 ): Promise<CommandResult> {
 	const waitMs = waitOf(input.flags);
-	const session = findSession(context.seams.fileSystem, forgeFiles(context.cwd));
+	const session = findSession(
+		context.seams.fileSystem,
+		forgeFiles(context.cwd),
+		context.seams.host,
+	);
 	if (session === undefined) {
 		throw new ForgeError("not_running", "No session runs for this project.", {
 			hint: 'Start one with "forge up".',

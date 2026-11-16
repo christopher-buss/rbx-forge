@@ -2,6 +2,7 @@ import { ForgeError } from "../errors.ts";
 import type { FileLock, NativeLoader } from "../native/addon.ts";
 import type { Clock } from "../seams/clock.ts";
 import type { FileSystem } from "../seams/file-system.ts";
+import type { Host } from "../seams/host.ts";
 import type { ForgeFiles } from "./session-files.ts";
 
 /** How often a wait for a lease or a barrier tries again. */
@@ -14,6 +15,7 @@ export interface LockSeams {
 		FileSystem,
 		"existsSync" | "mkdirSync" | "readdirSync" | "readFileSync" | "rmSync"
 	>;
+	host: Host;
 	native: NativeLoader;
 }
 

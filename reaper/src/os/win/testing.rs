@@ -36,24 +36,26 @@ use super::{check, owned, raw, wide};
 const GENERIC_READ: u32 = 0x8000_0000;
 const GENERIC_WRITE: u32 = 0x4000_0000;
 
-/// Put this process in a new job with `KILL_ON_JOB_CLOSE`, plus
-/// `BREAKAWAY_OK` when asked. The job lives until this process exits; then
-/// every process still in it dies.
+/// Put this process in a new job with the requested close and breakaway
+/// policy. Its handle lives until this process exits.
 ///
 /// # Errors
 ///
 /// When the job cannot be made or joined.
-pub fn join_new_job(breakaway_ok: bool) -> io::Result<()> {
+pub fn join_new_job(breakaway_ok: bool, kill_on_close: bool) -> io::Result<()> {
     // SAFETY: default security, no name.
     let job = owned(unsafe { CreateJobObjectW(null(), null()) }, null_mut())?;
     // SAFETY: all-zero is a valid value of this plain struct.
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        | if breakaway_ok {
-            JOB_OBJECT_LIMIT_BREAKAWAY_OK
-        } else {
-            0
-        };
+    limits.BasicLimitInformation.LimitFlags = if kill_on_close {
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    } else {
+        0
+    } | if breakaway_ok {
+        JOB_OBJECT_LIMIT_BREAKAWAY_OK
+    } else {
+        0
+    };
     // SAFETY: the job is open; the struct and its size match the class.
     check(unsafe {
         SetInformationJobObject(

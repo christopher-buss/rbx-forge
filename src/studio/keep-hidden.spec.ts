@@ -4,6 +4,7 @@ import { assert, describe, it } from "vitest";
 import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import { createMemoryFileSystem, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
+import type { StudioControl } from "../seams/studio-host.ts";
 import { STUDIO_OPEN_BOUND_MS } from "../session/studio-readiness.ts";
 import {
 	createKeepHiddenLauncher,
@@ -327,6 +328,120 @@ describe("windows detached window hiding", () => {
 		expect(sleeps).toBe(0);
 	});
 
+	it.for([true, false])(
+		"honors a Windows session show before or during watching: %s",
+		async (shownBefore, { expect }) => {
+			expect.assertions(2);
+
+			const native = createFakeNative({
+				42: {
+					alive: true,
+					executablePath: "RobloxStudio",
+					startTime: "42",
+					windowVisibility: "hidden",
+				},
+			});
+			const memory = createMemoryFileSystem();
+			function show() {
+				native.processes.get(42)!.windowVisibility = "user";
+				memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
+				memory.fileSystem.writeFileSync(STATE, JSON.stringify(sessionState("user")));
+			}
+
+			const seams = createTestSeams({
+				clock: {
+					now: () => 0,
+					sleep: async () => {
+						show();
+					},
+				},
+				fileSystem: memory.fileSystem,
+				native: () => native.addon,
+			});
+			const actions = new Map([
+				[false, () => {}],
+				[true, show],
+			]);
+			actions.get(shownBefore)!();
+			await keepStudioHiddenAsync(
+				seams,
+				JSON.stringify({ ...TARGET, isWindows: true }),
+				PROJECT,
+			);
+
+			expect(native.processes.get(42)!.windowHiding).not.toBe(true);
+			expect(native.processes.get(42)!.alive).toBeTrue();
+		},
+	);
+
+	it("does not restart hiding after the session shows Studio", async ({ expect }) => {
+		expect.assertions(1);
+
+		const native = createFakeNative({
+			42: {
+				alive: true,
+				executablePath: "RobloxStudio",
+				startTime: "42",
+				windowVisibility: "user",
+			},
+		});
+		const memory = createMemoryFileSystem();
+		memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
+		memory.fileSystem.writeFileSync(STATE, JSON.stringify(sessionState("user")));
+		const seams = createTestSeams({
+			fileSystem: memory.fileSystem,
+			native: () => native.addon,
+		});
+		const pin = await seams.studioHost.pinProcessAsync(42);
+		assert(pin !== null);
+		seams.studioHost.pinProcessAsync = async () => {
+			return {
+				...pin,
+				startWindowHidingAsync: async () => {
+					throw new Error("already shown");
+				},
+			};
+		};
+
+		await expect(
+			keepStudioHiddenAsync(seams, JSON.stringify({ ...TARGET, isWindows: true }), PROJECT),
+		).resolves.toBeUndefined();
+	});
+
+	it("keeps hiding while the previous user intent awaits the hide result", async ({ expect }) => {
+		expect.assertions(2);
+
+		const native = createFakeNative({
+			42: {
+				alive: true,
+				executablePath: "RobloxStudio",
+				startTime: "42",
+				windowVisibility: "hidden",
+			},
+		});
+		const memory = createMemoryFileSystem();
+		memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
+		memory.fileSystem.writeFileSync(STATE, JSON.stringify(sessionState("user")));
+		let sleeps = 0;
+		const seams = createTestSeams({
+			clock: {
+				now: () => 0,
+				sleep: async () => {
+					sleeps++;
+
+					expect(native.processes.get(42)!.windowHiding).toBeTrue();
+
+					native.processes.get(42)!.alive = false;
+				},
+			},
+			fileSystem: memory.fileSystem,
+			native: () => native.addon,
+		});
+		await keepStudioHiddenAsync(seams, JSON.stringify({ ...TARGET, isWindows: true }), PROJECT);
+
+		expect(sleeps).toBe(1);
+	});
+
 	it.for(["exit", "stop"] as const)(
 		"keeps the helper alive until the watcher %s",
 		async (end, { expect }) => {
@@ -359,6 +474,101 @@ describe("windows detached window hiding", () => {
 
 			expect(elapsed).toBe(KEEP_HIDDEN_POLL_MS);
 			expect(studio.windowVisibility).toBe("hidden");
+		},
+	);
+});
+
+function recoveringWatch(mode: "hide" | "ready" | "refuse" | "show") {
+	const native = createFakeNative({
+		42: {
+			alive: true,
+			executablePath: "RobloxStudio",
+			startTime: "42",
+			windowVisibility: "hidden",
+		},
+	});
+	const memory = createMemoryFileSystem();
+	const studio = native.processes.get(42);
+	assert(studio !== undefined);
+	const seams = createTestSeams({
+		clock: {
+			now: () => 0,
+			sleep: async () => {
+				studio.alive = false;
+			},
+		},
+		fileSystem: memory.fileSystem,
+		native: () => native.addon,
+	});
+	let listener: ((state: StudioControl) => void) | undefined;
+	seams.studioHost.onControl = (next) => {
+		listener = next;
+		return () => {
+			listener = undefined;
+		};
+	};
+
+	const original = seams.studioHost.pinProcessAsync;
+	let checks = 0;
+	let starts = 0;
+	seams.studioHost.pinProcessAsync = async (pid) => {
+		const pin = await original(pid);
+		assert(pin !== null);
+		return {
+			...pin,
+			startWindowHidingAsync: async () => {
+				starts += 1;
+				return starts === 1 || mode !== "refuse";
+			},
+			windowHidingAsync: async () => {
+				checks += 1;
+				if (checks === 1) {
+					assert(listener !== undefined);
+					const transitions: Array<StudioControl> =
+						mode === "ready" ? ["ready"] : ["recovering", "ready"];
+					for (const state of transitions) {
+						listener(state);
+					}
+
+					if (mode === "show") {
+						memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
+						memory.fileSystem.writeFileSync(
+							STATE,
+							JSON.stringify(sessionState("user")),
+						);
+					}
+				}
+
+				if (checks === 2 && mode === "hide") {
+					native.processes.get(42)!.alive = false;
+				}
+
+				return false;
+			},
+		};
+	};
+
+	return { isObserved: () => listener !== undefined, native, seams, starts: () => starts };
+}
+
+describe("keep-hidden recovery", () => {
+	it.for(["show", "hide", "refuse", "ready"] as const)(
+		"rereads the current %s intent after recovery",
+		async (mode, { expect }) => {
+			expect.assertions(3);
+
+			const run = recoveringWatch(mode);
+			await keepStudioHiddenAsync(
+				run.seams,
+				JSON.stringify({ ...TARGET, isWindows: true }),
+				PROJECT,
+			);
+
+			expect(run.starts()).toBe({ hide: 2, ready: 1, refuse: 2, show: 1 }[mode]);
+			expect(run.isObserved()).toBe(false);
+			expect(run.native.processes.get(42)!.alive).toBe(
+				{ hide: false, ready: true, refuse: true, show: true }[mode],
+			);
 		},
 	);
 });
