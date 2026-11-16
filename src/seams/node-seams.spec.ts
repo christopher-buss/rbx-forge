@@ -246,10 +246,69 @@ describe(createNodeSeams, () => {
 		},
 	);
 
+	it.for([
+		{ children: 2, entry: "session" },
+		{ children: 1, entry: "--keep-studio-hidden" },
+	])(
+		"owns a helper without recursively launching watchers: %j",
+		async ({ children, entry }, { expect, onTestFinished }) => {
+			expect.assertions(2);
+
+			wslHost(onTestFinished);
+			const original = process.argv;
+			process.argv = ["node", "supervisor", entry];
+			onTestFinished(() => {
+				process.argv = original;
+			});
+			vi.stubEnv("RBX_FORGE_TEST_WINDOWS_HELPER", "/fake/helper.ts");
+			const spawner = createFakeSpawner((child) => {
+				child.stdin.on("data", (line: string) => {
+					const request: unknown = JSON.parse(line);
+					assert(
+						typeof request === "object" &&
+							request !== null &&
+							"id" in request &&
+							"op" in request &&
+							typeof request.op === "string",
+					);
+					const results = new Map<string, unknown>([
+						[
+							"handshake",
+							{
+								helperArch: process.arch,
+								hostname: "WINDOWS",
+								protocol: 1,
+								windowsArch: process.arch,
+							},
+						],
+						["pin", { pid: 42, pin: "held", startTime: "42" }],
+						["processStartTime", "42"],
+						["startWindowHiding", true],
+						["windowHiding", true],
+					]);
+					child.stdout.write(
+						`${JSON.stringify({ id: request.id, result: results.get(request.op) })}\n`,
+					);
+				});
+			});
+			vi.spyOn(nodeChildProcessRunner, "spawn").mockImplementation(spawner.runner.spawn);
+			const pin = await makeSeams().studioHost.pinProcessAsync(42);
+			assert(pin !== null);
+
+			await expect(pin.startWindowHidingAsync()).resolves.toBeTrue();
+			expect(spawner.calls).toHaveLength(children);
+		},
+	);
+
 	it("locates the packaged helper lazily on WSL", async ({ expect, onTestFinished }) => {
 		expect.assertions(1);
 
 		wslHost(onTestFinished);
+		const original = process.argv;
+		process.argv = ["node", "supervisor", "--keep-studio-hidden"];
+		onTestFinished(() => {
+			process.argv = original;
+		});
 		vi.stubEnv("RBX_FORGE_TEST_WINDOWS_HELPER", undefined);
 
 		await expect(makeSeams().studioHost.hostnameAsync()).rejects.toMatchObject({

@@ -55,6 +55,7 @@ async function savePlaceAsync(
 	place: string,
 	timeoutMs: number,
 ): Promise<StudioSave> {
+	findSession(context.seams.fileSystem, forgeFiles(context.cwd), context.seams.host);
 	try {
 		const { config } = await loadProjectConfigAsync(
 			context.cwd,

@@ -392,6 +392,24 @@ async function unlockAsync(world: World): Promise<void> {
 }
 
 describe(stopSessionAsync, () => {
+	it("reports shutdown when its acknowledged part stop exits the supervisor before the reply", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const world = makeWorld();
+		await serveAsync({ onTestFinished }, world, exitOnShutdown, {
+			status: READY_STATUS,
+			stopParts: () => {
+				world.exit();
+				return { ...CLOSED_STOPS };
+			},
+		});
+
+		await expect(downAsync(world)).resolves.toHaveProperty("stoppedBy", "shutdown");
+	});
+
 	it("should stop the session on shutdown and report its supervisor's exit", async ({
 		expect,
 		onTestFinished,

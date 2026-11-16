@@ -327,6 +327,120 @@ describe("windows detached window hiding", () => {
 		expect(sleeps).toBe(0);
 	});
 
+	it.for([true, false])(
+		"honors a Windows session show before or during watching: %s",
+		async (shownBefore, { expect }) => {
+			expect.assertions(2);
+
+			const native = createFakeNative({
+				42: {
+					alive: true,
+					executablePath: "RobloxStudio",
+					startTime: "42",
+					windowVisibility: "hidden",
+				},
+			});
+			const memory = createMemoryFileSystem();
+			function show() {
+				native.processes.get(42)!.windowVisibility = "user";
+				memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
+				memory.fileSystem.writeFileSync(STATE, JSON.stringify(sessionState("user")));
+			}
+
+			const seams = createTestSeams({
+				clock: {
+					now: () => 0,
+					sleep: async () => {
+						show();
+					},
+				},
+				fileSystem: memory.fileSystem,
+				native: () => native.addon,
+			});
+			const actions = new Map([
+				[false, () => {}],
+				[true, show],
+			]);
+			actions.get(shownBefore)!();
+			await keepStudioHiddenAsync(
+				seams,
+				JSON.stringify({ ...TARGET, isWindows: true }),
+				PROJECT,
+			);
+
+			expect(native.processes.get(42)!.windowHiding).not.toBe(true);
+			expect(native.processes.get(42)!.alive).toBeTrue();
+		},
+	);
+
+	it("does not restart hiding after the session shows Studio", async ({ expect }) => {
+		expect.assertions(1);
+
+		const native = createFakeNative({
+			42: {
+				alive: true,
+				executablePath: "RobloxStudio",
+				startTime: "42",
+				windowVisibility: "user",
+			},
+		});
+		const memory = createMemoryFileSystem();
+		memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
+		memory.fileSystem.writeFileSync(STATE, JSON.stringify(sessionState("user")));
+		const seams = createTestSeams({
+			fileSystem: memory.fileSystem,
+			native: () => native.addon,
+		});
+		const pin = await seams.studioHost.pinProcessAsync(42);
+		assert(pin !== null);
+		seams.studioHost.pinProcessAsync = async () => {
+			return {
+				...pin,
+				startWindowHidingAsync: async () => {
+					throw new Error("already shown");
+				},
+			};
+		};
+
+		await expect(
+			keepStudioHiddenAsync(seams, JSON.stringify({ ...TARGET, isWindows: true }), PROJECT),
+		).resolves.toBeUndefined();
+	});
+
+	it("keeps hiding while the previous user intent awaits the hide result", async ({ expect }) => {
+		expect.assertions(2);
+
+		const native = createFakeNative({
+			42: {
+				alive: true,
+				executablePath: "RobloxStudio",
+				startTime: "42",
+				windowVisibility: "hidden",
+			},
+		});
+		const memory = createMemoryFileSystem();
+		memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
+		memory.fileSystem.writeFileSync(STATE, JSON.stringify(sessionState("user")));
+		let sleeps = 0;
+		const seams = createTestSeams({
+			clock: {
+				now: () => 0,
+				sleep: async () => {
+					sleeps++;
+
+					expect(native.processes.get(42)!.windowHiding).toBeTrue();
+
+					native.processes.get(42)!.alive = false;
+				},
+			},
+			fileSystem: memory.fileSystem,
+			native: () => native.addon,
+		});
+		await keepStudioHiddenAsync(seams, JSON.stringify({ ...TARGET, isWindows: true }), PROJECT);
+
+		expect(sleeps).toBe(1);
+	});
+
 	it.for(["exit", "stop"] as const)(
 		"keeps the helper alive until the watcher %s",
 		async (end, { expect }) => {

@@ -6,13 +6,17 @@ import path from "node:path";
 import { ForgeError } from "../errors.ts";
 import type { HelperClient } from "../native/helper-client.ts";
 import { readVariable } from "../process/environment.ts";
+import { STUDIO_OPEN_BOUND_MS } from "../session/studio-readiness.ts";
 import type { StudioExecutable } from "../studio/discover.ts";
+import type { KeepHiddenLauncher } from "../studio/keep-hidden.ts";
 import { studioArguments } from "../studio/launch-arguments.ts";
 import type { StudioLaunch, StudioLaunchOutcome } from "../studio/launcher.ts";
+import { KEEP_HIDDEN_POLL_MS } from "../studio/window-hiding.ts";
 import { commandExecutable, STUDIO_REGISTRY_KEYS } from "./addon-studio/discover.ts";
 import type { Environment, Seams } from "./seams.ts";
 import type { PinnedStudio, StudioHost } from "./studio-host.ts";
 import { convertedOutput, launched, pinnedIdentity } from "./wsl-helper-results.ts";
+import { createWslStudioPin } from "./wsl-studio-pin.ts";
 
 const INVALID_PATH = /[\r\n\0]/;
 const NULLABLE_TEXT = type("string | null");
@@ -21,7 +25,9 @@ const WINDOWS_DRIVE = /^[a-z]:[\\/]/i;
 const windowsAbsolute = /^(?:[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/i;
 
 type WslBackend = Pick<Seams, "clock" | "fileSystem" | "processRunner"> & {
+	cwd: string;
 	environment: Environment;
+	keepHidden?: KeepHiddenLauncher;
 };
 
 class WslHost {
@@ -175,12 +181,16 @@ class WslHost {
 		const result = await this.client().requestAsync({
 			args: studioArguments({ place, runScript }),
 			cwd,
+			desktop: launch.runScript === undefined ? launch.desktop : "user",
 			env: {},
-			hiddenWindows: false,
+			hiddenWindows: launch.runScript !== undefined && launch.desktop === "hidden",
 			op: "launch",
 			program,
 		});
-		return launched(result);
+		const outcome = launched(result, launch.desktop ?? "user");
+		await this.watchLaunchAsync(launch, result);
+
+		return outcome;
 	}
 
 	private async pinProcessAsync(pid: number, startTime?: string): Promise<null | PinnedStudio> {
@@ -189,8 +199,11 @@ class WslHost {
 			return null;
 		}
 
-		const pinned = this.wrap(
+		const pinned = createWslStudioPin(
 			await this.client().requestAsync({ op: "pin", pid, startTime: current }),
+			this.requestAsync.bind(this),
+			this.backend.clock,
+			this.startHidingAsync.bind(this),
 		);
 		return pinned.pid === pid && pinned.startTime === current ? pinned : null;
 	}
@@ -209,6 +222,28 @@ class WslHost {
 		timeoutMs?: number,
 	): Promise<T> {
 		return shape.assert(await this.client().requestAsync(operation, timeoutMs));
+	}
+
+	private async startHidingAsync(
+		identity: ReturnType<typeof pinnedIdentity>,
+		place = "",
+	): Promise<boolean> {
+		const op = { pin: identity.pin };
+		if (this.backend.keepHidden === undefined) {
+			return this.requestAsync({ ...op, op: "startWindowHiding" }, type("boolean"));
+		}
+
+		this.watch(identity.pid, identity.startTime, place);
+		const deadline = this.backend.clock.now() + STUDIO_OPEN_BOUND_MS;
+		while (!(await this.requestAsync({ ...op, op: "windowHiding" }, type("boolean")))) {
+			if (this.backend.clock.now() >= deadline) {
+				return false;
+			}
+
+			await this.backend.clock.sleep(KEEP_HIDDEN_POLL_MS);
+		}
+
+		return true;
 	}
 
 	private async tryLockFileAsync(
@@ -255,78 +290,21 @@ class WslHost {
 		}
 	}
 
-	// eslint-disable-next-line flawless/max-lines-per-function -- Flat mapping of the Studio pin interface.
-	private wrap(value: unknown): PinnedStudio {
-		const identity = pinnedIdentity(value);
-		async function boolAsync(op: string): Promise<boolean> {
-			return request({ op, pin: identity.pin }, type("boolean"));
+	private watch(pid: number, startTime: string, place: string): void {
+		this.backend.keepHidden?.({
+			cwd: this.backend.cwd,
+			env: this.backend.environment,
+			target: { isWindows: true, pid, place, startTime },
+		});
+	}
+
+	private async watchLaunchAsync(launch: StudioLaunch, result: unknown): Promise<void> {
+		if (launch.runScript === undefined || launch.desktop !== "hidden") {
+			return;
 		}
 
-		const request = this.requestAsync.bind(this);
-
-		return {
-			activateAppAsync: unsupportedAsync,
-			appActiveAsync: unsupportedAsync,
-			appHiddenAsync: unsupportedAsync,
-			desktopAsync: async () => "user",
-			dismissDialogAsync: async (title, button, desktop, timeoutMs = 1000) => {
-				return request(
-					{ button, desktop, op: "dismissDialog", pin: identity.pin, timeoutMs, title },
-					type("boolean"),
-					timeoutMs,
-				);
-			},
-			executablePathAsync: async () => {
-				return this.requestAsync(
-					{ op: "executablePath", pin: identity.pin },
-					NULLABLE_TEXT,
-				);
-			},
-			isAliveAsync: async () => boolAsync("isAlive"),
-			isBlockedAsync: async () => boolAsync("isBlocked"),
-			killAsync: async () => boolAsync("kill"),
-			os: "win32",
-			pid: identity.pid,
-			requestCloseAsync: async () => boolAsync("requestClose"),
-			requestSaveAsync: async (timeoutMs = 30_000) => {
-				return request(
-					{ op: "requestSave", pin: identity.pin, timeoutMs },
-					type("'menu_disabled' | 'no_menu_item' | 'requested' | 'timeout'"),
-					timeoutMs,
-				);
-			},
-			saveMenuEnabledAsync: async (timeoutMs) => {
-				return request(
-					{ op: "saveMenuEnabled", pin: identity.pin, timeoutMs },
-					type("boolean"),
-					timeoutMs,
-				);
-			},
-			setAppHiddenAsync: unsupportedAsync,
-			setWindowVisibilityAsync: unsupportedAsync,
-			startTime: identity.startTime,
-			startWindowHidingAsync: unsupportedAsync,
-			stopWindowHidingAsync: unsupportedAsync,
-			waitForExitAsync: async (timeoutMs) => {
-				const deadline = this.backend.clock.now() + timeoutMs;
-				while (await boolAsync("isAlive")) {
-					if (this.backend.clock.now() >= deadline) {
-						return false;
-					}
-
-					await this.backend.clock.sleep(50);
-				}
-
-				return true;
-			},
-			windowHidingAsync: unsupportedAsync,
-			windowVisibilityAsync: async () => {
-				return this.requestAsync(
-					{ op: "windowVisibility", pin: identity.pin },
-					type("'hidden' | 'user' | null"),
-				);
-			},
-		};
+		const identity = pinnedIdentity(result);
+		await this.startHidingAsync(identity, launch.place);
 	}
 }
 
@@ -340,11 +318,4 @@ class WslHost {
 export function createWslStudioHost(backend: WslBackend, connect: () => HelperClient): StudioHost {
 	const host = new WslHost(backend, connect);
 	return host.host();
-}
-
-async function unsupportedAsync(): Promise<never> {
-	throw new ForgeError(
-		"windows_helper_unavailable",
-		"This Studio operation is not supported by the Windows helper tracer.",
-	);
 }

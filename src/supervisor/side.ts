@@ -42,11 +42,32 @@ export function assertOwnSession(
 	fs: Pick<FileSystem, "readFileSync">,
 	identity: string,
 ): void {
+	let text: string;
+	try {
+		text = fs.readFileSync(identity, "utf8");
+	} catch (err) {
+		if (err instanceof Error && "code" in err && err.code === "ENOENT") {
+			return;
+		}
+
+		throw new ForgeError(
+			"identity_mismatch",
+			"The session side cannot be verified because its identity record could not be read.",
+			{
+				hint: 'Restore access to supervisor.id and run "forge down" on the side that started it.',
+			},
+		);
+	}
+
+	assertSideInText(host, text);
+}
+
+function assertSideInText(host: Pick<Host, "platform" | "wslDistro">, text: string): void {
 	let value: unknown;
 	try {
-		value = JSON.parse(fs.readFileSync(identity, "utf8"));
+		value = JSON.parse(text);
 	} catch {
-		// Missing and legacy records have no side to compare.
+		// Legacy malformed records have no side to compare.
 	}
 
 	if (

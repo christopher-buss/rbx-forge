@@ -31,7 +31,7 @@ describe("foreign side sessions", () => {
 	] as const)(
 		"refuses status and forced down from %s",
 		async ([platform, wslDistro, side], { expect }) => {
-			expect.assertions(14);
+			expect.assertions(16);
 
 			const memory = createMemoryFileSystem({
 				".forge/current": "s1",
@@ -88,6 +88,12 @@ describe("foreign side sessions", () => {
 				await expect(
 					command(context, { config: {}, flags: { force: true } }),
 				).rejects.toMatchObject({ code: "identity_mismatch" });
+			}
+
+			for (const command of [runSaveAsync, runStopAsync]) {
+				await expect(
+					command(context, { config: {}, flags: { force: true, place: "game.rbxl" } }),
+				).rejects.toHaveProperty("code", "identity_mismatch");
 			}
 
 			expect(memory.files()).toStrictEqual(before);

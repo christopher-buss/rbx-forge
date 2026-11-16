@@ -3,10 +3,12 @@ import path from "node:path";
 import { assert, describe, it } from "vitest";
 
 import { createMemoryFileSystem, createTestSeams } from "../../test/helpers/seams.ts";
+import { resolveStudioDesktop } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
 import type { HelperClient } from "../native/helper-client.ts";
 import type { ProcessOutcome, ProcessSpec } from "../process/process-runner.ts";
 import { closeStudioAsync, findPlaceStudioAsync } from "../studio/close-studio.ts";
+import type { KeepHiddenLauncher } from "../studio/keep-hidden.ts";
 import { saveStudioAsync } from "../studio/save-studio.ts";
 import { createWslStudioHost } from "./wsl-studio-host.ts";
 
@@ -25,6 +27,9 @@ function setup(
 	options: {
 		alive?: boolean;
 		blocked?: boolean;
+		clockStepMs?: number;
+		hiding?: boolean;
+		keepHidden?: KeepHiddenLauncher;
 		launchReply?: unknown;
 		lockReply?: null | string;
 		output?: string;
@@ -48,7 +53,7 @@ function setup(
 		clock: {
 			now: () => now,
 			sleep: async (ms) => {
-				now += ms;
+				now += options.clockStepMs ?? ms;
 			},
 		},
 		fileSystem: memory.fileSystem,
@@ -59,9 +64,26 @@ function setup(
 		identity: Promise.resolve(IDENTITY),
 		requestAsync: async (request) => {
 			requests.push(request);
+			if (
+				[
+					"desktop",
+					"setWindowVisibility",
+					"startWindowHiding",
+					"stopWindowHiding",
+					"windowHiding",
+					"windowVisibility",
+				].includes(String(request["op"]))
+			) {
+				assert(request["pin"] === PIN.pin);
+			}
+
 			switch (request["op"]) {
 				case "autoSaveDirectories": {
 					return [WINDOWS];
+				}
+				case "desktop":
+				case "windowVisibility": {
+					return "user";
 				}
 				case "dismissDialog": {
 					return false;
@@ -109,13 +131,18 @@ function setup(
 				case "saveMenuEnabled": {
 					return true;
 				}
+				case "setWindowVisibility":
+				case "startWindowHiding": {
+					return options.hiding ?? true;
+				}
+				case "stopWindowHiding":
+				case "windowHiding": {
+					return options.hiding ?? true;
+				}
 				case "tryLockFile": {
 					const lock = isLockHeld ? null : (options.lockReply ?? null);
 					isLockHeld = lock !== null;
 					return lock;
-				}
-				case "windowVisibility": {
-					return "user";
 				}
 				default: {
 					throw new Error(`Unexpected operation ${String(request["op"])}`);
@@ -136,10 +163,15 @@ function setup(
 	};
 
 	seams.studioHost = createWslStudioHost(
-		{ ...seams, environment: { PATH: "/fixture-bin" } },
+		{
+			...seams,
+			cwd: "/project",
+			environment: { PATH: "/fixture-bin" },
+			...(options.keepHidden === undefined ? {} : { keepHidden: options.keepHidden }),
+		},
 		() => client,
 	);
-	return { ...memory, conversions, requests, seams };
+	return { ...memory, conversions, now: () => now - Date.UTC(2026, 0, 1), requests, seams };
 }
 
 describe("wsl Studio tracer", () => {
@@ -166,12 +198,232 @@ describe("wsl Studio tracer", () => {
 		expect(await seams.studioHost.tryLockFileAsync("/project/lock")).toBeNull();
 	});
 
+	it("honors a hidden desktop for Windows Studio on a Linux host", async ({ expect }) => {
+		expect.assertions(2);
+
+		const { seams } = setup();
+		const desktop = resolveStudioDesktop(
+			{ studio: { autoRecovery: "move", desktop: "hidden", saveMethod: "menu" } },
+			await seams.studioHost.platformAsync(),
+		);
+
+		expect(desktop).toBe("hidden");
+		await expect(
+			seams.studioHost.launchAsync({
+				cwd: "/project",
+				desktop,
+				env: {},
+				place: "/project/game.rbxl",
+				studioPath: "/project/Studio.exe",
+			}),
+		).resolves.toMatchObject({ desktop: "hidden", studio: { desktop: "hidden", os: "win32" } });
+	});
+
+	it("changes visibility and controls the pinned Windows watcher", async ({ expect }) => {
+		expect.assertions(5);
+
+		const { seams } = setup();
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+
+		expect(await pin.setWindowVisibilityAsync("hidden")).toBeTrue();
+		expect(await pin.startWindowHidingAsync()).toBeTrue();
+		expect(await pin.windowHidingAsync()).toBeTrue();
+		expect(await pin.stopWindowHidingAsync()).toBeTrue();
+		expect(await pin.desktopAsync()).toBe("user");
+	});
+
+	it("starts an independent watcher for a hidden session launch", async ({ expect }) => {
+		expect.assertions(2);
+
+		const watches: Array<Parameters<KeepHiddenLauncher>[0]> = [];
+		const { seams } = setup({
+			keepHidden: (watch) => {
+				watches.push(watch);
+			},
+		});
+
+		await expect(
+			seams.studioHost.launchAsync({
+				cwd: "/project",
+				desktop: "hidden",
+				env: {},
+				place: "/project/game.rbxl",
+				runScript: "/project/script.lua",
+				studioPath: "/project/Studio.exe",
+			}),
+		).resolves.toMatchObject({ desktop: "hidden" });
+		expect(watches).toEqual([
+			{
+				cwd: "/project",
+				env: { PATH: "/fixture-bin" },
+				target: {
+					isWindows: true,
+					pid: 707,
+					place: "/project/game.rbxl",
+					startTime: PIN.startTime,
+				},
+			},
+		]);
+	});
+
+	it.for([false, true])(
+		"waits for its independent watcher to start: %s",
+		async (hiding, { expect }) => {
+			expect.assertions(2);
+
+			const watches: Array<Parameters<KeepHiddenLauncher>[0]> = [];
+			const { seams } = setup({
+				clockStepMs: 1000,
+				hiding,
+				keepHidden: (watch) => {
+					watches.push(watch);
+				},
+			});
+			const pin = await seams.studioHost.pinProcessAsync(707);
+			assert(pin !== null);
+
+			expect(await pin.startWindowHidingAsync()).toBe(hiding);
+			expect(watches).toHaveLength(1);
+		},
+	);
+
+	it("waits until the detached helper owns window hiding", async ({ expect }) => {
+		expect.assertions(1);
+
+		const options = { hiding: false, keepHidden: () => {} };
+		const { seams } = setup(options);
+		seams.clock.sleep = async () => {
+			options.hiding = true;
+		};
+
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+
+		await expect(pin.startWindowHidingAsync()).resolves.toBeTrue();
+	});
+
+	it.for([
+		{
+			desktop: "hidden",
+			hiddenWindows: false,
+			physical: "hidden",
+			runScript: undefined,
+			watches: 0,
+		},
+		{
+			desktop: "user",
+			hiddenWindows: false,
+			physical: "user",
+			runScript: "/project/script.lua",
+			watches: 0,
+		},
+		{
+			desktop: "hidden",
+			hiddenWindows: true,
+			physical: "user",
+			runScript: "/project/script.lua",
+			watches: 1,
+		},
+	] as const)("uses Windows launch placement %j", async (options, { expect }) => {
+		expect.assertions(2);
+
+		const watches: Array<Parameters<KeepHiddenLauncher>[0]> = [];
+		const { requests, seams } = setup({
+			keepHidden: (watch) => {
+				watches.push(watch);
+			},
+		});
+		await seams.studioHost.launchAsync({
+			cwd: "/project",
+			desktop: options.desktop,
+			env: {},
+			place: "/project/game.rbxl",
+			runScript: options.runScript,
+			studioPath: "/project/Studio.exe",
+		});
+
+		expect(requests.find((request) => request["op"] === "launch")).toMatchObject({
+			desktop: options.physical,
+			hiddenWindows: options.hiddenWindows,
+		});
+		expect(watches).toHaveLength(options.watches);
+	});
+
+	it("bounds watcher startup and keeps the identity in the detached target", async ({
+		expect,
+	}) => {
+		expect.assertions(3);
+
+		const watches: Array<Parameters<KeepHiddenLauncher>[0]> = [];
+		const { now, seams } = setup({
+			hiding: false,
+			keepHidden: (watch) => {
+				watches.push(watch);
+			},
+		});
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+
+		expect(await pin.startWindowHidingAsync()).toBeFalse();
+		expect(now()).toBe(180000);
+		expect(watches).toEqual([
+			{
+				cwd: "/project",
+				env: { PATH: "/fixture-bin" },
+				target: { isWindows: true, pid: 707, place: "", startTime: PIN.startTime },
+			},
+		]);
+	});
+
+	it("reports a refused native watcher start", async ({ expect }) => {
+		expect.assertions(2);
+
+		const { now, seams } = setup({ hiding: false });
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+
+		await expect(pin.startWindowHidingAsync()).resolves.toBeFalse();
+		expect(now()).toBe(0);
+	});
+
 	it("reports the Windows Plugins folder as a Linux path", async ({ expect }) => {
 		expect.assertions(1);
 
 		const { seams } = setup({ output: "/project/new-plugins" });
 
 		await expect(seams.studioHost.pluginsFolderAsync({})).resolves.toBe("/project/new-plugins");
+	});
+
+	it("allows the detached Linux watcher to load before reporting startup failure", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		const options = { hiding: false, keepHidden: () => {} };
+		const { seams } = setup(options);
+		let elapsed = 0;
+		seams.clock.now = () => elapsed;
+		seams.clock.sleep = async () => {
+			elapsed += 6000;
+			options.hiding = elapsed >= 18000;
+		};
+
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+
+		await expect(pin.startWindowHidingAsync()).resolves.toBeTrue();
+	});
+
+	it("returns at the requested exit deadline when Studio stays alive", async ({ expect }) => {
+		expect.assertions(2);
+
+		const { now, seams } = setup();
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+
+		await expect(pin.waitForExitAsync(100)).resolves.toBeFalse();
+		expect(now()).toBe(100);
 	});
 
 	it("saves the Windows place through its menu", async ({ expect }) => {
@@ -679,6 +931,7 @@ describe("wsl Studio tracer", () => {
 					WINDOWS,
 				],
 				cwd: WINDOWS,
+				desktop: "user",
 				env: {},
 				hiddenWindows: false,
 				op: "launch",

@@ -182,6 +182,40 @@ describe(waitForBarrierAsync, () => {
 });
 
 describe(clearOldSessionsAsync, () => {
+	it.for([
+		["win32", "wsl:Ubuntu"],
+		["linux", "windows"],
+	] as const)(
+		"retains an unreadable foreign identity on %s",
+		async ([platform, side], { expect }) => {
+			expect.assertions(2);
+
+			const { memory, seams } = makeSeams({
+				".forge/current": "old",
+				".forge/sessions/old/supervisor.id": JSON.stringify({ side }),
+			});
+			seams.host.platform = platform;
+			const before = memory.files();
+			seams.fileSystem.readFileSync = () => {
+				throw Object.assign(new Error("read denied"), { code: "EACCES" });
+			};
+
+			await expect(
+				clearOldSessionsAsync(seams, FORGE, {
+					boundMs: 0,
+					force: true,
+					signal: NEVER_ABORTS,
+				}),
+			).rejects.toMatchObject({
+				code: "identity_mismatch",
+				hint: 'Restore access to supervisor.id and run "forge down" on the side that started it.',
+				message:
+					"The session side cannot be verified because its identity record could not be read.",
+			});
+			expect(memory.files()).toStrictEqual(before);
+		},
+	);
+
 	it("refuses a side replaced before startup forced cleanup", async ({ expect }) => {
 		expect.assertions(2);
 

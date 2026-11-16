@@ -147,7 +147,7 @@ export async function stopSessionAsync(
 		return { parts, sessionId, status: "running", studio };
 	}
 
-	const stoppedBy = await stopSupervisorAsync(seams, target, options);
+	const stoppedBy = await stopSupervisorAsync(seams, target, options, stops?.ending === true);
 	await options.pause?.("barrier");
 	const cleanup = await clearBarrierAsync(seams, session.files, options);
 	await options.pause?.("delete");
@@ -306,6 +306,7 @@ function unresponsive({ session }: Target, force: boolean): ForgeError {
  * @param seams - The clock, transport, and native addon.
  * @param target - The session and its pinned supervisor.
  * @param options - `--force` and the wait.
+ * @param didStopParts - Its part-stop reply acknowledged that it is ending.
  * @returns How the supervisor went.
  * @rejects {ForgeError} `supervisor_unresponsive`; `session_replaced`.
  */
@@ -313,9 +314,10 @@ async function stopSupervisorAsync(
 	seams: DownSeams,
 	target: Target,
 	options: DownOptions,
+	didStopParts: boolean,
 ): Promise<StoppedBy> {
 	if (isGone(target)) {
-		return "gone";
+		return didStopParts ? "shutdown" : "gone";
 	}
 
 	if (await requestStopAsync(seams, target, false, options.timeoutMs)) {

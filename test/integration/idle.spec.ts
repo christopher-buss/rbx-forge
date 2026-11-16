@@ -156,8 +156,10 @@ async function keepActiveAsync(
 	act: () => Promise<void> | void,
 ): Promise<void> {
 	let isSettled = false;
-	void run.settled.finally(() => {
+	let outcome: Settled | undefined;
+	void run.settled.then((result) => {
 		isSettled = true;
+		outcome = result;
 	});
 	const until = Date.now() + ACTIVE_MS;
 	while (Date.now() < until) {
@@ -165,7 +167,7 @@ async function keepActiveAsync(
 		await sleep(ACTIVITY_EVERY_MS);
 	}
 
-	testContext.expect(isSettled).toBeFalse();
+	testContext.expect(isSettled, JSON.stringify({ events: run.events, outcome })).toBeFalse();
 }
 
 /**
@@ -214,7 +216,10 @@ describe("idle timeout", () => {
 	it("should start the time again on each compile start", async ({ expect }) => {
 		expect.assertions(2);
 
-		const { run, watched } = await startUpAsync(TIMEOUT);
+		const { project, run, watched } = await startUpAsync(TIMEOUT);
+		await waitForStatusAsync(project, run, ({ services }) => {
+			return services.compiler.lastBuild !== undefined;
+		});
 		let edits = 0;
 		await keepActiveAsync({ expect }, run, () => {
 			edits += 1;

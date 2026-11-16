@@ -60,6 +60,22 @@ enum Operation {
     IsBlocked {
         pin: String,
     },
+    Desktop {
+        pin: String,
+    },
+    SetWindowVisibility {
+        pin: String,
+        visibility: String,
+    },
+    StartWindowHiding {
+        pin: String,
+    },
+    StopWindowHiding {
+        pin: String,
+    },
+    WindowHiding {
+        pin: String,
+    },
     WindowVisibility {
         pin: String,
     },
@@ -253,6 +269,11 @@ impl Session {
                 | Operation::DismissDialog { pin, .. }
                 | Operation::IsBlocked { pin }
                 | Operation::WindowVisibility { pin }
+                | Operation::Desktop { pin }
+                | Operation::SetWindowVisibility { pin, .. }
+                | Operation::StartWindowHiding { pin }
+                | Operation::StopWindowHiding { pin }
+                | Operation::WindowHiding { pin }
                 | Operation::ExecutablePath { pin }
                 | Operation::RequestClose { pin }
                 | Operation::Kill { pin }) = &operation
@@ -297,6 +318,30 @@ impl Session {
                     Operation::IsAlive { .. } => Ok(json!(pinned.is_alive()?)),
                     Operation::IsBlocked { .. } => Ok(json!(pinned.is_blocked()?)),
                     Operation::WindowVisibility { .. } => Ok(json!(pinned.window_visibility()?)),
+                    Operation::SetWindowVisibility { visibility, .. } => {
+                        Ok(json!(pinned.set_window_visibility(&visibility)?))
+                    }
+                    Operation::StartWindowHiding { .. } => Ok(json!(pinned.start_window_hiding()?)),
+                    Operation::StopWindowHiding { .. } => Ok(json!(pinned.stop_window_hiding()?)),
+                    Operation::WindowHiding { .. } => Ok(json!(pinned.window_hiding()?)),
+                    Operation::Desktop { .. } => {
+                        #[cfg(windows)]
+                        {
+                            Ok(json!(
+                                if crate::os::win::desktop::for_process(pinned.pid())?.name()?
+                                    == crate::os::win::desktop::HIDDEN_NAME
+                                {
+                                    "hidden"
+                                } else {
+                                    "user"
+                                }
+                            ))
+                        }
+                        #[cfg(not(windows))]
+                        {
+                            Ok(json!("user"))
+                        }
+                    }
                     Operation::ExecutablePath { .. } => Ok(json!(pinned.executable_path()?)),
                     Operation::RequestClose { .. } => Ok(json!(pinned.request_close()?)),
                     Operation::Kill { .. } => Ok(json!(pinned.kill()?)),

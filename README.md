@@ -83,10 +83,11 @@ listener fails with `wsl_network_unreachable`; check forwarding, networking
 mode, and firewall settings. Forge installs both Studio plugins in the Windows
 Plugins folder; managed Rojo installation is verified for Linux Rojo 7.7.1 and
 other versions need a manual connection when the plugin is missing.
-`forge build --plugin` also writes to the Windows Plugins folder. Studio opens
-on the user's desktop; the remaining WSL Studio features and release validation
-are tracked in [#297](https://github.com/christopher-buss/rbx-forge/issues/297).
-See [JSON output](docs/json-output.md) for Windows PID interpretation and an
+`forge build --plugin` also writes to the Windows Plugins folder. `show`,
+`hide`, hidden session windows and hidden snapshots use Windows Studio placement
+through the helper. The remaining WSL Studio features and release validation are
+tracked in [#297](https://github.com/christopher-buss/rbx-forge/issues/297). See
+[JSON output](docs/json-output.md) for Windows PID interpretation and an
 uncertain launch result.
 
 ## Commands

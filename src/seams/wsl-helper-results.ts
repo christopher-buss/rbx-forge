@@ -1,6 +1,7 @@
 // cspell:words wslpath
 import { type } from "arktype";
 
+import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import type { ProcessOutcome } from "../process/process-runner.ts";
 import type { StudioLaunchOutcome } from "../studio/launcher.ts";
@@ -34,10 +35,11 @@ export function convertedOutput(result: ProcessOutcome, input: string): string {
 /**
  * Decode a completed Windows launch without assuming an uncertain PID.
  * @param value - Helper reply.
+ * @param desktop - The requested Studio placement.
  * @returns The launched Studio identity.
  * @rejects An unusable launch identity.
  */
-export function launched(value: unknown): StudioLaunchOutcome {
+export function launched(value: unknown, desktop: StudioDesktop): StudioLaunchOutcome {
 	if (!pinShape.allows(value)) {
 		throw new ForgeError(
 			"studio_launch_unknown",
@@ -47,8 +49,8 @@ export function launched(value: unknown): StudioLaunchOutcome {
 
 	const pinned = value;
 	return {
-		desktop: "user",
-		studio: { desktop: "user", os: "win32", pid: pinned.pid, startTime: pinned.startTime },
+		desktop,
+		studio: { desktop, os: "win32", pid: pinned.pid, startTime: pinned.startTime },
 		type: "launched",
 	};
 }
@@ -61,4 +63,12 @@ export function launched(value: unknown): StudioLaunchOutcome {
  */
 export function pinnedIdentity(value: unknown): { pid: number; pin: string; startTime: string } {
 	return pinShape.assert(value);
+}
+
+// oxlint-disable-next-line typescript/require-await -- The async Studio seam rejects unsupported capabilities.
+export async function unsupportedAsync(): Promise<never> {
+	throw new ForgeError(
+		"windows_helper_unavailable",
+		"This Studio operation is not supported by the Windows helper tracer.",
+	);
 }

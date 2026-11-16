@@ -66,7 +66,7 @@ describe("wsl found Studio", () => {
 			requestAsync: async (request) => replies.get(String(request["op"])),
 		};
 		context.seams.studioHost = createWslStudioHost(
-			{ ...context.seams, environment: context.env },
+			{ ...context.seams, cwd: context.cwd, environment: context.env },
 			() => client,
 		);
 
