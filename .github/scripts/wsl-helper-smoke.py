@@ -11,13 +11,21 @@ def windows(path):
     return subprocess.check_output(["wslpath", "-w", str(path)], text=True).strip()
 
 
+def text(value):
+    return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+
+
 native = pathlib.Path(sys.argv[1]).resolve(strict=True)
-context = subprocess.run(
-    ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-File",
-     windows(pathlib.Path(__file__).with_name("wsl-job-context.ps1"))],
-    capture_output=True, text=True, timeout=20,
-)
-print(json.dumps(dict(interopJobContext=dict(exitCode=context.returncode, stdout=context.stdout, stderr=context.stderr))), flush=True)
+try:
+    context = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-File",
+         windows(pathlib.Path(__file__).with_name("wsl-job-context.ps1"))],
+        capture_output=True, text=True, timeout=20,
+    )
+    context_result = dict(exitCode=context.returncode, stdout=context.stdout, stderr=context.stderr, timeout=False)
+except subprocess.TimeoutExpired as error:
+    context_result = dict(exitCode=None, stdout=text(error.stdout), stderr=text(error.stderr), timeout=True, message=str(error))
+print(json.dumps(dict(interopJobContext=context_result)), flush=True)
 with tempfile.TemporaryDirectory(prefix="forge-wsl-capability-", dir=sys.argv[2]) as directory:
     helper = subprocess.Popen(
         [str(native / "forge-windows-helper.exe")],
