@@ -7,7 +7,6 @@ import { createFakeNative } from "../../test/helpers/native.ts";
 import { createMemoryFileSystem, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
 import { clearOldSessionsAsync, SETTLE_MS, targetOf, waitForBarrierAsync } from "./barrier.ts";
-import type { LockSeams } from "./locks.ts";
 import { LEASE_POLL_MS } from "./locks.ts";
 import { forgeFiles, sessionFiles } from "./session-files.ts";
 
@@ -25,11 +24,12 @@ function makeSeams(files: Record<string, string> = {}) {
 	const memory = createMemoryFileSystem(files);
 	const manual = createManualClock();
 	const native = createFakeNative();
-	const seams: LockSeams = {
+	const seams = {
 		clock: manual.clock,
 		fileSystem: memory.fileSystem,
 		host: createTestSeams().host,
 		native: () => native.addon,
+		studioHost: createTestSeams().studioHost,
 	};
 	return { manual, memory, native, seams };
 }
@@ -183,6 +183,57 @@ describe(waitForBarrierAsync, () => {
 });
 
 describe(clearOldSessionsAsync, () => {
+	it("does not treat a PID without its start time as proof of Windows Studio exit", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const status = makeStatus();
+		status.services.studio = { control: "unavailable", owner: null, pid: 707, status: "open" };
+		const run = makeSeams({
+			...OLD_FILES,
+			".forge/sessions/old/state.json": JSON.stringify(status),
+		});
+
+		await expect(
+			clearOldSessionsAsync(run.seams, FORGE, {
+				boundMs: 0,
+				force: true,
+				signal: NEVER_ABORTS,
+			}),
+		).rejects.toMatchObject({
+			cause: { message: "Studio identity is unknown." },
+			code: "cleanup_in_progress",
+		});
+		expect(run.memory.fileSystem.existsSync(OLD.identity)).toBe(true);
+	});
+
+	it("explains an unknown retained Studio identity without deleting the record", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		const status = makeStatus();
+		status.services.studio = { control: "unavailable", owner: null, status: "opening" };
+		const run = makeSeams({
+			...OLD_FILES,
+			".forge/sessions/old/state.json": JSON.stringify(status),
+		});
+
+		await expect(
+			clearOldSessionsAsync(run.seams, FORGE, {
+				boundMs: 0,
+				force: true,
+				signal: NEVER_ABORTS,
+			}),
+		).rejects.toMatchObject({
+			cause: { message: "Studio identity is unknown." },
+			code: "cleanup_in_progress",
+			message:
+				"Windows Studio cleanup is unverified; the session identity record is retained.",
+		});
+	});
+
 	it.for([
 		["unavailable", "open", "cleanup_in_progress", true],
 		["recovering", "opening", "cleanup_in_progress", true],

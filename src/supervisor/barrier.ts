@@ -4,12 +4,13 @@ import { ForgeError } from "../errors.ts";
 import type { CleanupReport, SessionTarget } from "../native/addon.ts";
 import type { FinalReport } from "../reaper/protocol.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
-import { parseStatus } from "../session/status.ts";
+import type { Seams } from "../seams/seams.ts";
 import type { LockSeams } from "./locks.ts";
 import { LEASE_POLL_MS } from "./locks.ts";
 import type { ForgeFiles, SessionFiles } from "./session-files.ts";
 import { listSessions, removeSession, sessionFiles } from "./session-files.ts";
 import { assertOwnSession } from "./side.ts";
+import { proveStudioCleanupAsync } from "./studio-cleanup-proof.ts";
 
 /**
  * How long a new session waits for an old session's workers beyond their
@@ -119,7 +120,7 @@ export async function waitForBarrierAsync(
  *   could not verify.
  */
 export async function clearOldSessionsAsync(
-	seams: LockSeams,
+	seams: LockSeams & Pick<Seams, "studioHost">,
 	forge: ForgeFiles,
 	{ boundMs, force, signal }: ClearOptions,
 ): Promise<Array<ForcedCleanup>> {
@@ -144,7 +145,7 @@ export async function clearOldSessionsAsync(
 			cleanups.push(cleanup);
 		}
 
-		assertStudioControl(seams, files);
+		await proveStudioCleanupAsync(seams, files);
 		removeSession(seams.fileSystem, forge, sessionId, seams.host);
 	}
 
@@ -165,7 +166,7 @@ export async function clearOldSessionsAsync(
  *   outlived the wait.
  */
 export async function finalBarrierAsync(
-	seams: LockSeams,
+	seams: LockSeams & Pick<Seams, "studioHost">,
 	forge: ForgeFiles,
 	files: SessionFiles,
 	reports: ReadonlyArray<FinalReport>,
@@ -188,7 +189,7 @@ export async function finalBarrierAsync(
 		);
 	}
 
-	assertStudioControl(seams, files);
+	await proveStudioCleanupAsync(seams, files);
 	removeSession(seams.fileSystem, forge, files.sessionId, seams.host);
 }
 
@@ -267,25 +268,6 @@ async function forceAsync(
 	}
 
 	return cleanup;
-}
-
-function assertStudioControl(seams: Pick<LockSeams, "fileSystem">, files: SessionFiles): void {
-	if (!seams.fileSystem.existsSync(files.state)) {
-		return;
-	}
-
-	const status = parseStatus(JSON.parse(seams.fileSystem.readFileSync(files.state, "utf8")));
-	const studio = status?.services.studio;
-	if (
-		(studio?.control === "unavailable" || studio?.control === "recovering") &&
-		studio.status !== "off" &&
-		studio.status !== "closed"
-	) {
-		throw new ForgeError(
-			"cleanup_in_progress",
-			"Windows Studio cleanup is unverified; the session identity record is retained.",
-		);
-	}
 }
 
 function survivorsOf(reports: ReadonlyArray<FinalReport>): Array<string> {

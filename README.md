@@ -101,7 +101,10 @@ repair interop or the helper installation before trying Studio control again. A
 lost launch result is `studio_launch_unknown`: check Studio before opening
 again. Lost close, hide and save results require exit, visibility and the
 original save completion proof respectively. forge never repeats an uncertain
-mutation or kills Studio to resolve an uncertain close.
+mutation or kills Studio to resolve an uncertain close. A retained own-side
+record can be cleaned by a later `forge down` after fresh helper control
+verifies that its recorded Studio has exited. A live or unverified Studio keeps
+the record; foreign-side records still require `forge down` on their own side.
 
 ## Commands
 

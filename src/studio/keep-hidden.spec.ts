@@ -478,7 +478,7 @@ describe("windows detached window hiding", () => {
 	);
 });
 
-function recoveringWatch(mode: "hide" | "refuse" | "show") {
+function recoveringWatch(mode: "hide" | "ready" | "refuse" | "show") {
 	const native = createFakeNative({
 		42: {
 			alive: true,
@@ -488,7 +488,18 @@ function recoveringWatch(mode: "hide" | "refuse" | "show") {
 		},
 	});
 	const memory = createMemoryFileSystem();
-	const seams = createTestSeams({ fileSystem: memory.fileSystem, native: () => native.addon });
+	const studio = native.processes.get(42);
+	assert(studio !== undefined);
+	const seams = createTestSeams({
+		clock: {
+			now: () => 0,
+			sleep: async () => {
+				studio.alive = false;
+			},
+		},
+		fileSystem: memory.fileSystem,
+		native: () => native.addon,
+	});
 	let listener: ((state: StudioControl) => void) | undefined;
 	seams.studioHost.onControl = (next) => {
 		listener = next;
@@ -513,8 +524,12 @@ function recoveringWatch(mode: "hide" | "refuse" | "show") {
 				checks += 1;
 				if (checks === 1) {
 					assert(listener !== undefined);
-					listener("recovering");
-					listener("ready");
+					const transitions: Array<StudioControl> =
+						mode === "ready" ? ["ready"] : ["recovering", "ready"];
+					for (const state of transitions) {
+						listener(state);
+					}
+
 					if (mode === "show") {
 						memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
 						memory.fileSystem.writeFileSync(
@@ -524,19 +539,23 @@ function recoveringWatch(mode: "hide" | "refuse" | "show") {
 					}
 				}
 
+				if (checks === 2 && mode === "hide") {
+					native.processes.get(42)!.alive = false;
+				}
+
 				return false;
 			},
 		};
 	};
 
-	return { native, seams, starts: () => starts };
+	return { isObserved: () => listener !== undefined, native, seams, starts: () => starts };
 }
 
 describe("keep-hidden recovery", () => {
-	it.for(["show", "hide", "refuse"] as const)(
+	it.for(["show", "hide", "refuse", "ready"] as const)(
 		"rereads the current %s intent after recovery",
 		async (mode, { expect }) => {
-			expect.assertions(1);
+			expect.assertions(3);
 
 			const run = recoveringWatch(mode);
 			await keepStudioHiddenAsync(
@@ -545,7 +564,11 @@ describe("keep-hidden recovery", () => {
 				PROJECT,
 			);
 
-			expect(run.starts()).toBe({ hide: 2, refuse: 2, show: 1 }[mode]);
+			expect(run.starts()).toBe({ hide: 2, ready: 1, refuse: 2, show: 1 }[mode]);
+			expect(run.isObserved()).toBe(false);
+			expect(run.native.processes.get(42)!.alive).toBe(
+				{ hide: false, ready: true, refuse: true, show: true }[mode],
+			);
 		},
 	);
 });

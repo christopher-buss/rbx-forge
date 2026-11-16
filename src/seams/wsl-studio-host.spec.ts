@@ -1071,6 +1071,7 @@ describe("wsl Studio tracer", () => {
 				studioPath: "/project/Studio.exe",
 			}),
 		).rejects.toMatchObject({
+			cause: { name: "TraversalError" },
 			code: "studio_launch_unknown",
 			message:
 				"The Windows helper returned no usable Studio launch identity. Check Studio before trying again.",

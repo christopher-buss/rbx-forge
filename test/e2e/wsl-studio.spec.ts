@@ -5,6 +5,7 @@ import process from "node:process";
 import type { TestContext } from "vitest";
 import { assert, describe, it } from "vitest";
 
+import { nodeNetwork } from "../../src/seams/network.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import type { FixtureProject } from "../helpers/fixture-project.ts";
 import { makeFixtureProject } from "../helpers/fixture-project.ts";
@@ -27,7 +28,11 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 		expect.assertions(4);
 
 		const fixture = makeFixtureProject({
-			config: { projectType: "luau", studio: { desktop: "user" } },
+			config: {
+				projectType: "luau",
+				rojoPort: await nodeNetwork.freePortAsync(),
+				studio: { desktop: "user" },
+			},
 		});
 		installPathConverter(fixture);
 		const executable = path.join(fixture.project, "RobloxStudioBeta.exe");
@@ -71,10 +76,13 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 	}) => {
 		expect.assertions(2);
 
-		const fixture = makeFixtureProject({ config: { projectType: "luau" } });
+		const fixture = makeFixtureProject({
+			config: { projectType: "luau", rojoPort: await nodeNetwork.freePortAsync() },
+		});
 		installPathConverter(fixture);
 		const environment = {
 			FIXTURE_HELPER_UNREACHABLE: "1",
+			RBX_FORGE_NATIVE_DIR: NATIVE_DIRECTORY,
 			RBX_FORGE_TEST_WINDOWS_HELPER: HELPER,
 			WSL_DISTRO_NAME: "forge-test",
 		};
@@ -89,6 +97,7 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 
 	it.for(["0", "1"])(
 		"saves Windows Studio and closes it with dialog=%s",
+		{ timeout: 120_000 },
 		async (dialog, { expect, onTestFinished }) => {
 			expect.assertions(16);
 
@@ -96,6 +105,7 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 				config: {
 					open: { buildFirst: true },
 					projectType: "luau",
+					rojoPort: await nodeNetwork.freePortAsync(),
 					studio: { desktop: "user", saveMethod: "menu" },
 				},
 			});

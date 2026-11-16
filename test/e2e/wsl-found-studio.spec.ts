@@ -6,6 +6,7 @@ import process from "node:process";
 import { assert, describe, it } from "vitest";
 import type { TestContext } from "vitest";
 
+import { nodeNetwork } from "../../src/seams/network.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import { studioPlaceContent } from "../fixtures/bin/studio-stand-in.ts";
 import { makeFixtureProject } from "../helpers/fixture-project.ts";
@@ -16,7 +17,12 @@ const HELPER = path.resolve(import.meta.dirname, "../fixtures/bin/fake-windows-h
 
 async function fixtureAsync(onTestFinished: TestContext["onTestFinished"]) {
 	const project = makeFixtureProject({
-		config: { open: { buildFirst: true }, projectType: "luau", studio: { desktop: "user" } },
+		config: {
+			open: { buildFirst: true },
+			projectType: "luau",
+			rojoPort: await nodeNetwork.freePortAsync(),
+			studio: { desktop: "user" },
+		},
 	});
 	const converter = path.join(project.project, "fixture-bin/wslpath");
 	writeFileSync(converter, `#!/bin/sh\nexec "${process.execPath}" "${HELPER}" path "$@"\n`);

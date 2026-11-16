@@ -16,7 +16,9 @@ import { stopSessionAsync } from "../../src/client/down.ts";
 import { fetchStatusAsync, findSession, stopPartsAsync } from "../../src/client/session.ts";
 import { ForgeError } from "../../src/errors.ts";
 import { nodeClock } from "../../src/seams/clock.ts";
+import { nodeFileSystem } from "../../src/seams/file-system.ts";
 import { nodeHost } from "../../src/seams/host.ts";
+import { createAddonStudioHost } from "../../src/seams/studio-host.ts";
 import type { IdentityRecord } from "../../src/supervisor/session-files.ts";
 import { forgeFiles } from "../../src/supervisor/session-files.ts";
 import { realTransport } from "../helpers/native-testing.ts";
@@ -75,6 +77,17 @@ async function downAsync(project: Project, options: DownOptions = SHORT): Promis
 				host: nodeHost,
 				ipc: realTransport(),
 				native: () => native,
+				studioHost: createAddonStudioHost({
+					fileSystem: nodeFileSystem,
+					host: nodeHost,
+					installedStudio: () => {
+						throw new Error("Studio discovery is not used for worker cleanup.");
+					},
+					native: () => native,
+					studioLauncher: async () => {
+						throw new Error("No Studio launch is expected during cleanup.");
+					},
+				}),
 			},
 			forge,
 			session,

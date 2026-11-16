@@ -11,6 +11,7 @@ import { SETTLE_MS, targetOf, waitForBarrierAsync } from "../supervisor/barrier.
 import type { ForgeFiles, SessionFiles } from "../supervisor/session-files.ts";
 import { removeSession } from "../supervisor/session-files.ts";
 import { assertOwnSession, assertOwnSide } from "../supervisor/side.ts";
+import { proveStudioCleanupAsync } from "../supervisor/studio-cleanup-proof.ts";
 import type { DownParts, DownStudio } from "./down-parts.ts";
 import { askPartStopsAsync, downStudio } from "./down-parts.ts";
 import type { KnownSession } from "./session.ts";
@@ -29,7 +30,10 @@ const DOWN_POLL_MS = 100;
 const NEVER = AbortSignal.any([]);
 
 /** The seams `down` runs with. */
-export type DownSeams = Pick<Seams, "clock" | "fileSystem" | "host" | "ipc" | "native">;
+export type DownSeams = Pick<
+	Seams,
+	"clock" | "fileSystem" | "host" | "ipc" | "native" | "studioHost"
+>;
 
 /** Where a test can hold `down` up: before the barrier, before the delete. */
 export type DownPoint = "barrier" | "delete";
@@ -154,7 +158,7 @@ export async function stopSessionAsync(
 	return {
 		...(cleanup === undefined ? {} : { cleanup }),
 		parts,
-		removed: removeUnderLock(seams, forge, session.files),
+		removed: await removeUnderLockAsync(seams, forge, session.files),
 		sessionId,
 		status: "stopped",
 		stoppedBy,
@@ -446,7 +450,11 @@ async function clearBarrierAsync(
  * @param files - The target's files.
  * @returns Whether it deleted them.
  */
-function removeUnderLock(seams: DownSeams, forge: ForgeFiles, files: SessionFiles): boolean {
+async function removeUnderLockAsync(
+	seams: DownSeams,
+	forge: ForgeFiles,
+	files: SessionFiles,
+): Promise<boolean> {
 	if (!seams.fileSystem.existsSync(files.directory)) {
 		return false;
 	}
@@ -457,6 +465,7 @@ function removeUnderLock(seams: DownSeams, forge: ForgeFiles, files: SessionFile
 	}
 
 	try {
+		await proveStudioCleanupAsync(seams, files);
 		removeSession(seams.fileSystem, forge, files.sessionId, seams.host);
 		return true;
 	} finally {

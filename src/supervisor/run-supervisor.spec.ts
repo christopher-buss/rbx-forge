@@ -1415,6 +1415,41 @@ function spawnedIds(fake: FakeReaper): Array<string> {
 }
 
 describe(runSupervisorAsync, () => {
+	it("retains the session record when shutdown cannot prove Windows Studio cleanup", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const windows = createFakeNative(OPEN_STUDIO);
+		const seams = createTestSeams({ native: () => windows.addon });
+		let listener: ((state: StudioControl) => void) | undefined;
+		const run = startCommand({
+			...ATTACHED,
+			flags: NO_COMPILER,
+			studioHost: {
+				...seams.studioHost,
+				onControl: (next) => {
+					listener = next;
+					next("ready");
+					return () => {
+						listener = undefined;
+					};
+				},
+			},
+		});
+		await flushAsync();
+		assert(listener !== undefined);
+		listener("unavailable");
+		run.signals.fire("SIGINT");
+
+		await expect(run.result).rejects.toMatchObject({
+			code: "cleanup_in_progress",
+			message:
+				"Windows Studio cleanup is unverified; the session identity record is retained.",
+		});
+		expect(run.memory.fileSystem.existsSync(path.join(SESSION, "supervisor.id"))).toBe(true);
+	});
+
 	it("keeps the session and Studio status while reporting control loss and recovery", async ({
 		expect,
 		onTestFinished,

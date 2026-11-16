@@ -2,13 +2,22 @@ import { type } from "arktype";
 import path from "node:path";
 import { assert, describe, it } from "vitest";
 
+import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
-import { createMemoryFileSystem, createTestSeams } from "../../test/helpers/seams.ts";
+import { makeStatus } from "../../test/helpers/fake-session.ts";
+import { createFakeNative } from "../../test/helpers/native.ts";
+import {
+	createCommandContext,
+	createMemoryFileSystem,
+	createTestSeams,
+} from "../../test/helpers/seams.ts";
+import { runDownAsync } from "../commands/down.ts";
 import { ForgeError } from "../errors.ts";
 import { createHelperClient } from "../native/helper-client.ts";
 import { closeStudioAsync } from "../studio/close-studio.ts";
 import { watchHiddenLightingAsync } from "../studio/lighting-dialog.ts";
 import { saveStudioAsync } from "../studio/save-studio.ts";
+import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
 import { nodeClock } from "./clock.ts";
 import type { StudioControl } from "./studio-host.ts";
 import { createWslStudioHost } from "./wsl-studio-host.ts";
@@ -22,11 +31,20 @@ const PROCESS: import("../studio/launcher.ts").StudioProcess = {
 	pid: 707,
 	startTime: START,
 };
-const requestShape = type({ "id": "string", "lock?": "string", "op": "string", "pin?": "string" });
+const requestShape = type({
+	"id": "string",
+	"lock?": "string",
+	"op": "string",
+	"path?": "string",
+	"pid?": "number",
+	"pin?": "string",
+});
 
 interface RecoveryOptions {
 	badPin?: boolean;
+	claimReleasedLock?: boolean;
 	dead?: boolean;
+	delayFailureMs?: number;
 	desktop?: unknown;
 	hang?: boolean;
 	host?: string;
@@ -39,21 +57,25 @@ interface RecoveryOptions {
 	saved?: boolean;
 	transientAttempts?: number;
 	visibility?: string;
+	withoutEvents?: boolean;
 	wrongPin?: boolean;
 	wrongStart?: boolean;
 }
 
 function helperResults(
 	options: RecoveryOptions,
-	isReplacement: boolean,
-	isAlive: boolean,
-	generation: number,
+	{
+		generation,
+		isAlive,
+		isReplacement,
+		pid,
+	}: { generation: number; isAlive: boolean; isReplacement: boolean; pid: number },
 ): Record<string, unknown> {
 	const startTime = isReplacement && options.reused === true ? "999" : START;
 	return {
 		desktop: options.desktop ?? "user",
 		dismissDialog: false,
-		executablePath: String.raw`D:\temp\agents\RobloxStudioBeta.exe`,
+		executablePath: `D:\\temp\\agents\\${pid}\\RobloxStudioBeta.exe`,
 		handshake: {
 			helperArch: "x64",
 			hostname: isReplacement ? (options.host ?? "WINDOWS") : "WINDOWS",
@@ -66,8 +88,8 @@ function helperResults(
 			options.badPin === true
 				? {}
 				: {
-						pid: isReplacement && options.wrongPin === true ? 708 : 707,
-						pin: String(generation),
+						pid: isReplacement && options.wrongPin === true ? 709 : pid,
+						pin: `${generation}:${pid}`,
 						startTime: isReplacement && options.wrongStart === true ? "999" : START,
 					},
 		processStartTime: isAlive ? startTime : null,
@@ -105,14 +127,17 @@ function world(drop: string, options: RecoveryOptions = {}) {
 	let didDrop = false;
 	let isAlive = true;
 	let aliveQueries = 0;
+	let didRelease = false;
 	const states: Array<StudioControl> = [];
 	const spawner = createFakeSpawner((child) => {
+		const pins = new Map<string, number>();
+		const heldLocks = new Set<string>();
 		child.stdin.setEncoding("utf8");
 		child.stdin.on("data", handleRequest);
 		// eslint-disable-next-line sonar/cognitive-complexity -- The fake helper models transport and operation fault points.
 		function handleRequest(line: string): void {
 			const request = requestShape.assert(JSON.parse(line));
-			const isReplacement = didDrop;
+			const isReplacement = spawner.children.length > 1;
 			if (request.op === drop) {
 				effects.set(drop, (effects.get(drop) ?? 0) + 1);
 				if (options.dead === true) {
@@ -157,14 +182,34 @@ function world(drop: string, options: RecoveryOptions = {}) {
 			}
 
 			if (request.pin !== undefined) {
-				assert(request.pin === String(spawner.children.length), "stale Windows pin");
+				assert(pins.has(request.pin), "stale Windows pin");
 			}
 
 			if (request.lock !== undefined) {
-				assert(request.lock === String(spawner.children.length), "stale Windows lock");
+				assert(heldLocks.has(request.lock), "stale Windows lock");
+				heldLocks.delete(request.lock);
+				didRelease = true;
 			}
 
-			const result = helperResults(options, isReplacement, isAlive, spawner.children.length);
+			const pid = request.pid ?? pins.get(request.pin ?? "") ?? 707;
+			const result = helperResults(options, {
+				generation: spawner.children.length,
+				isAlive,
+				isReplacement,
+				pid,
+			});
+			if (request.op === "pin") {
+				pins.set(`${spawner.children.length}:${pid}`, pid);
+			}
+
+			if (request.op === "tryLockFile" && result["tryLockFile"] !== null) {
+				result["tryLockFile"] = `${spawner.children.length}:${request.path}`;
+				heldLocks.add(String(result["tryLockFile"]));
+				if (isReplacement && didRelease && options.claimReleasedLock === true) {
+					result["tryLockFile"] = null;
+				}
+			}
+
 			function reply() {
 				child.stdout.write(
 					`${JSON.stringify({ id: request.id, result: result[request.op] })}\n`,
@@ -184,22 +229,41 @@ function world(drop: string, options: RecoveryOptions = {}) {
 			clock,
 			cwd: PROJECT,
 			environment: {},
-			processRunner: async () => {
+			processRunner: async (spec) => {
+				const input = spec.args[1];
+				assert(input !== undefined);
 				return {
 					durationMs: 1,
 					exitCode: 0,
-					outputTail: [String.raw`D:\temp\agents\312.lock`],
+					outputTail: [`D:\\temp\\agents\\${path.posix.basename(input)}`],
 					signal: null,
 					type: "exited",
 				};
 			},
 		},
 		() => {
-			return createHelperClient(
+			const client = createHelperClient(
 				{ ...seams, childProcess: spawner.runner, clock },
 				() => ({ args: [], file: "/helper.exe" }),
 				"x64",
 			);
+			async function requestAsync(
+				...args: Parameters<typeof client.requestAsync>
+			): Promise<unknown> {
+				try {
+					return await client.requestAsync(...args);
+				} catch (err) {
+					await nodeClock.sleep(options.delayFailureMs ?? 0);
+					throw err;
+				}
+			}
+
+			const { onFailure, ...rest } = client;
+			return {
+				...rest,
+				...(onFailure === undefined || options.withoutEvents === true ? {} : { onFailure }),
+				requestAsync,
+			};
 		},
 	);
 	const unsubscribe = host.onControl?.((state) => {
@@ -210,6 +274,9 @@ function world(drop: string, options: RecoveryOptions = {}) {
 			elapsed += ms;
 		},
 		effects,
+		exitStudio: () => {
+			isAlive = false;
+		},
 		seams: { ...seams, clock, studioHost: host },
 		signals,
 		spawner,
@@ -218,12 +285,62 @@ function world(drop: string, options: RecoveryOptions = {}) {
 	};
 }
 
+function retainedSession(run: ReturnType<typeof world>, side = "wsl:forge-test") {
+	const forge = forgeFiles(PROJECT);
+	const files = sessionFiles(forge, "retained");
+	const status = makeStatus();
+	status.services.studio = {
+		...PROCESS,
+		control: "ready",
+		owner: null,
+		place: PLACE,
+		status: "open",
+	};
+	run.seams.fileSystem.mkdirSync(files.directory, { recursive: true });
+	run.seams.fileSystem.writeFileSync(forge.current, "retained\n");
+	run.seams.fileSystem.writeFileSync(
+		files.identity,
+		JSON.stringify({
+			endpoint: "retained",
+			pid: 500,
+			processStartTime: "500",
+			sessionId: "retained",
+			side,
+			startedAt: "2026-01-01T00:00:00.000Z",
+			version: "9.9.9",
+		}),
+	);
+	run.seams.fileSystem.writeFileSync(files.token, "token");
+	run.seams.studioHost.onControl?.((control) => {
+		status.services.studio.control = control;
+		run.seams.fileSystem.writeFileSync(files.state, JSON.stringify(status));
+	});
+	const native = createFakeNative();
+	const context = createCommandContext({
+		cwd: PROJECT,
+		seams: {
+			...run.seams,
+			host: { ...run.seams.host, platform: "linux", wslDistro: "forge-test" },
+			ipc: createMemoryTransport(),
+			native: () => native.addon,
+		},
+	});
+	return { context, files };
+}
+
 async function observedAsync<T>(work: Promise<T>) {
 	return work
 		.then((value) => ({ value }))
 		.catch((err: unknown) => {
 			assert(err instanceof ForgeError);
-			return { error: { code: err.code, details: err.details } };
+			return {
+				error: {
+					cause: err.cause,
+					code: err.code,
+					details: err.details,
+					message: err.message,
+				},
+			};
 		});
 }
 
@@ -252,7 +369,16 @@ describe("windows helper recovery", () => {
 	});
 
 	it.for([
-		[false, { error: { code: "process_failed" } }],
+		[
+			false,
+			{
+				error: {
+					cause: { message: "Windows helper EOF." },
+					code: "process_failed",
+					message: "The Studio close result is unknown; Studio was not killed.",
+				},
+			},
+		],
 		[true, { value: { end: "exited", forced: false, status: "stopped" } }],
 	] as const)(
 		"requires exit proof after losing a close reply: %o",
@@ -272,7 +398,17 @@ describe("windows helper recovery", () => {
 	);
 
 	it.for([
-		[false, { error: { code: "save_failed", details: { reason: "unknown" } } }],
+		[
+			false,
+			{
+				error: {
+					code: "save_failed",
+					details: { reason: "unknown" },
+					message:
+						"The Studio save result is unknown. Check the place before saving again.",
+				},
+			},
+		],
 		[true, { value: { bytes: 5, method: "menu" } }],
 	] as const)(
 		"retains the original save proof after loss: %o",
@@ -288,14 +424,15 @@ describe("windows helper recovery", () => {
 	);
 
 	it("stops recovery when the replacement reports another Windows host", async ({ expect }) => {
-		expect.assertions(3);
+		expect.assertions(4);
 
 		const run = world("setWindowVisibility", { host: "OTHER" });
 		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
 		assert(pin !== null);
 
-		await expect(pin.setWindowVisibilityAsync("hidden")).rejects.toThrow();
+		await expect(pin.setWindowVisibilityAsync("hidden")).rejects.toThrow("Windows helper EOF.");
 		await expect(pin.isAliveAsync()).rejects.toThrow("host changed");
+		expect(run.spawner.children).toHaveLength(2);
 		expect(run.states).toEqual(["ready", "recovering", "unavailable"]);
 	});
 
@@ -362,20 +499,23 @@ describe("windows helper recovery", () => {
 		expect(run.states).toEqual(["ready", "recovering", "ready"]);
 	});
 
-	it.for([{ lockFailed: true }, { wrongPin: true }, { wrongStart: true }])(
-		"refuses control when lock or pin restoration fails: %o",
-		async (options, { expect }) => {
-			expect.assertions(2);
+	it.for([
+		{ diagnostic: "Windows singleton lock could not be retaken.", lockFailed: true },
+		{ diagnostic: "Windows helper returned a different Studio identity.", wrongPin: true },
+		{ diagnostic: "Windows helper returned a different Studio identity.", wrongStart: true },
+	])("refuses control when lock or pin restoration fails: %o", async (options, { expect }) => {
+		expect.assertions(4);
 
-			const run = world("setWindowVisibility", options);
-			await run.seams.studioHost.tryLockFileAsync("/project/lock");
-			const pin = await run.seams.studioHost.pinProcessAsync(707, START);
-			assert(pin !== null);
+		const run = world("setWindowVisibility", options);
+		await run.seams.studioHost.tryLockFileAsync("/project/lock");
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
 
-			await expect(pin.setWindowVisibilityAsync("hidden")).rejects.toThrow();
-			expect(run.states).toEqual(["ready", "recovering", "unavailable"]);
-		},
-	);
+		await expect(pin.setWindowVisibilityAsync("hidden")).rejects.toThrow();
+		await expect(run.seams.studioHost.hostnameAsync()).rejects.toThrow(options.diagnostic);
+		expect(run.spawner.children).toHaveLength(2);
+		expect(run.states).toEqual(["ready", "recovering", "unavailable"]);
+	});
 
 	it("stops on malformed operation results", async ({ expect }) => {
 		expect.assertions(2);
@@ -393,7 +533,7 @@ describe("windows helper recovery", () => {
 
 		const run = world("unused", { badPin: true });
 
-		await expect(run.seams.studioHost.pinProcessAsync(707, START)).rejects.toThrow();
+		await expect(run.seams.studioHost.pinProcessAsync(707, START)).rejects.toThrow("pin must");
 		expect(run.states).toEqual(["ready", "unavailable"]);
 	});
 
@@ -581,5 +721,248 @@ describe("windows helper recovery", () => {
 		assert(pin !== null);
 
 		await expect(pin.saveMenuEnabledAsync(500)).rejects.toThrow();
+	});
+
+	it("retains an unavailable own-side session until fresh control proves its Studio gone", async ({
+		expect,
+	}) => {
+		expect.assertions(6);
+
+		const run = world("setWindowVisibility", { retryLoss: true });
+		const session = retainedSession(run);
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+
+		await expect(pin.setWindowVisibilityAsync("hidden")).rejects.toThrow();
+		await expect(
+			runDownAsync(session.context, { config: {}, flags: {} }),
+		).rejects.toMatchObject({ code: "cleanup_in_progress" });
+		expect(run.seams.fileSystem.existsSync(session.files.identity)).toBe(true);
+
+		const fresh = world("unused");
+		session.context.seams.studioHost = fresh.seams.studioHost;
+
+		await expect(
+			runDownAsync(session.context, { config: {}, flags: {} }),
+		).rejects.toMatchObject({ code: "cleanup_in_progress" });
+
+		fresh.exitStudio();
+
+		await expect(
+			runDownAsync(session.context, { config: {}, flags: {} }),
+		).resolves.toMatchObject({ data: { removed: true, status: "stopped" } });
+		expect(run.seams.fileSystem.existsSync(session.files.identity)).toBe(false);
+	});
+
+	it("refuses fresh-control cleanup of a retained foreign-side record", async ({ expect }) => {
+		expect.assertions(2);
+
+		const run = world("unused");
+		const session = retainedSession(run, "windows");
+		run.exitStudio();
+
+		await expect(
+			runDownAsync(session.context, { config: {}, flags: { force: true } }),
+		).rejects.toMatchObject({ code: "identity_mismatch" });
+		expect(run.seams.fileSystem.existsSync(session.files.identity)).toBe(true);
+	});
+
+	it("keeps two Windows identities distinct across recovery", async ({ expect }) => {
+		expect.assertions(3);
+
+		const run = world("setWindowVisibility");
+		const first = await run.seams.studioHost.pinProcessAsync(707, START);
+		const second = await run.seams.studioHost.pinProcessAsync(708, START);
+		assert(first !== null && second !== null);
+
+		await expect(first.setWindowVisibilityAsync("hidden")).resolves.toBe(true);
+		await expect(first.executablePathAsync()).resolves.toBe(
+			String.raw`D:\temp\agents\707\RobloxStudioBeta.exe`,
+		);
+		await expect(second.executablePathAsync()).resolves.toBe(
+			String.raw`D:\temp\agents\708\RobloxStudioBeta.exe`,
+		);
+	});
+
+	it("does not retake a lock released before later channel loss", async ({ expect }) => {
+		expect.assertions(2);
+
+		const run = world("unused", { claimReleasedLock: true });
+		const lock = await run.seams.studioHost.tryLockFileAsync("/project/lock");
+		assert(lock !== null);
+		await lock.releaseAsync();
+		run.spawner.children[0]!.stdout.emit("end");
+
+		await expect(run.seams.studioHost.hostnameAsync()).resolves.toEqual("WINDOWS");
+		expect(run.states).toEqual(["ready", "recovering", "ready"]);
+	});
+
+	it("keeps independent Windows locks distinct when one is released", async ({ expect }) => {
+		expect.assertions(1);
+
+		const run = world("unused");
+		const first = await run.seams.studioHost.tryLockFileAsync("/project/one.lock");
+		const second = await run.seams.studioHost.tryLockFileAsync("/project/two.lock");
+		assert(first !== null && second !== null);
+		await first.releaseAsync();
+		run.spawner.children[0]!.stdout.emit("end");
+		await run.seams.studioHost.hostnameAsync();
+
+		await expect(second.releaseAsync()).resolves.toBeUndefined();
+	});
+
+	it("does not confirm another lost mutation merely because Studio exited", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		const run = world("stopWindowHiding", { dead: true });
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+
+		await expect(pin.stopWindowHidingAsync()).rejects.toThrow("EOF");
+	});
+
+	it("recovers transient replacement losses within the caller deadline", async ({ expect }) => {
+		expect.assertions(1);
+
+		const run = world("saveMenuEnabled", { transientAttempts: 2 });
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+
+		await expect(pin.saveMenuEnabledAsync(2000)).resolves.toBe(true);
+	});
+
+	it.for([{ withoutEvents: true }, { delayFailureMs: 20 }])(
+		"recovers exactly once when the lost result arrives after its notification: %o",
+		async (options, { expect }) => {
+			expect.assertions(2);
+
+			const run = world("setWindowVisibility", options);
+			const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+			assert(pin !== null);
+
+			await expect(pin.setWindowVisibilityAsync("hidden")).resolves.toBe(true);
+			expect(run.states).toEqual(["ready", "recovering", "ready"]);
+		},
+	);
+
+	it("resets the exhausted attempt budget after a healthy minute", async ({ expect }) => {
+		expect.assertions(1);
+
+		const run = world("unused");
+		await run.seams.studioHost.hostnameAsync();
+		for (const index of [0, 1, 2]) {
+			run.spawner.children[index]!.stdout.emit("end");
+			await run.seams.studioHost.hostnameAsync();
+		}
+
+		run.advance(60_000);
+		run.spawner.children[3]!.stdout.emit("end");
+
+		await expect(run.seams.studioHost.hostnameAsync()).resolves.toBe("WINDOWS");
+	});
+
+	it("does not send a read when recovery consumes the entire caller deadline", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		const run = world("saveMenuEnabled");
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+
+		await expect(pin.saveMenuEnabledAsync(100)).rejects.toThrow("Windows helper EOF.");
+	});
+
+	it("keeps missing-helper failure terminal without another recovery cycle", async ({
+		expect,
+	}) => {
+		expect.assertions(3);
+
+		const seams = createTestSeams();
+		const failure = new ForgeError("windows_helper_unavailable", "missing helper");
+		const host = createWslStudioHost({ ...seams, cwd: PROJECT, environment: {} }, () => {
+			throw failure;
+		});
+		const states: Array<StudioControl> = [];
+		host.onControl!((state) => {
+			states.push(state);
+		});
+
+		await expect(host.hostnameAsync()).rejects.toBe(failure);
+		await expect(host.hostnameAsync()).rejects.toBe(failure);
+		expect(states).toEqual(["ready", "unavailable"]);
+	});
+
+	it("preserves the full diagnostic and cause of an uncertain close", async ({ expect }) => {
+		expect.assertions(1);
+
+		const run = world("requestClose");
+
+		await expect(
+			closeStudioAsync(
+				run.seams,
+				{ place: PLACE, process: PROCESS },
+				{ env: {}, mode: "delete", recoveryDirectory: path.join(PROJECT, "recovery") },
+			),
+		).rejects.toMatchObject({
+			cause: { message: "Windows helper EOF." },
+			code: "process_failed",
+			message: "The Studio close result is unknown; Studio was not killed.",
+		});
+	});
+
+	it("reports the original proof missing for an uncertain save", async ({ expect }) => {
+		expect.assertions(1);
+
+		const run = world("requestSave");
+
+		await expect(
+			saveStudioAsync(run.seams, { place: PLACE, process: PROCESS }, 2000),
+		).rejects.toMatchObject({
+			code: "save_failed",
+			details: { reason: "unknown" },
+			message: "The Studio save result is unknown. Check the place before saving again.",
+		});
+	});
+
+	it("explains why an old Windows identity cannot be commanded after PID reuse", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const run = world("setWindowVisibility", { reused: true });
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+
+		await expect(pin.setWindowVisibilityAsync("hidden")).rejects.toThrow();
+		await expect(pin.requestCloseAsync()).rejects.toMatchObject({
+			code: "identity_mismatch",
+			message: "The pinned Windows Studio has exited.",
+		});
+	});
+
+	it("explains why a live Studio retains its record after fresh control", async ({ expect }) => {
+		expect.assertions(2);
+
+		const run = world("setWindowVisibility", { retryLoss: true });
+		const session = retainedSession(run);
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+
+		await expect(pin.setWindowVisibilityAsync("hidden")).rejects.toThrow();
+
+		const fresh = world("unused");
+		session.context.seams.studioHost = fresh.seams.studioHost;
+
+		await expect(
+			runDownAsync(session.context, { config: {}, flags: {} }),
+		).rejects.toMatchObject({
+			cause: { message: "The recorded Windows Studio still runs." },
+			code: "cleanup_in_progress",
+			message:
+				"Windows Studio cleanup is unverified; the session identity record is retained.",
+		});
 	});
 });

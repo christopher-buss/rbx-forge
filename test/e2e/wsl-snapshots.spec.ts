@@ -12,7 +12,7 @@ import process from "node:process";
 import { assert, describe, it } from "vitest";
 
 import { makeFixtureProject } from "../helpers/fixture-project.ts";
-import { parseResult } from "../helpers/output.ts";
+import { parseLines, parseResult } from "../helpers/output.ts";
 import { NATIVE_DIRECTORY, waitForFileAsync } from "../helpers/real-native.ts";
 
 const HELPER = path.resolve(import.meta.dirname, "../fixtures/bin/fake-windows-helper.ts");
@@ -22,7 +22,7 @@ describe.skipIf(process.platform !== "linux")("wsl snapshots", () => {
 		expect,
 		onTestFinished,
 	}) => {
-		expect.assertions(11);
+		expect.assertions(13);
 
 		const fixture = makeFixtureProject({
 			config: { projectType: "luau", studio: { desktop: "hidden", saveMethod: "menu" } },
@@ -90,9 +90,20 @@ exec "${process.execPath}" "${HELPER}" path "$@"
 		expect(typeof lighting.watcherPid).toBe("number");
 		expect(lighting.helperPid).not.toBe(lighting.watcherPid);
 
-		const saved = await fixture.forge(["save", "--place", place, "--json"], environment);
+		const saved = await fixture.forge(["save", "--place", place, "--json"], {
+			...environment,
+			FIXTURE_HELPER_DROP: "requestSave",
+		});
 
 		expect(saved.status, saved.stdout + saved.stderr).toBe(0);
+		expect(parseLines(saved.stdout)).toContainEqual({
+			message: "Windows Studio control was lost; recovering.",
+			type: "warning",
+		});
+		expect(parseLines(saved.stdout)).toContainEqual({
+			message: "Windows Studio control recovered.",
+			type: "info",
+		});
 		expect(parseResult(saved.stdout)).toMatchObject({ data: { desktop: "hidden", place } });
 		expect(readFileSync(place, "utf8")).toBe("saved by Windows Studio");
 

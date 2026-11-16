@@ -64,9 +64,7 @@ export class HelperHandles {
 			return token;
 		}
 
-		if (operation["op"] === "releaseLock") {
-			this.locks.delete(String(operation["lock"]));
-		}
+		this.locks.delete(String(operation["lock"]));
 
 		return result;
 	}
