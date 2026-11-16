@@ -24,6 +24,7 @@ const OK: ProcessOutcome = {
 function setup(
 	options: {
 		alive?: boolean;
+		clockStepMs?: number;
 		hiding?: boolean;
 		keepHidden?: KeepHiddenLauncher;
 		launchReply?: unknown;
@@ -48,7 +49,7 @@ function setup(
 		clock: {
 			now: () => now,
 			sleep: async (ms) => {
-				now += ms;
+				now += options.clockStepMs ?? ms;
 			},
 		},
 		fileSystem: memory.fileSystem,
@@ -223,6 +224,7 @@ describe("wsl Studio tracer", () => {
 
 			const watches: Array<Parameters<KeepHiddenLauncher>[0]> = [];
 			const { seams } = setup({
+				clockStepMs: 1000,
 				hiding,
 				keepHidden: (watch) => {
 					watches.push(watch);
@@ -361,6 +363,17 @@ describe("wsl Studio tracer", () => {
 		assert(pin !== null);
 
 		await expect(pin.startWindowHidingAsync()).resolves.toBeTrue();
+	});
+
+	it("returns at the requested exit deadline when Studio stays alive", async ({ expect }) => {
+		expect.assertions(2);
+
+		const { now, seams } = setup();
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+
+		await expect(pin.waitForExitAsync(100)).resolves.toBeFalse();
+		expect(now()).toBe(100);
 	});
 
 	it("reads binary probe responses from the Windows helper", async ({ expect }) => {
