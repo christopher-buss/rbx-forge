@@ -5,9 +5,11 @@ import path from "node:path";
 import type { CommandContext } from "../commands/context.ts";
 import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
-import { runRojoAsync } from "../rojo/rojo.ts";
+import { isWsl } from "../process/wsl.ts";
+import { rojoInvocation, runRojoAsync } from "../rojo/rojo.ts";
 import type { RojoServerInfo } from "../seams/network.ts";
 import patched from "./rojo-plugin/patched.json" with { type: "json" };
+import { installWslPluginAsync, PLUGIN_INSTALL_ARGS } from "./wsl-plugin-install.ts";
 
 /**
  * Whether forge can guarantee automatic sync and acknowledge its completion.
@@ -79,28 +81,39 @@ export async function prepareRojoPluginAsync(
 	}
 
 	if (!context.seams.fileSystem.existsSync(model)) {
-		await runRojoAsync(context, config, ["plugin", "install"]);
+		if (isWsl(context.seams.host.platform, context.env)) {
+			const reason = unverifiedInstaller(context, config, server.serverVersion);
+			if (reason !== undefined) {
+				return manual(context, reason);
+			}
+
+			return installWslPluginAsync(context, config, {
+				prepare: (staged) => prepareModel(context, staged, server, signal),
+				signal,
+				target: model,
+			});
+		}
+
+		await runRojoAsync(context, config, PLUGIN_INSTALL_ARGS);
 		signal.throwIfAborted();
 	}
 
-	const sources = readSources(context, model);
-	if (sources === undefined) {
-		return MANUAL;
-	}
-
-	const decision = decide(context, model, sources, server);
-	if (decision !== "patch") {
-		return decision;
-	}
-
-	signal.throwIfAborted();
-	writeSources(context, model);
-	return FORGE;
+	return prepareModel(context, model, server, signal);
 }
 
-async function pluginPathAsync(context: CommandContext): Promise<string | undefined> {
-	const folder = await context.seams.studioHost.pluginsFolderAsync(context.env);
-	return folder === undefined ? undefined : path.join(folder, "RojoManagedPlugin.rbxm");
+function unverifiedInstaller(
+	context: CommandContext,
+	config: Pick<ResolvedConfig, "rojoAlias">,
+	version: string,
+): string | undefined {
+	if (version !== "7.7.1") {
+		return `Rojo ${version} plugin installation under WSL is not verified.`;
+	}
+
+	const invocation = rojoInvocation(context, config, PLUGIN_INSTALL_ARGS);
+	return [".com", ".exe"].includes(path.extname(invocation.file).toLowerCase())
+		? "The Windows Rojo installer is not verified with Linux staging paths."
+		: undefined;
 }
 
 function manual(context: CommandContext, reason: string): PluginCapabilities {
@@ -269,4 +282,30 @@ function writeSources(context: CommandContext, model: string): void {
 			{ cause: err, hint: "Check permissions on RojoManagedPlugin.rbxm and retry." },
 		);
 	}
+}
+
+function prepareModel(
+	context: CommandContext,
+	model: string,
+	server: Pick<RojoServerInfo, "protocolVersion" | "serverVersion">,
+	signal: AbortSignal,
+): PluginCapabilities {
+	const sources = readSources(context, model);
+	if (sources === undefined) {
+		return MANUAL;
+	}
+
+	const decision = decide(context, model, sources, server);
+	if (decision !== "patch") {
+		return decision;
+	}
+
+	signal.throwIfAborted();
+	writeSources(context, model);
+	return FORGE;
+}
+
+async function pluginPathAsync(context: CommandContext): Promise<string | undefined> {
+	const folder = await context.seams.studioHost.pluginsFolderAsync(context.env);
+	return folder === undefined ? undefined : path.join(folder, "RojoManagedPlugin.rbxm");
 }

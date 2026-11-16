@@ -12,9 +12,8 @@ import type { StudioLaunch, StudioLaunchOutcome } from "../studio/launcher.ts";
 import { commandExecutable, STUDIO_REGISTRY_KEYS } from "./addon-studio/discover.ts";
 import type { Environment, Seams } from "./seams.ts";
 import type { PinnedStudio, StudioHost } from "./studio-host.ts";
-import { convertedOutput } from "./wsl-path-output.ts";
+import { convertedOutput, launched, pinnedIdentity } from "./wsl-helper-results.ts";
 
-const pinShape = type({ pid: "number.integer > 0", pin: "string > 0", startTime: "string > 0" });
 const INVALID_PATH = /[\r\n\0]/;
 const NULLABLE_TEXT = type("string | null");
 const PATHS = type("string[]");
@@ -49,8 +48,8 @@ class WslHost {
 			pinProcessAsync: this.pinProcessAsync.bind(this),
 			platformAsync: async () => "win32",
 			pluginsFolderAsync: async () => {
-				// The tracer leaves managed plugin installation to the
-				// subsequent WSL slice.
+				const folder = await this.requestAsync({ op: "pluginsFolder" }, type("string"));
+				return this.convertAsync(folder, false, false);
 			},
 			probeHttpAsync: this.probeHttpAsync.bind(this),
 			processStartTimeAsync: async (pid) => {
@@ -239,7 +238,7 @@ class WslHost {
 
 	// eslint-disable-next-line flawless/max-lines-per-function -- Flat mapping of the Studio pin interface.
 	private wrap(value: unknown): PinnedStudio {
-		const identity = pinShape.assert(value);
+		const identity = pinnedIdentity(value);
 		async function boolAsync(op: string): Promise<boolean> {
 			return request({ op, pin: identity.pin }, type("boolean"));
 		}
@@ -322,22 +321,6 @@ class WslHost {
 export function createWslStudioHost(backend: WslBackend, connect: () => HelperClient): StudioHost {
 	const host = new WslHost(backend, connect);
 	return host.host();
-}
-
-function launched(value: unknown): StudioLaunchOutcome {
-	if (!pinShape.allows(value)) {
-		throw new ForgeError(
-			"studio_launch_unknown",
-			"The Windows helper returned no usable Studio launch identity. Check Studio before trying again.",
-		);
-	}
-
-	const pinned = value;
-	return {
-		desktop: "user",
-		studio: { desktop: "user", os: "win32", pid: pinned.pid, startTime: pinned.startTime },
-		type: "launched",
-	};
 }
 
 async function unsupportedAsync(): Promise<never> {

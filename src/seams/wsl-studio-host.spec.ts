@@ -84,6 +84,9 @@ function setup(
 				case "pin": {
 					return PIN;
 				}
+				case "pluginsFolder": {
+					return WINDOWS;
+				}
 				case "probeHttp": {
 					return options.probeReply;
 				}
@@ -129,6 +132,14 @@ function setup(
 }
 
 describe("wsl Studio tracer", () => {
+	it("reports the Windows Plugins folder as a Linux path", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup({ output: "/project/new-plugins" });
+
+		await expect(seams.studioHost.pluginsFolderAsync({})).resolves.toBe("/project/new-plugins");
+	});
+
 	it("saves the Windows place through its menu", async ({ expect }) => {
 		expect.assertions(2);
 
@@ -540,7 +551,7 @@ describe("wsl Studio tracer", () => {
 		expect(await seams.studioHost.autoSaveDirectoriesAsync({})).toEqual([
 			"/project/Studio.exe",
 		]);
-		expect(await seams.studioHost.pluginsFolderAsync({})).toBeUndefined();
+		expect(await seams.studioHost.pluginsFolderAsync({})).toBe("/project/Studio.exe");
 		expect(await seams.studioHost.frontmostApplicationAsync()).toBeNull();
 		expect(await seams.studioHost.platformAsync()).toBe("win32");
 		await expect(seams.studioHost.tryLockFileAsync("/project/lock")).rejects.toMatchObject({

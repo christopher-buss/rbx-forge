@@ -21,6 +21,7 @@ enum Operation {
     Handshake {
         protocol: u32,
     },
+    PluginsFolder,
     ProbeHttp {
         port: u16,
         route: String,
@@ -135,6 +136,17 @@ impl Session {
         }
         match op {
             Operation::Handshake { .. } => unreachable!(),
+            Operation::PluginsFolder => {
+                let home = std::env::var_os("USERPROFILE")
+                    .ok_or_else(|| io::Error::other("Windows user profile is unavailable"))?;
+                Ok(json!(
+                    std::path::PathBuf::from(home)
+                        .join("AppData")
+                        .join("Local")
+                        .join("Roblox")
+                        .join("Plugins")
+                ))
+            }
             Operation::ProbeHttp { port, route } => {
                 Ok(json!(crate::helper_probe::probe(port, &route)?))
             }
