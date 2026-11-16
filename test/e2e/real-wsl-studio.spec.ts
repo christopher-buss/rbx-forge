@@ -5,13 +5,19 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { assert, describe, it } from "vitest";
 
-import { parseResult } from "../helpers/output.ts";
+import { parseOpened, parseResult } from "../helpers/output.ts";
 import { ownedWslTerminalAsync } from "../helpers/owned-wsl-terminal.ts";
 import { studioCleanup } from "../helpers/real-studio-cleanup.ts";
 import { realStudioHost } from "../helpers/real-studio-host.ts";
-import { makeRealProjectAsync, realVariables, waitForLoadedAsync } from "./real-studio.spec.ts";
+import {
+	compatibilitySnapshotAsync,
+	makeRealProjectAsync,
+	realVariables,
+	waitForLoadedAsync,
+} from "./real-studio.spec.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 import type { UpRun } from "./up-fixture.ts";
 
@@ -160,6 +166,62 @@ describe.skipIf(!IS_ENABLED)("packed WSL2 real Studio release checks", () => {
 			const saved = await runForgeAsync(fixture, ["save", "--json"], realVariables());
 
 			expect(saved.status).toBe(0);
+		},
+	);
+
+	it(
+		"keeps the snapshot Lighting watcher alive after closing its owned WSL launch terminal",
+		{ timeout: 150_000 },
+		async ({ expect }) => {
+			expect.assertions(6);
+
+			const fixture = await compatibilitySnapshotAsync();
+			const own = studioCleanup();
+			const terminal = await ownedWslTerminalAsync({
+				argv: ["open", "--desktop", "hidden"],
+				bin: fixture.cli.bin,
+				project: fixture.project,
+				variables: realVariables(),
+			});
+			const output = path.join(fixture.project, "owned-terminal-up.ndjson");
+
+			await expect
+				.poll(() => readFileSync(output, "utf8").includes('"type":"result"'), {
+					timeout: 90_000,
+				})
+				.toBeTrue();
+
+			const opened = parseResult(readFileSync(output, "utf8"));
+			assert(opened.ok, JSON.stringify(opened));
+			const { place, studio } = parseOpened(opened.data);
+			assert(studio !== null);
+			const pinned = await own(studio);
+
+			await expect
+				.poll(() => Number(readFileSync(`${place}.lock`, "utf8").split(/\r?\n/, 1)[0]), {
+					timeout: 90_000,
+				})
+				.toBe(studio.pid);
+
+			await terminal.killAsync();
+
+			expect(await terminal.waitForExitAsync(10_000)).toBeTrue();
+
+			await sleep(15_000);
+
+			await expect
+				.poll(async () => pinned.isBlockedAsync(), { interval: 500, timeout: 30_000 })
+				.toBeFalse();
+
+			const saved = await runForgeAsync(
+				fixture,
+				["save", "--place", place, "--json"],
+				realVariables(),
+			);
+			recordRun("snapshot-after-relay-loss", saved);
+
+			expect(saved).toMatchObject({ result: { ok: true }, status: 0 });
+			expect(await pinned.isAliveAsync()).toBeTrue();
 		},
 	);
 

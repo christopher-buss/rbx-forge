@@ -200,6 +200,32 @@ export async function waitForLoadedAsync(
 	return [status.services.studio.pid, lockPid, pinned];
 }
 
+export async function compatibilitySnapshotAsync(
+	fixturePlace = "compatibility.rbxl",
+	sharedCli?: IsolatedRealStudioCli,
+): Promise<RealFixture> {
+	const fixture = await makeRealFixtureAsync({ projectType: "luau" }, sharedCli);
+	const directory = path.join(fixture.project, "node_modules", "snapshot-rojo");
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(
+		path.join(fixture.project, "package.json"),
+		JSON.stringify({ devDependencies: { "snapshot-rojo": "1.0.0" } }),
+	);
+	writeFileSync(
+		path.join(directory, "package.json"),
+		JSON.stringify({ name: "snapshot-rojo", bin: { rojo: "cli.mjs" } }),
+	);
+	writeFileSync(
+		path.join(directory, "cli.mjs"),
+		`import { copyFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
+const output = process.argv[process.argv.indexOf('--output') + 1];
+mkdirSync(path.dirname(output), { recursive: true });
+copyFileSync(${JSON.stringify(path.join(PLACES, fixturePlace))}, output);`,
+	);
+	return fixture;
+}
+
 /**
  * The real Plugins folder, where every fixture uses unique filenames.
  *
@@ -234,32 +260,6 @@ function note(entry: Record<string, unknown>): void {
 	if (log !== undefined) {
 		appendFileSync(log, `${JSON.stringify(entry)}\n`);
 	}
-}
-
-async function compatibilitySnapshotAsync(
-	fixturePlace = "compatibility.rbxl",
-	sharedCli?: IsolatedRealStudioCli,
-): Promise<RealFixture> {
-	const fixture = await makeRealFixtureAsync({ projectType: "luau" }, sharedCli);
-	const directory = path.join(fixture.project, "node_modules", "snapshot-rojo");
-	mkdirSync(directory, { recursive: true });
-	writeFileSync(
-		path.join(fixture.project, "package.json"),
-		JSON.stringify({ devDependencies: { "snapshot-rojo": "1.0.0" } }),
-	);
-	writeFileSync(
-		path.join(directory, "package.json"),
-		JSON.stringify({ name: "snapshot-rojo", bin: { rojo: "cli.mjs" } }),
-	);
-	writeFileSync(
-		path.join(directory, "cli.mjs"),
-		`import { copyFileSync, mkdirSync } from 'node:fs';
-import path from 'node:path';
-const output = process.argv[process.argv.indexOf('--output') + 1];
-mkdirSync(path.dirname(output), { recursive: true });
-copyFileSync(${JSON.stringify(path.join(PLACES, fixturePlace))}, output);`,
-	);
-	return fixture;
 }
 
 /**

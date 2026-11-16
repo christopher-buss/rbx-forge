@@ -104,6 +104,8 @@ Native Linux, outside WSL, still has no Studio.
 - The Windows 2025 capability job proves a VM by running a Linux command before
   trying real helper interop with an owned Windows fixture. Its report records
   VM unavailability separately from provisioning and lifecycle failures. A
-  lifecycle failure after successful VM execution fails the job. Hosted runner
-  results remain unmeasured until a job URL and artifact are recorded in the
-  [release evidence](../validation/wsl-297.md).
+  lifecycle failure after successful VM execution fails the job. The
+  [hosted report](../validation/wsl-297.md) proves a WSL2 VM and helper
+  handshake on Windows 2025; its owned fixture's detached launch is unavailable.
+  The job reports this lifecycle failure after VM success, and does not classify
+  it as unsupported WSL2. It establishes no real-Studio gate pass.
