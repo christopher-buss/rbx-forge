@@ -44,6 +44,9 @@ export interface StudioHostLock {
 	releaseAsync: () => Promise<void>;
 }
 
+/** Availability of Windows Studio control across helper generations. */
+export type StudioControl = "ready" | "recovering" | "unavailable";
+
 /**
  * Studio OS operations; worker, local lock, and IPC operations stay on Seams.
  */
@@ -57,6 +60,7 @@ export interface StudioHost {
 	frontmostApplicationAsync: () => Promise<null | number>;
 	hostnameAsync: () => Promise<string>;
 	launchAsync: (launch: StudioLaunch) => Promise<StudioLaunchOutcome>;
+	onControl?: (listener: (state: StudioControl) => void) => () => void;
 	pinProcessAsync: (pid: number, startTime?: string) => Promise<null | PinnedStudio>;
 	platformAsync: () => Promise<NodeJS.Platform>;
 	pluginsFolderAsync: (environment: Environment) => Promise<string | undefined>;

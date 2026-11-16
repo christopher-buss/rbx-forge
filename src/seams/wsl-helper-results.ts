@@ -40,14 +40,7 @@ export function convertedOutput(result: ProcessOutcome, input: string): string {
  * @rejects An unusable launch identity.
  */
 export function launched(value: unknown, desktop: StudioDesktop): StudioLaunchOutcome {
-	if (!pinShape.allows(value)) {
-		throw new ForgeError(
-			"studio_launch_unknown",
-			"The Windows helper returned no usable Studio launch identity. Check Studio before trying again.",
-		);
-	}
-
-	const pinned = value;
+	const pinned = pinShape.assert(value);
 	return {
 		desktop,
 		studio: { desktop, os: "win32", pid: pinned.pid, startTime: pinned.startTime },

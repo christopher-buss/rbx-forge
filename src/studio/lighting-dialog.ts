@@ -1,3 +1,4 @@
+import { isHelperChannelLoss } from "../native/helper-client.ts";
 import type { PinnedStudio } from "../seams/studio-host.ts";
 import type { StudioSeams, StudioTarget } from "./close-studio.ts";
 import { findPlaceStudioAsync } from "./close-studio.ts";
@@ -42,6 +43,7 @@ export async function dismissLightingDialogAsync(
  * @param target - The launched or attached place and identity.
  * @param options - Opening deadline, cancellation, and optional diagnostic observer.
  */
+// eslint-disable-next-line sonar/cognitive-complexity, flawless/max-lines-per-function -- The bounded watcher distinguishes uncertain mutations from transient accessibility errors.
 export async function watchHiddenLightingAsync(
 	seams: StudioSeams,
 	target: StudioTarget,
@@ -73,8 +75,10 @@ export async function watchHiddenLightingAsync(
 				}
 			}
 		} catch (err) {
-			// Accessibility providers can fail while Studio is still loading.
 			trace?.({ event: "error", message: String(err) });
+			if (isHelperChannelLoss(err)) {
+				return;
+			}
 		}
 
 		try {

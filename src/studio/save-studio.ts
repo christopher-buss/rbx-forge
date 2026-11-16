@@ -4,6 +4,7 @@ import type { CaptureWarning } from "../capture/protocol.ts";
 import type { SaveMethod } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import type { SaveOutcome } from "../native/addon.ts";
+import { isHelperChannelLoss } from "../native/helper-client.ts";
 import type { PinnedStudio } from "../seams/studio-host.ts";
 import type { StudioSeams, StudioTarget } from "./close-studio.ts";
 import { findPlaceStudioAsync } from "./close-studio.ts";
@@ -38,6 +39,7 @@ export const PRIME_LIMIT_MS = 5000;
  * @returns The saved file metadata and Studio identity.
  * @rejects A stable Studio or save error.
  */
+// eslint-disable-next-line flawless/max-lines-per-function -- Keeps the original save proof across transport loss.
 export async function saveStudioAsync(
 	seams: StudioSeams,
 	target: StudioTarget,
@@ -50,10 +52,31 @@ export async function saveStudioAsync(
 	const before = writableMtime(seams, target.place);
 
 	try {
-		await requestStudioSaveAsync(seams, pinned, target.place, {
-			deadline: started + timeoutMs,
-			signal,
-		});
+		try {
+			await requestStudioSaveAsync(seams, pinned, target.place, {
+				deadline: started + timeoutMs,
+				signal,
+			});
+		} catch (err) {
+			if (!isHelperChannelLoss(err)) {
+				throw err;
+			}
+
+			try {
+				return await waitForSaveAsync(seams, pinned, target, {
+					before,
+					signal,
+					started,
+					timeoutMs,
+				});
+			} catch {
+				throw new ForgeError(
+					"save_failed",
+					"The Studio save result is unknown. Check the place before saving again.",
+					{ cause: err, details: { place: target.place, reason: "unknown" } },
+				);
+			}
+		}
 
 		return await waitForSaveAsync(seams, pinned, target, {
 			before,

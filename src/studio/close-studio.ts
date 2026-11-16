@@ -1,5 +1,6 @@
 import type { AutoRecoveryMode } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
+import { isHelperChannelLoss } from "../native/helper-client.ts";
 import { startTimeToEpochMs } from "../native/start-time.ts";
 import type { Environment, Seams } from "../seams/seams.ts";
 import type { PinnedStudio } from "../seams/studio-host.ts";
@@ -178,12 +179,32 @@ async function killedAsync(pinned: PinnedStudio, end: StudioEnd): Promise<Ended>
  * Ask Studio to close. An OS that refuses the request leaves the kill.
  *
  * @param pinned - The pinned Studio process.
+ * @param helper - Whether channel failures must preserve an uncertain result.
  * @returns Whether a close request went out.
+ * @rejects An uncertain close without verified exit.
  */
-async function askToCloseAsync(pinned: PinnedStudio): Promise<boolean> {
+async function askToCloseAsync(pinned: PinnedStudio, helper: boolean): Promise<boolean> {
 	try {
 		return await pinned.requestCloseAsync();
-	} catch {
+	} catch (err) {
+		if (isHelperChannelLoss(err)) {
+			if (await pinned.waitForExitAsync(STUDIO_EXIT_TIMEOUT_MS)) {
+				// Stryker disable next-line BooleanLiteral: exit is already
+				// proved.
+				return true;
+			}
+
+			throw new ForgeError(
+				"process_failed",
+				"The Studio close result is unknown; Studio was not killed.",
+				{ cause: err },
+			);
+		}
+
+		if (helper) {
+			throw err;
+		}
+
 		return false;
 	}
 }
@@ -222,7 +243,7 @@ async function endStudioAsync(
 	pinned: PinnedStudio,
 	{ lockPath, wasLocked }: { lockPath: string; wasLocked: boolean },
 ): Promise<Ended> {
-	if (!(await askToCloseAsync(pinned))) {
+	if (!(await askToCloseAsync(pinned, studioHost.onControl !== undefined))) {
 		return (await pinned.isAliveAsync())
 			? killedAsync(pinned, "no_window")
 			: { end: "exited", forced: false, killed: false };

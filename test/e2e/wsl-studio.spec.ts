@@ -20,6 +20,51 @@ function installPathConverter(fixture: FixtureProject): void {
 }
 
 describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
+	it("keeps the session ready after losing the Windows helper", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(4);
+
+		const fixture = makeFixtureProject({
+			config: { projectType: "luau", studio: { desktop: "user" } },
+		});
+		installPathConverter(fixture);
+		const executable = path.join(fixture.project, "RobloxStudioBeta.exe");
+		copyFileSync(process.execPath, executable);
+		const environment = {
+			FIXTURE_HELPER_DROP: "processStartTime",
+			FIXTURE_HELPER_EXECUTABLE: executable,
+			FIXTURE_HELPER_STATE: path.join(fixture.project, "helper.json"),
+			FIXTURE_ROJO_VERSION: "7.7.1",
+			FIXTURE_WSL_PLUGIN: "1",
+			RBX_FORGE_NATIVE_DIR: NATIVE_DIRECTORY,
+			RBX_FORGE_STUDIO_PATH: process.execPath,
+			RBX_FORGE_TEST_WINDOWS_HELPER: HELPER,
+			WSL_DISTRO_NAME: "forge-test",
+		};
+		const markStopped = registerStop(fixture, environment, onTestFinished);
+		const up = await fixture.forge(["up", "--no-compiler", "--studio", "--json"], environment);
+
+		expect(up.status, up.stdout + up.stderr).toBe(0);
+
+		const status = await fixture.forge(["status", "--json"], environment);
+
+		expect(parseStatus(parseResult(status.stdout).data)).toMatchObject({
+			running: true,
+			services: { studio: { control: "ready", os: "win32", status: "open" } },
+		});
+		expect(existsSync(`${environment.FIXTURE_HELPER_STATE}.dropped-processStartTime`)).toBe(
+			true,
+		);
+
+		const down = await fixture.forge(["down", "--json"], environment);
+
+		markStopped();
+
+		expect(down.status, down.stdout + down.stderr).toBe(0);
+	});
+
 	it("fails up when Windows cannot reach the WSL listener", async ({
 		expect,
 		onTestFinished,

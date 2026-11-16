@@ -149,6 +149,17 @@ session's top-level PID identifies the Linux supervisor. Do not pass Studio's
 Windows PID to Linux process-control tools. Older sessions and native hosts may
 omit `os`.
 
+Studio under WSL also has optional `services.studio.control`: `ready`,
+`recovering`, or `unavailable`. This describes the Windows helper channel;
+Studio's existing status and the session's lifetime remain independent. One
+warning announces channel loss, one info event announces successful recovery,
+and one warning announces stopped recovery. A replacement verifies its Windows
+host, retakes supported Windows locks and re-pins Studio by PID and start time
+before accepting commands. Missing helpers, disabled interop, invalid protocol,
+malformed data and changed Windows hosts stop recovery. Lost mutation results
+are never replayed. A save without its original completion proof fails with
+`save_failed` and `details.reason: "unknown"`.
+
 ## Fresh builds: `status --wait`
 
 A plain `forge status` right after a save can return the build before it: the

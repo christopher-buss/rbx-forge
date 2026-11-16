@@ -1,5 +1,6 @@
 import { assert, describe, it } from "vitest";
 
+import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { createManualClock } from "../../test/helpers/manual-clock.ts";
 import type { FakeSessionProcess } from "../../test/helpers/native.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
@@ -182,6 +183,38 @@ describe(waitForBarrierAsync, () => {
 });
 
 describe(clearOldSessionsAsync, () => {
+	it.for([
+		["unavailable", "open", "cleanup_in_progress", true],
+		["recovering", "opening", "cleanup_in_progress", true],
+		["unavailable", "off", "cleared", false],
+		["unavailable", "closed", "cleared", false],
+	] as const)(
+		"retains unverified Windows Studio identity: %o",
+		async ([control, studioStatus, expected, retained], { expect }) => {
+			expect.assertions(2);
+
+			const status = makeStatus();
+			status.services.studio = { control, owner: null, status: studioStatus };
+			const run = makeSeams({
+				...OLD_FILES,
+				".forge/sessions/old/state.json": JSON.stringify(status),
+			});
+			const outcome = await clearOldSessionsAsync(run.seams, FORGE, {
+				boundMs: 0,
+				force: true,
+				signal: NEVER_ABORTS,
+			})
+				.then(() => "cleared")
+				.catch((err: unknown) => {
+					assert(err instanceof Error && "code" in err);
+					return err.code;
+				});
+
+			expect(outcome).toBe(expected);
+			expect(run.memory.fileSystem.existsSync(OLD.identity)).toBe(retained);
+		},
+	);
+
 	it.for([
 		["win32", "wsl:Ubuntu"],
 		["linux", "windows"],

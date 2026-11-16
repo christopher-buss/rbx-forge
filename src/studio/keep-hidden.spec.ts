@@ -4,6 +4,7 @@ import { assert, describe, it } from "vitest";
 import { createFakeSpawner } from "../../test/helpers/fake-process.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import { createMemoryFileSystem, createTestSeams, PROJECT } from "../../test/helpers/seams.ts";
+import type { StudioControl } from "../seams/studio-host.ts";
 import { STUDIO_OPEN_BOUND_MS } from "../session/studio-readiness.ts";
 import {
 	createKeepHiddenLauncher,
@@ -473,6 +474,78 @@ describe("windows detached window hiding", () => {
 
 			expect(elapsed).toBe(KEEP_HIDDEN_POLL_MS);
 			expect(studio.windowVisibility).toBe("hidden");
+		},
+	);
+});
+
+function recoveringWatch(mode: "hide" | "refuse" | "show") {
+	const native = createFakeNative({
+		42: {
+			alive: true,
+			executablePath: "RobloxStudio",
+			startTime: "42",
+			windowVisibility: "hidden",
+		},
+	});
+	const memory = createMemoryFileSystem();
+	const seams = createTestSeams({ fileSystem: memory.fileSystem, native: () => native.addon });
+	let listener: ((state: StudioControl) => void) | undefined;
+	seams.studioHost.onControl = (next) => {
+		listener = next;
+		return () => {
+			listener = undefined;
+		};
+	};
+
+	const original = seams.studioHost.pinProcessAsync;
+	let checks = 0;
+	let starts = 0;
+	seams.studioHost.pinProcessAsync = async (pid) => {
+		const pin = await original(pid);
+		assert(pin !== null);
+		return {
+			...pin,
+			startWindowHidingAsync: async () => {
+				starts += 1;
+				return starts === 1 || mode !== "refuse";
+			},
+			windowHidingAsync: async () => {
+				checks += 1;
+				if (checks === 1) {
+					assert(listener !== undefined);
+					listener("recovering");
+					listener("ready");
+					if (mode === "show") {
+						memory.fileSystem.mkdirSync(path.dirname(STATE), { recursive: true });
+						memory.fileSystem.writeFileSync(
+							STATE,
+							JSON.stringify(sessionState("user")),
+						);
+					}
+				}
+
+				return false;
+			},
+		};
+	};
+
+	return { native, seams, starts: () => starts };
+}
+
+describe("keep-hidden recovery", () => {
+	it.for(["show", "hide", "refuse"] as const)(
+		"rereads the current %s intent after recovery",
+		async (mode, { expect }) => {
+			expect.assertions(1);
+
+			const run = recoveringWatch(mode);
+			await keepStudioHiddenAsync(
+				run.seams,
+				JSON.stringify({ ...TARGET, isWindows: true }),
+				PROJECT,
+			);
+
+			expect(run.starts()).toBe({ hide: 2, refuse: 2, show: 1 }[mode]);
 		},
 	);
 });

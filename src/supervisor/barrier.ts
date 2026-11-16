@@ -4,6 +4,7 @@ import { ForgeError } from "../errors.ts";
 import type { CleanupReport, SessionTarget } from "../native/addon.ts";
 import type { FinalReport } from "../reaper/protocol.ts";
 import { FORCED_CLEANUP_MS } from "../reaper/reaper-client.ts";
+import { parseStatus } from "../session/status.ts";
 import type { LockSeams } from "./locks.ts";
 import { LEASE_POLL_MS } from "./locks.ts";
 import type { ForgeFiles, SessionFiles } from "./session-files.ts";
@@ -143,6 +144,7 @@ export async function clearOldSessionsAsync(
 			cleanups.push(cleanup);
 		}
 
+		assertStudioControl(seams, files);
 		removeSession(seams.fileSystem, forge, sessionId, seams.host);
 	}
 
@@ -186,6 +188,7 @@ export async function finalBarrierAsync(
 		);
 	}
 
+	assertStudioControl(seams, files);
 	removeSession(seams.fileSystem, forge, files.sessionId, seams.host);
 }
 
@@ -264,6 +267,25 @@ async function forceAsync(
 	}
 
 	return cleanup;
+}
+
+function assertStudioControl(seams: Pick<LockSeams, "fileSystem">, files: SessionFiles): void {
+	if (!seams.fileSystem.existsSync(files.state)) {
+		return;
+	}
+
+	const status = parseStatus(JSON.parse(seams.fileSystem.readFileSync(files.state, "utf8")));
+	const studio = status?.services.studio;
+	if (
+		(studio?.control === "unavailable" || studio?.control === "recovering") &&
+		studio.status !== "off" &&
+		studio.status !== "closed"
+	) {
+		throw new ForgeError(
+			"cleanup_in_progress",
+			"Windows Studio cleanup is unverified; the session identity record is retained.",
+		);
+	}
 }
 
 function survivorsOf(reports: ReadonlyArray<FinalReport>): Array<string> {

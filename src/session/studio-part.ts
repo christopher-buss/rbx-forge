@@ -8,7 +8,6 @@ import { ForgeError } from "../errors.ts";
 import { settlesWithinAsync } from "../seams/clock.ts";
 import type { StudioReadyListener } from "../seams/network.ts";
 import { watchHiddenLightingAsync } from "../studio/lighting-dialog.ts";
-import { studioLockPath } from "../studio/lock-file.ts";
 import type { OpenedStudio } from "./attach.ts";
 import { attachStudioAsync } from "./attach.ts";
 import type { BuildWatch } from "./build-watch.ts";
@@ -21,8 +20,8 @@ import type { SessionScope } from "./run-session.ts";
 import type { ServiceParts } from "./service-parts.ts";
 import type { PartId, StatusRecorder, StatusStore } from "./status.ts";
 import { openStudioAsync } from "./studio-launch.ts";
+import { studioLock } from "./studio-lock-watch.ts";
 import { createStudioReadiness, STUDIO_OPEN_BOUND_MS } from "./studio-readiness.ts";
-import type { StudioLockWatch } from "./watch.ts";
 import { waitForStudioCloseAsync, watchSaves } from "./watch.ts";
 import { watchOptions } from "./worker-context.ts";
 
@@ -276,28 +275,6 @@ async function watchStartupLightingAsync(
 				},
 			)
 		: undefined;
-}
-
-/**
- * The lock file of the place, and the Studio it must name while that
- * Studio runs.
- *
- * @param context - Reads process start times.
- * @param opened - The place and its Studio.
- * @returns The lock watch.
- */
-function studioLock(context: CommandContext, { place, studio }: OpenedStudio): StudioLockWatch {
-	return {
-		isAlive: async () => {
-			return (
-				studio === null ||
-				(await context.seams.studioHost.processStartTimeAsync(studio.pid)) ===
-					studio.startTime
-			);
-		},
-		path: studioLockPath(place),
-		pid: studio?.pid,
-	};
 }
 
 /**

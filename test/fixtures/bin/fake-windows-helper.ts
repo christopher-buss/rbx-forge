@@ -280,6 +280,13 @@ async function replyAsync(line: string): Promise<void> {
 	const request = parseRequest(line);
 	try {
 		const result = request.op === "probeHttp" ? await probeAsync(request) : execute(request);
+		const drop = process.env["FIXTURE_HELPER_DROP"];
+		const marker = `${STATE_FILE}.dropped-${request.op}`;
+		if (drop === request.op && !existsSync(marker)) {
+			writeFileSync(marker, "lost reply");
+			process.exit(0);
+		}
+
 		process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
 	} catch (err) {
 		process.stdout.write(

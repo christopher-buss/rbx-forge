@@ -1,4 +1,7 @@
+import { fromAny } from "@total-typescript/shoehorn";
+
 import { type } from "arktype";
+import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
@@ -13,6 +16,8 @@ import { createHelperClient } from "../../src/native/helper-client.ts";
 import { nodeChildProcessRunner } from "../../src/seams/child-process.ts";
 import { nodeClock } from "../../src/seams/clock.ts";
 import { nodeNetwork } from "../../src/seams/network.ts";
+import type { StudioControl } from "../../src/seams/studio-host.ts";
+import { createWslStudioHost } from "../../src/seams/wsl-studio-host.ts";
 import {
 	loadRealNative,
 	makeRunScriptStudioExecutable,
@@ -21,6 +26,7 @@ import {
 	waitForExitAsync,
 	waitForFileAsync,
 } from "../helpers/real-native.ts";
+import { createTestSeams } from "../helpers/seams.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 
 function startHelper({ onTestFinished }: Pick<TestContext, "onTestFinished">) {
@@ -90,6 +96,74 @@ async function launchStudioAsync(
 }
 
 describe.skipIf(process.platform !== "win32")("windows helper", () => {
+	it.for(["close", "save", "hide"] as const)(
+		"recovers after a killed helper loses a %s reply",
+		async (operation, { expect, onTestFinished }) => {
+			expect.assertions(2);
+
+			const fixture = await launchStudioAsync({ onTestFinished });
+			const children: Array<ReturnType<typeof spawn>> = [];
+			const seams = createTestSeams();
+			const states: Array<StudioControl> = [];
+			const host = createWslStudioHost(
+				{ ...seams, clock: nodeClock, cwd: process.cwd(), environment: {} },
+				() => {
+					return createHelperClient(
+						{
+							childProcess: {
+								spawn: fromAny(
+									(
+										file: string,
+										args: Array<string>,
+										options: SpawnOptionsWithoutStdio,
+									) => {
+										const child = spawn(file, args, options);
+										children.push(child);
+										onTestFinished(() => {
+											child.kill();
+										});
+										return child;
+									},
+								),
+							},
+							clock: nodeClock,
+						},
+						() => {
+							return {
+								args: [],
+								file: path.join(NATIVE_DIRECTORY, "forge-windows-helper.exe"),
+							};
+						},
+						process.arch,
+					);
+				},
+			);
+			host.onControl!((state) => {
+				states.push(state);
+			});
+			const pin = await host.pinProcessAsync(fixture.pinned.pid, fixture.pinned.startTime);
+			assert(pin !== null);
+			const first = children[0];
+			assert(first !== undefined && first.stdout !== null);
+			first.stdout.pause();
+			const mutations = {
+				close: async () => pin.requestCloseAsync(),
+				hide: async () => pin.setWindowVisibilityAsync("hidden"),
+				save: async () => pin.requestSaveAsync(1000),
+			};
+			const pending = mutations[operation]().catch(() => false);
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 25);
+			});
+			first.kill();
+			await pending;
+			await host.hostnameAsync();
+
+			expect(states).toEqual(["ready", "recovering", "ready"]);
+			expect(await pin.isAliveAsync()).toBe(fixture.pinned.isAlive());
+		},
+	);
+
 	it("launches Studio on the shared hidden snapshot desktop", async ({
 		expect,
 		onTestFinished,

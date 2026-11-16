@@ -1,6 +1,7 @@
 // cspell:words wslpath
 /* oxlint-disable typescript/require-await -- Async Studio-host methods also wrap constant platform capabilities. */
 import { type } from "arktype";
+import assert from "node:assert/strict";
 import path from "node:path";
 
 import { ForgeError } from "../errors.ts";
@@ -14,6 +15,7 @@ import type { StudioLaunch, StudioLaunchOutcome } from "../studio/launcher.ts";
 import { KEEP_HIDDEN_POLL_MS } from "../studio/window-hiding.ts";
 import { commandExecutable, STUDIO_REGISTRY_KEYS } from "./addon-studio/discover.ts";
 import type { SnapshotLightingLauncher } from "./addon-studio/snapshot-lighting-launcher.ts";
+import { HelperRecovery } from "./helper-recovery.ts";
 import type { Environment, Seams } from "./seams.ts";
 import type { PinnedStudio, StudioHost } from "./studio-host.ts";
 import { convertedOutput, launched, pinnedIdentity } from "./wsl-helper-results.ts";
@@ -34,13 +36,11 @@ type WslBackend = Pick<Seams, "clock" | "fileSystem" | "processRunner"> & {
 
 class WslHost {
 	private readonly backend: WslBackend;
-	private readonly connect: () => HelperClient;
-
-	private channel: HelperClient | undefined;
+	private readonly recovery: HelperRecovery;
 
 	constructor(backend: WslBackend, connect: () => HelperClient) {
 		this.backend = backend;
-		this.connect = connect;
+		this.recovery = new HelperRecovery(connect, backend.clock);
 	}
 
 	public host(): StudioHost {
@@ -50,10 +50,11 @@ class WslHost {
 			fromHostPathAsync: async (file) => this.convertAsync(file, false),
 			frontmostApplicationAsync: async () => null,
 			hostnameAsync: async () => {
-				const identity = await this.client().identity;
+				const identity = await this.recovery.identityAsync();
 				return identity.hostname;
 			},
 			launchAsync: this.launchAsync.bind(this),
+			onControl: this.recovery.observe.bind(this.recovery),
 			pinProcessAsync: this.pinProcessAsync.bind(this),
 			platformAsync: async () => "win32",
 			pluginsFolderAsync: async () => {
@@ -94,11 +95,6 @@ class WslHost {
 		}
 
 		return { path: linux, source };
-	}
-
-	private client(): HelperClient {
-		this.channel ??= this.connect();
-		return this.channel;
 	}
 
 	private async convertAsync(input: string, windows: boolean, mustExist = true): Promise<string> {
@@ -180,7 +176,7 @@ class WslHost {
 				? undefined
 				: await this.convertAsync(launch.runScript, true);
 		await launch.beforeLaunch?.();
-		const result = await this.client().requestAsync({
+		const result = await this.recovery.requestAsync({
 			args: studioArguments({ place, runScript }),
 			cwd,
 			desktop: launch.runScript === undefined ? launch.desktop : "user",
@@ -202,7 +198,7 @@ class WslHost {
 		}
 
 		const pinned = createWslStudioPin(
-			await this.client().requestAsync({ op: "pin", pid, startTime: current }),
+			await this.recovery.requestAsync({ op: "pin", pid, startTime: current }),
 			this.requestAsync.bind(this),
 			this.backend.clock,
 			this.startHidingAsync.bind(this),
@@ -223,7 +219,14 @@ class WslHost {
 		shape: { assert: (value: unknown) => T },
 		timeoutMs?: number,
 	): Promise<T> {
-		return shape.assert(await this.client().requestAsync(operation, timeoutMs));
+		const result = await this.recovery.requestAsync(operation, timeoutMs);
+		try {
+			return shape.assert(result);
+		} catch (err) {
+			assert(err instanceof Error);
+			this.recovery.unavailable(err);
+			throw err;
+		}
 	}
 
 	private async startHidingAsync(

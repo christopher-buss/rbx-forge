@@ -73,6 +73,7 @@ export function createKeepHiddenLauncher(
  * @param root - The project directory, whose sessions may show Studio.
  * @returns Resolves when hiding ends.
  */
+// eslint-disable-next-line flawless/max-lines-per-function -- Owns the watcher subscription for its entire lifetime.
 export async function keepStudioHiddenAsync(
 	seams: Pick<Seams, "clock" | "fileSystem" | "studioHost">,
 	payload: string,
@@ -92,7 +93,22 @@ export async function keepStudioHiddenAsync(
 			return;
 		}
 
-		return keepWindowsHiddenAsync(pinned, seams, root, { pid, startTime });
+		let didRecover = false;
+		const dispose = seams.studioHost.onControl?.((state) => {
+			if (state === "recovering") {
+				didRecover = true;
+			}
+		});
+		try {
+			await keepWindowsHiddenAsync(pinned, seams, root, { pid, startTime }, () => {
+				const didRecoverNow = didRecover;
+				didRecover = false;
+				return didRecoverNow;
+			});
+			return;
+		} finally {
+			dispose?.();
+		}
 	}
 
 	await keepMacStudioHiddenAsync(seams, pinned, { pid, place, startTime }, root);
@@ -158,17 +174,33 @@ async function keepMacStudioHiddenAsync(
 	}
 }
 
+// eslint-disable-next-line better-max-params/better-max-params -- The recovery observation belongs to this detached watcher.
 async function keepWindowsHiddenAsync(
 	pinned: PinnedStudio,
 	seams: Pick<Seams, "clock" | "fileSystem">,
 	root: string,
 	target: Pick<KeepHiddenTarget, "pid" | "startTime">,
+	recovered: () => boolean,
 ): Promise<void> {
 	if (!(await pinned.startWindowHidingAsync())) {
 		return;
 	}
 
-	while (await pinned.windowHidingAsync()) {
+	for (;;) {
+		const isHiding = await pinned.windowHidingAsync();
+		if (recovered()) {
+			if (isShownBySession(seams.fileSystem, root, target)) {
+				await pinned.stopWindowHidingAsync();
+				return;
+			}
+
+			if (!(await pinned.startWindowHidingAsync())) {
+				return;
+			}
+		} else if (!isHiding) {
+			return;
+		}
+
 		if (
 			isShownBySession(seams.fileSystem, root, target) &&
 			(await pinned.windowVisibilityAsync()) === "user"

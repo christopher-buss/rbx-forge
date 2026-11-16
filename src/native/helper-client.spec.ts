@@ -43,6 +43,24 @@ function channel(reply: (op: string) => unknown, clock: Clock = nodeClock) {
 }
 
 describe("windows helper channel", () => {
+	it("retires a helper channel and reports its disposal", async ({ expect }) => {
+		expect.assertions(3);
+
+		const { client, spawner } = channel(() => true);
+		await client.identity;
+		const failures: Array<string> = [];
+		client.onFailure!((error) => {
+			failures.push(error.message);
+		});
+		client.dispose!();
+
+		await expect(client.requestAsync({ op: "isAlive" })).rejects.toThrow(
+			"Windows helper channel disposed.",
+		);
+		expect(failures).toEqual(["Windows helper channel disposed."]);
+		expect(spawner.children[0]!.kills).toHaveLength(1);
+	});
+
 	it("returns the Windows identity and correlated results", async ({ expect }) => {
 		expect.assertions(2);
 

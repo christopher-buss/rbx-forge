@@ -35,7 +35,7 @@ import type { Clock } from "../seams/clock.ts";
 import type { ConfigLoader } from "../seams/config-loader.ts";
 import type { Network } from "../seams/network.ts";
 import type { CommandResult } from "../seams/reporter.ts";
-import type { StudioHost } from "../seams/studio-host.ts";
+import type { StudioControl, StudioHost } from "../seams/studio-host.ts";
 import { FRESH_BUILD_TIMEOUT_MS } from "../session/build-watch.ts";
 import type { Pause, PausePoint } from "../session/pause.ts";
 import { neverPauseAsync } from "../session/pause.ts";
@@ -1415,6 +1415,70 @@ function spawnedIds(fake: FakeReaper): Array<string> {
 }
 
 describe(runSupervisorAsync, () => {
+	it("keeps the session and Studio status while reporting control loss and recovery", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(6);
+
+		let listener: ((state: StudioControl) => void) | undefined;
+		const seams = createTestSeams();
+		const run = startCommand({
+			flags: { compiler: false, open: false },
+			studioHost: {
+				...seams.studioHost,
+				onControl: (next) => {
+					listener = next;
+					next("ready");
+					return () => {
+						listener = undefined;
+					};
+				},
+			},
+		});
+		onTestFinished(async () => {
+			run.signals.fire("SIGINT");
+			await run.result;
+		});
+		await flushAsync();
+		assert(listener !== undefined);
+		listener("recovering");
+
+		expect(stateOf(run)).toMatchObject({
+			running: true,
+			services: { studio: { control: "recovering", status: "off" } },
+		});
+
+		listener("ready");
+
+		expect(stateOf(run)).toMatchObject({ services: { studio: { control: "ready" } } });
+
+		listener("recovering");
+		listener("unavailable");
+
+		expect(stateOf(run)).toMatchObject({
+			running: true,
+			services: { studio: { control: "unavailable", status: "off" } },
+		});
+		expect(run.reporter.events.filter((event) => event.type === "warning")).toEqual([
+			{ message: "Windows Studio control was lost; recovering.", type: "warning" },
+			{ message: "Windows Studio control was lost; recovering.", type: "warning" },
+			{
+				message: "Windows Studio control is unavailable; recovery stopped.",
+				type: "warning",
+			},
+		]);
+		expect(run.reporter.events.filter((event) => event.type === "info")).toEqual([
+			{ message: 'Stop it with "forge down".', type: "info" },
+			{ message: "Windows Studio control recovered.", type: "info" },
+		]);
+
+		run.signals.fire("SIGINT");
+		await run.result;
+
+		expect(listener).toBeUndefined();
+	});
+
 	it("should declare an inert capture instance before Rojo starts serving", async ({
 		expect,
 		onTestFinished,

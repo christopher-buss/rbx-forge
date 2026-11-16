@@ -21,7 +21,10 @@ import { FILE_POLL_MS } from "./worker-context.ts";
 function followingStudio(
 	onTestFinished: TestContext["onTestFinished"],
 	platform: NodeJS.Platform = "win32",
-	{ hasLock = true }: { hasLock?: boolean } = {},
+	{
+		controlFailure,
+		hasLock = true,
+	}: { controlFailure?: "helper" | "native"; hasLock?: boolean } = {},
 ) {
 	const memory = createMemoryFileSystem({
 		"game.rbxl": "place",
@@ -60,6 +63,16 @@ function followingStudio(
 		native: () => native.addon,
 	});
 	seams.host.platform = platform;
+	if (controlFailure !== undefined) {
+		seams.studioHost.processStartTimeAsync = async () => {
+			throw new Error("control unavailable");
+		};
+
+		if (controlFailure === "helper") {
+			seams.studioHost.onControl = () => () => {};
+		}
+	}
+
 	const context = createCommandContext({ seams });
 	const status = createStatusStore(
 		{
@@ -101,7 +114,7 @@ function followingStudio(
 	onTestFinished(async () => {
 		abort.abort();
 		inspection.resolve();
-		await Promise.all(tracked);
+		await Promise.allSettled(tracked);
 	});
 	const studio = native.processes.get(42);
 	assert(studio !== undefined);
@@ -131,6 +144,28 @@ async function flushAsync(): Promise<void> {
 }
 
 describe("studio follow completion", () => {
+	it("keeps following Studio when Windows control is unavailable", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const run = followingStudio(onTestFinished, "win32", { controlFailure: "helper" });
+		run.finishInspection();
+		await run.open;
+
+		expect(run.status.snapshot().services.studio.status).toBe("open");
+	});
+
+	it("preserves native liveness errors", async ({ expect, onTestFinished }) => {
+		expect.assertions(1);
+
+		const run = followingStudio(onTestFinished, "win32", { controlFailure: "native" });
+		run.finishInspection();
+
+		await expect(run.done()).rejects.toThrow("control unavailable");
+	});
+
 	it.for(["darwin", "linux"] as const)(
 		"leaves Windows migration dialogs alone on a %s host",
 		async (platform, { expect, onTestFinished }) => {

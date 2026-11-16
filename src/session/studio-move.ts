@@ -6,6 +6,8 @@ import type { LocatedStudio } from "../studio/launcher.ts";
 import type { SessionScope } from "./run-session.ts";
 import type { StudioSetup } from "./studio-part.ts";
 
+export { watchStudioControl } from "./studio-control.ts";
+
 /** A serialized visibility change of the session Studio. */
 export interface StudioMoveRequest {
 	desktop: StudioDesktop;

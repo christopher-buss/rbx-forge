@@ -41,20 +41,25 @@ export function createPartRecorder(
 export function createStudioRecorder(
 	status: SessionStatus,
 	changed: () => void,
-): Pick<StatusRecorder, "studio" | "studioLeft"> {
+): Pick<StatusRecorder, "studio" | "studioControl" | "studioLeft"> {
 	return {
 		studio: (studioStatus, place, process, origin = status.services.studio.origin) => {
-			const { owner } = status.services.studio;
+			const { control, owner } = status.services.studio;
 			const from = origin === undefined ? {} : { origin };
 			const desktop = process?.desktop ?? "user";
 			status.services.studio = {
 				...process,
+				...(control === undefined ? {} : { control }),
 				...from,
 				desktop,
 				owner,
 				place,
 				status: studioStatus,
 			};
+			changed();
+		},
+		studioControl: (control) => {
+			status.services.studio.control = control;
 			changed();
 		},
 		studioLeft: () => {

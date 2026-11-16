@@ -12,7 +12,9 @@ import type { WindowsHelperIdentity } from "./windows-helper.ts";
 
 /** The verified helper channel. */
 export interface HelperClient {
+	dispose?: () => void;
 	identity: Promise<WindowsHelperIdentity>;
+	onFailure?: (listener: (error: Error) => void) => void;
 	requestAsync: (operation: Record<string, unknown>, timeoutMs?: number) => Promise<unknown>;
 }
 
@@ -25,6 +27,21 @@ const replyShape = type({
 	"error?": { code: "string", message: "string" },
 	"result?": "unknown",
 });
+const channelLosses = new WeakSet<Error>();
+
+/**
+ * Identify a command whose result was lost on the transport.
+ * @param error - A command failure.
+ * @returns Whether transport loss makes the result uncertain.
+ */
+export function isHelperChannelLoss(error: unknown): error is Error {
+	return (
+		error instanceof Error &&
+		(channelLosses.has(error) ||
+			(error instanceof ForgeError && isHelperChannelLoss(error.cause)))
+	);
+}
+
 const operationFailures = new WeakSet<Error>();
 
 class Channel {
@@ -35,6 +52,8 @@ class Channel {
 	private buffer = "";
 	private failure: Error | undefined;
 	private serial = 0;
+
+	public onFailure: ((error: Error) => void) | undefined;
 
 	constructor(child: ChildProcessWithoutNullStreams, clock: Clock) {
 		this.child = child;
@@ -58,6 +77,10 @@ class Channel {
 		child.stdout.on("data", (chunk: string) => {
 			this.receive(chunk);
 		});
+	}
+
+	public dispose(): void {
+		this.fail(new ForgeError("windows_helper_unavailable", "Windows helper channel disposed."));
 	}
 
 	public async requestAsync(
@@ -109,6 +132,11 @@ class Channel {
 		}
 
 		this.failure = err;
+		if (!(err instanceof ForgeError) && !(err instanceof SyntaxError)) {
+			channelLosses.add(err);
+		}
+
+		this.onFailure?.(err);
 		for (const request of this.pending.values()) {
 			request.reject(err);
 		}
@@ -200,6 +228,7 @@ class Channel {
  * @returns A channel that verifies the handshake before Studio operations.
  * @rejects Invalid helper paths and spawn failures.
  */
+// eslint-disable-next-line flawless/max-lines-per-function -- Starts the transport and binds its lifecycle in one place.
 export function createHelperClient(
 	backend: Pick<Seams, "childProcess" | "clock">,
 	locate: () => { args: Array<string>; file: string },
@@ -223,7 +252,13 @@ export function createHelperClient(
 		return channel.requestAsync(operation);
 	});
 	return {
+		dispose: () => {
+			channel.dispose();
+		},
 		identity,
+		onFailure: (listener) => {
+			channel.onFailure = listener;
+		},
 		requestAsync: async (operation, timeoutMs) => {
 			await identity;
 			return channel.requestAsync(operation, timeoutMs);

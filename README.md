@@ -93,6 +93,16 @@ validation are tracked in
 [JSON output](docs/json-output.md) for Windows PID interpretation and an
 uncertain launch result.
 
+Under WSL, closing the launching terminal can interrupt the Windows helper.
+forge recovers Studio control with a fresh handshake, Windows lock and verified
+Studio pins. `status --json` reports `services.studio.control` as `ready`,
+`recovering`, or `unavailable`. A failed recovery keeps the session running;
+repair interop or the helper installation before trying Studio control again. A
+lost launch result is `studio_launch_unknown`: check Studio before opening
+again. Lost close, hide and save results require exit, visibility and the
+original save completion proof respectively. forge never repeats an uncertain
+mutation or kills Studio to resolve an uncertain close.
+
 ## Commands
 
 Session commands:
