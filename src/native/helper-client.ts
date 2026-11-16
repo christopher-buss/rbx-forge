@@ -13,7 +13,7 @@ import type { WindowsHelperIdentity } from "./windows-helper.ts";
 /** The verified helper channel. */
 export interface HelperClient {
 	identity: Promise<WindowsHelperIdentity>;
-	requestAsync: (operation: Record<string, unknown>) => Promise<unknown>;
+	requestAsync: (operation: Record<string, unknown>, timeoutMs?: number) => Promise<unknown>;
 }
 
 interface Pending {
@@ -60,15 +60,18 @@ class Channel {
 		});
 	}
 
-	public async requestAsync(operation: Record<string, unknown>): Promise<unknown> {
+	public async requestAsync(
+		operation: Record<string, unknown>,
+		timeoutMs = 10_000,
+	): Promise<unknown> {
 		if (this.failure !== undefined) {
 			throw this.failure;
 		}
 
 		this.serial += 1;
 		const abort = new AbortController();
-		const response = this.sendAsync(operation, String(this.serial), 10_000);
-		const timer = this.deadlineAsync(abort.signal);
+		const response = this.sendAsync(operation, String(this.serial), timeoutMs);
+		const timer = this.deadlineAsync(abort.signal, timeoutMs);
 		try {
 			return await response;
 		} catch (err) {
@@ -90,9 +93,9 @@ class Channel {
 		}
 	}
 
-	private async deadlineAsync(signal: AbortSignal): Promise<null> {
+	private async deadlineAsync(signal: AbortSignal, timeoutMs: number): Promise<null> {
 		return this.clock
-			.sleep(10_000, signal)
+			.sleep(timeoutMs, signal)
 			.then(() => {
 				this.fail(new Error("Windows helper request deadline elapsed."));
 				return null;
@@ -221,9 +224,9 @@ export function createHelperClient(
 	});
 	return {
 		identity,
-		requestAsync: async (operation) => {
+		requestAsync: async (operation, timeoutMs) => {
 			await identity;
-			return channel.requestAsync(operation);
+			return channel.requestAsync(operation, timeoutMs);
 		},
 	};
 }

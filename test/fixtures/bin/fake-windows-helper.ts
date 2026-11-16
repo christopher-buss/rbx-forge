@@ -131,10 +131,12 @@ function control(op: string, visibility?: string): unknown {
 	const state = readState();
 	const operations = new Map<string, () => unknown>([
 		["desktop", () => "user"],
+		["autoSaveDirectories", () => []],
+		["dismissDialog", () => false],
 		["executablePath", () => process.env["FIXTURE_HELPER_EXECUTABLE"]],
 		["isAlive", () => existsSync(`${state.place}.lock`)],
-		["isBlocked", () => false],
-		["kill", () => terminate(state.actualPid, "SIGKILL")],
+		["isBlocked", () => existsSync(`${STATE_FILE}.dialog`)],
+		["kill", () => terminate(state.actualPid, "SIGTERM")],
 		[
 			"pin",
 			() => {
@@ -142,7 +144,25 @@ function control(op: string, visibility?: string): unknown {
 			},
 		],
 		["processStartTime", () => state.startTime],
-		["requestClose", () => terminate(state.actualPid, "SIGTERM")],
+		[
+			"requestClose",
+			() => {
+				if (process.env["FIXTURE_HELPER_DIALOG"] === "1") {
+					writeFileSync(`${STATE_FILE}.dialog`, "open");
+					return true;
+				}
+
+				return terminate(state.actualPid, "SIGTERM");
+			},
+		],
+		[
+			"requestSave",
+			() => {
+				writeFileSync(state.place, "saved by Windows Studio");
+				return "requested";
+			},
+		],
+		["saveMenuEnabled", () => true],
 		[
 			"setWindowVisibility",
 			() => {

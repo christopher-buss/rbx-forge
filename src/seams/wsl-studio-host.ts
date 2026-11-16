@@ -15,10 +15,12 @@ import { KEEP_HIDDEN_POLL_MS } from "../studio/window-hiding.ts";
 import { commandExecutable, STUDIO_REGISTRY_KEYS } from "./addon-studio/discover.ts";
 import type { Environment, Seams } from "./seams.ts";
 import type { PinnedStudio, StudioHost } from "./studio-host.ts";
-import { convertedOutput, launched, pinShape, unsupportedAsync } from "./wsl-studio-results.ts";
+import { createWslStudioPin } from "./wsl-studio-pin.ts";
+import { convertedOutput, launched, pinnedIdentity } from "./wsl-helper-results.ts";
 
 const INVALID_PATH = /[\r\n\0]/;
 const NULLABLE_TEXT = type("string | null");
+const PATHS = type("string[]");
 const windowsAbsolute = /^(?:[a-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/i;
 
 type WslBackend = Pick<Seams, "clock" | "fileSystem" | "processRunner"> & {
@@ -40,7 +42,7 @@ class WslHost {
 
 	public host(): StudioHost {
 		return {
-			autoSaveDirectoriesAsync: async () => [],
+			autoSaveDirectoriesAsync: this.autoSaveDirectoriesAsync.bind(this),
 			findStudioExecutableAsync: this.discoverAsync.bind(this),
 			fromHostPathAsync: async (file) => this.convertAsync(file, false),
 			frontmostApplicationAsync: async () => null,
@@ -67,6 +69,13 @@ class WslHost {
 				);
 			},
 		};
+	}
+
+	private async autoSaveDirectoriesAsync(): Promise<Array<string>> {
+		const directories = await this.requestAsync({ op: "autoSaveDirectories" }, PATHS);
+		return Promise.all(
+			directories.map(async (directory) => this.convertAsync(directory, false, false)),
+		);
 	}
 
 	private async checkedAsync(
@@ -194,7 +203,7 @@ class WslHost {
 			return null;
 		}
 
-		return this.wrap(await this.client().requestAsync({ op: "pin", pid, startTime: current }));
+		return createWslStudioPin(await this.client().requestAsync({ op: "pin", pid, startTime: current }), this.requestAsync.bind(this), this.backend.clock, this.startHidingAsync.bind(this));
 	}
 
 	private async probeHttpAsync(port: number, route: string): Promise<Uint8Array> {
@@ -208,11 +217,12 @@ class WslHost {
 	private async requestAsync<T>(
 		operation: Record<string, unknown>,
 		shape: { assert: (value: unknown) => T },
+		timeoutMs?: number,
 	): Promise<T> {
-		return shape.assert(await this.client().requestAsync(operation));
+		return shape.assert(await this.client().requestAsync(operation, timeoutMs));
 	}
 
-	private async startHidingAsync(identity: typeof pinShape.infer, place = ""): Promise<boolean> {
+	private async startHidingAsync(identity: ReturnType<typeof pinnedIdentity>, place = ""): Promise<boolean> {
 		const op = { pin: identity.pin };
 		if (this.backend.keepHidden === undefined) {
 			return this.requestAsync({ ...op, op: "startWindowHiding" }, type("boolean"));
@@ -247,7 +257,7 @@ class WslHost {
 			);
 		}
 
-		if (mustExist && !windows && !this.backend.fileSystem.existsSync(output)) {
+		if (!windows && mustExist && !this.backend.fileSystem.existsSync(output)) {
 			throw new ForgeError(
 				"studio_launch_failed",
 				`The converted Windows path is unavailable in WSL: ${output}`,
@@ -268,72 +278,11 @@ class WslHost {
 			return;
 		}
 
-		const identity = pinShape.assert(result);
+		const identity = pinnedIdentity(result);
 		await this.startHidingAsync(identity, launch.place);
 	}
 
-	// eslint-disable-next-line flawless/max-lines-per-function -- Flat mapping of the Studio pin interface.
-	private wrap(value: unknown): PinnedStudio {
-		const identity = pinShape.assert(value);
-		async function boolAsync(op: string): Promise<boolean> {
-			return request({ op, pin: identity.pin }, type("boolean"));
-		}
 
-		const request = this.requestAsync.bind(this);
-
-		return {
-			activateAppAsync: unsupportedAsync,
-			appActiveAsync: unsupportedAsync,
-			appHiddenAsync: unsupportedAsync,
-			desktopAsync: async () => {
-				return request({ op: "desktop", pin: identity.pin }, type("'hidden' | 'user'"));
-			},
-			dismissDialogAsync: unsupportedAsync,
-			executablePathAsync: async () => {
-				return this.requestAsync(
-					{ op: "executablePath", pin: identity.pin },
-					NULLABLE_TEXT,
-				);
-			},
-			isAliveAsync: async () => boolAsync("isAlive"),
-			isBlockedAsync: async () => boolAsync("isBlocked"),
-			killAsync: async () => boolAsync("kill"),
-			os: "win32",
-			pid: identity.pid,
-			requestCloseAsync: async () => boolAsync("requestClose"),
-			requestSaveAsync: unsupportedAsync,
-			saveMenuEnabledAsync: unsupportedAsync,
-			setAppHiddenAsync: unsupportedAsync,
-			setWindowVisibilityAsync: async (visibility) => {
-				return request(
-					{ op: "setWindowVisibility", pin: identity.pin, visibility },
-					type("boolean"),
-				);
-			},
-			startTime: identity.startTime,
-			startWindowHidingAsync: async () => this.startHidingAsync(identity),
-			stopWindowHidingAsync: async () => boolAsync("stopWindowHiding"),
-			waitForExitAsync: async (timeoutMs) => {
-				const deadline = this.backend.clock.now() + timeoutMs;
-				while (await boolAsync("isAlive")) {
-					if (this.backend.clock.now() >= deadline) {
-						return false;
-					}
-
-					await this.backend.clock.sleep(50);
-				}
-
-				return true;
-			},
-			windowHidingAsync: async () => boolAsync("windowHiding"),
-			windowVisibilityAsync: async () => {
-				return this.requestAsync(
-					{ op: "windowVisibility", pin: identity.pin },
-					type("'hidden' | 'user' | null"),
-				);
-			},
-		};
-	}
 }
 
 /**

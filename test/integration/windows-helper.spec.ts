@@ -54,6 +54,7 @@ function startHelper({ onTestFinished }: Pick<TestContext, "onTestFinished">) {
 
 async function launchStudioAsync(
 	testContext: Pick<TestContext, "onTestFinished">,
+	environment: Record<string, string> = {},
 	desktop = "user",
 ) {
 	const helper = startHelper(testContext);
@@ -65,7 +66,7 @@ async function launchStudioAsync(
 		args: [place],
 		cwd: path.dirname(place),
 		desktop,
-		env: studioVariables(program),
+		env: { ...studioVariables(program), ...environment },
 		op: "launch",
 		program,
 	});
@@ -97,6 +98,7 @@ describe.skipIf(process.platform !== "win32")("windows helper", () => {
 
 		const { pinned, requestAsync, result } = await launchStudioAsync(
 			{ onTestFinished },
+			{},
 			"hidden",
 		);
 
@@ -143,6 +145,92 @@ describe.skipIf(process.platform !== "win32")("windows helper", () => {
 			false,
 		);
 		expect(pinned.isAlive()).toBeTrue();
+	});
+
+	it("checks and dismisses only the pinned Studio's exact dialog", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(5);
+
+		const { requestAsync, result } = await launchStudioAsync(
+			{ onTestFinished },
+			{ FIXTURE_STUDIO_DIALOG_DELAY_MS: "0" },
+		);
+
+		await expect
+			.poll(async () => requestAsync({ op: "isBlocked", pin: result.pin }))
+			.toHaveProperty("result", true);
+		await expect(
+			requestAsync({
+				button: "Continue",
+				desktop: "user",
+				op: "dismissDialog",
+				pin: result.pin,
+				timeoutMs: 5000,
+				title: "Other dialog",
+			}),
+		).resolves.toHaveProperty("result", false);
+		await expect(
+			requestAsync({
+				button: "Continue",
+				desktop: "user",
+				op: "dismissDialog",
+				pin: result.pin,
+				timeoutMs: 5000,
+				title: "Lighting Technology Migration",
+			}),
+		).resolves.toHaveProperty("result", true);
+		await expect
+			.poll(async () => requestAsync({ op: "isBlocked", pin: result.pin }))
+			.toHaveProperty("result", false);
+		await expect(
+			requestAsync({
+				button: "Continue",
+				desktop: "user",
+				op: "dismissDialog",
+				pin: "missing",
+				timeoutMs: 5000,
+				title: "Lighting Technology Migration",
+			}),
+		).resolves.toHaveProperty("error.message", "unknown pin");
+	});
+
+	it("runs the shared save menu operation and respects its deadline", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(3);
+
+		const { requestAsync, result } = await launchStudioAsync({ onTestFinished });
+
+		await expect(
+			requestAsync({ op: "requestSave", pin: result.pin, timeoutMs: 0 }),
+		).resolves.toHaveProperty("result", "timeout");
+		await expect(
+			requestAsync({ op: "saveMenuEnabled", pin: result.pin, timeoutMs: 5000 }),
+		).resolves.toHaveProperty("result", true);
+		await expect(
+			requestAsync({ op: "requestSave", pin: result.pin, timeoutMs: 5000 }),
+		).resolves.toHaveProperty("result", "no_menu_item");
+	});
+
+	it("reports Windows AutoSaves folders from the helper environment", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(1);
+
+		const { requestAsync } = startHelper({ onTestFinished });
+		await requestAsync({ op: "handshake", protocol: 1 });
+
+		await expect(requestAsync({ op: "autoSaveDirectories" })).resolves.toHaveProperty(
+			"result",
+			[
+				path.join(process.env["LOCALAPPDATA"]!, "Roblox/RobloxStudio/AutoSaves"),
+				path.join(process.env["USERPROFILE"]!, "Documents/ROBLOX/AutoSaves"),
+			],
+		);
 	});
 
 	it("reports the Windows user Plugins folder without writing it", async ({

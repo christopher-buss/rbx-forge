@@ -1,4 +1,5 @@
 // cspell:words wslpath
+import path from "node:path";
 import { assert, describe, it } from "vitest";
 
 import { createMemoryFileSystem, createTestSeams } from "../../test/helpers/seams.ts";
@@ -8,6 +9,7 @@ import type { HelperClient } from "../native/helper-client.ts";
 import type { ProcessOutcome, ProcessSpec } from "../process/process-runner.ts";
 import { closeStudioAsync, findPlaceStudioAsync } from "../studio/close-studio.ts";
 import type { KeepHiddenLauncher } from "../studio/keep-hidden.ts";
+import { saveStudioAsync } from "../studio/save-studio.ts";
 import { createWslStudioHost } from "./wsl-studio-host.ts";
 
 const WINDOWS = String.raw`D:\temp\agents\RobloxStudioBeta.exe`;
@@ -27,6 +29,7 @@ function setup(
 		clockStepMs?: number;
 		hiding?: boolean;
 		keepHidden?: KeepHiddenLauncher;
+		blocked?: boolean;
 		launchReply?: unknown;
 		output?: string;
 		probeReply?: unknown;
@@ -44,7 +47,7 @@ function setup(
 		memory.fileSystem.writeFileSync(file, "fixture");
 	}
 
-	let now = 0;
+	let now = Date.UTC(2026, 0, 1);
 	const seams = createTestSeams({
 		clock: {
 			now: () => now,
@@ -77,6 +80,12 @@ function setup(
 				case "windowVisibility": {
 					return "user";
 				}
+				case "autoSaveDirectories": {
+					return [WINDOWS];
+				}
+				case "dismissDialog": {
+					return false;
+				}
 				case "executablePath": {
 					return WINDOWS;
 				}
@@ -84,11 +93,11 @@ function setup(
 					return isAlive;
 				}
 				case "isBlocked": {
-					return false;
+					return options.blocked ?? false;
 				}
 				case "kill":
 				case "requestClose": {
-					isAlive = false;
+					isAlive = request["op"] === "requestClose" && options.blocked === true;
 					return true;
 				}
 				case "launch": {
@@ -117,6 +126,13 @@ function setup(
 				case "windowHiding": {
 					return options.hiding ?? true;
 				}
+				case "requestSave": {
+					memory.fileSystem.writeFileSync("/project/game.rbxl", "saved place");
+					return "requested";
+				}
+				case "saveMenuEnabled": {
+					return true;
+				}
 				default: {
 					throw new Error(`Unexpected operation ${String(request["op"])}`);
 				}
@@ -144,7 +160,7 @@ function setup(
 		},
 		() => client,
 	);
-	return { ...memory, conversions, now: () => now, requests, seams };
+	return { ...memory, conversions, now: () => now - Date.UTC(2026, 0, 1), requests, seams };
 }
 
 describe("wsl Studio tracer", () => {
@@ -374,6 +390,75 @@ describe("wsl Studio tracer", () => {
 
 		await expect(pin.waitForExitAsync(100)).resolves.toBeFalse();
 		expect(now()).toBe(100);
+	});
+
+	it("saves the Windows place through its menu", async ({ expect }) => {
+		expect.assertions(2);
+
+		const { seams } = setup();
+		seams.fileSystem.writeFileSync(
+			"/project/game.rbxl.lock",
+			"707\nRobloxStudioBeta\nWINDOWS\n",
+		);
+
+		await expect(
+			saveStudioAsync(seams, { place: "/project/game.rbxl", process: PIN }),
+		).resolves.toMatchObject({ bytes: 11, pid: 707 });
+		expect(seams.fileSystem.readFileSync("/project/game.rbxl", "utf8")).toBe("saved place");
+	});
+
+	it("exposes menu state, save, and exact dialog operations on a Windows pin", async ({
+		expect,
+	}) => {
+		expect.assertions(3);
+
+		const { seams } = setup();
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+
+		await expect(pin.saveMenuEnabledAsync(1000)).resolves.toBe(true);
+		await expect(pin.requestSaveAsync()).resolves.toBe("requested");
+		await expect(
+			pin.dismissDialogAsync("Lighting Technology Migration", "Continue", "user"),
+		).resolves.toBe(false);
+	});
+
+	it("accepts an absent Windows AutoSaves folder", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup({ output: "/absent/AutoSaves" });
+
+		await expect(seams.studioHost.autoSaveDirectoriesAsync({})).resolves.toEqual([
+			"/absent/AutoSaves",
+		]);
+	});
+
+	it("moves Windows recovery files across devices after a modal dialog blocks close", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const { seams } = setup({ blocked: true, output: "/project" });
+		const file = "/project/game_AutoRecovery_0.rbxl";
+		seams.fileSystem.writeFileSync(file, "recovery");
+		seams.fileSystem.renameSync = () => {
+			throw Object.assign(new Error("cross device"), { code: "EXDEV" });
+		};
+
+		await expect(
+			closeStudioAsync(
+				seams,
+				{ place: "/project/game.rbxl", process: PIN },
+				{ env: {}, mode: "move", recoveryDirectory: "/project/recovery" },
+			),
+		).resolves.toMatchObject({
+			end: "dialog",
+			recovery: {
+				moved: [{ from: path.join("/project", "game_AutoRecovery_0.rbxl") }],
+				warnings: [],
+			},
+		});
+		expect(seams.fileSystem.existsSync(file)).toBe(false);
 	});
 
 	it("reads binary probe responses from the Windows helper", async ({ expect }) => {
@@ -715,7 +800,9 @@ describe("wsl Studio tracer", () => {
 
 		const { seams } = setup();
 
-		expect(await seams.studioHost.autoSaveDirectoriesAsync({})).toEqual([]);
+		expect(await seams.studioHost.autoSaveDirectoriesAsync({})).toEqual([
+			"/project/Studio.exe",
+		]);
 		expect(await seams.studioHost.pluginsFolderAsync({})).toBe("/project/Studio.exe");
 		expect(await seams.studioHost.frontmostApplicationAsync()).toBeNull();
 		expect(await seams.studioHost.platformAsync()).toBe("win32");
@@ -726,7 +813,7 @@ describe("wsl Studio tracer", () => {
 		const pin = await seams.studioHost.pinProcessAsync(707);
 		assert(pin !== null);
 
-		await expect(pin.requestSaveAsync()).rejects.toMatchObject({
+		await expect(pin.activateAppAsync()).rejects.toMatchObject({
 			code: "windows_helper_unavailable",
 		});
 	});
@@ -742,6 +829,19 @@ describe("wsl Studio tracer", () => {
 		};
 
 		expect(await pin.waitForExitAsync(100)).toBe(true);
+	});
+
+	it("does not wait past an already elapsed exit deadline", async ({ expect }) => {
+		expect.assertions(1);
+
+		const { seams } = setup();
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+		seams.clock.sleep = async () => {
+			await pin.killAsync();
+		};
+
+		expect(await pin.waitForExitAsync(0)).toBe(false);
 	});
 
 	it("converts every direct-launch path and sends only named environment overrides", async ({
@@ -918,7 +1018,7 @@ describe("wsl Studio tracer", () => {
 		const pin = await seams.studioHost.pinProcessAsync(707);
 		assert(pin !== null);
 
-		await expect(pin.requestSaveAsync()).rejects.toThrow(
+		await expect(pin.activateAppAsync()).rejects.toThrow(
 			"This Studio operation is not supported by the Windows helper tracer.",
 		);
 	});
