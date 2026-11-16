@@ -1020,7 +1020,16 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 			const [recorded, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 			const opened = Date.now();
 			const saved = await runForgeAsync(fixture, ["save", "--json"], realVariables());
-			note({ command: "prepare-down", result: saved.result, status: saved.status });
+			note({
+				command: "prepare-down",
+				result: saved.result,
+				status: saved.status,
+				stderr: saved.stderr,
+				supervisorLog: readFileSync(
+					path.join(fixture.project, ".forge/logs/supervisor.log"),
+					"utf8",
+				),
+			});
 
 			expect(saveOutcome(saved)).toBe("saved");
 
@@ -1044,7 +1053,16 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 		const sessionId = await upStudioAsync(fixture);
 		const [, lockPid, pinned] = await waitForLoadedAsync(fixture, sessionId);
 		const saved = await runForgeAsync(fixture, ["save", "--json"], realVariables());
-		note({ command: "prepare-stop", result: saved.result, status: saved.status });
+		note({
+			command: "prepare-stop",
+			result: saved.result,
+			status: saved.status,
+			stderr: saved.stderr,
+			supervisorLog: readFileSync(
+				path.join(fixture.project, ".forge/logs/supervisor.log"),
+				"utf8",
+			),
+		});
 
 		expect(saveOutcome(saved)).toBe("saved");
 

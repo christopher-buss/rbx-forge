@@ -108,34 +108,37 @@ unsafe fn windows_save(
             UIA_NamePropertyId,
             &VARIANT::from(BSTR::from("Save to File")),
         )?;
-        let menu_deadline = deadline.min(Instant::now() + std::time::Duration::from_secs(15));
         let walker = automation.ControlViewWalker()?;
-        let result = (|| loop {
-            windows_action(&automation, deadline, pid, handle)?;
-            // Startup can dismiss the popup before its accessible children appear.
-            expand.Expand()?;
-            windows_deadline(&automation, deadline)?;
-            let item = walker.GetFirstChildElement(&file).and_then(|menu| {
-                windows_deadline(&automation, deadline)?;
-                menu.FindFirst(TreeScope_Children, &condition)
-            });
-            match item {
-                Ok(item) => {
-                    windows_deadline(&automation, deadline)?;
-                    let invoke: IUIAutomationInvokePattern =
-                        item.GetCurrentPatternAs(UIA_InvokePatternId)?;
+        let result = (|| {
+            let item = find_menu_item(
+                deadline,
+                || {
                     windows_action(&automation, deadline, pid, handle)?;
-                    invoke.Invoke()?;
-                    break Ok("requested".to_owned());
-                }
-                Err(err) if matches!(err.code().0 as u32, 0 | 0x80004003) => {
-                    if Instant::now() >= menu_deadline {
-                        break Ok("no_menu_item".to_owned());
+                    expand.Expand()?;
+                    windows_deadline(&automation, deadline)?;
+                    match walker.GetFirstChildElement(&file).and_then(|menu| {
+                        windows_deadline(&automation, deadline)?;
+                        menu.FindFirst(TreeScope_Children, &condition)
+                    }) {
+                        Ok(item) => Ok(Some(item)),
+                        Err(err) if matches!(err.code().0 as u32, 0 | 0x80004003) => Ok(None),
+                        Err(err) => Err(err),
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(err) => break Err(err),
-            }
+                },
+                // Selecting another menu clears Qt's dismissed File selection.
+                || reset_file_popup(&automation, &window, pid, handle, deadline),
+                Instant::now,
+                std::thread::sleep,
+            )?;
+            let Some(item) = item else {
+                return Ok("no_menu_item".to_owned());
+            };
+            windows_deadline(&automation, deadline)?;
+            let invoke: IUIAutomationInvokePattern =
+                item.GetCurrentPatternAs(UIA_InvokePatternId)?;
+            windows_action(&automation, deadline, pid, handle)?;
+            invoke.Invoke()?;
+            Ok("requested".to_owned())
         })();
         if windows_action(&automation, deadline, pid, handle).is_ok() {
             let _ = expand.Collapse();
@@ -186,4 +189,152 @@ unsafe fn windows_action(
         )));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+unsafe fn reset_file_popup(
+    automation: &windows::Win32::UI::Accessibility::IUIAutomation2,
+    window: &windows::Win32::UI::Accessibility::IUIAutomationElement,
+    pid: u32,
+    handle: isize,
+    deadline: Instant,
+) -> windows::core::Result<()> {
+    use windows::Win32::System::Variant::VARIANT;
+    use windows::Win32::UI::Accessibility::{
+        IUIAutomationExpandCollapsePattern, TreeScope_Descendants, UIA_ControlTypePropertyId,
+        UIA_ExpandCollapsePatternId, UIA_MenuItemControlTypeId, UIA_NamePropertyId,
+    };
+    use windows::core::BSTR;
+    unsafe {
+        windows_action(automation, deadline, pid, handle)?;
+        let name = automation
+            .CreatePropertyCondition(UIA_NamePropertyId, &VARIANT::from(BSTR::from("Edit")))?;
+        let kind = automation.CreatePropertyCondition(
+            UIA_ControlTypePropertyId,
+            &VARIANT::from(UIA_MenuItemControlTypeId.0),
+        )?;
+        let condition = automation.CreateAndCondition(&name, &kind)?;
+        windows_deadline(automation, deadline)?;
+        let edit = match window.FindFirst(TreeScope_Descendants, &condition) {
+            Ok(edit) => edit,
+            Err(err) if matches!(err.code().0 as u32, 0 | 0x80004003) => return Ok(()),
+            Err(err) => return Err(err),
+        };
+        windows_deadline(automation, deadline)?;
+        let expand: IUIAutomationExpandCollapsePattern =
+            edit.GetCurrentPatternAs(UIA_ExpandCollapsePatternId)?;
+        windows_action(automation, deadline, pid, handle)?;
+        expand.Expand()?;
+        windows_action(automation, deadline, pid, handle)?;
+        expand.Collapse()
+    }
+}
+
+#[cfg(windows)]
+fn find_menu_item<T, E>(
+    deadline: Instant,
+    mut find: impl FnMut() -> Result<Option<T>, E>,
+    reset: impl FnOnce() -> Result<(), E>,
+    now: impl Fn() -> Instant,
+    sleep: impl Fn(std::time::Duration),
+) -> Result<Option<T>, E> {
+    let mut reset = Some(reset);
+    while now() < deadline {
+        let item = find()?;
+        if now() >= deadline {
+            return Ok(None);
+        }
+        if item.is_some() {
+            return Ok(item);
+        }
+        if let Some(reset) = reset.take() {
+            reset()?;
+        }
+        sleep(
+            deadline
+                .saturating_duration_since(now())
+                .min(std::time::Duration::from_millis(10)),
+        );
+    }
+    Ok(None)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    #[test]
+    fn recovers_a_dismissed_file_popup_before_returning_the_save_item() {
+        let start = Instant::now();
+        let clock = Cell::new(start);
+        let reset = Cell::new(false);
+        let found = find_menu_item(
+            start + Duration::from_secs(1),
+            || Ok::<_, ()>(reset.get().then_some("Save to File")),
+            || {
+                reset.set(true);
+                Ok(())
+            },
+            || clock.get(),
+            |duration| clock.set(clock.get() + duration),
+        )
+        .unwrap();
+        assert_eq!(found, Some("Save to File"));
+        assert!(reset.get());
+    }
+
+    #[test]
+    fn retries_discovery_with_only_one_reset_and_the_original_deadline() {
+        let start = Instant::now();
+        let clock = Cell::new(start);
+        let resets = Cell::new(0);
+        let found = find_menu_item(
+            start + Duration::from_millis(1003),
+            || Ok::<Option<()>, ()>(None),
+            || {
+                resets.set(resets.get() + 1);
+                Ok(())
+            },
+            || clock.get(),
+            |duration| clock.set(clock.get() + duration),
+        )
+        .unwrap();
+        assert_eq!(found, None);
+        assert_eq!(resets.get(), 1);
+        assert_eq!(clock.get(), start + Duration::from_millis(1003));
+    }
+
+    #[test]
+    fn a_ready_item_does_not_reset_the_menu() {
+        let start = Instant::now();
+        let found = find_menu_item(
+            start + Duration::from_secs(1),
+            || Ok::<_, ()>(Some("Save to File")),
+            || panic!("a ready popup does not need a reset"),
+            || start,
+            |_| panic!("a ready popup does not need another lookup"),
+        )
+        .unwrap();
+        assert_eq!(found, Some("Save to File"));
+    }
+
+    #[test]
+    fn a_lookup_that_consumes_the_deadline_cannot_return_an_invokable_item() {
+        let start = Instant::now();
+        let clock = Cell::new(start);
+        let found = find_menu_item(
+            start + Duration::from_secs(1),
+            || {
+                clock.set(start + Duration::from_secs(1));
+                Ok::<_, ()>(Some("Save to File"))
+            },
+            || panic!("the deadline expired"),
+            || clock.get(),
+            |_| panic!("the deadline expired"),
+        )
+        .unwrap();
+        assert_eq!(found, None);
+    }
 }
