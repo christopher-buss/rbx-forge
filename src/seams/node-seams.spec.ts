@@ -230,7 +230,9 @@ describe(createNodeSeams, () => {
 
 			wslHost(onTestFinished);
 			const directory = makeTemporaryDirectory();
-			writeFileSync(path.join(directory, "forge-windows-helper.exe"), "fixture");
+			writeFileSync(path.join(directory, "forge-windows-helper.exe"), "fixture", {
+				mode: 0o755,
+			});
 			vi.stubEnv("RBX_FORGE_TEST_WINDOWS_HELPER", fakeHelperPath(fake, directory));
 			const spawner = createFakeSpawner((child) => {
 				child.stdin.on("data", () => {

@@ -56,6 +56,12 @@ try {
             $state = 'provisioning-failed'
             throw 'WSL distro provisioning did not complete; inspect the report'
         }
+    }
+    $versions = Invoke-Probe 'distro-version' @('--list', '--verbose')
+    $versionOne = @($versions.stdout -split '\r?\n' | Where-Object {
+        $_ -match "^\s*\*?\s*$([regex]::Escape($Distro))\s+.+\s+1\s*$"
+    })
+    if ($versionOne.Count -gt 0 -and $Provision) {
         $version = Invoke-Probe 'version-2' @('--set-version', $Distro, '2') 90
         if ($version.timeout -or $version.exitCode -ne 0) {
             $state = 'provisioning-failed'
