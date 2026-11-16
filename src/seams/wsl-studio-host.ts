@@ -193,7 +193,10 @@ class WslHost {
 			return null;
 		}
 
-		return this.wrap(await this.client().requestAsync({ op: "pin", pid, startTime: current }));
+		const pinned = this.wrap(
+			await this.client().requestAsync({ op: "pin", pid, startTime: current }),
+		);
+		return pinned.pid === pid && pinned.startTime === current ? pinned : null;
 	}
 
 	private async probeHttpAsync(port: number, route: string): Promise<Uint8Array> {
