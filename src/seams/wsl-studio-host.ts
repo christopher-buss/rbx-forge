@@ -203,12 +203,13 @@ class WslHost {
 			return null;
 		}
 
-		return createWslStudioPin(
+		const pinned = createWslStudioPin(
 			await this.client().requestAsync({ op: "pin", pid, startTime: current }),
 			this.requestAsync.bind(this),
 			this.backend.clock,
 			this.startHidingAsync.bind(this),
 		);
+		return pinned.pid === pid && pinned.startTime === current ? pinned : null;
 	}
 
 	private async probeHttpAsync(port: number, route: string): Promise<Uint8Array> {
