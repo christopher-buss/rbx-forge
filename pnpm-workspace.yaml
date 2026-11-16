@@ -8,6 +8,7 @@ minimumReleaseAge: 1440 # 1 day
 
 minimumReleaseAgeExclude:
   - "@isentinel/eslint-config"
+  - "@isentinel/machine-budget"
 
 minimumReleaseAgeExcludePrune: true
 
@@ -60,7 +61,7 @@ catalogs:
     oxlint-tsgolint: 7.0.2003
     publint: 0.3.25
   mutation:
-    "@isentinel/machine-budget": 0.1.0
+    "@isentinel/machine-budget": 0.2.0
     "@stryker-mutator/api": 10.1.1
     "@stryker-mutator/core": 10.1.1
     "@stryker-mutator/typescript-checker": 10.1.1
