@@ -50,7 +50,8 @@ export interface StudioSetup extends RojoSetup {
 	config: ResolvedConfig;
 	/** Gets each save of the session's Studio as activity. */
 	idle: Pick<IdleTracker, "activity">;
-	status: Pick<StatusRecorder, "rojoPort" | "service" | "studio"> & Pick<StatusStore, "snapshot">;
+	status: Pick<StatusRecorder, "rojoPort" | "service" | "studio" | "studioControl"> &
+		Pick<StatusStore, "snapshot">;
 }
 
 /** A place prepared for Studio, without launching a new Studio yet. */

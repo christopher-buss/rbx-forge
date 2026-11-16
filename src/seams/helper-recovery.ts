@@ -203,7 +203,9 @@ export class HelperRecovery {
 		const { pin } = operation;
 		if (operation["op"] === "setWindowVisibility") {
 			const visibility = await this.requestAsync({ op: "windowVisibility", pin }, remaining);
-			if (visibility === operation["visibility"]) {
+			const expected =
+				operation["visibility"] === "active" ? "user" : operation["visibility"];
+			if (visibility === expected) {
 				return true;
 			}
 		}

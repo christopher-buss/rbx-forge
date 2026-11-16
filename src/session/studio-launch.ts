@@ -4,6 +4,7 @@ import type { CommandContext } from "../commands/context.ts";
 import { openPlaceAsync } from "../commands/open.ts";
 import { resolveStudioDesktop } from "../config/resolve.ts";
 import type { StudioDesktop } from "../config/schema.ts";
+import { ForgeError } from "../errors.ts";
 import type { StudioReadyListener } from "../seams/network.ts";
 import { prepareRojoPluginAsync } from "../studio/rojo-plugin.ts";
 import type { PluginCapabilities } from "../studio/rojo-plugin.ts";
@@ -67,6 +68,10 @@ export async function openStudioAsync(
 		reportManualStudio(steps);
 		return opened;
 	} catch (err) {
+		if (err instanceof ForgeError && err.code === "studio_launch_unknown") {
+			setup.status.studioControl("unavailable", true);
+		}
+
 		readiness?.close();
 		throw err;
 	}

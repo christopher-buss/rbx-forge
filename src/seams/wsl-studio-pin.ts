@@ -79,12 +79,18 @@ export function createWslStudioPin(
 		stopWindowHidingAsync: async () => boolAsync("stopWindowHiding"),
 		waitForExitAsync: async (timeoutMs) => {
 			const deadline = clock.now() + timeoutMs;
-			while (await boolAsync("isAlive")) {
+			while (
+				await request(
+					{ op: "isAlive", pin: identity.pin },
+					type("boolean"),
+					Math.max(1, deadline - clock.now()),
+				)
+			) {
 				if (clock.now() >= deadline) {
 					return false;
 				}
 
-				await clock.sleep(50);
+				await clock.sleep(Math.min(50, deadline - clock.now()));
 			}
 
 			return true;

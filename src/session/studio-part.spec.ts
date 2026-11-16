@@ -1,7 +1,6 @@
 import path from "node:path";
 import { describe, it, vi } from "vitest";
 
-import { makeStatus } from "../../test/helpers/fake-session.ts";
 import { configureModelSources } from "../../test/helpers/model-sources.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import {
@@ -12,9 +11,11 @@ import {
 } from "../../test/helpers/seams.ts";
 import { resolveConfig } from "../config/resolve.ts";
 import type { StudioDesktop } from "../config/schema.ts";
+import { ForgeError } from "../errors.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
 import { SCRIPTS, VERSION } from "../studio/rojo-plugin.ts";
 import stock from "../studio/rojo-plugin/stock.json" with { type: "json" };
+import { createStatusStore } from "./status.ts";
 import { openStudioAsync } from "./studio-part.ts";
 
 function fixture(
@@ -24,6 +25,7 @@ function fixture(
 	{
 		beforePrepare,
 		desktop,
+		launchError,
 	}: {
 		beforePrepare?: (abort: AbortController) => void;
 		desktop?: {
@@ -32,6 +34,7 @@ function fixture(
 			flag?: StudioDesktop;
 			platform: NodeJS.Platform;
 		};
+		launchError?: Error;
 	} = {},
 ) {
 	const directory = path.join(PROJECT, "session");
@@ -52,6 +55,10 @@ function fixture(
 		if (prepare) {
 			beforePrepare?.(abort);
 			await launch.beforeLaunch?.();
+		}
+
+		if (launchError !== undefined) {
+			throw launchError;
 		}
 
 		return fallback
@@ -94,6 +101,21 @@ function fixture(
 		}),
 	});
 	const abort = new AbortController();
+	const status = createStatusStore(
+		{
+			compiler: false,
+			open: true,
+			owner: null,
+			pid: 1,
+			port: 34872,
+			sessionId: "test",
+			startedAt: "2026-01-01",
+			syncback: false,
+		},
+		() => 0,
+		() => {},
+	);
+
 	const setup = {
 		config: resolveConfig(
 			{
@@ -103,12 +125,7 @@ function fixture(
 			{},
 		),
 		directory,
-		status: {
-			rojoPort: () => {},
-			service: () => {},
-			snapshot: () => makeStatus(),
-			studio: () => {},
-		},
+		status,
 	};
 	return {
 		abort,
@@ -125,11 +142,36 @@ function fixture(
 			);
 		},
 		processRunner: seams.processRunner,
+		status,
 		write,
 	};
 }
 
 describe("session Studio plugin capabilities", () => {
+	it("persists an uncertain Windows launch through control changes and leaving Studio", async ({
+		expect,
+	}) => {
+		expect.assertions(3);
+
+		const run = fixture([], false, false, {
+			launchError: new ForgeError("studio_launch_unknown", "lost launch"),
+		});
+
+		await expect(run.open()).rejects.toHaveProperty("code", "studio_launch_unknown");
+		expect(run.status.snapshot().services.studio).toMatchObject({
+			control: "unavailable",
+			isLaunchUnknown: true,
+		});
+
+		run.status.studioControl("ready");
+		run.status.studioLeft();
+
+		expect(run.status.snapshot().services.studio).toMatchObject({
+			isLaunchUnknown: true,
+			status: "off",
+		});
+	});
+
 	it("should install the forge plugin beside the managed Rojo plugin", async ({ expect }) => {
 		expect.assertions(1);
 

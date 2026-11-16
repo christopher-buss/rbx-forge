@@ -18,6 +18,7 @@ import type {
 } from "../../studio/launcher.ts";
 import type { FileSystem } from "../file-system.ts";
 import type { Environment } from "../seams.ts";
+import { watchSnapshotLighting } from "../snapshot-watcher.ts";
 import type { InstalledStudio } from "./discover.ts";
 import { findStudioExecutable } from "./discover.ts";
 import {
@@ -26,7 +27,6 @@ import {
 	UNBUNDLED_HIDDEN_WARNING,
 } from "./macos-launch.ts";
 import { createSnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
-import type { SnapshotLightingLauncher } from "./snapshot-lighting-launcher.ts";
 import { startBreakingAway } from "./windows-launch.ts";
 
 /**
@@ -356,25 +356,4 @@ async function launchStudioAsync(
 	return executable === undefined
 		? launchThroughPlatformAsync(backend, launch)
 		: launchDirectAsync(backend, keepHidden, launch, executable.path);
-}
-
-function watchSnapshotLighting(
-	watch: SnapshotLightingLauncher,
-	launch: StudioLaunch,
-	outcome: StudioLaunchOutcome,
-): StudioLaunchOutcome {
-	if (launch.watchHiddenLighting !== true || outcome.studio?.desktop !== "hidden") {
-		return outcome;
-	}
-
-	try {
-		watch({ cwd: launch.cwd, env: launch.env, place: launch.place, studio: outcome.studio });
-		return outcome;
-	} catch (err) {
-		return {
-			...outcome,
-			type: "launched",
-			warning: `Studio opened, but its automatic Lighting prompt watcher could not start: ${String(err)}`,
-		};
-	}
 }

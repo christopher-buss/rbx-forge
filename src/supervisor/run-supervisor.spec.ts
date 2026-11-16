@@ -1415,9 +1415,7 @@ function spawnedIds(fake: FakeReaper): Array<string> {
 }
 
 describe(runSupervisorAsync, () => {
-	it("retains the session record when shutdown cannot prove Windows Studio cleanup", async ({
-		expect,
-	}) => {
+	it("leaves a found Studio open when shutdown loses Windows control", async ({ expect }) => {
 		expect.assertions(2);
 
 		const windows = createFakeNative(OPEN_STUDIO);
@@ -1442,12 +1440,8 @@ describe(runSupervisorAsync, () => {
 		listener("unavailable");
 		run.signals.fire("SIGINT");
 
-		await expect(run.result).rejects.toMatchObject({
-			code: "cleanup_in_progress",
-			message:
-				"Windows Studio cleanup is unverified; the session identity record is retained.",
-		});
-		expect(run.memory.fileSystem.existsSync(path.join(SESSION, "supervisor.id"))).toBe(true);
+		await expect(run.result).resolves.toMatchObject({ data: { reason: "SIGINT" } });
+		expect(run.memory.fileSystem.existsSync(path.join(SESSION, "supervisor.id"))).toBe(false);
 	});
 
 	it("keeps the session and Studio status while reporting control loss and recovery", async ({

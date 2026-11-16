@@ -38,6 +38,7 @@ export function createPartRecorder(
  * @param changed - Called after each change.
  * @returns What records the session's Studio.
  */
+// eslint-disable-next-line flawless/max-lines-per-function -- Records the three Studio state transitions together.
 export function createStudioRecorder(
 	status: SessionStatus,
 	changed: () => void,
@@ -58,12 +59,21 @@ export function createStudioRecorder(
 			};
 			changed();
 		},
-		studioControl: (control) => {
+		studioControl: (control, isLaunchUnknown) => {
+			if (isLaunchUnknown === true) {
+				status.services.studio.isLaunchUnknown = true;
+			}
+
 			status.services.studio.control = control;
 			changed();
 		},
 		studioLeft: () => {
-			status.services.studio = { owner: null, status: "off" };
+			const { isLaunchUnknown } = status.services.studio;
+			status.services.studio = {
+				owner: null,
+				status: "off",
+				...(isLaunchUnknown === undefined ? {} : { isLaunchUnknown }),
+			};
 			changed();
 		},
 	};

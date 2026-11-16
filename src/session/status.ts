@@ -106,6 +106,8 @@ export interface SessionStudio {
 	 * Absent before launch and in older sessions.
 	 */
 	desktop?: StudioDesktop;
+	/** A Windows launch completed without a usable identity. */
+	isLaunchUnknown?: true;
 	origin?: StudioOrigin;
 	os?: NodeJS.Platform;
 	owner: null | PartOwner;
@@ -177,7 +179,7 @@ export interface StatusRecorder {
 		process: null | StudioProcess,
 		origin?: StudioOrigin,
 	) => void;
-	studioControl: (control: StudioControl) => void;
+	studioControl: (control: StudioControl, isLaunchUnknown?: true) => void;
 	/**
 	 * The session let go of its Studio, which stays open: `off`, with no
 	 * owner.
@@ -394,6 +396,7 @@ const statusSchema: Type<SessionStatus> = type({
 		studio: {
 			"control?": "'ready' | 'recovering' | 'unavailable'",
 			"desktop?": "'user' | 'hidden'",
+			"isLaunchUnknown?": "true",
 			"origin?": "'forge' | 'found'",
 			"os?": "'win32' | 'darwin' | 'linux' | 'aix' | 'android' | 'freebsd' | 'haiku' | 'openbsd' | 'sunos' | 'cygwin' | 'netbsd'",
 			"owner": OWNER,

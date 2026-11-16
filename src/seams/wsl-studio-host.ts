@@ -17,6 +17,7 @@ import { commandExecutable, STUDIO_REGISTRY_KEYS } from "./addon-studio/discover
 import type { SnapshotLightingLauncher } from "./addon-studio/snapshot-lighting-launcher.ts";
 import { HelperRecovery } from "./helper-recovery.ts";
 import type { Environment, Seams } from "./seams.ts";
+import { watchSnapshotLighting } from "./snapshot-watcher.ts";
 import type { PinnedStudio, StudioHost } from "./studio-host.ts";
 import { convertedOutput, launched, pinnedIdentity } from "./wsl-helper-results.ts";
 import { createWslStudioPin } from "./wsl-studio-pin.ts";
@@ -188,7 +189,7 @@ class WslHost {
 		const outcome = launched(result, launch.desktop ?? "user");
 		await this.watchLaunchAsync(launch, result);
 
-		return this.watchSnapshot(launch, outcome);
+		return watchSnapshotLighting(this.backend.snapshotLighting, launch, outcome);
 	}
 
 	private async pinProcessAsync(pid: number, startTime?: string): Promise<null | PinnedStudio> {
@@ -310,27 +311,6 @@ class WslHost {
 
 		const identity = pinnedIdentity(result);
 		await this.startHidingAsync(identity, launch.place);
-	}
-
-	private watchSnapshot(launch: StudioLaunch, outcome: StudioLaunchOutcome): StudioLaunchOutcome {
-		if (launch.watchHiddenLighting === true && outcome.studio?.desktop === "hidden") {
-			try {
-				this.backend.snapshotLighting?.({
-					cwd: launch.cwd,
-					env: launch.env,
-					place: launch.place,
-					studio: outcome.studio,
-				});
-			} catch (err) {
-				return {
-					...outcome,
-					type: "launched",
-					warning: `Studio opened, but its automatic Lighting prompt watcher could not start: ${String(err)}`,
-				};
-			}
-		}
-
-		return outcome;
 	}
 }
 

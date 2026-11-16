@@ -23,16 +23,12 @@ export async function proveStudioCleanupAsync(
 
 	const status = parseStatus(JSON.parse(seams.fileSystem.readFileSync(files.state, "utf8")));
 	const studio = status?.services.studio;
-	if (
-		(studio?.control !== "unavailable" && studio?.control !== "recovering") ||
-		studio.status === "off" ||
-		studio.status === "closed"
-	) {
+	if (studio === undefined || !needsProof(studio)) {
 		return;
 	}
 
 	try {
-		if (studio.pid === undefined || studio.startTime === undefined) {
+		if (studio.isLaunchUnknown || studio.pid === undefined || studio.startTime === undefined) {
 			throw new Error("Studio identity is unknown.");
 		}
 
@@ -47,4 +43,26 @@ export async function proveStudioCleanupAsync(
 			{ cause: err },
 		);
 	}
+}
+
+function needsProof(studio: import("../session/status.ts").SessionStudio): boolean {
+	if (studio.isLaunchUnknown) {
+		return true;
+	}
+
+	if (studio.origin === "found") {
+		return false;
+	}
+
+	if (studio.os === "win32" && studio.pid !== undefined) {
+		return true;
+	}
+
+	return (
+		studio.status !== "off" &&
+		studio.status !== "closed" &&
+		(studio.os === "win32" ||
+			studio.control === "unavailable" ||
+			studio.control === "recovering")
+	);
 }

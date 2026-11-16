@@ -35,6 +35,7 @@ function setup(
 		lockReply?: null | string;
 		output?: string;
 		probeReply?: unknown;
+		queryDelayMs?: number;
 		registries?: Array<null | string>;
 		registry?: null | string;
 		result?: ProcessOutcome;
@@ -61,10 +62,13 @@ function setup(
 		fileSystem: memory.fileSystem,
 	});
 	let isAlive = options.alive ?? true;
+	let desktop = "user";
+	let visibility = "user";
+	let isHiding = true;
 	let isLockHeld = false;
 	const client: HelperClient = {
 		identity: Promise.resolve(IDENTITY),
-		requestAsync: async (request) => {
+		requestAsync: async (request, timeoutMs = 10_000) => {
 			requests.push(request);
 			if (
 				[
@@ -83,9 +87,8 @@ function setup(
 				case "autoSaveDirectories": {
 					return [WINDOWS];
 				}
-				case "desktop":
-				case "windowVisibility": {
-					return "user";
+				case "desktop": {
+					return desktop;
 				}
 				case "dismissDialog": {
 					return false;
@@ -94,6 +97,12 @@ function setup(
 					return WINDOWS;
 				}
 				case "isAlive": {
+					const delay = options.queryDelayMs ?? 0;
+					now += Math.min(delay, timeoutMs);
+					if (delay > timeoutMs) {
+						throw new Error("Windows helper request deadline elapsed.");
+					}
+
 					return isAlive;
 				}
 				case "isBlocked": {
@@ -105,6 +114,8 @@ function setup(
 					return true;
 				}
 				case "launch": {
+					desktop = request["desktop"] === "hidden" ? "hidden" : "user";
+					visibility = request["hiddenWindows"] === true ? "hidden" : "user";
 					return options.launchReply ?? PIN;
 				}
 				case "pin": {
@@ -133,18 +144,29 @@ function setup(
 				case "saveMenuEnabled": {
 					return true;
 				}
-				case "setWindowVisibility":
+				case "setWindowVisibility": {
+					visibility = request["visibility"] === "hidden" ? "hidden" : "user";
+					return true;
+				}
 				case "startWindowHiding": {
+					isHiding = true;
 					return options.hiding ?? true;
 				}
-				case "stopWindowHiding":
-				case "windowHiding": {
-					return options.hiding ?? true;
+				case "stopWindowHiding": {
+					isHiding = false;
+					options.hiding = false;
+					return true;
 				}
 				case "tryLockFile": {
 					const lock = isLockHeld ? null : (options.lockReply ?? null);
 					isLockHeld = lock !== null;
 					return lock;
+				}
+				case "windowHiding": {
+					return options.hiding ?? isHiding;
+				}
+				case "windowVisibility": {
+					return visibility;
 				}
 				default: {
 					throw new Error(`Unexpected operation ${String(request["op"])}`);
@@ -314,31 +336,35 @@ describe("wsl Studio tracer", () => {
 			hiddenWindows: false,
 			physical: "hidden",
 			runScript: undefined,
-			watches: 0,
+			visibility: "user",
+			watches: false,
 		},
 		{
 			desktop: "user",
 			hiddenWindows: false,
 			physical: "user",
 			runScript: "/project/script.lua",
-			watches: 0,
+			visibility: "user",
+			watches: false,
 		},
 		{
 			desktop: "hidden",
 			hiddenWindows: true,
 			physical: "user",
 			runScript: "/project/script.lua",
-			watches: 1,
+			visibility: "hidden",
+			watches: true,
 		},
 	] as const)("uses Windows launch placement %j", async (options, { expect }) => {
-		expect.assertions(2);
+		expect.assertions(4);
 
-		const watches: Array<Parameters<KeepHiddenLauncher>[0]> = [];
-		const { requests, seams } = setup({
-			keepHidden: (watch) => {
-				watches.push(watch);
+		const watcher = {
+			hiding: false,
+			keepHidden: () => {
+				watcher.hiding = true;
 			},
-		});
+		};
+		const { seams } = setup(watcher);
 		await seams.studioHost.launchAsync({
 			cwd: "/project",
 			desktop: options.desktop,
@@ -348,11 +374,16 @@ describe("wsl Studio tracer", () => {
 			studioPath: "/project/Studio.exe",
 		});
 
-		expect(requests.find((request) => request["op"] === "launch")).toMatchObject({
-			desktop: options.physical,
-			hiddenWindows: options.hiddenWindows,
-		});
-		expect(watches).toHaveLength(options.watches);
+		const pin = await seams.studioHost.pinProcessAsync(707);
+		assert(pin !== null);
+
+		expect(await pin.desktopAsync()).toBe(options.physical);
+		expect(await pin.windowVisibilityAsync()).toBe(options.visibility);
+		expect(await pin.windowHidingAsync()).toBe(options.watches);
+
+		await pin.stopWindowHidingAsync();
+
+		expect(await pin.windowHidingAsync()).toBe(false);
 	});
 
 	it("bounds watcher startup and keeps the identity in the detached target", async ({
@@ -420,14 +451,28 @@ describe("wsl Studio tracer", () => {
 		await expect(pin.startWindowHidingAsync()).resolves.toBeTrue();
 	});
 
-	it("returns at the requested exit deadline when Studio stays alive", async ({ expect }) => {
+	it.for([75, 100])(
+		"returns at the requested exit deadline %s when Studio stays alive",
+		async (timeoutMs, { expect }) => {
+			expect.assertions(2);
+
+			const { now, seams } = setup();
+			const pin = await seams.studioHost.pinProcessAsync(707);
+			assert(pin !== null);
+
+			await expect(pin.waitForExitAsync(timeoutMs)).resolves.toBeFalse();
+			expect(now()).toBe(timeoutMs);
+		},
+	);
+
+	it("uses the remaining exit deadline after a slow liveness reply", async ({ expect }) => {
 		expect.assertions(2);
 
-		const { now, seams } = setup();
+		const { now, seams } = setup({ queryDelayMs: 40 });
 		const pin = await seams.studioHost.pinProcessAsync(707);
 		assert(pin !== null);
 
-		await expect(pin.waitForExitAsync(100)).resolves.toBeFalse();
+		await expect(pin.waitForExitAsync(100)).rejects.toThrow("deadline");
 		expect(now()).toBe(100);
 	});
 

@@ -157,6 +157,10 @@ session's top-level PID identifies the Linux supervisor. Do not pass Studio's
 Windows PID to Linux process-control tools. Older sessions and native hosts may
 omit `os`.
 
+`services.studio.isLaunchUnknown: true` records a Windows launch whose reply did
+not provide a usable identity. It survives Studio being set to `off`; cleanup
+retains the Side record because the Windows process cannot be proved gone.
+
 Studio under WSL also has optional `services.studio.control`: `ready`,
 `recovering`, or `unavailable`. This describes the Windows helper channel;
 Studio's existing status and the session's lifetime remain independent. One

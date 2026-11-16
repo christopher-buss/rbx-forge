@@ -1,3 +1,5 @@
+import { fromPartial } from "@total-typescript/shoehorn";
+
 import { type } from "arktype";
 import path from "node:path";
 import { assert, describe, it } from "vitest";
@@ -14,7 +16,10 @@ import {
 import { runDownAsync } from "../commands/down.ts";
 import { ForgeError } from "../errors.ts";
 import { createHelperClient } from "../native/helper-client.ts";
+import { createStatusStore } from "../session/status.ts";
+import { createStudioMover } from "../session/studio-move.ts";
 import { closeStudioAsync } from "../studio/close-studio.ts";
+import { keepStudioHiddenAsync } from "../studio/keep-hidden.ts";
 import { watchHiddenLightingAsync } from "../studio/lighting-dialog.ts";
 import { saveStudioAsync } from "../studio/save-studio.ts";
 import { forgeFiles, sessionFiles } from "../supervisor/session-files.ts";
@@ -38,6 +43,7 @@ const requestShape = type({
 	"path?": "string",
 	"pid?": "number",
 	"pin?": "string",
+	"visibility?": "string",
 });
 
 interface RecoveryOptions {
@@ -125,6 +131,8 @@ function world(drop: string, options: RecoveryOptions = {}) {
 	};
 	const effects = new Map<string, number>();
 	let didDrop = false;
+	let visibility = options.visibility ?? "hidden";
+	let isHiding = false;
 	let isAlive = true;
 	let aliveQueries = 0;
 	let didRelease = false;
@@ -138,6 +146,25 @@ function world(drop: string, options: RecoveryOptions = {}) {
 		function handleRequest(line: string): void {
 			const request = requestShape.assert(JSON.parse(line));
 			const isReplacement = spawner.children.length > 1;
+			switch (request.op) {
+				case "setWindowVisibility": {
+					visibility = request.visibility === "hidden" ? "hidden" : "user";
+
+					break;
+				}
+				case "startWindowHiding": {
+					isHiding = true;
+
+					break;
+				}
+				case "stopWindowHiding": {
+					isHiding = false;
+
+					break;
+				}
+				// No default
+			}
+
 			if (request.op === drop) {
 				effects.set(drop, (effects.get(drop) ?? 0) + 1);
 				if (options.dead === true) {
@@ -198,6 +225,10 @@ function world(drop: string, options: RecoveryOptions = {}) {
 				isReplacement,
 				pid,
 			});
+			result["windowVisibility"] = options.visibility ?? visibility;
+			result["windowHiding"] = isHiding;
+			result["startWindowHiding"] = true;
+			result["stopWindowHiding"] = true;
 			if (request.op === "pin") {
 				pins.set(`${spawner.children.length}:${pid}`, pid);
 			}
@@ -355,6 +386,71 @@ describe("windows helper recovery", () => {
 		await expect(pin.setWindowVisibilityAsync("hidden")).resolves.toBe(true);
 		expect(run.effects.get("setWindowVisibility")).toBe(1);
 		expect(run.states).toEqual(["ready", "recovering", "ready"]);
+	});
+
+	it("publishes a successful show after a lost reply so a later watcher respects it", async ({
+		expect,
+	}) => {
+		expect.assertions(4);
+
+		const run = world("setWindowVisibility");
+		const files = sessionFiles(forgeFiles(PROJECT), "shown");
+		run.seams.fileSystem.mkdirSync(files.directory, { recursive: true });
+		const status = createStatusStore(
+			{
+				compiler: false,
+				open: true,
+				owner: null,
+				pid: 1,
+				port: 34872,
+				sessionId: "shown",
+				startedAt: "2026-01-01",
+				syncback: false,
+			},
+			run.seams.clock.now,
+			(state) => {
+				run.seams.fileSystem.writeFileSync(files.state, JSON.stringify(state));
+			},
+		);
+		status.studio("open", PLACE, { ...PROCESS, desktop: "hidden" }, "forge");
+		const move = createStudioMover(
+			fromPartial({
+				context: createCommandContext({ cwd: PROJECT, seams: run.seams }),
+				idle: { activity: () => {} },
+				status,
+			}),
+			fromPartial({ signal: AbortSignal.timeout(60_000) }),
+		);
+
+		await expect(move({ desktop: "user" })).resolves.toMatchObject({
+			from: "hidden",
+			pid: 707,
+			to: "user",
+		});
+		expect(status.snapshot().services.studio.desktop).toBe("user");
+
+		await keepStudioHiddenAsync(
+			run.seams,
+			JSON.stringify({ isWindows: true, pid: 707, place: PLACE, startTime: START }),
+			PROJECT,
+		);
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+
+		expect(await pin.windowVisibilityAsync()).toBe("user");
+		expect(await pin.windowHidingAsync()).toBe(false);
+	});
+
+	it("bounds exit polling on a delayed helper channel", async ({ expect }) => {
+		expect.assertions(1);
+
+		const options = { responseDelayMs: 0 };
+		const run = world("unused", options);
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+		options.responseDelayMs = 500;
+
+		await expect(pin.waitForExitAsync(100)).rejects.toThrow("deadline");
 	});
 
 	it("does not claim an unproved hide or repeat it", async ({ expect }) => {
@@ -753,6 +849,59 @@ describe("windows helper recovery", () => {
 		).resolves.toMatchObject({ data: { removed: true, status: "stopped" } });
 		expect(run.seams.fileSystem.existsSync(session.files.identity)).toBe(false);
 	});
+
+	it.for(["open", "off", "closed"] as const)(
+		"retains stale ready after a supervisor crash with Studio %s until fresh control proves exit",
+		async (studioStatus, { expect }) => {
+			expect.assertions(4);
+
+			const run = world("unused");
+			const session = retainedSession(run);
+			const status = makeStatus();
+			status.services.studio = {
+				...PROCESS,
+				control: "ready",
+				owner: null,
+				place: PLACE,
+				status: studioStatus,
+			};
+			run.seams.fileSystem.writeFileSync(session.files.state, JSON.stringify(status));
+
+			await expect(
+				runDownAsync(session.context, { config: {}, flags: {} }),
+			).rejects.toHaveProperty("code", "cleanup_in_progress");
+			expect(run.seams.fileSystem.existsSync(session.files.identity)).toBe(true);
+
+			run.exitStudio();
+
+			await expect(
+				runDownAsync(session.context, { config: {}, flags: {} }),
+			).resolves.toMatchObject({ data: { removed: true } });
+			expect(run.seams.fileSystem.existsSync(session.files.identity)).toBe(false);
+		},
+	);
+
+	it.for([
+		{ isLaunchUnknown: true, owner: null, status: "off" },
+		{ control: "ready", os: "win32", owner: null, status: "opening" },
+		{ isLaunchUnknown: true, origin: "found", owner: null, status: "off" },
+	] as const)(
+		"retains a Windows launch without a usable identity: %j",
+		async (studio, { expect }) => {
+			expect.assertions(2);
+
+			const run = world("unused");
+			const session = retainedSession(run);
+			const status = makeStatus();
+			status.services.studio = studio;
+			run.seams.fileSystem.writeFileSync(session.files.state, JSON.stringify(status));
+
+			await expect(
+				runDownAsync(session.context, { config: {}, flags: {} }),
+			).rejects.toHaveProperty("code", "cleanup_in_progress");
+			expect(run.seams.fileSystem.existsSync(session.files.identity)).toBe(true);
+		},
+	);
 
 	it("refuses fresh-control cleanup of a retained foreign-side record", async ({ expect }) => {
 		expect.assertions(2);
