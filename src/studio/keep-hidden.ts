@@ -85,7 +85,14 @@ export async function keepStudioHiddenAsync(
 	}
 
 	if (isWindows === true) {
-		return keepWindowsHiddenAsync(pinned, seams.clock);
+		if (
+			isShownBySession(seams.fileSystem, root, { pid, startTime }) &&
+			(await pinned.windowVisibilityAsync()) === "user"
+		) {
+			return;
+		}
+
+		return keepWindowsHiddenAsync(pinned, seams, root, { pid, startTime });
 	}
 
 	await keepMacStudioHiddenAsync(seams, pinned, { pid, place, startTime }, root);
@@ -93,13 +100,6 @@ export async function keepStudioHiddenAsync(
 
 function ignoreError(): void {
 	// The launch already succeeded; the watcher is best effort.
-}
-
-async function hideInactiveAsync(pinned: PinnedStudio): Promise<void> {
-	// An active Studio is never re-hidden.
-	if ((await pinned.appActiveAsync()) !== true) {
-		await pinned.setAppHiddenAsync(true);
-	}
 }
 
 function isShownBySession(
@@ -115,6 +115,13 @@ function isShownBySession(
 			: undefined;
 		return studio?.pid === pid && studio.startTime === startTime && studio.desktop === "user";
 	});
+}
+
+async function hideInactiveAsync(pinned: PinnedStudio): Promise<void> {
+	// An active Studio is never re-hidden.
+	if ((await pinned.appActiveAsync()) !== true) {
+		await pinned.setAppHiddenAsync(true);
+	}
 }
 
 async function keepMacStudioHiddenAsync(
@@ -151,12 +158,25 @@ async function keepMacStudioHiddenAsync(
 	}
 }
 
-async function keepWindowsHiddenAsync(pinned: PinnedStudio, clock: Seams["clock"]): Promise<void> {
+async function keepWindowsHiddenAsync(
+	pinned: PinnedStudio,
+	seams: Pick<Seams, "clock" | "fileSystem">,
+	root: string,
+	target: Pick<KeepHiddenTarget, "pid" | "startTime">,
+): Promise<void> {
 	if (!(await pinned.startWindowHidingAsync())) {
 		return;
 	}
 
 	while (await pinned.windowHidingAsync()) {
-		await clock.sleep(KEEP_HIDDEN_POLL_MS);
+		if (
+			isShownBySession(seams.fileSystem, root, target) &&
+			(await pinned.windowVisibilityAsync()) === "user"
+		) {
+			await pinned.stopWindowHidingAsync();
+			return;
+		}
+
+		await seams.clock.sleep(KEEP_HIDDEN_POLL_MS);
 	}
 }

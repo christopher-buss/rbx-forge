@@ -1,5 +1,5 @@
 // cspell:words wslpath
-import { chmodSync, copyFileSync, existsSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import type { TestContext } from "vitest";
@@ -39,7 +39,7 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 		expect,
 		onTestFinished,
 	}) => {
-		expect.assertions(6);
+		expect.assertions(11);
 
 		const fixture = makeFixtureProject({
 			config: {
@@ -73,6 +73,43 @@ describe.skipIf(process.platform !== "linux")("wsl Studio tracer", () => {
 		expect(state.services.studio.status).toBe("open");
 		expect(state.services.studio.os).toBe("win32");
 		expect(state.services.studio.pid).toBeGreaterThan(1_000_000);
+
+		const hide = await fixture.forge(["hide", "--json"], environment);
+
+		expect(hide.status, hide.stdout + hide.stderr).toBe(0);
+
+		function watcherPid() {
+			const value: unknown = JSON.parse(
+				readFileSync(environment.FIXTURE_HELPER_STATE, "utf8"),
+			);
+			assert(
+				typeof value === "object" &&
+					value !== null &&
+					"watcherPid" in value &&
+					typeof value.watcherPid === "number",
+			);
+			return value.watcherPid;
+		}
+
+		await expect.poll(() => watcherPid()).not.toBe(state.pid);
+
+		const watcher = watcherPid();
+
+		expect(() => process.kill(watcher, 0)).not.toThrow();
+
+		const show = await fixture.forge(["show", "--json"], environment);
+
+		expect(show.status, show.stdout + show.stderr).toBe(0);
+		await expect
+			.poll(() => {
+				try {
+					process.kill(watcher, 0);
+					return true;
+				} catch {
+					return false;
+				}
+			})
+			.toBeFalse();
 
 		const down = await fixture.forge(["down", "--json"], environment);
 

@@ -52,7 +52,10 @@ function startHelper({ onTestFinished }: Pick<TestContext, "onTestFinished">) {
 	return { child, requestAsync };
 }
 
-async function launchStudioAsync(testContext: Pick<TestContext, "onTestFinished">) {
+async function launchStudioAsync(
+	testContext: Pick<TestContext, "onTestFinished">,
+	desktop = "user",
+) {
 	const helper = startHelper(testContext);
 	await helper.requestAsync({ op: "handshake", protocol: 1 });
 	const native = loadRealNative();
@@ -61,6 +64,7 @@ async function launchStudioAsync(testContext: Pick<TestContext, "onTestFinished"
 	const reply = await helper.requestAsync({
 		args: [place],
 		cwd: path.dirname(place),
+		desktop,
 		env: studioVariables(program),
 		op: "launch",
 		program,
@@ -85,6 +89,62 @@ async function launchStudioAsync(testContext: Pick<TestContext, "onTestFinished"
 }
 
 describe.skipIf(process.platform !== "win32")("windows helper", () => {
+	it("launches Studio on the shared hidden snapshot desktop", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(2);
+
+		const { pinned, requestAsync, result } = await launchStudioAsync(
+			{ onTestFinished },
+			"hidden",
+		);
+
+		await expect(requestAsync({ op: "desktop", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			"hidden",
+		);
+		expect(pinned.isAlive()).toBeTrue();
+	});
+
+	it("hides and shows the same pinned Studio and stops its watcher", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(9);
+
+		const { pinned, requestAsync, result } = await launchStudioAsync({ onTestFinished });
+
+		await expect(requestAsync({ op: "desktop", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			"user",
+		);
+		await expect(
+			requestAsync({ op: "setWindowVisibility", pin: result.pin, visibility: "hidden" }),
+		).resolves.toHaveProperty("result", true);
+		await expect(
+			requestAsync({ op: "startWindowHiding", pin: result.pin }),
+		).resolves.toHaveProperty("result", true);
+		await expect(
+			requestAsync({ op: "windowVisibility", pin: result.pin }),
+		).resolves.toHaveProperty("result", "hidden");
+		await expect(requestAsync({ op: "windowHiding", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			true,
+		);
+		await expect(
+			requestAsync({ op: "stopWindowHiding", pin: result.pin }),
+		).resolves.toHaveProperty("result", true);
+		await expect(
+			requestAsync({ op: "setWindowVisibility", pin: result.pin, visibility: "active" }),
+		).resolves.toHaveProperty("result", true);
+		await expect(requestAsync({ op: "windowHiding", pin: result.pin })).resolves.toHaveProperty(
+			"result",
+			false,
+		);
+		expect(pinned.isAlive()).toBeTrue();
+	});
+
 	it("probes capture without acknowledging Studio synchronization", async ({
 		expect,
 		onTestFinished,

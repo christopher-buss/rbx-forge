@@ -20,6 +20,7 @@ import { createChildProcessRunner } from "../process/process-runner.ts";
 import { isWsl } from "../process/wsl.ts";
 import type { ReaperLauncher } from "../reaper/reaper-client.ts";
 import { createReaperLauncher } from "../reaper/reaper-client.ts";
+import { createKeepHiddenLauncher, KEEP_HIDDEN_FLAG } from "../studio/keep-hidden.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
 import { createDetachedLauncher } from "../supervisor/detached-launcher.ts";
 import { createSupervisorLauncher } from "../supervisor/launcher.ts";
@@ -183,6 +184,7 @@ function helperLocator(directory: string | undefined, requireModule: NodeJS.Requ
 	});
 }
 
+// eslint-disable-next-line flawless/max-lines-per-function -- Select the process-local Studio backend and its detached watcher.
 function createSelectedStudioHost({
 	directory,
 	entry,
@@ -204,7 +206,11 @@ function createSelectedStudioHost({
 	return createWslStudioHost(
 		{
 			clock: nodeClock,
+			cwd: process.cwd(),
 			environment: process.env,
+			...(process.argv[2] === KEEP_HIDDEN_FLAG
+				? {}
+				: { keepHidden: createKeepHiddenLauncher(PROCESS_BACKEND, entry) }),
 			fileSystem: nodeFileSystem,
 			processRunner: createChildProcessRunner(PROCESS_BACKEND),
 		},

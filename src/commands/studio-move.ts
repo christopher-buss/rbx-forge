@@ -38,7 +38,7 @@ export async function runStudioMoveAsync(
 		throw new ForgeError("studio_not_open", "No session Studio is open.");
 	}
 
-	movePlatform(context);
+	await movePlatformAsync(context);
 	const answer = await callSessionAsync(
 		context.seams.ipc,
 		{ endpoint: session.identity.endpoint, token: session.token },
@@ -55,8 +55,8 @@ export async function runStudioMoveAsync(
 	return parseMoveResult(answer);
 }
 
-function movePlatform(context: CommandContext): NodeJS.Platform {
-	const { platform } = context.seams.host;
+async function movePlatformAsync(context: CommandContext): Promise<NodeJS.Platform> {
+	const platform = await context.seams.studioHost.platformAsync();
 	if (platform !== "win32" && platform !== "darwin") {
 		throw new ForgeError("usage", "Showing and hiding Studio requires Windows or macOS.");
 	}

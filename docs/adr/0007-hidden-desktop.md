@@ -28,6 +28,10 @@ kept hidden, and activated only briefly when a save needs it.
   an Alt+Tab entry. A detached helper owns the watcher that hides new top-level
   windows of its verified PID while it is hidden, and ends when Studio exits or
   is shown.
+- **WSL visibility.** Windows Studio uses the same visibility, window hiding,
+  and hidden desktop operations through the Windows helper. The keep-hidden
+  watcher runs as a detached Linux Node process with its own helper. It reads
+  the session visibility intent before hiding, so a later `show` ends hiding.
 - **One hidden snapshot desktop.** One named hidden desktop per Windows user
   session, shared by all projects. forge opens it, or makes it if it does not
   exist, and never destroys it. Only hidden snapshots use it.
@@ -35,10 +39,11 @@ kept hidden, and activated only briefly when a save needs it.
   it visibly on the user's desktop. `studio.desktop` in the config and
   `--desktop <user|hidden>` override this. On Windows, `restart` keeps Studio's
   visibility and the state contract reports it (`services.studio.desktop`). On
-  macOS the same defaults and overrides apply; Linux always uses the user's
-  desktop. A `start` that joins a session shows the hidden Studio it takes when
-  its effective desktop is `user`, preserving the process without saving it. A
-  hidden desktop request and the owner's end preserve its visibility.
+  macOS the same defaults and overrides apply; native Linux always uses the
+  user's desktop. WSL selects placement by Studio's Windows OS. A `start` that
+  joins a session shows the hidden Studio it takes when its effective desktop is
+  `user`, preserving the process without saving it. A hidden desktop request and
+  the owner's end preserve its visibility.
 - **macOS hidden.** forge launches the Studio app bundle through LaunchServices
   as a new instance, with activation off, and hides it as soon as it exists.
   Studio shows itself while it loads, so a detached watcher hides it again each

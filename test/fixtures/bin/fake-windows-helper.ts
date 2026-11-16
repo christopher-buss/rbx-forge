@@ -11,12 +11,16 @@ interface Request {
 	op: string;
 	port?: number | undefined;
 	route?: string | undefined;
+	visibility?: string | undefined;
 }
 interface State {
 	actualPid: number;
+	hidden?: boolean | undefined;
+	hiding?: boolean | undefined;
 	pid: number;
 	place: string;
 	startTime: string;
+	watcherPid?: number | undefined;
 }
 const STATE_FILE = process.env["FIXTURE_HELPER_STATE"] ?? "";
 const MODE = process.argv[2];
@@ -84,9 +88,15 @@ function readState(): State {
 	);
 	return {
 		actualPid: value.actualPid,
+		hidden: "hidden" in value && value.hidden === true,
+		hiding: "hiding" in value && value.hiding === true,
 		pid: value.pid,
 		place: value.place,
 		startTime: value.startTime,
+		watcherPid:
+			"watcherPid" in value && typeof value.watcherPid === "number"
+				? value.watcherPid
+				: undefined,
 	};
 }
 
@@ -95,9 +105,11 @@ function terminate(pid: number, signal: NodeJS.Signals): boolean {
 	return true;
 }
 
-function control(op: string): unknown {
+// eslint-disable-next-line flawless/max-lines-per-function -- Flat fixture protocol operations.
+function control(op: string, visibility?: string): unknown {
 	const state = readState();
 	const operations = new Map<string, () => unknown>([
+		["desktop", () => "user"],
 		["executablePath", () => process.env["FIXTURE_HELPER_EXECUTABLE"]],
 		["isAlive", () => existsSync(`${state.place}.lock`)],
 		["isBlocked", () => false],
@@ -110,7 +122,40 @@ function control(op: string): unknown {
 		],
 		["processStartTime", () => state.startTime],
 		["requestClose", () => terminate(state.actualPid, "SIGTERM")],
-		["windowVisibility", () => "user"],
+		[
+			"setWindowVisibility",
+			() => {
+				writeFileSync(
+					STATE_FILE,
+					JSON.stringify({ ...state, hidden: visibility === "hidden", hiding: false }),
+				);
+				return true;
+			},
+		],
+		[
+			"startWindowHiding",
+			() => {
+				writeFileSync(
+					STATE_FILE,
+					JSON.stringify({
+						...state,
+						hidden: true,
+						hiding: true,
+						watcherPid: process.ppid,
+					}),
+				);
+				return true;
+			},
+		],
+		[
+			"stopWindowHiding",
+			() => {
+				writeFileSync(STATE_FILE, JSON.stringify({ ...state, hiding: false }));
+				return true;
+			},
+		],
+		["windowHiding", () => state.hiding === true && existsSync(`${state.place}.lock`)],
+		["windowVisibility", () => (state.hidden === true ? "hidden" : "user")],
 	]);
 	const operation = operations.get(op);
 	assert(operation !== undefined, `Unexpected helper operation ${op}`);
@@ -136,7 +181,7 @@ function execute(request: Request): unknown {
 		return launch(place);
 	}
 
-	return control(request.op);
+	return control(request.op, request.visibility);
 }
 
 function parseRequest(line: string): Request {
@@ -159,6 +204,10 @@ function parseRequest(line: string): Request {
 		op: value.op,
 		port: "port" in value && typeof value.port === "number" ? value.port : undefined,
 		route: "route" in value && typeof value.route === "string" ? value.route : undefined,
+		visibility:
+			"visibility" in value && typeof value.visibility === "string"
+				? value.visibility
+				: undefined,
 		...(args === undefined ? {} : { args }),
 	};
 }
