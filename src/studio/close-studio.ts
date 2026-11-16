@@ -188,7 +188,14 @@ async function askToCloseAsync(pinned: PinnedStudio, helper: boolean): Promise<b
 		return await pinned.requestCloseAsync();
 	} catch (err) {
 		if (isHelperChannelLoss(err)) {
-			if (await pinned.waitForExitAsync(STUDIO_EXIT_TIMEOUT_MS)) {
+			let hasExited = false;
+			try {
+				hasExited = await pinned.waitForExitAsync(STUDIO_EXIT_TIMEOUT_MS);
+			} catch {
+				// Missing fresh control proves no exit.
+			}
+
+			if (hasExited) {
 				// Stryker disable next-line BooleanLiteral: exit is already
 				// proved.
 				return true;

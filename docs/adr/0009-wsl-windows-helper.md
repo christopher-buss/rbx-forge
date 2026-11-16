@@ -23,7 +23,9 @@ Native Linux, outside WSL, still has no Studio.
 - **Helper protocol.** Versioned handshake (protocol, helper and Windows
   architecture, Windows host name), request ids, deadlines. forge starts the
   packaged helper by its absolute path. At stdin EOF the helper closes its
-  handles and exits; it never closes Studio.
+  handles and exits; it never closes Studio. The client serializes dispatch to
+  match the native loop. A queued call keeps its original deadline; expiry
+  before dispatch reports a busy helper without retiring the active channel.
 - **Unknown launch.** A launch whose reply is lost is `studio_launch_unknown`:
   forge never launches again and never falls back to the platform launcher.
 - **Identity.** A Studio under WSL is a Windows PID with a Windows start time.

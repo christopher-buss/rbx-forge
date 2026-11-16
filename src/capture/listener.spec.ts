@@ -983,3 +983,33 @@ describe("capture listener", () => {
 		},
 	);
 });
+
+describe("capture bootstrap identity", () => {
+	it("resolves current identity only through the secret route and a read-only request", async ({
+		expect,
+		onTestFinished,
+	}) => {
+		expect.assertions(4);
+
+		const run = await fixtureAsync({ onTestFinished });
+		const bootstrap = new URL(run.listener.url);
+		bootstrap.searchParams.set("sessionId", "");
+		bootstrap.searchParams.set("identity", "1");
+
+		const reply = run.request(bootstrap.href);
+
+		await expect(reply.finished).resolves.toMatchObject({
+			body: JSON.stringify({ ...IDENTITY, url: run.listener.url }),
+			headers: { "content-type": "application/json" },
+			status: 200,
+		});
+		expect(reply.ends).toHaveLength(1);
+		await expect(run.request(bootstrap.href, "POST").finished).resolves.toMatchObject({
+			status: 404,
+		});
+
+		bootstrap.pathname += "-wrong-secret";
+
+		await expect(run.request(bootstrap.href).finished).resolves.toMatchObject({ status: 404 });
+	});
+});

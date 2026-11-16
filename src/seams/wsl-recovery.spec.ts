@@ -38,24 +38,29 @@ const PROCESS: import("../studio/launcher.ts").StudioProcess = {
 };
 const requestShape = type({
 	"id": "string",
+	"deadlineMs": "number.integer >= 0",
 	"lock?": "string",
 	"op": "string",
 	"path?": "string",
 	"pid?": "number",
 	"pin?": "string",
+	"timeoutMs?": "number.integer >= 0",
 	"visibility?": "string",
 });
 
 interface RecoveryOptions {
 	badPin?: boolean;
 	claimReleasedLock?: boolean;
+	consumeSaveBudget?: boolean;
 	dead?: boolean;
 	delayFailureMs?: number;
 	desktop?: unknown;
 	hang?: boolean;
+	holdSaveReply?: boolean;
 	host?: string;
 	lateExit?: boolean;
 	lockFailed?: boolean;
+	minimumSaveMs?: number;
 	refuseClose?: boolean;
 	responseDelayMs?: number;
 	retryLoss?: boolean;
@@ -130,6 +135,7 @@ function world(drop: string, options: RecoveryOptions = {}) {
 		},
 	};
 	const effects = new Map<string, number>();
+	const requests: Array<string> = [];
 	let didDrop = false;
 	let visibility = options.visibility ?? "hidden";
 	let isHiding = false;
@@ -145,6 +151,7 @@ function world(drop: string, options: RecoveryOptions = {}) {
 		// eslint-disable-next-line sonar/cognitive-complexity -- The fake helper models transport and operation fault points.
 		function handleRequest(line: string): void {
 			const request = requestShape.assert(JSON.parse(line));
+			requests.push(request.op);
 			const isReplacement = spawner.children.length > 1;
 			switch (request.op) {
 				case "setWindowVisibility": {
@@ -178,6 +185,10 @@ function world(drop: string, options: RecoveryOptions = {}) {
 
 				if (!didDrop) {
 					didDrop = true;
+					if (options.holdSaveReply === true) {
+						return;
+					}
+
 					child.stdout.end();
 					return;
 				}
@@ -225,6 +236,23 @@ function world(drop: string, options: RecoveryOptions = {}) {
 				isReplacement,
 				pid,
 			});
+			if (request.op === "requestSave" && options.minimumSaveMs !== undefined) {
+				assert(request.timeoutMs !== undefined);
+				result["requestSave"] =
+					request.timeoutMs < options.minimumSaveMs ? "timeout" : "requested";
+				if (result["requestSave"] === "requested") {
+					seams.fileSystem.writeFileSync(PLACE, "saved");
+					memory.setModifiedTime(PLACE, before + 1000);
+				}
+			}
+
+			if (request.op === "requestSave" && options.consumeSaveBudget === true) {
+				assert(request.timeoutMs !== undefined);
+				elapsed += request.timeoutMs;
+				seams.fileSystem.writeFileSync(PLACE, "saved");
+				memory.setModifiedTime(PLACE, before + 1000);
+			}
+
 			result["windowVisibility"] = options.visibility ?? visibility;
 			result["windowHiding"] = isHiding;
 			result["startWindowHiding"] = true;
@@ -308,6 +336,7 @@ function world(drop: string, options: RecoveryOptions = {}) {
 		exitStudio: () => {
 			isAlive = false;
 		},
+		requests,
 		seams: { ...seams, clock, studioHost: host },
 		signals,
 		spawner,
@@ -376,6 +405,96 @@ async function observedAsync<T>(work: Promise<T>) {
 }
 
 describe("windows helper recovery", () => {
+	it("does not let a queued short read retire an in-flight save", async ({ expect }) => {
+		expect.assertions(6);
+
+		const run = world("unused", { responseDelayMs: 40 });
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+		const saving = pin.requestSaveAsync(200);
+
+		await expect(pin.waitForExitAsync(5)).rejects.toMatchObject({
+			code: "windows_helper_unavailable",
+			message: "Windows helper is busy with another operation.",
+		});
+
+		const reading = pin.isAliveAsync();
+		await nodeClock.sleep(5);
+
+		expect(run.requests.filter((op) => op === "isAlive")).toHaveLength(0);
+		await expect(saving).resolves.toBe("requested");
+		expect(run.requests.filter((op) => op === "requestSave")).toHaveLength(1);
+		await expect(reading).resolves.toBeTrue();
+		expect(run.states).toEqual(["ready"]);
+	});
+
+	it("does not dispatch a queued read at its caller deadline", async ({ expect }) => {
+		expect.assertions(3);
+
+		const run = world("unused", { responseDelayMs: 40 });
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+		const saving = pin.requestSaveAsync(5000);
+		const waiting = pin.waitForExitAsync(1000);
+		run.advance(1000);
+
+		await expect(waiting).rejects.toMatchObject({
+			code: "windows_helper_unavailable",
+			message: "Windows helper is busy with another operation.",
+		});
+		await expect(saving).resolves.toBe("requested");
+		expect(run.requests.filter((op) => op === "isAlive")).toHaveLength(0);
+	});
+
+	it("keeps a waiting request exclusive after the preceding operation finishes", async ({
+		expect,
+	}) => {
+		expect.assertions(5);
+
+		const run = world("unused", { responseDelayMs: 40 });
+		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
+		assert(pin !== null);
+		const saving = pin.requestSaveAsync(500);
+		const reading = pin.isAliveAsync();
+
+		await expect(saving).resolves.toBe("requested");
+		await expect(pin.waitForExitAsync(5)).rejects.toMatchObject({
+			code: "windows_helper_unavailable",
+			message: "Windows helper is busy with another operation.",
+		});
+		await expect(reading).resolves.toBeTrue();
+		expect(run.states).toEqual(["ready"]);
+		expect(run.signals.every((signal) => signal.aborted)).toBeTrue();
+	});
+
+	it("allows a Windows save enough time to perform its menu action", async ({ expect }) => {
+		expect.assertions(2);
+
+		const run = world("unused", { minimumSaveMs: 50 });
+
+		await expect(
+			saveStudioAsync(
+				{ ...run.seams, clock: nodeClock },
+				{ place: PLACE, process: PROCESS },
+				1000,
+			),
+		).resolves.toMatchObject({ bytes: 5, method: "menu" });
+		expect(run.requests.filter((op) => op === "requestSave")).toHaveLength(1);
+	});
+
+	it("proves a save when its acknowledgement consumes the entire native action budget", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const run = world("unused", { consumeSaveBudget: true });
+
+		await expect(
+			saveStudioAsync(run.seams, { place: PLACE, process: PROCESS }, 1000),
+		).resolves.toMatchObject({ bytes: 5, method: "menu" });
+		expect(run.requests.filter((op) => op === "requestSave")).toHaveLength(1);
+	});
+
 	it("proves a lost hide using fresh visibility without hiding twice", async ({ expect }) => {
 		expect.assertions(3);
 
@@ -518,6 +637,23 @@ describe("windows helper recovery", () => {
 			expect(run.effects.get("requestSave")).toBe(1);
 		},
 	);
+
+	it("proves a completed save while its original helper reply consumes the deadline", async ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const run = world("requestSave", { holdSaveReply: true, saved: true });
+
+		await expect(
+			saveStudioAsync(
+				{ ...run.seams, clock: nodeClock },
+				{ place: PLACE, process: PROCESS },
+				2000,
+			),
+		).resolves.toMatchObject({ bytes: 5, method: "menu" });
+		expect(run.effects.get("requestSave")).toBe(1);
+	});
 
 	it("stops recovery when the replacement reports another Windows host", async ({ expect }) => {
 		expect.assertions(4);
@@ -1060,6 +1196,24 @@ describe("windows helper recovery", () => {
 			code: "process_failed",
 			message: "The Studio close result is unknown; Studio was not killed.",
 		});
+	});
+
+	it("keeps a close uncertain when fresh exit proof also loses control", async ({ expect }) => {
+		expect.assertions(2);
+
+		const run = world("requestClose", { hang: true });
+
+		await expect(
+			closeStudioAsync(
+				run.seams,
+				{ place: PLACE, process: PROCESS },
+				{ env: {}, mode: "delete", recoveryDirectory: path.join(PROJECT, "recovery") },
+			),
+		).rejects.toMatchObject({
+			code: "process_failed",
+			message: "The Studio close result is unknown; Studio was not killed.",
+		});
+		expect(run.effects.get("requestClose")).toBe(1);
 	});
 
 	it("reports the original proof missing for an uncertain save", async ({ expect }) => {

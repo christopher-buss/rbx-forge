@@ -21,6 +21,7 @@
 		"test/**/*.ts",
 		"test/fixtures/rojo-plugin-v2.json",
 		"test/fixtures/rojo-plugin-v3.json",
+		"test/fixtures/rojo-plugin-v4.json",
 		"scripts/**/*.ts",
 		"*.config.ts",
 		"plugin/*.config.ts"

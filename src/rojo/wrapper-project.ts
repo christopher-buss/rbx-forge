@@ -25,13 +25,14 @@ export function rojoWrapperPath(directory: string): string {
  * @param config - The original project and build output, for the endpoint key.
  * @param directory - The session directory.
  * @param capture - The endpoint and port of the connected Rojo generation.
+ * @returns The generated project name used by Rojo.
  */
 export function writeRojoWrapper(
 	{ cwd, seams }: CommandContext,
 	config: Pick<ResolvedConfig, "buildOutputPath" | "rojoProjectPath" | "studio">,
 	directory: string,
 	capture?: CaptureListener & { rojoPort: number },
-): void {
+): string {
 	const projectPath = path.resolve(cwd, config.rojoProjectPath);
 	// Rojo validates the project; forge reads only its name and root serve
 	// fields.
@@ -40,8 +41,9 @@ export function writeRojoWrapper(
 	});
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Rojo validates the project shape
 	const project = JSON.parse(content) as Record<string, unknown> & { name?: string };
+	const name = `${project.name ?? inferProjectName(projectPath)}@${endpointKey(cwd, config.buildOutputPath)}`;
 	const wrapper: Record<string, unknown> = {
-		name: `${project.name ?? inferProjectName(projectPath)}@${endpointKey(cwd, config.buildOutputPath)}`,
+		name,
 		tree: wrapperTree(
 			projectPath,
 			config.studio.saveMethod === "capture",
@@ -63,6 +65,7 @@ export function writeRojoWrapper(
 		// Stryker disable next-line StringLiteral: equivalent formatting
 		`${JSON.stringify(wrapper, undefined, "\t")}\n`,
 	);
+	return name;
 }
 
 function captureAttributes(
@@ -70,15 +73,7 @@ function captureAttributes(
 	capture?: CaptureListener & { rojoPort: number },
 ): Record<string, unknown> {
 	if (capture === undefined) {
-		// Hydration must map the existing singleton and config before endpoint
-		// updates arrive.
-		return {
-			CaptureUrl: "",
-			ForgeSessionId: forgeSessionId,
-			ProjectName: "",
-			RojoPort: 0,
-			SessionId: "",
-		};
+		return {};
 	}
 
 	const url = new URL(capture.url);

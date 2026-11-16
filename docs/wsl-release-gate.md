@@ -38,6 +38,8 @@ export RBX_FORGE_TEST_REAL_ROJO=/absolute/path/to/linux/rojo
 export RBX_FORGE_TEST_PACKED_INSTALL=/absolute/install/node_modules/rbx-forge
 export RBX_FORGE_TEST_WSL_NETWORK=nat # mirrored for the other mode
 export RBX_FORGE_TEST_WSL_FILESYSTEM=drvfs # ext4 for the Linux file system
+export RBX_FORGE_TEST_WINDOWS_NATIVE_DIR='D:/absolute/path/to/matching/windows/native'
+export RBX_FORGE_TEST_WINDOWS_SOURCE='D:/absolute/path/to/the/matching/checkout'
 export RBX_FORGE_TEST_REAL_STUDIO_LOG=/absolute/evidence/cell.ndjson
 node /absolute/path/to/linux/pnpm/bin/pnpm.mjs exec vitest run \
   --project e2e-real-wsl-studio
@@ -52,9 +54,14 @@ canonical plugins' bytes and modification times, and never edits another Studio.
 This isolated copy is instrumented. The additional found-Studio smoke case runs
 the **untouched packed CLI**, without a development native-directory override.
 
-The lost-reply case uses a transparent Linux transport proxy around the actual
-packaged Windows helper. It drops one completed menu-save reply, records the
-original reply, and checks completion without a repeated save. It fabricates no
+The lost launch, close and save reply cases use a transparent Linux transport
+proxy around the actual packaged Windows helper. They drop one completed
+mutation reply and retain its original response. Save requires file proof, an
+unknown launch retains its side record, and an uncertain close never escalates
+to kill. The extra drvfs cross-side case runs this same private CLI under
+genuine Windows Node with matching Windows native artifacts, then reverses
+ownership. `RBX_FORGE_TEST_WINDOWS_NATIVE_DIR` is a Windows path to those
+artifacts; it does not replace the Linux packed installation. It fabricates no
 helper operation or response. No fake-helper result counts toward this gate.
 
 | Project file system                     | Networking                        | Required outcome           |

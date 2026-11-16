@@ -1,4 +1,5 @@
 // cspell:words drvfs wslinfo osrelease
+import { type } from "arktype";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, statfsSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -12,12 +13,14 @@ import { parseOpened, parseResult } from "../helpers/output.ts";
 import { ownedWslTerminalAsync } from "../helpers/owned-wsl-terminal.ts";
 import { studioCleanup } from "../helpers/real-studio-cleanup.ts";
 import { realStudioHost } from "../helpers/real-studio-host.ts";
+import { installWindowsRojoAsync, windowsForgeAsync } from "../helpers/windows-forge.ts";
 import {
 	compatibilitySnapshotAsync,
 	makeRealProjectAsync,
 	realVariables,
 	waitForLoadedAsync,
 } from "./real-studio.spec.ts";
+import { runBinAsync } from "./run-bin.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 import type { UpRun } from "./up-fixture.ts";
 
@@ -116,6 +119,8 @@ describe.skipIf(!IS_ENABLED)("packed WSL2 real Studio release checks", () => {
 			expect(await pinned.isAliveAsync()).toBeTrue();
 
 			const save = await runForgeAsync(untouched, ["save", "--json"], realVariables());
+
+			recordRun("untouched-save", save);
 
 			expect(save.status).toBe(0);
 
@@ -273,6 +278,218 @@ describe.skipIf(!IS_ENABLED)("packed WSL2 real Studio release checks", () => {
 			).toHaveLength(1);
 			expect(readFileSync(fixture.place).equals(before)).toBeFalse();
 			expect(await pinned.isAliveAsync()).toBeTrue();
+		},
+	);
+
+	it(
+		"retains an unknown real launch without replay or foreign cleanup",
+		{ timeout: 180_000 },
+		async ({ expect }) => {
+			expect.assertions(6);
+
+			const fixture = await makeRealProjectAsync("unsaved.rbxl");
+			const packed = process.env["RBX_FORGE_TEST_PACKED_INSTALL"];
+			assert(packed !== undefined);
+			const target = createRequire(path.join(packed, "package.json")).resolve(
+				`@rbx-forge/native-linux-${process.arch}-gnu/forge-windows-helper.exe`,
+			);
+			const log = path.join(fixture.project, "lost-launch.ndjson");
+			const variables = {
+				...realVariables(),
+				RBX_FORGE_TEST_HELPER_PROXY_LOG: log,
+				RBX_FORGE_TEST_HELPER_PROXY_OPERATION: "launch",
+				RBX_FORGE_TEST_HELPER_PROXY_TARGET: target,
+				RBX_FORGE_TEST_WINDOWS_HELPER: path.join(
+					import.meta.dirname,
+					"../fixtures/bin/real-helper-loss-proxy.ts",
+				),
+			};
+			const own = studioCleanup(fixture.project);
+			const launched = await runForgeAsync(fixture, ["up", "--studio", "--json"], variables);
+			recordRun("lost-launch", launched);
+			const { result: identity } = type({
+				result: { pid: "number.integer > 0", startTime: "string" },
+			}).assert(JSON.parse(readFileSync(`${log}.lost`, "utf8")));
+			const pin = await own(identity);
+
+			expect(launched.result).toMatchObject({
+				error: { code: "studio_launch_unknown" },
+				ok: false,
+			});
+			expect(await pin.isAliveAsync()).toBeTrue();
+
+			const current = path.join(fixture.project, ".forge/current");
+			const before = readFileSync(current, "utf8");
+			const down = await runForgeAsync(fixture, ["down", "--force", "--json"], variables);
+			recordRun("lost-launch-down", down);
+
+			expect(down.result).toMatchObject({
+				error: { code: "cleanup_in_progress" },
+				ok: false,
+			});
+			expect(readFileSync(current, "utf8")).toBe(before);
+			expect(
+				readFileSync(log, "utf8")
+					.split("\n")
+					.filter((line) => line.includes('"op":"launch"')),
+			).toHaveLength(1);
+			expect(await pin.isAliveAsync()).toBeTrue();
+		},
+	);
+
+	it(
+		"retains an uncertain real close without replay or kill",
+		{ timeout: 180_000 },
+		async ({ expect }) => {
+			expect.assertions(5);
+
+			const fixture = await makeRealProjectAsync("saved.rbxl");
+			const packed = process.env["RBX_FORGE_TEST_PACKED_INSTALL"];
+			assert(packed !== undefined);
+			const target = createRequire(path.join(packed, "package.json")).resolve(
+				`@rbx-forge/native-linux-${process.arch}-gnu/forge-windows-helper.exe`,
+			);
+			const log = path.join(fixture.project, "lost-close.ndjson");
+			const variables = {
+				...realVariables(),
+				RBX_FORGE_TEST_HELPER_PROXY_LOG: log,
+				RBX_FORGE_TEST_HELPER_PROXY_OPERATION: "requestClose",
+				RBX_FORGE_TEST_HELPER_PROXY_TARGET: target,
+				RBX_FORGE_TEST_WINDOWS_HELPER: path.join(
+					import.meta.dirname,
+					"../fixtures/bin/real-helper-loss-proxy.ts",
+				),
+			};
+			const own = studioCleanup(fixture.project);
+			const up = await runForgeAsync(fixture, ["up", "--studio", "--json"], variables);
+			assert(up.status === 0 && up.result.data !== undefined, up.stdout);
+			const pinLoaded = await waitForLoadedAsync(
+				fixture,
+				String(up.result.data["sessionId"]),
+			);
+			const pin = pinLoaded[2];
+			await own({ pid: pin.pid, startTime: pin.startTime });
+			const closed = await runForgeAsync(fixture, ["stop", "--force", "--json"], variables);
+			recordRun("lost-close", closed);
+
+			expect(existsSync(`${log}.lost`)).toBeTrue();
+			expect(closed.result).toMatchObject({
+				error: {
+					code: "process_failed",
+					message: "The Studio close result is unknown; Studio was not killed.",
+				},
+				ok: false,
+			});
+			expect(await pin.isAliveAsync()).toBeTrue();
+
+			const requests = readFileSync(log, "utf8").split("\n");
+
+			expect(requests.filter((line) => line.includes('"op":"requestClose"'))).toHaveLength(1);
+			expect(requests.filter((line) => line.includes('"op":"kill"'))).toHaveLength(0);
+		},
+	);
+
+	it.skipIf(
+		process.env["RBX_FORGE_TEST_WSL_FILESYSTEM"] !== "drvfs" ||
+			process.env["RBX_FORGE_TEST_WINDOWS_NATIVE_DIR"] === undefined,
+	)(
+		"excludes actual Windows and WSL sessions in both directions",
+		{ timeout: 300_000 },
+		async ({ expect, onTestFinished }) => {
+			expect.assertions(31);
+
+			const fixture = await makeRealProjectAsync("saved.rbxl");
+			const commands = [
+				["status"],
+				["up", "--force"],
+				["down", "--force"],
+				["stop", "--force"],
+				["stop", "--place", fixture.place, "--force"],
+				["save"],
+				["save", "--place", fixture.place],
+			];
+
+			const own = studioCleanup(fixture.project);
+			async function linuxAsync(argv: ReadonlyArray<string>): Promise<UpRun> {
+				const run = await runBinAsync(
+					[...argv, "--json"],
+					fixture.project,
+					fixture.environment(realVariables()),
+					{ bin: fixture.bin, registerCleanup: false },
+				);
+				return { ...run, result: parseResult(run.stdout) };
+			}
+
+			async function windowsAsync(argv: ReadonlyArray<string>): Promise<UpRun> {
+				return windowsForgeAsync(fixture, [...argv, "--json"]);
+			}
+
+			onTestFinished(async () => {
+				await windowsAsync(["down", "--force"]);
+			});
+			const up = await linuxAsync(["up", "--studio"]);
+			assert(up.status === 0 && up.result.data !== undefined, up.stdout);
+			const firstLoaded = await waitForLoadedAsync(
+				fixture,
+				String(up.result.data["sessionId"]),
+			);
+			const first = firstLoaded[2];
+			await own({ pid: first.pid, startTime: first.startTime });
+			const current = path.join(fixture.project, ".forge/current");
+			const linuxIdentity = readFileSync(current, "utf8");
+			for (const argv of commands) {
+				const denied = await windowsAsync(argv);
+				recordRun(`windows-foreign ${argv.join(" ")}`, denied);
+
+				expect(denied.result).toMatchObject({
+					error: { code: "identity_mismatch" },
+					ok: false,
+				});
+				expect(readFileSync(current, "utf8")).toBe(linuxIdentity);
+			}
+
+			expect(await first.isAliveAsync()).toBeTrue();
+
+			const linuxDown = await linuxAsync(["down", "--force"]);
+			assert(linuxDown.status === 0);
+			await installWindowsRojoAsync(fixture.project);
+			const winUp = await windowsAsync(["up", "--studio", "--desktop", "hidden"]);
+			recordRun("windows-owner-up", winUp);
+			assert(winUp.status === 0 && winUp.result.data !== undefined, winUp.stdout);
+			const {
+				services: { studio },
+			} = type({
+				services: { studio: { pid: "number.integer > 0", startTime: "string" } },
+			}).assert(winUp.result.data);
+			const second = await own(studio);
+
+			await expect
+				.poll(
+					() => {
+						return Number(
+							readFileSync(`${fixture.place}.lock`, "utf8").split(/\r?\n/, 1)[0],
+						);
+					},
+					{ timeout: 90_000 },
+				)
+				.toBe(studio.pid);
+
+			const windowsIdentity = readFileSync(current, "utf8");
+			for (const argv of commands) {
+				const denied = await linuxAsync(argv);
+				recordRun(`wsl-foreign ${argv.join(" ")}`, denied);
+
+				expect(denied.result).toMatchObject({
+					error: { code: "identity_mismatch" },
+					ok: false,
+				});
+				expect(readFileSync(current, "utf8")).toBe(windowsIdentity);
+			}
+
+			expect(await second.isAliveAsync()).toBeTrue();
+
+			const windowsDown = await windowsAsync(["down", "--force"]);
+			assert(windowsDown.status === 0);
 		},
 	);
 });

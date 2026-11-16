@@ -99,6 +99,8 @@ try {
         imageOS = $env:ImageOS; imageVersion = $env:ImageVersion
         architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
         windows = [Environment]::OSVersion.VersionString
+        userInteractive = [Environment]::UserInteractive
+        processSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
         commit = $env:GITHUB_SHA; distro = $Distro; probes = $records
     }
     $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath "$ReportDirectory/report.json" -Encoding utf8

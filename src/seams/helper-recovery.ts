@@ -5,6 +5,7 @@ import { isHelperChannelLoss } from "../native/helper-client.ts";
 import type { HelperClient } from "../native/helper-client.ts";
 import type { Clock } from "./clock.ts";
 import { HelperHandles } from "./helper-handles.ts";
+import { HelperRequestQueue } from "./helper-request-queue.ts";
 import type { StudioControl } from "./studio-host.ts";
 
 const ATTEMPTS = 3;
@@ -35,6 +36,7 @@ export class HelperRecovery {
 	private readonly connect: () => HelperClient;
 	private readonly handles: HelperHandles;
 	private readonly listeners = new Set<(state: StudioControl) => void>();
+	private readonly queue: HelperRequestQueue;
 
 	private attempts = 0;
 	private client: HelperClient | undefined;
@@ -47,6 +49,7 @@ export class HelperRecovery {
 	constructor(connect: () => HelperClient, clock: Clock) {
 		this.connect = connect;
 		this.clock = clock;
+		this.queue = new HelperRequestQueue(clock);
 		this.handles = new HelperHandles(clock, this.unavailable.bind(this));
 	}
 
@@ -68,30 +71,10 @@ export class HelperRecovery {
 		operation: Record<string, unknown>,
 		timeoutMs = 10_000,
 	): Promise<unknown> {
-		const deadline = this.clock.now() + timeoutMs;
-		await (this.flight === undefined
-			? this.ensureAsync()
-			: this.withinAsync(this.flight, timeoutMs));
-
-		const { client } = this;
-		assert(client !== undefined);
-		try {
-			if (operation["op"] === "isAlive" && this.handles.isGone(operation["pin"])) {
-				return false;
-			}
-
-			const result = await client.requestAsync(
-				this.handles.translate(operation),
-				Math.max(1, deadline - this.clock.now()),
-			);
-			return this.handles.remember(operation, result);
-		} catch (err) {
-			if (!isHelperChannelLoss(err)) {
-				throw err;
-			}
-
-			return this.lostResultAsync(client, operation, deadline, err);
-		}
+		return this.queue.runAsync(
+			async (remaining) => this.performAsync(operation, remaining),
+			timeoutMs,
+		);
 	}
 
 	public unavailable(error: Error): void {
@@ -189,10 +172,40 @@ export class HelperRecovery {
 		}
 
 		if (reads.has(String(operation["op"]))) {
-			return this.requestAsync(operation, remaining);
+			return this.performAsync(operation, remaining);
 		}
 
 		return this.proveMutationAsync(operation, remaining, error);
+	}
+
+	private async performAsync(
+		operation: Record<string, unknown>,
+		timeoutMs = 10_000,
+	): Promise<unknown> {
+		const deadline = this.clock.now() + timeoutMs;
+		await (this.flight === undefined
+			? this.ensureAsync()
+			: this.withinAsync(this.flight, timeoutMs));
+
+		const { client } = this;
+		assert(client !== undefined);
+		try {
+			if (operation["op"] === "isAlive" && this.handles.isGone(operation["pin"])) {
+				return false;
+			}
+
+			const result = await client.requestAsync(
+				this.handles.translate(operation),
+				Math.max(1, deadline - this.clock.now()),
+			);
+			return this.handles.remember(operation, result);
+		} catch (err) {
+			if (!isHelperChannelLoss(err)) {
+				throw err;
+			}
+
+			return this.lostResultAsync(client, operation, deadline, err);
+		}
 	}
 
 	private async proveMutationAsync(
@@ -202,7 +215,7 @@ export class HelperRecovery {
 	): Promise<unknown> {
 		const { pin } = operation;
 		if (operation["op"] === "setWindowVisibility") {
-			const visibility = await this.requestAsync({ op: "windowVisibility", pin }, remaining);
+			const visibility = await this.performAsync({ op: "windowVisibility", pin }, remaining);
 			const expected =
 				operation["visibility"] === "active" ? "user" : operation["visibility"];
 			if (visibility === expected) {
@@ -212,7 +225,7 @@ export class HelperRecovery {
 
 		if (
 			operation["op"] === "requestClose" &&
-			(await this.requestAsync({ op: "isAlive", pin }, remaining)) === false
+			(await this.performAsync({ op: "isAlive", pin }, remaining)) === false
 		) {
 			return true;
 		}

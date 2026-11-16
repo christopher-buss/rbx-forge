@@ -1100,3 +1100,66 @@ for _, failure in { "connect", "initial", "stream" } do
 	instance:willUnmount()
 end
 print("PASS: reconnect, offline edits, foreign identity, fixed endpoint, cancellation, and original readiness identity")
+
+-- Bootstrap metadata is accepted only for the Rojo identity actually connected.
+for _, outcome in { "valid", "delayed", "foreign-project", "foreign-session", "unreachable" } do
+	reset()
+	local isReady = outcome ~= "delayed"
+	local attributes = {
+		ProjectName = "Game@worktree",
+		SessionId = "",
+		CaptureUrl = "http://127.0.0.1:50002/capture/secret?projectName=Game&sessionId=",
+	}
+	local capture = {
+		IsA = function(_, name)
+			return name == "Configuration"
+		end,
+		GetAttribute = function(_, name)
+			return attributes[name]
+		end,
+		SetAttribute = function(_, name, value)
+			attributes[name] = value
+		end,
+	}
+	services.ServerStorage.FindFirstChild = function()
+		return capture
+	end
+	services.HttpService = {
+		GetAsync = function(_, url)
+			assert(string.find(url, "&identity=1", 1, true))
+			if outcome == "unreachable" or not isReady then
+				error("offline")
+			end
+			return "identity"
+		end,
+		JSONDecode = function()
+			return {
+				projectName = if outcome == "foreign-project" then "Foreign" else "Game@worktree",
+				sessionId = if outcome == "foreign-session" then "stale" else "launch",
+				url = "http://127.0.0.1:50002/capture/secret?projectName=Game&sessionId=launch",
+			}
+		end,
+	}
+	existing = marker()
+	local instance = app()
+	server()
+	initialSync()
+	if outcome == "delayed" then
+		assert(attributes.SessionId == "", "bootstrap remains inert before binding")
+		isReady = true
+		advance(0.2)
+	end
+	if outcome == "valid" or outcome == "delayed" then
+		assert(
+			attributes.SessionId == "launch" and attributes.ConnectedSessionId == "launch",
+			"publish only the verified connected identity"
+		)
+	else
+		assert(
+			attributes.SessionId == "" and attributes.ConnectedSessionId == nil,
+			"foreign or unavailable bootstrap stays inert"
+		)
+	end
+	instance:willUnmount()
+end
+print("PASS: capture bootstrap identity binding")

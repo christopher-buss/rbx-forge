@@ -229,7 +229,7 @@ describe("wsl managed Rojo plugin preparation", () => {
 		).resolves.toEqual({ autoConnect: true, source: "forge", syncAcknowledgement: true });
 		expect(specs.map(({ args }) => args)).toEqual([["plugin", "install"]]);
 		expect(memory.files()["windows/plugins/RojoManagedPlugin.rbxm"]).toContain(
-			"-- rbx-forge patch 4 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n",
+			"-- rbx-forge patch 5 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n",
 		);
 		expect(memory.fileSystem.readdirSync(path.join(PROJECT, ".forge"))).toEqual([]);
 		expect(context.env["HOME"]).toBe("/original");

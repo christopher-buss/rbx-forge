@@ -1,5 +1,5 @@
 /**
- * Relay the genuine helper, losing one completed save reply without
+ * Relay the genuine helper, losing one completed mutation reply without
  * fabricating replies.
  */
 import assert from "node:assert/strict";
@@ -10,6 +10,7 @@ import { createInterface } from "node:readline";
 
 const TARGET = process.env["RBX_FORGE_TEST_HELPER_PROXY_TARGET"];
 const LOG = process.env["RBX_FORGE_TEST_HELPER_PROXY_LOG"];
+const DROP = process.env["RBX_FORGE_TEST_HELPER_PROXY_OPERATION"] ?? "requestSave";
 assert(TARGET !== undefined && LOG !== undefined);
 const child = spawn(TARGET, [], { stdio: "pipe", windowsHide: true });
 const pending = new Map<string, string>();
@@ -37,7 +38,7 @@ createInterface({ input: child.stdout }).on("line", (line) => {
 	);
 	const operation = pending.get(reply.id);
 	pending.delete(reply.id);
-	if (operation === "requestSave" && !existsSync(`${LOG}.lost`)) {
+	if (operation === DROP && !existsSync(`${LOG}.lost`)) {
 		writeFileSync(`${LOG}.lost`, line, { flag: "wx" });
 		child.stdin.end();
 		process.stdout.end();

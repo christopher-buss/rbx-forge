@@ -944,12 +944,31 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 			const sessionId = await upStudioAsync(fixture, desktop);
 			const [, lockPid] = await waitForLoadedAsync(fixture, sessionId);
 			const before = statSync(fixture.place).mtimeMs;
+			note({
+				command: "before-menu-save",
+				state: JSON.parse(
+					readFileSync(
+						path.join(fixture.project, ".forge/sessions", sessionId, "state.json"),
+						"utf8",
+					),
+				),
+			});
 			const save = await runForgeAsync(
 				fixture,
 				["save", "--timeout", "30", "--json"],
 				realVariables(),
 			);
-			note({ command: "save", result: save.result, status: save.status });
+			note({
+				command: "save",
+				result: save.result,
+				state: JSON.parse(
+					readFileSync(
+						path.join(fixture.project, ".forge/sessions", sessionId, "state.json"),
+						"utf8",
+					),
+				),
+				status: save.status,
+			});
 
 			expect(saveOutcome(save)).toBe("saved");
 			// A hidden session Studio runs on the user's desktop with hidden

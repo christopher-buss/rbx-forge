@@ -898,7 +898,7 @@ describe(createPartStopper, () => {
 	});
 
 	it("should leave Studio open with keepStudio, and let the session go", async ({ expect }) => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const world = makeWorld(servicesWith({ rojo: READY, studio: OPEN }), ["rojo"]);
 		const studio = openStudio(world);
@@ -909,6 +909,7 @@ describe(createPartStopper, () => {
 			stopped: ["rojo"],
 		});
 		expect(studio.alive).toBeTrue();
+		expect(world.studioLeft).toHaveBeenCalledOnce();
 	});
 
 	it("should wait while Studio is opening, then close it", async ({ expect }) => {

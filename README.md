@@ -116,13 +116,13 @@ before waiting for Studio. It supplies no relay. Changing `.wslconfig` can
 require `wsl --shutdown`, which stops every distro: save work and coordinate
 other WSL and Docker workloads first.
 
-| Error                              | Repair                                                                                                                  |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `wsl_interop_unavailable`          | Enable `[interop] enabled=true` in `/etc/wsl.conf`, restart WSL when safe, and verify `cmd.exe /c ver` works.           |
-| `windows_helper_unavailable`       | Reinstall with optional dependencies; check the matching architecture, executable helper, and protocol version.         |
-| `wsl_network_unreachable`          | Enable NAT localhost forwarding or use mirrored networking; verify IPv4 loopback access and firewall rules.             |
-| `studio_launch_unknown`            | Check Studio and `forge status` before another launch: Studio may already be open. forge never repeats the lost launch. |
-| `identity_mismatch` (foreign side) | Run `forge down` on the Windows side or distro named in the error. `--force` does not override side ownership.          |
+| Error                              | Repair                                                                                                                              |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `wsl_interop_unavailable`          | Enable `[interop] enabled=true` in `/etc/wsl.conf`, restart WSL when safe, and verify `cmd.exe /c ver` works.                       |
+| `windows_helper_unavailable`       | If the message says busy, wait for the current operation. Otherwise check optional dependencies, architecture, helper and protocol. |
+| `wsl_network_unreachable`          | Enable NAT localhost forwarding or use mirrored networking; verify IPv4 loopback access and firewall rules.                         |
+| `studio_launch_unknown`            | Check Studio and `forge status` before another launch: Studio may already be open. forge never repeats the lost launch.             |
+| `identity_mismatch` (foreign side) | Run `forge down` on the Windows side or distro named in the error. `--force` does not override side ownership.                      |
 
 Attach, stop, restart, saves, show/hide, Windows AutoSaves handling, hidden
 session windows, and hidden snapshots use Windows process identities through the

@@ -6,6 +6,7 @@ import { assert, describe, it, vi } from "vitest";
 
 import olderPlugin from "../../test/fixtures/rojo-plugin-v2.json" with { type: "json" };
 import previousPlugin from "../../test/fixtures/rojo-plugin-v3.json" with { type: "json" };
+import lastPlugin from "../../test/fixtures/rojo-plugin-v4.json" with { type: "json" };
 import { createMemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import type { MemoryTransport } from "../../test/helpers/fake-ipc.ts";
 import { createFakeReaper, createFakeSignals } from "../../test/helpers/fake-reaper.ts";
@@ -686,10 +687,10 @@ describe("managed Rojo plugin lifecycle", () => {
 		await run.result;
 
 		expect(sources[0]).toContain(
-			"-- rbx-forge patch 4 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+			"-- rbx-forge patch 5 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
 		);
 		expect(sources[1]).toContain(
-			"-- rbx-forge patch 4 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+			"-- rbx-forge patch 5 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
 		);
 	});
 
@@ -705,16 +706,17 @@ describe("managed Rojo plugin lifecycle", () => {
 		await endPluginSessionAsync(run);
 
 		expect(sources[0].split("\n", 1)[0]).toBe(
-			"-- rbx-forge patch 4 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
+			"-- rbx-forge patch 5 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15",
 		);
 		expect(sources[1]!.split("\n", 1)[0]).toBe(
-			"-- rbx-forge patch 4 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
+			"-- rbx-forge patch 5 stock e7a8fe67a0ff8229d13680fedfec2228fc2d23561bf2a512d1032bb7517c111a",
 		);
 	});
 
 	it.for([
 		{ plugin: olderPlugin, version: 2 },
 		{ plugin: previousPlugin, version: 3 },
+		{ plugin: lastPlugin, version: 4 },
 	])(
 		"should upgrade genuine plugin patch $version sources coherently",
 		async ({ plugin, version }, { expect }) => {
@@ -728,8 +730,8 @@ describe("managed Rojo plugin lifecycle", () => {
 			const run = startPluginSession(sources);
 			await endPluginSessionAsync(run);
 
-			expect(sources[0]).toContain("-- rbx-forge patch 4 stock");
-			expect(sources[1]).toContain("-- rbx-forge patch 4 stock");
+			expect(sources[0]).toContain("-- rbx-forge patch 5 stock");
+			expect(sources[1]).toContain("-- rbx-forge patch 5 stock");
 		},
 	);
 
@@ -896,7 +898,7 @@ describe("managed Rojo plugin lifecycle", () => {
 		await endPluginSessionAsync(run);
 
 		expect(run.fake.spawned.map(({ args }) => args)).not.toContainEqual(["plugin", "install"]);
-		expect(sources[0]).toStartWith("-- rbx-forge patch 4");
+		expect(sources[0]).toStartWith("-- rbx-forge patch 5");
 	});
 
 	it.for(["", undefined])(
@@ -1003,7 +1005,7 @@ describe("managed Rojo plugin lifecycle", () => {
 				file: path.join(TOOLS, "custom-rojo"),
 			}),
 		);
-		expect(sources[0]).toStartWith("-- rbx-forge patch 4");
+		expect(sources[0]).toStartWith("-- rbx-forge patch 5");
 	});
 
 	it("should fail on a protocol mismatch before changing the plugin or launching", async ({
@@ -1508,7 +1510,7 @@ describe(runSupervisorAsync, () => {
 		expect(listener).toBeUndefined();
 	});
 
-	it("should declare an inert capture instance before Rojo starts serving", async ({
+	it("should publish the capture bootstrap endpoint before Rojo starts serving", async ({
 		expect,
 		onTestFinished,
 	}) => {
@@ -1517,6 +1519,13 @@ describe(runSupervisorAsync, () => {
 		const run = startCommand({
 			file: { studio: { saveMethod: "capture" } },
 			isListening: async () => false,
+			listenForCapture: async () => {
+				return {
+					captureAsync: async () => ({ model: new Uint8Array(), services: [] }),
+					close: () => {},
+					url: "http://127.0.0.1:50002/capture/bootstrap?projectName=Example&sessionId=",
+				};
+			},
 		});
 		onTestFinished(async () => {
 			run.signals.fire("SIGINT");
@@ -1528,10 +1537,11 @@ describe(runSupervisorAsync, () => {
 
 		expect(JSON.parse(wrapper)).toHaveProperty("tree.ServerStorage.ForgeCapture", {
 			$attributes: {
-				CaptureUrl: "",
+				CaptureUrl:
+					"http://127.0.0.1:50002/capture/bootstrap?projectName=Example&sessionId=",
 				ForgeSessionId: "session-1",
-				ProjectName: "",
-				RojoPort: 0,
+				ProjectName: "Example",
+				RojoPort: 4000,
 				SessionId: "",
 			},
 			$className: "Configuration",
@@ -1605,7 +1615,7 @@ describe(runSupervisorAsync, () => {
 		run.signals.fire("SIGINT");
 		await run.result;
 
-		expect(close).toHaveBeenCalledOnce();
+		expect(close).toHaveBeenCalledTimes(2);
 	});
 
 	it("should replace the capture endpoint and identity when the session repairs Rojo", async ({
@@ -1674,12 +1684,12 @@ describe(runSupervisorAsync, () => {
 			RojoPort: 4000,
 			SessionId: "second-rojo-session",
 		});
-		expect(closed).toStrictEqual(new Set(["first-rojo-session"]));
+		expect(closed).toStrictEqual(new Set(["", "first-rojo-session"]));
 
 		run.signals.fire("SIGINT");
 		await run.result;
 
-		expect(closed).toStrictEqual(new Set(["first-rojo-session", "second-rojo-session"]));
+		expect(closed).toStrictEqual(new Set(["", "first-rojo-session", "second-rojo-session"]));
 	});
 
 	it("should release a stopped Rojo's cancellation listener before the session ends", async ({

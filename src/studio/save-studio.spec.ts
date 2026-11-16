@@ -118,6 +118,19 @@ function priming(
 }
 
 describe(saveStudioAsync, () => {
+	it("does not claim file stability first observed at the caller deadline", async ({
+		expect,
+	}) => {
+		expect.assertions(1);
+
+		const run = priming({ saveMenuDisabled: false }, { timeoutMs: 300 });
+
+		await expect(run.save()).rejects.toMatchObject({
+			code: "save_failed",
+			details: { reason: "timeout" },
+		});
+	});
+
 	it("should activate a never-active Studio once, then hide it and refocus the front app before saving", async ({
 		expect,
 	}) => {

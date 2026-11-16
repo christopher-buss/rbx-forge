@@ -164,6 +164,13 @@ async function primeStudioAsync(
 	}
 }
 
+function saveRequestBudget(pinned: PinnedStudio, remainingMs: number): number {
+	// Leave time to prove the original file write if the helper reply is lost.
+	return pinned.os === "win32"
+		? Math.max(1, Math.floor(remainingMs - Math.max(STABLE_MS + POLL_MS, remainingMs / 4)))
+		: remainingMs;
+}
+
 async function requestStudioSaveAsync(
 	seams: StudioSeams,
 	pinned: PinnedStudio,
@@ -186,7 +193,7 @@ async function requestStudioSaveAsync(
 		throw new ForgeError("studio_busy", "A modal dialog blocks Roblox Studio.");
 	}
 
-	let outcome = await pinned.requestSaveAsync(remainingMs);
+	let outcome = await pinned.requestSaveAsync(saveRequestBudget(pinned, remainingMs));
 	if (outcome === "menu_disabled") {
 		await primeStudioAsync(seams, pinned, place, { deadline, signal });
 		const primedMs = deadline - seams.clock.now();
@@ -246,12 +253,12 @@ async function waitForSaveAsync(
 			changedAt = now;
 		}
 
-		if (last !== options.before && now - changedAt >= STABLE_MS) {
-			return savedResultAsync(target, pinned, stat, now - options.started);
-		}
-
 		if (now - options.started >= options.timeoutMs) {
 			throw saveFailure(target.place, "timeout");
+		}
+
+		if (last !== options.before && now - changedAt >= STABLE_MS) {
+			return savedResultAsync(target, pinned, stat, now - options.started);
 		}
 
 		await seams.clock.sleep(

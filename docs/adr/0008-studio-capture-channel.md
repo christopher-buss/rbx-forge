@@ -18,10 +18,14 @@ wrapper, and the plugin verifies its identity against the connected Rojo project
 and session before polling. This also serves a found Studio when its Rojo
 reconnects.
 
-The initial wrapper declares the capture instance before Rojo serves it. Its
-empty endpoint keeps the plugin inert until the listener binds. Rojo hydrates
-the existing service and instance before their capture attributes change; a
-later patch cannot create a service and its descendants with `Instance.new`.
+The initial wrapper publishes the non-Archivable capture instance and a secret
+bootstrap URL before Rojo reads the project. Once Rojo listens, the same secret
+and port serve the generation's actual identity. A read-only identity lookup
+lets the managed plugin bind those attributes only when the returned project and
+session match its connected Rojo. No filesystem notification is required for
+publication. A new generation rotates the bootstrap secret. Rojo hydrates the
+existing service and instance before any later patch; patches cannot create a
+service and its descendants with `Instance.new`.
 
 Snapshots keep their port and secret beside the place. Their non-Archivable
 launch marker identifies the capture without a Rojo connection. Each save binds
@@ -35,12 +39,11 @@ not enter syncback or a saved place.
 
 Under WSL, listeners bind IPv4 loopback and rely on localhost forwarding or
 mirrored networking. Before Rojo reports ready, the Windows helper verifies its
-identity through `127.0.0.1`. Before publishing a capture URL and on every
-snapshot save bind, it verifies a separate nonce route on that listener. Probes
-never request the readiness route, whose GET acknowledges Studio
-synchronization. A failed probe is `wsl_network_unreachable`, with a hint to
-check localhost forwarding, networking mode, and the firewall. There is no
-relay.
+identity through `127.0.0.1`. Before reporting Rojo ready and on every snapshot
+save bind, it verifies a separate nonce route on that listener. Probes never
+request the readiness route, whose GET acknowledges Studio synchronization. A
+failed probe is `wsl_network_unreachable`, with a hint to check localhost
+forwarding, networking mode, and the firewall. There is no relay.
 
 ## Consequences
 
