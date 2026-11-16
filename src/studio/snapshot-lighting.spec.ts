@@ -278,7 +278,10 @@ describe("snapshot Lighting helper launch", () => {
 		};
 
 		const launch = createSnapshotLightingLauncher(
-			createTestSeams({ native: () => native.addon }),
+			createTestSeams({
+				host: { ...createTestSeams().host, platform: "win32" },
+				native: () => native.addon,
+			}),
 			"/forge/supervisor.mjs",
 		);
 
@@ -311,7 +314,10 @@ describe("snapshot Lighting helper launch", () => {
 		const variants = { denied: () => null, missing: undefined };
 		Object.assign(native.addon, { spawnDetached: variants[kind] });
 		const launch = createSnapshotLightingLauncher(
-			createTestSeams({ native: () => native.addon }),
+			createTestSeams({
+				host: { ...createTestSeams().host, platform: "win32" },
+				native: () => native.addon,
+			}),
 			"/forge/supervisor.mjs",
 		);
 

@@ -27,6 +27,7 @@ import { createSupervisorLauncher } from "../supervisor/launcher.ts";
 import type { InstalledStudio } from "./addon-studio/discover.ts";
 import { findInstalledStudio, noInstalledStudio as none } from "./addon-studio/discover.ts";
 import { createStudioLauncher } from "./addon-studio/launcher.ts";
+import { createSnapshotLightingLauncher } from "./addon-studio/snapshot-lighting-launcher.ts";
 import { nodeChildProcessRunner } from "./child-process.ts";
 import { nodeClock } from "./clock.ts";
 import { loadConfigFileAsync } from "./config-loader.ts";
@@ -208,6 +209,7 @@ function createSelectedStudioHost({
 			clock: nodeClock,
 			cwd: process.cwd(),
 			environment: process.env,
+			snapshotLighting: createSnapshotLightingLauncher({ ...PROCESS_BACKEND, native }, entry),
 			...(process.argv[2] === KEEP_HIDDEN_FLAG
 				? {}
 				: { keepHidden: createKeepHiddenLauncher(PROCESS_BACKEND, entry) }),
