@@ -62,10 +62,12 @@ export function isolatedRealStudioCli({
 	directory,
 	native,
 	pluginsDirectory,
+	source = REPOSITORY,
 }: {
 	directory: string;
 	native: NativeAddon;
 	pluginsDirectory: string;
+	source?: string | undefined;
 }): IsolatedRealStudioCli {
 	const isolation = isolationPaths(directory, pluginsDirectory);
 	const canonical = canonicalModels(pluginsDirectory);
@@ -78,7 +80,7 @@ export function isolatedRealStudioCli({
 	}
 
 	try {
-		return { ...prepareIsolation(isolation, native), close };
+		return { ...prepareIsolation(isolation, native, source), close };
 	} catch (err) {
 		close();
 		throw err;
@@ -135,12 +137,16 @@ function linkDependencies(source: string, destination: string): void {
 	}
 }
 
-function copyBundle(bundle: string): void {
+function copyBundle(bundle: string, source: string): void {
 	mkdirSync(bundle);
-	cpSync(path.join(REPOSITORY, "dist"), path.join(bundle, "dist"), { recursive: true });
-	cpSync(path.join(REPOSITORY, "bin"), path.join(bundle, "bin"), { recursive: true });
-	copyFileSync(path.join(REPOSITORY, "package.json"), path.join(bundle, "package.json"));
-	linkDependencies(path.join(REPOSITORY, "node_modules"), path.join(bundle, "node_modules"));
+	cpSync(path.join(source, "dist"), path.join(bundle, "dist"), { recursive: true });
+	cpSync(path.join(source, "bin"), path.join(bundle, "bin"), { recursive: true });
+	copyFileSync(path.join(source, "package.json"), path.join(bundle, "package.json"));
+	const dependencies = path.join(source, "node_modules");
+	linkDependencies(
+		existsSync(dependencies) ? dependencies : path.dirname(source),
+		path.join(bundle, "node_modules"),
+	);
 }
 
 function replaceOne(source: string, before: string, after: string): string {
@@ -266,6 +272,7 @@ function isolateRojoModel(
 function prepareIsolation(
 	isolation: Isolation,
 	native: NativeAddon,
+	source: string,
 ): Pick<
 	IsolatedRealStudioCli,
 	| "bin"
@@ -285,7 +292,7 @@ function prepareIsolation(
 		managedPlugin,
 		token,
 	} = isolation;
-	copyBundle(bundle);
+	copyBundle(bundle, source);
 	const gateFile = path.join(bundle, "studio-gate.lua");
 	writeFileSync(gateFile, `${gate}\n`);
 	isolateJavaScript(bundle, { ...isolation, gateFile });

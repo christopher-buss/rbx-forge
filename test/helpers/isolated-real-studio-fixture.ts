@@ -1,3 +1,4 @@
+import process from "node:process";
 import { onTestFinished } from "vitest";
 
 import type { Fixture } from "../e2e/session-fixture.ts";
@@ -32,10 +33,23 @@ export async function isolatedRealStudioFixtureAsync({
 			directory: fixture.project,
 			native: loadRealNative(),
 			pluginsDirectory,
+			source: process.env["RBX_FORGE_TEST_PACKED_INSTALL"],
 		});
 	if (sharedCli === undefined) {
 		onTestFinished(cli.close);
 	}
 
-	return { ...fixture, bin: cli.bin, cli };
+	return {
+		...fixture,
+		bin: cli.bin,
+		cli,
+		environment: (variables) => {
+			const environment = fixture.environment(variables);
+			if (process.env["RBX_FORGE_TEST_PACKED_INSTALL"] !== undefined) {
+				delete environment["RBX_FORGE_NATIVE_DIR"];
+			}
+
+			return environment;
+		},
+	};
 }

@@ -241,6 +241,12 @@ describe("startPlugin", () => {
 
 	it.each([
 		{ engineType: "bool", expected: { Bool: false }, value: false },
+		{ engineType: "Content", expected: { Content: "None" }, value: Content.none },
+		{
+			engineType: "Content",
+			expected: { Content: { Uri: "rbxassetid://123" } },
+			value: Content.fromUri("rbxassetid://123"),
+		},
 		{ engineType: "double", expected: { Float64: 1.25 }, value: 1.25 },
 		{ engineType: "int", expected: { Int32: -3 }, value: -3 },
 		{ engineType: "int64", expected: { Int64: 9007199254740991 }, value: 9007199254740991 },
@@ -499,6 +505,34 @@ describe("startPlugin", () => {
 				url: "",
 			});
 		}).toThrow("Folder.Unsupported");
+	});
+
+	it("should identify object Content that the native writer cannot preserve", () => {
+		expect.assertions(1);
+
+		const { io } = createIo();
+		const root = new Instance("Folder");
+		const service = new Instance("Folder", root);
+		const capture = new Instance("Configuration", service);
+		const image = game.GetService("AssetService").CreateEditableImage();
+		const content = Content.fromObject(image);
+
+		expect(() => {
+			return captureInstances(root, {
+				capture,
+				io: {
+					...io,
+					services: {
+						...io.services,
+						properties: () => [
+							{ name: "Edited", engineType: "Content", serialized: true },
+						],
+						readProperty: () => content,
+					},
+				},
+				url: "",
+			});
+		}).toThrow("Folder.Edited");
 	});
 
 	it("should name a current-engine reference attribute that the native writer cannot preserve", () => {

@@ -8,6 +8,8 @@ const REAL_STUDIO_SPEC = "test/integration/real-studio-sync.spec.ts";
 
 /** Opt-in real Studio lifecycle tests with pinned process ownership. */
 const REAL_STUDIO_E2E_SPEC = "test/e2e/real-studio.spec.ts";
+const REAL_WSL_STUDIO_SPEC = "test/e2e/real-wsl-studio.spec.ts";
+const e2eSetupFiles = [...setupFiles, "./test/setup/studio-isolation.ts"];
 
 /**
  * The coverage-measured suite. Never spawns a process: every I/O goes through
@@ -88,12 +90,12 @@ export default defineConfig({
 				test: {
 					name: "e2e",
 					clearMocks: true,
-					exclude: [...defaultExclude, REAL_STUDIO_E2E_SPEC],
+					exclude: [...defaultExclude, REAL_STUDIO_E2E_SPEC, REAL_WSL_STUDIO_SPEC],
 					// Removing temp projects outruns the default on Windows.
 					hookTimeout: 30_000,
 					include: ["test/e2e/**/*.spec.ts"],
 					restoreMocks: true,
-					setupFiles: [...setupFiles, "./test/setup/studio-isolation.ts"],
+					setupFiles: e2eSetupFiles,
 					testTimeout: 60_000,
 					unstubEnvs: true,
 				},
@@ -106,9 +108,19 @@ export default defineConfig({
 					hookTimeout: 30_000,
 					include: [REAL_STUDIO_E2E_SPEC],
 					restoreMocks: true,
-					setupFiles: [...setupFiles, "./test/setup/studio-isolation.ts"],
+					setupFiles: e2eSetupFiles,
 					testTimeout: 60_000,
 					unstubEnvs: true,
+				},
+			},
+			{
+				extends: true,
+				test: {
+					name: "e2e-real-wsl-studio",
+					hookTimeout: 30_000,
+					include: [REAL_WSL_STUDIO_SPEC],
+					setupFiles: e2eSetupFiles,
+					testTimeout: 60_000,
 				},
 			},
 			{

@@ -4,6 +4,20 @@ How `open`, `start`, `up --studio`, and `restart` open Roblox Studio, how
 `stop`, `down`, and `restart` close it, and what forge does with Studio's
 auto-recovery files.
 
+## WSL2
+
+WSL runs the Linux CLI, reaper and workers; the packaged Windows helper drives
+Windows Studio. Every Studio feature uses the same Windows operations, including
+registry discovery, verified PID and start time, AutoSaves handling, menu saves,
+visibility, the hidden snapshot desktop and both detached watchers. The session
+supervisor remains a Linux process. Studio's `os` is `win32` in JSON.
+
+Listeners use IPv4 loopback in NAT with localhost forwarding, or mirrored
+networking. Projects on ext4 reach Studio through `\\wsl.localhost`; Windows
+drives use drive paths. See [WSL requirements and repairs](../README.md#wsl2)
+and the [packed-package release gate](./wsl-release-gate.md). WSL1 and native
+Linux Studio are outside this support contract.
+
 ## Opening Studio
 
 `start` and `up --studio` start Rojo and wait until it listens before launching
@@ -32,10 +46,11 @@ it later. forge finds the executable in this order:
 A path from 1 or 2 that is not a file fails with `studio_launch_failed`. On
 Windows, a missing native addon fails with `native_missing`.
 
-When forge finds no executable, or the terminal's job forbids breakaway
-(Windows), it opens the place through the platform launcher (`start`, `open`,
+On native Windows, macOS and Linux, when forge finds no executable, or the
+terminal's job forbids breakaway (Windows), it opens the place through the platform launcher (`start`, `open`,
 `xdg-open`). The session then has no PID for Studio, and finds it only through
-the place's lock file. The platform launcher passes no marker script.
+the place's lock file. The platform launcher passes no marker script. WSL requires direct helper
+control and never uses this fallback for an uncertain launch.
 
 `open` builds a snapshot, a copy of the place, into
 `.forge/snapshots/<time>_<place>` and opens it, with no session and no Rojo. A
@@ -58,8 +73,7 @@ the session and stays open.
 A Studio that the session attached this way is a found Studio:
 `data.services.studio.origin` is `found` (`forge` for a Studio the session
 opened), also after a `start` took it and gave it back. Only `stop --force` and
-`restart --force` close a found Studio during cleanup. An explicit Windows
-`show` or `hide` also closes it when changing its visibility, after saving it.
+`restart --force` close a found Studio during cleanup. An explicit `show` or `hide` changes its visibility in place.
 `down` and the idle timeout stop its
 Rojo and let it go, open, and touch none of its auto-recovery files; `restart`
 keeps it, and starts the compiler and Rojo again on the same port; `stop` fails
@@ -82,8 +96,8 @@ these hidden snapshots leave the user's screen and focus unchanged.
 
 `forge start` opens Studio on the user's desktop by default. Set
 `studio.desktop` in the config or pass `--desktop user` / `--desktop hidden` to
-`start`, `up --studio`, or `open`; the flag wins. On Linux the effective desktop
-is always `user`. A found Studio stays on its existing desktop.
+`start`, `up --studio`, or `open`; the flag wins. On native Linux the effective desktop
+is always `user`; WSL uses Windows Studio placement through the helper. A found Studio stays on its existing desktop.
 
 When `start` joins a running session and takes its hidden Studio, an effective
 desktop of `user` shows that same Studio in place, without saving, closing, or

@@ -70,41 +70,82 @@ there.
 
 The bins `forge` and `rbx-forge` are the same. Run forge from the project root.
 
-Under WSL2, `forge up --studio`, attach, `forge stop`, `forge restart`, menu
-saves (`studio.saveMethod: "menu"`), and `forge down` use the packaged Windows
-helper. A found Studio stays open on stop or restart unless `--force` is set.
-Closing a Studio blocked by a dialog handles its Windows AutoSaves recovery
-files. The helper reports Windows process identities; native Linux outside WSL
-keeps its existing behavior. `--studio-path` and `RBX_FORGE_STUDIO_PATH` accept
-absolute Windows drive or UNC paths, or Linux paths accessible through
-`wslpath`. WSL interop must be enabled. Windows must reach WSL through IPv4
-localhost forwarding or mirrored networking. An unreachable Rojo or capture
-listener fails with `wsl_network_unreachable`; check forwarding, networking
-mode, and firewall settings. Forge installs both Studio plugins in the Windows
-Plugins folder; managed Rojo installation is verified for Linux Rojo 7.7.1 and
-other versions need a manual connection when the plugin is missing.
-`forge build --plugin` also writes to the Windows Plugins folder. `show`,
-`hide`, hidden session windows and hidden snapshots use Windows Studio placement
-through the helper. Hidden snapshots have a detached Lighting prompt watcher;
-`forge save --place <snapshot>` saves them, and `forge open` prunes closed
-snapshots beyond the newest five. The remaining WSL Studio features and release
-validation are tracked in
-[#297](https://github.com/christopher-buss/rbx-forge/issues/297). See
-[JSON output](docs/json-output.md) for Windows PID interpretation and an
-uncertain launch result.
+## WSL2
 
-Under WSL, closing the launching terminal can interrupt the Windows helper.
-forge recovers Studio control with a fresh handshake, Windows lock and verified
-Studio pins. `status --json` reports `services.studio.control` as `ready`,
-`recovering`, or `unavailable`. A failed recovery keeps the session running;
-repair interop or the helper installation before trying Studio control again. A
-lost launch result is `studio_launch_unknown`: check Studio before opening
-again. Lost close, hide and save results require exit, visibility and the
-original save completion proof respectively. forge never repeats an uncertain
+WSL Studio support in this branch awaits the
+[recorded release gate](docs/wsl-release-gate.md). The published v2.3.0 predates
+this work. Both Windows and WSL must use the first validated WSL release or
+newer for same-project exclusion; its exact minimum version belongs in the
+release record before publication. Until then, use the same dependency-complete
+WSL build on both sides. An older forge does not read the side record and cannot
+exclude the other side.
+
+Run forge with **Linux Node.js 24.12 or later**, Linux project tools, and
+Windows Studio installed and logged in. Check `node -p process.platform`: it
+must print `linux`. WSL1 and native Linux Studio are unsupported. WSL interop
+must run Windows executables; check `cmd.exe /c ver` from the distro. Keep npm
+optional dependencies enabled: the Linux native package supplies a Windows
+helper of the matching x64 or arm64 architecture, with executable permission. No
+separate Windows Node or forge installation is needed to control Studio.
+
+Use genuine Linux Rojo on `PATH` or in the project. Managed plugin installation
+is verified for Linux Rojo 7.7.1; an unverified installer needs a manual
+connection when its plugin is missing. forge installs its own plugin and the
+managed Rojo plugin into the Windows Plugins folder. `forge build --plugin` also
+writes there; forge downloads no plugins.
+
+Projects can live on either file system:
+
+```bash
+cd ~/projects/my-game        # ext4; Studio receives a \wsl.localhost UNC path
+forge up --studio
+cd /mnt/d/projects/my-game   # Windows drive; Studio receives a drive path
+forge up --studio
+```
+
+Studio discovery reads the Windows registry. `--studio-path` and
+`RBX_FORGE_STUDIO_PATH` also accept an absolute Linux path, Windows drive path,
+or UNC path. Quote Windows paths in the Linux shell. Paths must be reachable
+through `wslpath`; a bad explicit path fails instead of using another Studio.
+
+Windows must reach the distro's **IPv4 loopback** listeners. NAT needs
+`localhostForwarding=true`; mirrored networking also works through `127.0.0.1`.
+IPv6 `::1` is not used. Check the active mode with `wslinfo --networking-mode`,
+and check Windows firewall rules. forge probes Rojo and captures from Windows
+before waiting for Studio. It supplies no relay. Changing `.wslconfig` can
+require `wsl --shutdown`, which stops every distro: save work and coordinate
+other WSL and Docker workloads first.
+
+| Error                              | Repair                                                                                                                  |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `wsl_interop_unavailable`          | Enable `[interop] enabled=true` in `/etc/wsl.conf`, restart WSL when safe, and verify `cmd.exe /c ver` works.           |
+| `windows_helper_unavailable`       | Reinstall with optional dependencies; check the matching architecture, executable helper, and protocol version.         |
+| `wsl_network_unreachable`          | Enable NAT localhost forwarding or use mirrored networking; verify IPv4 loopback access and firewall rules.             |
+| `studio_launch_unknown`            | Check Studio and `forge status` before another launch: Studio may already be open. forge never repeats the lost launch. |
+| `identity_mismatch` (foreign side) | Run `forge down` on the Windows side or distro named in the error. `--force` does not override side ownership.          |
+
+Attach, stop, restart, saves, show/hide, Windows AutoSaves handling, hidden
+session windows, and hidden snapshots use Windows process identities through the
+helper. A found Studio stays open on stop or restart unless `--force` is set.
+Hidden snapshots have a detached Lighting prompt watcher;
+`forge save --place <snapshot>` saves them, and `forge open` prunes closed
+snapshots beyond the newest five. Configuration follows Studio's Windows OS,
+including `studio.desktop` and `studio.saveMethod`. See
+[Studio](docs/studio.md).
+
+Closing the terminal that ran `forge up` can interrupt the helper's channel. The
+detached session continues and forge attempts bounded recovery, with a new
+handshake, Windows lock and verified Studio pins. `status --json` reports
+`services.studio.os: "win32"` and `control: "ready"`, `"recovering"`, or
+`"unavailable"`. Never pass Studio's Windows PID to Linux `kill`.
+
+Repair interop or the helper installation before retrying unavailable control. A
+lost save needs its original completion proof; otherwise it returns
+`save_failed` with reason `unknown`. Lost close and hide results require
+verified exit and visibility respectively. forge never repeats an uncertain
 mutation or kills Studio to resolve an uncertain close. A retained own-side
-record can be cleaned by a later `forge down` after fresh helper control
-verifies that its recorded Studio has exited. A live or unverified Studio keeps
-the record; foreign-side records still require `forge down` on their own side.
+record can be removed by a later `forge down` only after fresh helper control
+proves its Studio has exited. See [JSON output](docs/json-output.md).
 
 ## Commands
 

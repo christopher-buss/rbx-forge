@@ -38,7 +38,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { TestContext } from "vitest";
 import { assert, describe, it, expect as matchers } from "vitest";
 
-import type { PinnedProcess } from "../../src/native/addon.ts";
+import type { PinnedStudio } from "../../src/seams/studio-host.ts";
 import { parseStatus } from "../../src/session/status.ts";
 import { captureRealStudioFixtureAsync } from "../helpers/capture-real-studio-fixture.ts";
 import { installCaptureRojoProxy } from "../helpers/capture-rojo-proxy.ts";
@@ -47,14 +47,17 @@ import { isolatedRealStudioFixtureAsync } from "../helpers/isolated-real-studio-
 import { parseLines, parseOpened } from "../helpers/output.ts";
 import { loadRealNative } from "../helpers/real-native.ts";
 import { studioCleanup } from "../helpers/real-studio-cleanup.ts";
+import { realStudioHost } from "../helpers/real-studio-host.ts";
 import { genuineRojo } from "../helpers/real-studio-sync-fixture.ts";
-import { pinNow } from "../helpers/worker-log.ts";
 import type { Fixture } from "./session-fixture.ts";
 import type { UpRun } from "./up-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
 const { env } = process;
-const IS_ENABLED = env["RBX_FORGE_TEST_REAL_STUDIO"] === "1" && process.platform === "win32";
+const IS_WSL = process.platform === "linux" && env["WSL_DISTRO_NAME"] !== undefined;
+const IS_ENABLED =
+	(env["RBX_FORGE_TEST_REAL_STUDIO"] === "1" && process.platform === "win32") ||
+	(env["RBX_FORGE_TEST_REAL_WSL_STUDIO"] === "1" && IS_WSL);
 const PLACES = path.join(import.meta.dirname, "..", "fixtures", "studio");
 /** A name no place of the user has: its auto-recovery files are forge's. */
 const PLACE = "forge-real-studio.rbxl";
@@ -70,39 +73,6 @@ interface RealFixture extends Fixture {
 }
 
 /**
- * The real Plugins folder, where every fixture uses unique filenames.
- *
- * @returns Its path.
- */
-function realPluginsDirectory(): string {
-	const home = env["RBX_FORGE_TEST_REAL_USERPROFILE"] ?? "";
-	return path.join(home, "AppData/Local/Roblox/Plugins");
-}
-
-async function makeRealFixtureAsync(
-	config: Record<string, unknown> = {},
-	sharedCli?: IsolatedRealStudioCli,
-): Promise<RealFixture> {
-	return isolatedRealStudioFixtureAsync({
-		config,
-		pluginsDirectory: realPluginsDirectory(),
-		...(sharedCli === undefined ? {} : { sharedCli }),
-	});
-}
-
-/**
- * Note one timing.
- *
- * @param entry - What was timed, and how long it took.
- */
-function note(entry: Record<string, unknown>): void {
-	const log = env["RBX_FORGE_TEST_REAL_STUDIO_LOG"];
-	if (log !== undefined) {
-		appendFileSync(log, `${JSON.stringify(entry)}\n`);
-	}
-}
-
-/**
  * The real environment for forge and Studio: the installed Studio, the
  * user's own folders (the e2e setup replaces them), and the user's `PATH`
  * with genuine Rojo first. No fixture binary: the managed plugin acknowledges
@@ -111,7 +81,7 @@ function note(entry: Record<string, unknown>): void {
  *
  * @returns The variables for forge's run.
  */
-function realVariables(): Record<string, string> {
+export function realVariables(): Record<string, string> {
 	return {
 		HOME: env["RBX_FORGE_TEST_REAL_HOME"] ?? "",
 		LOCALAPPDATA: env["RBX_FORGE_TEST_REAL_LOCALAPPDATA"] ?? "",
@@ -128,39 +98,13 @@ function realVariables(): Record<string, string> {
  * @param fixturePlace - `saved.rbxl` or `unsaved.rbxl`.
  * @returns The project, with the copy as its place.
  */
-async function makeRealProjectAsync(fixturePlace: string): Promise<RealFixture> {
+export async function makeRealProjectAsync(fixturePlace: string): Promise<RealFixture> {
 	const fixture = await makeRealFixtureAsync({
 		buildOutputPath: PLACE,
 		open: { buildFirst: false },
 	});
 	copyFileSync(path.join(PLACES, fixturePlace), path.join(fixture.project, PLACE));
 	return { ...fixture, place: path.join(fixture.project, PLACE) };
-}
-
-async function compatibilitySnapshotAsync(
-	fixturePlace = "compatibility.rbxl",
-	sharedCli?: IsolatedRealStudioCli,
-): Promise<RealFixture> {
-	const fixture = await makeRealFixtureAsync({ projectType: "luau" }, sharedCli);
-	const directory = path.join(fixture.project, "node_modules", "snapshot-rojo");
-	mkdirSync(directory, { recursive: true });
-	writeFileSync(
-		path.join(fixture.project, "package.json"),
-		JSON.stringify({ devDependencies: { "snapshot-rojo": "1.0.0" } }),
-	);
-	writeFileSync(
-		path.join(directory, "package.json"),
-		JSON.stringify({ name: "snapshot-rojo", bin: { rojo: "cli.mjs" } }),
-	);
-	writeFileSync(
-		path.join(directory, "cli.mjs"),
-		`import { copyFileSync, mkdirSync } from 'node:fs';
-import path from 'node:path';
-const output = process.argv[process.argv.indexOf('--output') + 1];
-mkdirSync(path.dirname(output), { recursive: true });
-copyFileSync(${JSON.stringify(path.join(PLACES, fixturePlace))}, output);`,
-	);
-	return fixture;
 }
 
 /**
@@ -171,7 +115,7 @@ copyFileSync(${JSON.stringify(path.join(PLACES, fixturePlace))}, output);`,
  * @param desktop - Where Studio opens.
  * @returns The session's id.
  */
-async function upStudioAsync(
+export async function upStudioAsync(
 	fixture: Fixture,
 	desktop: "hidden" | "user" = "user",
 ): Promise<string> {
@@ -199,7 +143,7 @@ async function upStudioAsync(
 	);
 	const studio = state?.services.studio;
 	assert(studio?.pid !== undefined && studio.startTime !== undefined);
-	own({ pid: studio.pid, startTime: studio.startTime });
+	await own({ pid: studio.pid, startTime: studio.startTime });
 	return sessionId;
 }
 
@@ -213,11 +157,11 @@ async function upStudioAsync(
  * @returns The PID the session recorded, the lock PID and its verified pin.
  * @rejects When Studio does not open the place in time.
  */
-async function waitForLoadedAsync(
+export async function waitForLoadedAsync(
 	fixture: Fixture,
 	sessionId: string,
 	quietMs = QUIET_MS,
-): Promise<[unknown, number, PinnedProcess]> {
+): Promise<[unknown, number, PinnedStudio]> {
 	const state = path.join(fixture.project, ".forge", "sessions", sessionId, "state.json");
 	const deadline = Date.now() + OPEN_MS;
 	while (!existsSync(state) || !readFileSync(state, "utf8").includes('"status":"open"')) {
@@ -230,19 +174,23 @@ async function waitForLoadedAsync(
 
 	// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the session's state contract
 	const status = JSON.parse(readFileSync(state, "utf8")) as {
-		services: { studio: { pid?: number; startTime?: string } };
+		services: { studio: { os?: string; pid?: number; startTime?: string } };
 	};
+	assert(!IS_WSL || status.services.studio.os === "win32");
 	const lockPid = Number(readFileSync(`${fixture.place}.lock`, "utf8").split(/\r?\n/, 1)[0]);
 	assert(status.services.studio.pid === lockPid);
-	const pinned = pinNow(lockPid);
-	assert(pinned !== undefined && pinned.startTime === status.services.studio.startTime);
+	const pinned = await realStudioHost().pinProcessAsync(
+		lockPid,
+		status.services.studio.startTime,
+	);
+	assert(pinned !== null && pinned.startTime === status.services.studio.startTime);
 	let quietSince = Date.now();
 	while (Date.now() - quietSince < quietMs) {
 		if (Date.now() > deadline) {
 			throw new Error(`Studio did not open ${fixture.place} in time`);
 		}
 
-		if (pinned.isBlocked()) {
+		if (await pinned.isBlockedAsync()) {
 			quietSince = Date.now();
 		}
 
@@ -250,6 +198,68 @@ async function waitForLoadedAsync(
 	}
 
 	return [status.services.studio.pid, lockPid, pinned];
+}
+
+/**
+ * The real Plugins folder, where every fixture uses unique filenames.
+ *
+ * @returns Its path.
+ */
+async function realPluginsDirectoryAsync(): Promise<string> {
+	const folder = await realStudioHost().pluginsFolderAsync({
+		USERPROFILE: env["RBX_FORGE_TEST_REAL_USERPROFILE"] ?? "",
+	});
+	assert(folder !== undefined);
+	return folder;
+}
+
+async function makeRealFixtureAsync(
+	config: Record<string, unknown> = {},
+	sharedCli?: IsolatedRealStudioCli,
+): Promise<RealFixture> {
+	return isolatedRealStudioFixtureAsync({
+		config,
+		pluginsDirectory: await realPluginsDirectoryAsync(),
+		...(sharedCli === undefined ? {} : { sharedCli }),
+	});
+}
+
+/**
+ * Note one timing.
+ *
+ * @param entry - What was timed, and how long it took.
+ */
+function note(entry: Record<string, unknown>): void {
+	const log = env["RBX_FORGE_TEST_REAL_STUDIO_LOG"];
+	if (log !== undefined) {
+		appendFileSync(log, `${JSON.stringify(entry)}\n`);
+	}
+}
+
+async function compatibilitySnapshotAsync(
+	fixturePlace = "compatibility.rbxl",
+	sharedCli?: IsolatedRealStudioCli,
+): Promise<RealFixture> {
+	const fixture = await makeRealFixtureAsync({ projectType: "luau" }, sharedCli);
+	const directory = path.join(fixture.project, "node_modules", "snapshot-rojo");
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(
+		path.join(fixture.project, "package.json"),
+		JSON.stringify({ devDependencies: { "snapshot-rojo": "1.0.0" } }),
+	);
+	writeFileSync(
+		path.join(directory, "package.json"),
+		JSON.stringify({ name: "snapshot-rojo", bin: { rojo: "cli.mjs" } }),
+	);
+	writeFileSync(
+		path.join(directory, "cli.mjs"),
+		`import { copyFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
+const output = process.argv[process.argv.indexOf('--output') + 1];
+mkdirSync(path.dirname(output), { recursive: true });
+copyFileSync(${JSON.stringify(path.join(PLACES, fixturePlace))}, output);`,
+	);
+	return fixture;
 }
 
 /**
@@ -288,9 +298,10 @@ function notOwnedBy(testContext: Pick<TestContext, "expect">, studio: number): u
  * @param place - The snapshot this test opened.
  * @returns The log's lines; empty until Studio writes it.
  */
-function studioLogLines(place: string): Array<string> {
-	const logs = path.join(env["RBX_FORGE_TEST_REAL_LOCALAPPDATA"] ?? "", "Roblox", "logs");
-	const needle = place.replaceAll("\\", "/");
+async function studioLogLinesAsync(place: string): Promise<Array<string>> {
+	const logs = path.join(await realPluginsDirectoryAsync(), "..", "logs");
+	const hostPlace = await realStudioHost().toHostPathAsync(place);
+	const needle = hostPlace.replaceAll("\\", "/");
 	return (
 		readdirSync(logs)
 			.filter((file) => file.includes("_Studio_"))
@@ -303,10 +314,9 @@ function studioLogLines(place: string): Array<string> {
 	);
 }
 
-function hasRunForgePlugin(place: string, plugin: string): boolean {
-	return studioLogLines(place).some((line) => {
-		return line.includes(`loadPlugin user_${path.basename(plugin)}`);
-	});
+async function hasRunForgePluginAsync(place: string, plugin: string): Promise<boolean> {
+	const lines = await studioLogLinesAsync(place);
+	return lines.some((line) => line.includes(`loadPlugin user_${path.basename(plugin)}`));
 }
 
 /**
@@ -330,7 +340,7 @@ async function openPluginSnapshotAsync(sharedCli?: IsolatedRealStudioCli): Promi
 	);
 	const { place, studio } = parseOpened(opened.result.data);
 	assert(opened.status === 0 && studio !== null, JSON.stringify(opened.result));
-	pin(studio);
+	await pin(studio);
 	const { mtimeMs, size } = statSync(fixture.cli.installedPlugin);
 	note({ command: "forge-plugin-open", plugin: size, result: opened.result });
 	return { cli: fixture.cli, place, pluginModified: mtimeMs };
@@ -383,7 +393,7 @@ task.wait(0.1)`,
 				captureName: fixture.cli.captureName,
 				directory: fixture.project,
 				native: loadRealNative(),
-				pluginsDirectory: realPluginsDirectory(),
+				pluginsDirectory: await realPluginsDirectoryAsync(),
 			});
 			onTestFinished(editor.closeAsync);
 			writeFileSync(
@@ -403,7 +413,7 @@ task.wait(0.1)`,
 			);
 			const sessionId = await upStudioAsync(fixture, "hidden");
 			const [, pid, pinned] = await waitForLoadedAsync(fixture, sessionId, 0);
-			editor.own(pinned);
+			await editor.own(pinned);
 			await editor.waitForCaptureUrlAsync();
 			const baseline = await captureForgeAsync(fixture, ["save", "--json"]);
 
@@ -476,7 +486,7 @@ part.Parent = workspace`,
 				captureName: fixture.cli.captureName,
 				directory: fixture.project,
 				native: loadRealNative(),
-				pluginsDirectory: realPluginsDirectory(),
+				pluginsDirectory: await realPluginsDirectoryAsync(),
 			});
 			onTestFinished(editor.closeAsync);
 			mkdirSync(path.join(fixture.project, "workspace"));
@@ -507,8 +517,8 @@ part.Parent = workspace`,
 
 			const { place, studio } = parseOpened(opened.result.data);
 			assert(studio !== null);
-			const pinned = own(studio);
-			editor.own(pinned);
+			const pinned = await own(studio);
+			await editor.own(pinned);
 			await editor.waitForCaptureUrlAsync();
 			const edited = await editor.runAsync("edit");
 			note({ command: "snapshot-edit", pid: studio.pid, studioVersion: edited.version });
@@ -531,7 +541,7 @@ part.Parent = workspace`,
 			expect(
 				existsSync(path.join(fixture.project, "workspace/ForgeCapturedSnapshotPart.rbxm")),
 			).toBeTrue();
-			expect(pinned.isAlive()).toBeTrue();
+			expect(await pinned.isAliveAsync()).toBeTrue();
 		},
 	);
 
@@ -559,7 +569,7 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured t
 				captureName: fixture.cli.captureName,
 				directory: fixture.project,
 				native: loadRealNative(),
-				pluginsDirectory: realPluginsDirectory(),
+				pluginsDirectory: await realPluginsDirectoryAsync(),
 			});
 			onTestFinished(editor.closeAsync);
 			mkdirSync(path.join(fixture.project, "workspace"));
@@ -584,7 +594,7 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured t
 			);
 			const sessionId = await upStudioAsync(fixture, "hidden");
 			const [, pid, pinned] = await waitForLoadedAsync(fixture, sessionId, 0);
-			editor.own(pinned);
+			await editor.own(pinned);
 			const observation = await editor.runAsync("edit");
 			note({ command: "capture-sync-edit", pid, studioVersion: observation.version });
 			const synced = await captureForgeAsync(fixture, ["sync", "--json"]);
@@ -615,7 +625,7 @@ game:GetService("ServerScriptService").CaptureScript.Source = 'print("captured t
 				result: { error: { code: "capture_not_connected" } },
 				status: 1,
 			});
-			expect(pinned.isAlive()).toBeTrue();
+			expect(await pinned.isAliveAsync()).toBeTrue();
 		},
 	);
 
@@ -653,7 +663,7 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 				captureName: fixture.cli.captureName,
 				directory: fixture.project,
 				native: loadRealNative(),
-				pluginsDirectory: realPluginsDirectory(),
+				pluginsDirectory: await realPluginsDirectoryAsync(),
 			});
 			onTestFinished(editor.closeAsync);
 			mkdirSync(path.join(fixture.project, "workspace"));
@@ -678,7 +688,7 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 			);
 			const sessionId = await upStudioAsync(fixture, "hidden");
 			const [, pid, pinned] = await waitForLoadedAsync(fixture, sessionId, 0);
-			editor.own(pinned);
+			await editor.own(pinned);
 			const initial = await editor.runAsync("first");
 			note({
 				command: "capture-edit",
@@ -721,7 +731,7 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 			const down = await captureForgeAsync(fixture, ["down", "--keep-studio", "--json"]);
 
 			expect(down.status).toBe(0);
-			expect(pinned.isAlive()).toBeTrue();
+			expect(await pinned.isAliveAsync()).toBeTrue();
 
 			const restarted = await upStudioAsync(fixture, "hidden");
 			const [, foundPid] = await waitForLoadedAsync(fixture, restarted, 0);
@@ -796,11 +806,11 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 
 			const { place, studio } = parseOpened(opened.result.data);
 			assert(studio !== null);
-			const pinned = pinSnapshot(studio);
+			const pinned = await pinSnapshot(studio);
 			note({
 				bytes: statSync(place).size,
 				command: "snapshot-open",
-				executable: pinned.executablePath(),
+				executable: await pinned.executablePathAsync(),
 				result: opened.result,
 			});
 
@@ -814,9 +824,9 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 			await sleep(10_000);
 
 			await expect
-				.poll(() => pinned.isBlocked(), { interval: 500, timeout: 30_000 })
+				.poll(async () => pinned.isBlockedAsync(), { interval: 500, timeout: 30_000 })
 				.toBeFalse();
-			expect(pinned.isAlive()).toBeTrue();
+			expect(await pinned.isAliveAsync()).toBeTrue();
 			expect(foregroundOwner()).toStrictEqual(notOwnedBy({ expect }, studio.pid));
 		},
 	);
@@ -837,7 +847,7 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 			expect(second.pluginModified).toBe(first.pluginModified);
 
 			await expect
-				.poll(() => hasRunForgePlugin(first.place, first.cli.installedPlugin), {
+				.poll(async () => hasRunForgePluginAsync(first.place, first.cli.installedPlugin), {
 					interval: 500,
 					timeout: OPEN_MS,
 				})
@@ -847,7 +857,7 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 				.toBeTrue();
 
 			await sleep(QUIET_MS);
-			const lines = studioLogLines(first.place);
+			const lines = await studioLogLinesAsync(first.place);
 			const mentions = lines.filter((line) => {
 				return line.includes(path.basename(first.cli.installedPlugin));
 			});
@@ -1003,7 +1013,7 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 			expect(down.result.data).toMatchObject({
 				studio: { end: CLOSED_END, forced: false, pid: lockPid, status: "closed" },
 			});
-			await expect.poll(() => pinned.isAlive(), { timeout: 10_000 }).toBeFalse();
+			await expect.poll(async () => pinned.isAliveAsync(), { timeout: 10_000 }).toBeFalse();
 			expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
 		},
 	);
@@ -1029,7 +1039,7 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 			pid: lockPid,
 			stopped: true,
 		});
-		await expect.poll(() => pinned.isAlive(), { timeout: 10_000 }).toBeFalse();
+		await expect.poll(async () => pinned.isAliveAsync(), { timeout: 10_000 }).toBeFalse();
 	});
 
 	it(
@@ -1054,7 +1064,7 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 					status: "closed",
 				},
 			});
-			await expect.poll(() => pinned.isAlive(), { timeout: 10_000 }).toBeFalse();
+			await expect.poll(async () => pinned.isAliveAsync(), { timeout: 10_000 }).toBeFalse();
 			expect(existsSync(`${fixture.place}.lock`)).toBeFalse();
 		},
 	);

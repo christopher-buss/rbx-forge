@@ -365,8 +365,9 @@ either, the command selects its default. On Windows, `hidden` keeps a session
 Studio on the user's desktop with its windows hidden; a hidden snapshot from
 `open` uses a separate desktop object. On macOS, it is a background
 LaunchServices launch, kept hidden and activated only briefly for its first
-save. On Linux Studio always runs on the user's desktop. An already open Studio
-keeps its placement. See [Hidden desktop](./studio.md#hidden-desktop).
+save. On native Linux the effective desktop is always `user`; WSL uses Windows
+Studio placement through the helper. An already open Studio keeps its placement.
+See [Hidden desktop](./studio.md#hidden-desktop).
 
 ```ts
 defineConfig({

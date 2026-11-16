@@ -7,7 +7,8 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { gunzipSync } from "node:zlib";
 
-import type { NativeAddon, PinnedProcess } from "../../src/native/addon.ts";
+import type { NativeAddon } from "../../src/native/addon.ts";
+import type { PinnedStudio } from "../../src/seams/studio-host.ts";
 
 const CAPTURE_ROUTE = /\/capture\/[^?]+/u;
 
@@ -28,7 +29,7 @@ export interface CaptureStudioObservation {
 export interface CaptureStudioFixture {
 	closeAsync: () => Promise<void>;
 	launchAttributes: Record<string, string>;
-	own: (studio: PinnedProcess) => void;
+	own: (studio: PinnedStudio) => Promise<void>;
 	runAsync: (action: string) => Promise<CaptureStudioObservation>;
 	sample: () => CaptureStudioObservation | undefined;
 	waitForCaptureUrlAsync: (previous?: string) => Promise<CaptureStudioObservation>;
@@ -38,7 +39,7 @@ export interface CaptureStudioFixture {
 interface Runtime {
 	command: undefined | { action: string; id: string };
 	observation: CaptureStudioObservation | undefined;
-	studio: PinnedProcess | undefined;
+	studio: PinnedStudio | undefined;
 }
 
 /**
@@ -130,7 +131,10 @@ async function waitForAsync(
 ): Promise<CaptureStudioObservation> {
 	const deadline = Date.now() + 90_000;
 	for (;;) {
-		assert(runtime.studio?.isAlive() === true, "Only a pinned, living Studio may be edited");
+		assert(
+			(await runtime.studio?.isAliveAsync()) === true,
+			"Only a pinned, living Studio may be edited",
+		);
 		if (runtime.observation !== undefined && ready(runtime.observation)) {
 			return runtime.observation;
 		}
@@ -182,8 +186,8 @@ function controls(
 			rmSync(plugin, { force: true });
 		},
 		launchAttributes: { __ForgeCaptureTestLaunch: token },
-		own: (studio) => {
-			assert(studio.isAlive(), "The launched Studio must still be alive");
+		own: async (studio) => {
+			assert(await studio.isAliveAsync(), "The launched Studio must still be alive");
 			runtime.studio = studio;
 		},
 		runAsync: async (action) => runActionAsync(runtime, actions, action),

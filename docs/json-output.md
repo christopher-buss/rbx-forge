@@ -46,12 +46,20 @@ Under WSL, helper startup failures exit with code 1 and include `error.hint`:
   Reinstall forge with optional dependencies and the matching architecture.
 - `wsl_interop_unavailable`: launching or handshaking with the Windows helper
   fails. Enable `[interop] enabled=true` in `/etc/wsl.conf`, run
-  `wsl --shutdown` from Windows, and check that Windows executables run in the
-  distro. forge judges interop by the actual launch and handshake.
+  `wsl --shutdown` from Windows after saving and coordinating other distro and
+  Docker workloads, and check that Windows executables run in the distro. forge
+  judges interop by the actual launch and handshake.
 
 A lost Studio launch reply returns `studio_launch_unknown` (exit 1). Studio may
 already be running. forge never repeats that launch or falls back to a platform
 launcher; check Studio before trying again.
+
+A session belonging to Windows or another WSL distro fails with
+`identity_mismatch` (exit 5) before process control, IPC, or cleanup. The hint
+names the side on which to run `forge down`; `--force` does not override it.
+Both sides need the first validated WSL release or newer. Published v2.3.0
+predates this guarantee; the [release record](./wsl-release-gate.md) must name
+the exact minimum version before publication.
 
 ## Session results
 

@@ -87,7 +87,9 @@ Native Linux, outside WSL, still has no Studio.
 ## Consequences
 
 - The helper is tested on Windows CI. Real Studio under WSL2 gates each release
-  through a recorded run of the packed package.
+  through a [recorded run of the packed package](../wsl-release-gate.md).
+  Acceptance awaits the complete real-Studio matrix; partial local results and a
+  hosted fixture pass do not establish release readiness.
 - A forge older than this decision on the other side does not read the side and
   is not excluded.
 - WSL2 3.0.5, NAT: an interop-started process is in no job, and Studio outlives
@@ -99,4 +101,9 @@ Native Linux, outside WSL, still has no Studio.
 - Mirrored networking reaches a WSL listener on `127.0.0.1` or `0.0.0.0` from
   Windows; NAT with `localhostForwarding=false` reaches none. Closing the
   terminal ends the helper in both modes.
-- Not measured: WSL2 on hosted Windows runners; an interop start inside a job.
+- The Windows 2025 capability job proves a VM by running a Linux command before
+  trying real helper interop with an owned Windows fixture. Its report records
+  VM unavailability separately from provisioning and lifecycle failures. A
+  lifecycle failure after successful VM execution fails the job. Hosted runner
+  results remain unmeasured until a job URL and artifact are recorded in the
+  [release evidence](../validation/wsl-297.md).

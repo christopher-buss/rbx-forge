@@ -101,13 +101,13 @@ export function directSyncLauncher({
  * @returns Its explicit executable path.
  */
 export function genuineRojo(): string {
-	const explicit = readVariable(process.env, "RBX_FORGE_TEST_REAL_ROJO", "win32");
-	const search = readVariable(process.env, "PATH", "win32") ?? "";
+	const explicit = readVariable(process.env, "RBX_FORGE_TEST_REAL_ROJO", process.platform);
+	const search = readVariable(process.env, "PATH", process.platform) ?? "";
 	const executable =
 		explicit ??
 		search
 			.split(path.delimiter)
-			.map((entry) => path.join(entry, "rojo.exe"))
+			.map((entry) => path.join(entry, process.platform === "win32" ? "rojo.exe" : "rojo"))
 			.find((entry) => existsSync(entry));
 	assert(
 		executable !== undefined && path.isAbsolute(executable),
