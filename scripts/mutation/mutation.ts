@@ -20,7 +20,7 @@ export interface MutationDependencies {
 	readonly files: MutationFiles;
 	/** The `incrementalFile` of `stryker.config.ts`. */
 	readonly localFile: string;
-	readonly run: () => StrykerExit;
+	readonly run: () => Promise<StrykerExit>;
 	/** The report every worktree of the clone shares. */
 	readonly sharedFile: string;
 }
@@ -79,7 +79,7 @@ export function shouldPublish(
  * @param dependencies - Files, paths, and the Stryker run.
  * @returns Stryker's exit code.
  */
-export function runMutation(dependencies: MutationDependencies): number {
+export async function runMutationAsync(dependencies: MutationDependencies): Promise<number> {
 	const { files, localFile, sharedFile } = dependencies;
 	const seed = files.read(sharedFile);
 	if (seed !== undefined) {
@@ -88,7 +88,7 @@ export function runMutation(dependencies: MutationDependencies): number {
 	}
 
 	const before = files.read(localFile);
-	const exit = dependencies.run();
+	const exit = await dependencies.run();
 	const outcome = classifyExit(exit);
 	const after = files.read(localFile);
 	const report = after === before ? undefined : parseReport(after);
