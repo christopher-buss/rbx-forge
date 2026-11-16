@@ -13,6 +13,7 @@
 
 pub mod desktop;
 pub mod detach;
+pub mod menu;
 pub mod pipe;
 pub mod registry;
 pub mod security;

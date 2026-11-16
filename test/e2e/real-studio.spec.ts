@@ -262,6 +262,28 @@ function note(entry: Record<string, unknown>): void {
 	}
 }
 
+function runtimeObservation(fixture: Fixture, sessionId: string): Record<string, unknown> {
+	try {
+		const stat = statSync(fixture.place);
+		return {
+			bytes: stat.size,
+			mtimeMs: stat.mtimeMs,
+			state: JSON.parse(
+				readFileSync(
+					path.join(fixture.project, ".forge/sessions", sessionId, "state.json"),
+					"utf8",
+				),
+			),
+			supervisorLog: readFileSync(
+				path.join(fixture.project, ".forge/logs/supervisor.log"),
+				"utf8",
+			),
+		};
+	} catch (err) {
+		return { observationError: String(err) };
+	}
+}
+
 /**
  * Read focus without activating or switching any desktop.
  * @returns The PID that owns the foreground window.
@@ -982,7 +1004,13 @@ lighting:SetAttribute("CapturedServiceEdit", "second")`,
 
 			const firstSavedAt = statSync(fixture.place).mtimeMs;
 			const again = await runForgeAsync(fixture, ["save", "--json"], realVariables());
-			note({ command: "save-again", result: again.result, status: again.status });
+			note({
+				command: "save-again",
+				firstSavedAt,
+				result: again.result,
+				status: again.status,
+				...runtimeObservation(fixture, sessionId),
+			});
 
 			expect({
 				changed: statSync(fixture.place).mtimeMs > firstSavedAt,

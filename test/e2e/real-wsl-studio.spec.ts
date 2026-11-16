@@ -1,7 +1,14 @@
 // cspell:words drvfs wslinfo osrelease
 import { type } from "arktype";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, statfsSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	readdirSync,
+	readFileSync,
+	statfsSync,
+	writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +35,14 @@ const IS_ENABLED =
 	process.env["RBX_FORGE_TEST_REAL_WSL_STUDIO"] === "1" && process.platform === "linux";
 const FILESYSTEMS: Record<string, number> = { drvfs: 0x01021997, ext4: 0xef53 };
 const EXPECTED_FILESYSTEM = FILESYSTEMS[process.env["RBX_FORGE_TEST_WSL_FILESYSTEM"] ?? ""];
+
+function proxyRequests(log: string): string {
+	const prefix = `${path.basename(log)}.requests-`;
+	return readdirSync(path.dirname(log))
+		.filter((name) => name.startsWith(prefix))
+		.map((name) => readFileSync(path.join(path.dirname(log), name), "utf8"))
+		.join("\n");
+}
 
 function recordRun(command: string, run: UpRun): void {
 	const log = process.env["RBX_FORGE_TEST_REAL_STUDIO_LOG"];
@@ -247,6 +262,7 @@ describe.skipIf(!IS_ENABLED)("packed WSL2 real Studio release checks", () => {
 			const variables = {
 				...realVariables(),
 				RBX_FORGE_TEST_HELPER_PROXY_LOG: log,
+				RBX_FORGE_TEST_HELPER_PROXY_PLACE: fixture.place,
 				RBX_FORGE_TEST_HELPER_PROXY_TARGET: target,
 				RBX_FORGE_TEST_WINDOWS_HELPER: path.join(
 					import.meta.dirname,
@@ -272,7 +288,7 @@ describe.skipIf(!IS_ENABLED)("packed WSL2 real Studio release checks", () => {
 			expect(saved).toMatchObject({ result: { ok: true }, status: 0 });
 			expect(existsSync(`${log}.lost`)).toBeTrue();
 			expect(
-				readFileSync(log, "utf8")
+				proxyRequests(log)
 					.split("\n")
 					.filter((line) => line.includes('"requestSave"')),
 			).toHaveLength(1);
@@ -329,7 +345,7 @@ describe.skipIf(!IS_ENABLED)("packed WSL2 real Studio release checks", () => {
 			});
 			expect(readFileSync(current, "utf8")).toBe(before);
 			expect(
-				readFileSync(log, "utf8")
+				proxyRequests(log)
 					.split("\n")
 					.filter((line) => line.includes('"op":"launch"')),
 			).toHaveLength(1);
@@ -382,7 +398,7 @@ describe.skipIf(!IS_ENABLED)("packed WSL2 real Studio release checks", () => {
 			});
 			expect(await pin.isAliveAsync()).toBeTrue();
 
-			const requests = readFileSync(log, "utf8").split("\n");
+			const requests = proxyRequests(log).split("\n");
 
 			expect(requests.filter((line) => line.includes('"op":"requestClose"'))).toHaveLength(1);
 			expect(requests.filter((line) => line.includes('"op":"kill"'))).toHaveLength(0);

@@ -108,6 +108,9 @@ Native Linux, outside WSL, still has no Studio.
   VM unavailability separately from provisioning and lifecycle failures. A
   lifecycle failure after successful VM execution fails the job. The
   [hosted report](../validation/wsl-297.md) proves a WSL2 VM and helper
-  handshake on Windows 2025; its owned fixture's detached launch is unavailable.
-  The job reports this lifecycle failure after VM success, and does not classify
-  it as unsupported WSL2. It establishes no real-Studio gate pass.
+  handshake on Windows 2025. With WSL 3.0.3 and 3.0.5, its owned fixture's
+  detached launch fails with `CreateProcessW` error 5. The interop job probe
+  records neither explicit nor silent breakaway permission. The helper retains
+  this known OS failure and never retries without breakaway. The job reports
+  this lifecycle failure after VM success, and does not classify it as
+  unsupported WSL2. It establishes no real-Studio gate pass.

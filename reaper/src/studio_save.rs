@@ -109,6 +109,8 @@ unsafe fn windows_save(
             &VARIANT::from(BSTR::from("Save to File")),
         )?;
         let walker = automation.ControlViewWalker()?;
+        windows_action(&automation, deadline, pid, handle)?;
+        crate::os::win::menu::activate(pid, handle as *mut _, deadline);
         let result = (|| {
             let item = find_menu_item(
                 deadline,

@@ -66,6 +66,7 @@ interface RecoveryOptions {
 	retryLoss?: boolean;
 	reused?: boolean;
 	saved?: boolean;
+	saveReply?: Promise<void>;
 	transientAttempts?: number;
 	visibility?: string;
 	withoutEvents?: boolean;
@@ -275,7 +276,9 @@ function world(drop: string, options: RecoveryOptions = {}) {
 				);
 			}
 
-			if (options.responseDelayMs === undefined) {
+			if (request.op === "requestSave" && options.saveReply !== undefined) {
+				void options.saveReply.then(reply);
+			} else if (options.responseDelayMs === undefined) {
 				reply();
 			} else {
 				setTimeout(reply, options.responseDelayMs);
@@ -405,13 +408,20 @@ async function observedAsync<T>(work: Promise<T>) {
 }
 
 describe("windows helper recovery", () => {
-	it("does not let a queued short read retire an in-flight save", async ({ expect }) => {
+	it("does not let a queued short read retire an in-flight save", async ({
+		expect,
+		onTestFinished,
+	}) => {
 		expect.assertions(6);
 
-		const run = world("unused", { responseDelayMs: 40 });
+		const completion = Promise.withResolvers<void>();
+		onTestFinished(() => {
+			completion.resolve();
+		});
+		const run = world("unused", { saveReply: completion.promise });
 		const pin = await run.seams.studioHost.pinProcessAsync(707, START);
 		assert(pin !== null);
-		const saving = pin.requestSaveAsync(200);
+		const saving = pin.requestSaveAsync(5000);
 
 		await expect(pin.waitForExitAsync(5)).rejects.toMatchObject({
 			code: "windows_helper_unavailable",
@@ -422,6 +432,9 @@ describe("windows helper recovery", () => {
 		await nodeClock.sleep(5);
 
 		expect(run.requests.filter((op) => op === "isAlive")).toHaveLength(0);
+
+		completion.resolve();
+
 		await expect(saving).resolves.toBe("requested");
 		expect(run.requests.filter((op) => op === "requestSave")).toHaveLength(1);
 		await expect(reading).resolves.toBeTrue();
