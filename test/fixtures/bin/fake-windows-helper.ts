@@ -1,7 +1,7 @@
 /** Linux protocol fixture with synthetic Windows PIDs and start times. */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { createInterface } from "node:readline";
@@ -70,6 +70,12 @@ async function probeAsync(request: Request): Promise<Array<number>> {
 	return [...new Uint8Array(await response.arrayBuffer())];
 }
 
+function writeState(state: State): void {
+	const temporary = `${STATE_FILE}.${process.pid}.tmp`;
+	writeFileSync(temporary, JSON.stringify(state));
+	renameSync(temporary, STATE_FILE);
+}
+
 function launch(windowsPlace: string, windowsScript?: string): unknown {
 	const place = windowsPlace.slice(23).replaceAll("\\", "/");
 	const scriptArgs =
@@ -83,7 +89,7 @@ function launch(windowsPlace: string, windowsScript?: string): unknown {
 	assert(child.pid !== undefined);
 	const pid = child.pid + 1_000_000;
 	const startTime = String((BigInt(Date.now()) + 11_644_473_600_000n) * 10_000n);
-	writeFileSync(STATE_FILE, JSON.stringify({ actualPid: child.pid, pid, place, startTime }));
+	writeState({ actualPid: child.pid, pid, place, startTime });
 	return { pid, pin: "1", startTime };
 }
 
@@ -140,32 +146,26 @@ function control(op: string, visibility?: string): unknown {
 		[
 			"setWindowVisibility",
 			() => {
-				writeFileSync(
-					STATE_FILE,
-					JSON.stringify({ ...state, hidden: visibility === "hidden", hiding: false }),
-				);
+				writeState({ ...state, hidden: visibility === "hidden", hiding: false });
 				return true;
 			},
 		],
 		[
 			"startWindowHiding",
 			() => {
-				writeFileSync(
-					STATE_FILE,
-					JSON.stringify({
-						...state,
-						hidden: true,
-						hiding: true,
-						watcherPid: process.ppid,
-					}),
-				);
+				writeState({
+					...state,
+					hidden: true,
+					hiding: true,
+					watcherPid: process.ppid,
+				});
 				return true;
 			},
 		],
 		[
 			"stopWindowHiding",
 			() => {
-				writeFileSync(STATE_FILE, JSON.stringify({ ...state, hiding: false }));
+				writeState({ ...state, hiding: false });
 				return true;
 			},
 		],
@@ -238,9 +238,9 @@ async function replyAsync(line: string): Promise<void> {
 	try {
 		const result = request.op === "probeHttp" ? await probeAsync(request) : execute(request);
 		process.stdout.write(`${JSON.stringify({ id: request.id, result })}\n`);
-	} catch {
+	} catch (err) {
 		process.stdout.write(
-			`${JSON.stringify({ id: request.id, error: { code: "operation_failed", message: "unreachable" } })}\n`,
+			`${JSON.stringify({ id: request.id, error: { code: "operation_failed", message: err instanceof Error ? err.message : String(err) } })}\n`,
 		);
 	}
 }
