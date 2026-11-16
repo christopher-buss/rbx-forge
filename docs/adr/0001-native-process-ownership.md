@@ -256,7 +256,11 @@ Window states after `WM_CLOSE` to the main window:
   FILETIME strings. Helper EOF drops handles and exits without closing Studio.
   Studio launches use the helper's Windows environment plus named overrides, and
   the same detached launch policy as the addon. Each Linux package carries the
-  matching Windows architecture's helper (ADR 0009).
+  matching Windows architecture's helper (ADR 0009). A helper directly inside a
+  non-killing accounting job joins its own inner breakaway job before launch,
+  matching the Windows Node launch context. It preserves host limits and never
+  adapts a kill-on-close job that forbids breakaway. Studio still launches once
+  with explicit breakaway.
 - **Loader.** A TypeScript module in the native-bindings area (no napi generated
   JS; the build already uses `--no-js`) picks the package from
   `process.platform`, `process.arch`, and glibc or musl. It loads the addon with

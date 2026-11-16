@@ -57,11 +57,12 @@ kept hidden, and activated only briefly when a save needs it.
   only for that first save of a never-active Studio, and only briefly: an item
   still disabled after a short priming limit fails the save (`menu_disabled`),
   with visibility and focus restored.
-- **Fallback.** When forge cannot launch Studio hidden (no executable, so it
-  uses the platform launcher, or breakaway is denied), it opens Studio on the
+- **Native fallback.** When forge cannot launch Studio hidden (no executable, so
+  it uses the platform launcher, or breakaway is denied), it opens Studio on the
   user's desktop with a warning. On macOS the platform launcher opens the place
   in the background (`open -g -j`), and forge warns that it cannot keep Studio
-  hidden.
+  hidden. WSL has no platform-launcher fallback: a known helper launch failure
+  retains its Windows error; an uncertain launch retains its unknown outcome.
 - **Windows hidden session save.** Expand File, then invoke Save to File, also
   for hidden windows. Every save briefly shows the File menu and moves keyboard
   focus to Studio until the user clicks elsewhere. The save result reports the

@@ -18,6 +18,11 @@ drives use drive paths. See [WSL requirements and repairs](../README.md#wsl2)
 and the [packed-package release gate](./wsl-release-gate.md). WSL1 and native
 Linux Studio are outside this support contract.
 
+The helper uses a scoped breakaway job when the inherited Windows job only
+accounts for processes. It preserves the host's limits. A host job that kills
+members on close and forbids breakaway still refuses launch with the original
+Windows error; forge never retries without breakaway.
+
 ## Opening Studio
 
 `start` and `up --studio` start Rojo and wait until it listens before launching

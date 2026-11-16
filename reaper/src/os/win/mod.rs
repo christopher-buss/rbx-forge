@@ -13,6 +13,7 @@
 
 pub mod desktop;
 pub mod detach;
+pub mod helper_job;
 pub mod menu;
 pub mod pipe;
 pub mod registry;

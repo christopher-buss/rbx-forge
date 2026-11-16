@@ -326,15 +326,17 @@ pub fn current_user_sid() -> Result<String> {
     security::current_user_sid().map_err(|err| to_napi("current user", &err))
 }
 
-/// Tests only: put this process in a new kill-on-close job, with breakaway
+/// Tests only: put this process in a new job, with breakaway
 /// rights when asked.
+/// Kill-on-close defaults to true; false models an accounting-only host.
 ///
 /// # Errors
 ///
 /// When the job cannot be made or joined.
 #[napi]
-pub fn join_new_job(breakaway_ok: bool) -> Result<()> {
-    testing::join_new_job(breakaway_ok).map_err(|err| to_napi("join a new job", &err))
+pub fn join_new_job(breakaway_ok: bool, kill_on_close: Option<bool>) -> Result<()> {
+    testing::join_new_job(breakaway_ok, kill_on_close.unwrap_or(true))
+        .map_err(|err| to_napi("join a new job", &err))
 }
 
 /// Tests only: open the pipe at `path` as another local user. Returns 0, or

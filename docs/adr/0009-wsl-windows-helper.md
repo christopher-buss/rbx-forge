@@ -28,6 +28,11 @@ Native Linux, outside WSL, still has no Studio.
   before dispatch reports a busy helper without retiring the active channel.
 - **Unknown launch.** A launch whose reply is lost is `studio_launch_unknown`:
   forge never launches again and never falls back to the platform launcher.
+- **Launch job.** A directly interop-started helper can inherit an accounting
+  job that forbids breakaway. Before its first launch, it joins a private inner
+  job that permits breakaway, preserving the host's limits. Studio leaves that
+  inner job through the original detached launch flags. A kill-on-close host job
+  without breakaway permission remains a known launch refusal.
 - **Identity.** A Studio under WSL is a Windows PID with a Windows start time.
   The lock file's host is checked against the helper's Windows host name. The
   state contract marks the Studio's OS; the supervisor stays a Linux identity.

@@ -67,6 +67,8 @@ fn spawn_with_desktop(
 pub fn spawn_pinned(
     detached: &Detached<'_>,
 ) -> io::Result<Option<crate::os::process::PinnedProcess>> {
+    super::helper_job::prepare()
+        .map_err(|err| io::Error::other(format!("prepare Windows helper job: {err}")))?;
     spawn_and_then(
         detached,
         super::desktop::inherit_hidden,

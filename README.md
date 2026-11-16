@@ -124,10 +124,10 @@ other WSL and Docker workloads first.
 | `studio_launch_unknown`            | Check Studio and `forge status` before another launch: Studio may already be open. forge never repeats the lost launch.             |
 | `identity_mismatch` (foreign side) | Run `forge down` on the Windows side or distro named in the error. `--force` does not override side ownership.                      |
 
-The Windows host must permit job breakaway for detached Studio. A known launch
-failure preserves the Windows error. When it names job breakaway and error 5,
-check the host's job policy and executable permissions. forge does not retry the
-launch without breakaway.
+A Windows host that forbids job breakaway and kills its members on close cannot
+support detached Studio. A known launch failure preserves the Windows error.
+When it names job breakaway and error 5, check the host's job policy and
+executable permissions. forge does not retry the launch without breakaway.
 
 Attach, stop, restart, saves, show/hide, Windows AutoSaves handling, hidden
 session windows, and hidden snapshots use Windows process identities through the

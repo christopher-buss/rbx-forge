@@ -113,7 +113,7 @@ jobs:
         run: |
           pnpm build:reaper
           cargo test --manifest-path reaper/Cargo.toml --bin forge-windows-helper helper::tests
-          pnpm exec vitest run --project integration test/integration/windows-helper.spec.ts
+          pnpm exec vitest run --project integration test/integration/windows-helper.spec.ts test/integration/windows-helper-jobs.spec.ts
         shell: bash
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
