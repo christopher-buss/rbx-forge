@@ -6,7 +6,13 @@ import { assert, describe, it } from "vitest";
 import { EXIT_NOT_RUNNING } from "../../src/exit-codes.ts";
 import { parseResult } from "../helpers/output.ts";
 import { makeProject, runBinAsync } from "./run-bin.ts";
-import { IS_WINDOWS, makeFixtureAsync, START_STUDIO, startReadyAsync } from "./session-fixture.ts";
+import {
+	IS_WINDOWS,
+	makeFixtureAsync,
+	START_STUDIO,
+	startReadyAsync,
+	waitForOutputAsync,
+} from "./session-fixture.ts";
 import { runForgeAsync } from "./up-fixture.ts";
 
 describe("forge show and hide", () => {
@@ -36,6 +42,7 @@ describe("forge show and hide", () => {
 				{ studio: true },
 			);
 			const { session } = await startReadyAsync(fixture, START_STUDIO);
+			await waitForOutputAsync(session, "Roblox Studio has");
 			const before = await runForgeAsync(fixture, ["status", "--json"]);
 			chmodSync(fixture.place, 0o444);
 			onTestFinished(() => {
