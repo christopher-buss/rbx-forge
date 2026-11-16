@@ -2,6 +2,7 @@ param(
     [string]$Distro = 'Ubuntu',
     [string]$ReportDirectory = "$env:RUNNER_TEMP/wsl-capability",
     [switch]$Provision,
+    [switch]$Update,
     [switch]$Lifecycle
 )
 
@@ -76,6 +77,24 @@ try {
         } else { throw 'Actual WSL2 execution failed; this is not a verified unsupported VM' }
     } else {
         $state = 'vm-available'
+        if ($Update) {
+            $updateResult = Invoke-Probe 'update-wsl' @('--update', '--web-download') 180
+            if ($updateResult.timeout -or $updateResult.exitCode -ne 0) {
+                $state = 'update-failed'
+                throw 'WSL runs, but its requested update did not complete'
+            }
+            $shutdown = Invoke-Probe 'restart-updated-wsl' @('--shutdown') 30
+            if ($shutdown.timeout -or $shutdown.exitCode -ne 0) {
+                $state = 'update-failed'
+                throw 'Updated WSL did not shut down for its restart'
+            }
+            [void](Invoke-Probe 'version-after-update' @('--version'))
+            $updatedVm = Invoke-Probe 'actual-vm-after-update' @('-d', $Distro, '-u', 'root', '--exec', 'sh', '-ec', 'uname -r; grep -qi microsoft-standard-WSL2 /proc/sys/kernel/osrelease') 60
+            if ($updatedVm.timeout -or $updatedVm.exitCode -ne 0) {
+                $state = 'update-failed'
+                throw 'The actual WSL2 VM failed after its update'
+            }
+        }
         if ($Lifecycle) {
             $script = (Join-Path $PSScriptRoot 'wsl-helper-smoke.py')
             $native = (Resolve-Path "$PSScriptRoot/../../reaper/target/napi").Path
@@ -101,9 +120,13 @@ try {
         windows = [Environment]::OSVersion.VersionString
         userInteractive = [Environment]::UserInteractive
         processSessionId = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+        updateRequested = $Update.IsPresent
         commit = $env:GITHUB_SHA; distro = $Distro; probes = $records
     }
-    $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath "$ReportDirectory/report.json" -Encoding utf8
+    $serialized = $report | ConvertTo-Json -Depth 8
+    $serialized | Set-Content -LiteralPath "$ReportDirectory/report.json" -Encoding utf8
+    $phase = if ($Lifecycle) { 'lifecycle' } else { 'vm' }
+    $serialized | Set-Content -LiteralPath "$ReportDirectory/$phase-report.json" -Encoding utf8
     $summary = "## WSL2 capability: $state`n`nReal Studio release gate: **not run**. A fixture pass does not replace the manual packed-package matrix.`n`nImage: $env:ImageOS / $env:ImageVersion; Windows: $($report.windows); architecture: $($report.architecture).`n`nSee report.json for each command, timeout, exit code, stdout and stderr."
     $summary | Set-Content -LiteralPath "$ReportDirectory/summary.md" -Encoding utf8
     if ($env:GITHUB_STEP_SUMMARY) { $summary | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY }

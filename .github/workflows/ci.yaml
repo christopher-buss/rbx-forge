@@ -193,7 +193,7 @@ jobs:
 
       - id: vm
         name: Prove an actual WSL2 VM runs
-        run: ./.github/scripts/wsl-capability.ps1 -Provision
+        run: ./.github/scripts/wsl-capability.ps1 -Provision -Update
         shell: pwsh
 
       - if: steps.vm.outputs.state == 'vm-available'
