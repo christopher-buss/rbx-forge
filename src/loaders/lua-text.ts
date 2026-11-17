@@ -21,7 +21,7 @@ type NextLoad = Parameters<LoadHookSync>[2];
  *   `nextLoad` gives.
  */
 export function loadLuaText(url: string, context: LoadContext, nextLoad: NextLoad): LoadFnOutput {
-	if (url.startsWith("file:") && url.endsWith(".lua")) {
+	if (url.endsWith(".lua")) {
 		return { format: "module", shortCircuit: true, source: luaTextModule(fileURLToPath(url)) };
 	}
 

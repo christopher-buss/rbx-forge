@@ -45,10 +45,11 @@ describe(loadLuaText, () => {
 
 describe(luaTextPlugin, () => {
 	it("should load a .lua file as a module of its text, and nothing else", ({ expect }) => {
-		expect.assertions(2);
+		expect.assertions(3);
 
 		const plugin = luaTextPlugin();
 
+		expect(plugin.name).toBe("lua-text");
 		expect(plugin.load(APP)).toBe(APP_MODULE);
 		expect(plugin.load(path.join(import.meta.dirname, "lua-text.ts"))).toBeUndefined();
 	});
