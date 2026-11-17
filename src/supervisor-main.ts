@@ -1,0 +1,245 @@
+/**
+ * Supervisor process: `forge start` runs `supervisor.ts` as a separate process
+ * (`supervisor/launcher.ts`), with the session request as its one argument and
+ * the owner pipe as its stdin. `forge up` runs it detached
+ * (`supervisor/detached-launcher.ts`): no owner pipe, and its messages go to
+ * the request's report file until the session is ready. Like `cli.ts`, it is a
+ * process entry: it reads argv and the environment, builds the real seams, and
+ * exits. Every decision lives in `supervisor/run-supervisor.ts`, where a test
+ * drives it.
+ *
+ * `RBX_FORGE_TEST_PAUSE_DIR` and `RBX_FORGE_TEST_PAUSE` enable the
+ * fault-injection pause points (`session/pause.ts`); only tests set them.
+ * `RBX_FORGE_TEST_SNAPSHOT_LIGHTING_TRACE` records snapshot watcher boundaries.
+ */
+import assert from "node:assert/strict";
+import { appendFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+import packageJson from "../package.json" with { type: "json" };
+import { ForgeError, toForgeError } from "./errors.ts";
+import { readVariable } from "./process/environment.ts";
+import { nodeClock } from "./seams/clock.ts";
+import { nodeFileSystem } from "./seams/file-system.ts";
+import { createNodeSeams } from "./seams/node-seams.ts";
+import type { Reporter } from "./seams/reporter.ts";
+import type { Seams } from "./seams/seams.ts";
+import { createSignals } from "./seams/signals.ts";
+import type { Pause } from "./session/pause.ts";
+import {
+	createFilePause,
+	neverPauseAsync,
+	parsePausePoints,
+	PAUSE_POLL_MS,
+} from "./session/pause.ts";
+import { createStopSource } from "./session/stop-source.ts";
+import { KEEP_HIDDEN_FLAG, keepStudioHiddenAsync } from "./studio/keep-hidden.ts";
+import { runSnapshotLightingAsync } from "./studio/snapshot-lighting.ts";
+import type { SessionRequest } from "./supervisor/channel.ts";
+import { createChannelReporter, encodeMessage, parseSessionRequest } from "./supervisor/channel.ts";
+import type { SupervisorOwner } from "./supervisor/owner-end.ts";
+import { watchOwner } from "./supervisor/owner.ts";
+import { runSupervisorAsync } from "./supervisor/run-supervisor.ts";
+
+/**
+ * Read the request first: a detached supervisor has no owner pipe to watch.
+ *
+ * @returns The request, or the error that reading it gave.
+ */
+function readRequest(): ForgeError | SessionRequest {
+	try {
+		return parseSessionRequest(process.argv[2]);
+	} catch (err) {
+		return toForgeError(err);
+	}
+}
+
+/**
+ * The real seams of a supervisor process.
+ *
+ * @returns Seams that never prompt: the run is not interactive.
+ */
+function createSupervisorSeams(): Seams {
+	// The entry, `supervisor.ts`: from source, its hook loads `.lua`.
+	const entry = process.argv[1];
+	assert(entry !== undefined, "Node runs the supervisor as a script");
+	return createNodeSeams({
+		// Runs from source name a model (`RBX_FORGE_PLUGIN_MODEL`); builds ship
+		// one.
+		forgePluginPath:
+			process.env["RBX_FORGE_PLUGIN_MODEL"] ??
+			fileURLToPath(new URL("forge-plugin/ForgePlugin.rbxm", import.meta.url)),
+		input: process.stdin,
+		nativeDirectory: process.env["RBX_FORGE_NATIVE_DIR"],
+		noInstalledStudio: process.env["RBX_FORGE_TEST_NO_INSTALLED_STUDIO"] === "1",
+		output: process.stderr,
+		supervisorEntry: entry,
+	});
+}
+
+if (process.argv[2] === KEEP_HIDDEN_FLAG) {
+	await keepStudioHiddenAsync(createSupervisorSeams(), process.argv[3] ?? "", process.cwd());
+	process.exit();
+}
+
+if (process.argv[2] === "--watch-hidden-lighting") {
+	await runSnapshotLightingAsync(
+		createSupervisorSeams(),
+		process.argv[3] ?? "",
+		readVariable(process.env, "RBX_FORGE_TEST_SNAPSHOT_LIGHTING_TRACE", process.platform),
+	);
+	process.exit();
+}
+
+const REQUEST = readRequest();
+const REPORT = REQUEST instanceof ForgeError ? undefined : REQUEST.detached?.report;
+
+/**
+ * The `start` that owns this session: the owner pipe's end, and where the
+ * news goes that the session let it go.
+ *
+ * @returns The owner; `undefined` when detached.
+ */
+function watchOwnerPipe(): SupervisorOwner | undefined {
+	if (REPORT !== undefined) {
+		return undefined;
+	}
+
+	const end = createStopSource();
+	watchOwner(process.stdin, end);
+	return {
+		onEnd: end.onStop,
+		onReleased: ({ data, summary }) => {
+			process.stdout.write(encodeMessage({ data, summary, type: "released" }));
+		},
+	};
+}
+
+// Next: the owner pipe and the stop signals, so no stop is ever missed.
+const stop = createStopSource();
+const OWNER = watchOwnerPipe();
+
+createSignals(process).onStop((signal) => {
+	stop.request({ signal, type: "signal" });
+});
+
+// Writes after `start` died fail; the session stops on the pipe's EOF.
+process.stdout.on("error", () => {
+	// Nobody reads the output any more.
+});
+
+const { env } = process;
+const PAUSE_DIRECTORY = env["RBX_FORGE_TEST_PAUSE_DIR"];
+const PAUSE_POINTS = parsePausePoints(env["RBX_FORGE_TEST_PAUSE"]);
+const PAUSE: Pause =
+	PAUSE_DIRECTORY === undefined
+		? neverPauseAsync
+		: createFilePause({
+				clock: nodeClock,
+				directory: PAUSE_DIRECTORY,
+				fileSystem: nodeFileSystem,
+				pid: process.pid,
+				points: PAUSE_POINTS,
+			});
+
+/** What every run of the supervisor gets, but its `onReady`. */
+const SUPERVISE = { owner: OWNER, pause: PAUSE, stop, version: packageJson.version };
+
+/**
+ * Test only (`RBX_FORGE_TEST_PAUSE=block`): once the test writes
+ * `<dir>/block.request`, write `<dir>/block.blocked` (content: this PID)
+ * and block the event loop for good, as a hung supervisor that answers
+ * nothing. Only a kill ends it.
+ *
+ * @param directory - The pause directory.
+ */
+function watchBlockRequest(directory: string): void {
+	const request = path.join(directory, "block.request");
+	setInterval(() => {
+		if (!existsSync(request)) {
+			return;
+		}
+
+		writeFileSync(path.join(directory, "block.blocked"), String(process.pid));
+		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+	}, PAUSE_POLL_MS).unref();
+}
+
+if (PAUSE_DIRECTORY !== undefined && PAUSE_POINTS.has("block")) {
+	watchBlockRequest(PAUSE_DIRECTORY);
+}
+
+/**
+ * Where the supervisor's messages go: to `start` through stdout; when
+ * detached, to the report file until the session is ready, and after that
+ * to stdout (the supervisor log).
+ *
+ * @param report - The report file of a detached supervisor.
+ * @returns The reporter, and what to call once the session is ready.
+ */
+function createOutput(report: string | undefined): { onReady: () => void; reporter: Reporter } {
+	let target = report;
+	const reporter = createChannelReporter((text) => {
+		if (target === undefined) {
+			process.stdout.write(text);
+			return;
+		}
+
+		try {
+			appendFileSync(target, text);
+		} catch {
+			// `forge up` is gone and its report with it; nobody reads this.
+		}
+	});
+	return {
+		onReady: () => {
+			if (target === undefined) {
+				return;
+			}
+
+			rmSync(target, { force: true });
+			target = undefined;
+		},
+		reporter,
+	};
+}
+
+/**
+ * Run the session and write its result to `start` or `up`.
+ *
+ * @returns The exit code: the error's, or 0.
+ */
+async function superviseAsync(): Promise<number> {
+	const { onReady, reporter } = createOutput(REPORT);
+	try {
+		if (REQUEST instanceof ForgeError) {
+			throw REQUEST;
+		}
+
+		const result = await runSupervisorAsync(
+			{
+				cwd: process.cwd(),
+				env,
+				interactive: false,
+				reporter,
+				seams: createSupervisorSeams(),
+			},
+			REQUEST,
+			{ ...SUPERVISE, onReady },
+		);
+		reporter.succeed("start", result);
+		return 0;
+	} catch (err) {
+		const { code, details, exitCode, hint, message } = toForgeError(err);
+		reporter.fail({ code, command: "start", details, exitCode, hint, message });
+		return exitCode;
+	}
+}
+
+process.exitCode = await superviseAsync();
+// The owner pipe keeps stdin open: exit once the result is written out.
+process.stdout.write("", () => {
+	process.exit();
+});

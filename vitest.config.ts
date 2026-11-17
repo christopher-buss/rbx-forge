@@ -1,6 +1,8 @@
 import type { TestProjectInlineConfiguration } from "vitest/config";
 import { defaultExclude, defineConfig } from "vitest/config";
 
+import { luaTextPlugin } from "./src/loaders/lua-text.ts";
+
 const setupFiles = ["./test/setup/jest-extended.ts"];
 
 /** Opt-in real engine synchronization with an owned, gated test plugin. */
@@ -20,7 +22,12 @@ export const unitProject = {
 	test: {
 		name: "unit",
 		clearMocks: true,
-		exclude: [...defaultExclude, "./src/cli.ts", "./src/supervisor.ts"],
+		exclude: [
+			...defaultExclude,
+			"./src/cli.ts",
+			"./src/supervisor.ts",
+			"./src/supervisor-main.ts",
+		],
 		include: ["src/**/*.spec.ts", "scripts/**/*.spec.ts"],
 		// `vi.mock` is banned (lint), so no spec needs a fresh module graph.
 		isolate: false,
@@ -38,11 +45,13 @@ export const unitProject = {
 } satisfies TestProjectInlineConfiguration;
 
 export default defineConfig({
+	plugins: [luaTextPlugin()],
 	test: {
 		coverage: {
 			exclude: [
 				"src/cli.ts",
 				"src/supervisor.ts",
+				"src/supervisor-main.ts",
 				"src/**/*.spec-d.ts",
 				// Hook entries, like `src/cli.ts`, touch the process.
 				"scripts/worktree/{create,remove}.ts",

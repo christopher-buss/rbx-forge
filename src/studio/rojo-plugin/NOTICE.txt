@@ -10,7 +10,8 @@ the root MIT license.
 
 The exact current patched sources are distributed in readable App.lua and
 ServeSession.lua files alongside this notice. The original stock sources are
-available in stock.json here and src/studio/rojo-plugin/stock.json in the forge
-repository at https://github.com/christopher-buss/rbx-forge.
+available in stock/ here and src/studio/rojo-plugin/stock/ in the forge
+repository at https://github.com/christopher-buss/rbx-forge. The patched
+sources there are in src/studio/rojo-plugin/patched/.
 Upstream source files are available at:
 https://github.com/rojo-rbx/rojo/tree/v7.7.1/plugin/src

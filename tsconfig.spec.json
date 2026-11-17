@@ -18,6 +18,7 @@
 	"include": [
 		"src/**/*.spec.ts",
 		"src/**/*.spec-d.ts",
+		"src/lua.d.ts",
 		"test/**/*.ts",
 		"test/fixtures/rojo-plugin-v2.json",
 		"test/fixtures/rojo-plugin-v3.json",

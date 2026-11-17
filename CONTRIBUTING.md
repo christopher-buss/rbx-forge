@@ -92,6 +92,19 @@ set `RBX_FORGE_NATIVE_DIR` to that directory; without it, forge loads the
 - `src/native/addon.ts`: the same surface in TypeScript, written by hand. Change
   it with `lib.rs`.
 
+## Managed Rojo plugin
+
+`src/studio/rojo-plugin/stock/` holds the Rojo plugin sources forge recognizes;
+`patched/` holds the sources forge installs. Their bytes matter, so lint skips
+them. See the patch with:
+
+```bash
+git diff --no-index src/studio/rojo-plugin/stock src/studio/rojo-plugin/patched
+```
+
+Each release that changes `patched/` bumps `VERSION` in
+`src/studio/rojo-plugin-manifest.ts`.
+
 ## Releases
 
 `pnpm release` (bumpp) asks for the next version, then runs the release gate

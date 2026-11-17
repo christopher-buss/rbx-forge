@@ -18,6 +18,8 @@ export default isentinel(
 			".agents/**",
 			".claude/**",
 			"plugin/{build,include,out,.jest-roblox}/**",
+			// Rojo's sources: their bytes are what forge recognizes and installs.
+			"src/studio/rojo-plugin/{stock,patched}/**",
 		],
 		namedConfigs: true,
 		naming: true,
@@ -40,7 +42,11 @@ export default isentinel(
 		// Process entries, like `src/cli.ts`: the config exempts that one by
 		// name.
 		name: "project/process-entries",
-		files: ["src/supervisor.ts", "scripts/worktree/{create,remove}.ts"],
+		files: [
+			"src/supervisor.ts",
+			"src/supervisor-main.ts",
+			"scripts/worktree/{create,remove}.ts",
+		],
 		rules: { "antfu/no-top-level-await": "off" },
 	},
 	{

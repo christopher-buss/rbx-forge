@@ -3,6 +3,7 @@ import { assert, describe, it } from "vitest";
 
 import { configureModelSources } from "../../test/helpers/model-sources.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
+import { stock } from "../../test/helpers/rojo-stock.ts";
 import {
 	createCommandContext,
 	createMemoryFileSystem,
@@ -11,7 +12,6 @@ import {
 	PROJECT,
 } from "../../test/helpers/seams.ts";
 import { prepareRojoPluginAsync } from "./rojo-plugin.ts";
-import stock from "./rojo-plugin/stock.json" with { type: "json" };
 
 function setup(exitCode = 0, app = stock.App) {
 	const memory = createMemoryFileSystem({ "tools/rojo": "" });
