@@ -5,7 +5,7 @@ language: en
 
 ignorePaths:
   - src/studio/rojo-plugin/LICENSE.txt
-  - src/studio/rojo-plugin/stock.json
+  - src/studio/rojo-plugin/stock/**
 
 words:
   - DACL

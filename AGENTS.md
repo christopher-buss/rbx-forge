@@ -84,7 +84,8 @@ test project must pass; on Windows, `pnpm test:plugin` too after a change in
 
 - **Unit** (`src/**/*.spec.ts`, `scripts/**/*.spec.ts`): through a use-case with
   injected seams (`createTestSeams`, `test/helpers/seams.ts`; memfs for files).
-  Never spawns a process. `src/cli.ts` and `src/supervisor.ts` are excluded.
+  Never spawns a process. `src/cli.ts` and `src/supervisor{,-main}.ts` are
+  excluded.
 - **Integration** (`test/integration/`): the supervisor, reaper, addon, locks,
   and IPC through their Node APIs, with real processes. `session-harness.ts`
   builds projects and stages old sessions.
@@ -97,7 +98,7 @@ test project must pass; on Windows, `pnpm test:plugin` too after a change in
   hooks; its header lists the environment variables that shape its process tree.
   `test/helpers/fixture-project.ts` makes e2e projects.
 - **Pause points** make races reproducible: `RBX_FORGE_TEST_PAUSE_DIR` plus
-  `RBX_FORGE_TEST_PAUSE=<points>`, read only in `src/supervisor.ts` and the
+  `RBX_FORGE_TEST_PAUSE=<points>`, read only in `src/supervisor-main.ts` and the
   reaper. A paused process writes `<dir>/<point>.paused`; the test deletes it to
   go on.
 - Rules: `vi.mock` is banned (lint); inject seams. No lifecycle hooks in specs:
@@ -105,8 +106,8 @@ test project must pass; on Windows, `pnpm test:plugin` too after a change in
 
 ## Seams
 
-- `src/cli.ts` and `src/supervisor.ts` are the only modules that touch the
-  process (argv, `process.env`, streams, exit). They build the real `Seams`
+- `src/cli.ts` and `src/supervisor{,-main}.ts` are the only modules that touch
+  the process (argv, `process.env`, streams, exit). They build the real `Seams`
   record (`src/seams/node-seams.ts`); every other module takes it as a required
   argument.
 - A new I/O dependency is a new member of `Seams` (`src/seams/seams.ts`), with a

@@ -3,6 +3,7 @@ import { describe, it, vi } from "vitest";
 
 import { configureModelSources } from "../../test/helpers/model-sources.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
+import { stock } from "../../test/helpers/rojo-stock.ts";
 import {
 	createCommandContext,
 	createMemoryFileSystem,
@@ -14,7 +15,6 @@ import type { StudioDesktop } from "../config/schema.ts";
 import { ForgeError } from "../errors.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
 import { SCRIPTS, VERSION } from "../studio/rojo-plugin.ts";
-import stock from "../studio/rojo-plugin/stock.json" with { type: "json" };
 import { createStatusStore } from "./status.ts";
 import { openStudioAsync } from "./studio-part.ts";
 

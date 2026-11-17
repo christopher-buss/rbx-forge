@@ -16,6 +16,7 @@ import type { ManualClock } from "../../test/helpers/manual-clock.ts";
 import { configureModelSources } from "../../test/helpers/model-sources.ts";
 import { createFakeNative } from "../../test/helpers/native.ts";
 import type { FakeNative, FakeProcess } from "../../test/helpers/native.ts";
+import { stock as stockPlugin } from "../../test/helpers/rojo-stock.ts";
 import {
 	createCommandContext,
 	createMemoryFileSystem,
@@ -47,7 +48,6 @@ import { createStopSource } from "../session/stop-source.ts";
 import { STUDIO_OPEN_BOUND_MS } from "../session/studio-part.ts";
 import { FILE_POLL_MS } from "../session/worker-context.ts";
 import type { StudioLauncher } from "../studio/launcher.ts";
-import stockPlugin from "../studio/rojo-plugin/stock.json" with { type: "json" };
 import type { SessionRequest } from "./channel.ts";
 import { endpointFor, endpointKey } from "./endpoint.ts";
 import { runSupervisorAsync } from "./run-supervisor.ts";

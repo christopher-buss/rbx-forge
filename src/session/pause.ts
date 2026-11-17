@@ -47,7 +47,7 @@ export async function neverPauseAsync(): Promise<void> {
 /**
  * A pause for tests: at a listed point it writes `<directory>/<point>.paused`
  * (content: this PID) and waits until the test deletes that file. Only a test
- * environment variable enables it (see `src/supervisor.ts`).
+ * environment variable enables it (see `src/supervisor-main.ts`).
  *
  * @param options - The pause directory, points, clock, and file system.
  * @returns A pause that waits at the listed points.

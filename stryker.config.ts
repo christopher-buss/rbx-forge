@@ -28,7 +28,7 @@ export default {
 		"!src/**/*.spec-d.ts",
 		"!src/**/*.d.ts",
 		"!src/cli.ts",
-		"!src/supervisor.ts",
+		"!src/supervisor{,-main}.ts",
 	],
 	plugins: ["@stryker-mutator/vitest-runner", "@stryker-mutator/typescript-checker"],
 	reporters: ["html", "clear-text", "progress"],
