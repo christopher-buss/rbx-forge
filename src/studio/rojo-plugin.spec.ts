@@ -11,7 +11,13 @@ import {
 	createTestSeams,
 	PROJECT,
 } from "../../test/helpers/seams.ts";
-import { prepareRojoPluginAsync } from "./rojo-plugin.ts";
+import { prepareRojoPluginAsync, SCRIPTS } from "./rojo-plugin.ts";
+
+const NON_ASCII = /[\u0080-\u{10FFFF}]/gu;
+
+function nonAscii(text: string): Array<string> {
+	return text.match(NON_ASCII) ?? [];
+}
 
 function setup(exitCode = 0, app = stock.App) {
 	const memory = createMemoryFileSystem({ "tools/rojo": "" });
@@ -229,9 +235,23 @@ describe("wsl managed Rojo plugin preparation", () => {
 		).resolves.toEqual({ autoConnect: true, source: "forge", syncAcknowledgement: true });
 		expect(specs.map(({ args }) => args)).toEqual([["plugin", "install"]]);
 		expect(memory.files()["windows/plugins/RojoManagedPlugin.rbxm"]).toContain(
-			"-- rbx-forge patch 5 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n",
+			"-- rbx-forge patch 6 stock f7facea2cd39479ede1349b0042633c8228b8a41d602831f1928a1e43f7b1f15\n",
 		);
 		expect(memory.fileSystem.readdirSync(path.join(PROJECT, ".forge"))).toEqual([]);
 		expect(context.env["HOME"]).toBe("/original");
 	});
+});
+
+describe("patched Rojo plugin sources", () => {
+	it.for(["App", "ServeSession"] as const)(
+		"should keep the non-ASCII text of stock %s",
+		(name, { expect }) => {
+			expect.assertions(1);
+
+			const patched = SCRIPTS.find((script) => script.name === name);
+			assert(patched !== undefined);
+
+			expect(nonAscii(patched.source)).toStrictEqual(nonAscii(stock[name]));
+		},
+	);
 });

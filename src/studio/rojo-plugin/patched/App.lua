@@ -77,7 +77,7 @@ function App:init()
 
 		Log.warn(
 			string.format(
-				"You've undone '%s'.\nIf this was not intended, please Redo in the topbar or with Ctrl/Ã¢Å’Ëœ+Y.",
+				"You've undone '%s'.\nIf this was not intended, please Redo in the topbar or with Ctrl/⌘+Y.",
 				action
 			)
 		)

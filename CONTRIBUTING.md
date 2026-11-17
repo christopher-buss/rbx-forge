@@ -103,7 +103,8 @@ git diff --no-index src/studio/rojo-plugin/stock src/studio/rojo-plugin/patched
 ```
 
 Each release that changes `patched/` bumps `VERSION` in
-`src/studio/rojo-plugin-manifest.ts`.
+`src/studio/rojo-plugin-manifest.ts` and adds the SHA-256 of the replaced bodies
+to `legacyHashes`, so forge upgrades that patch in place.
 
 ## Releases
 

@@ -29,13 +29,11 @@ const SOURCES = { App: patchedApp, ServeSession: patchedServeSession };
 /** Script bodies and provenance for the source distribution. */
 export const SCRIPTS: ReadonlyArray<{
 	hash: string;
+	legacyHashes: Readonly<Partial<Record<number, string>>>;
 	name: string;
-	olderHash: string;
-	oldestHash: string;
-	previousHash: string;
 	source: string;
-}> = PATCHES.map(({ name, hash, olderHash, oldestHash, previousHash }) => {
-	return { name, hash, olderHash, oldestHash, previousHash, source: SOURCES[name] };
+}> = PATCHES.map(({ name, hash, legacyHashes }) => {
+	return { name, hash, legacyHashes, source: SOURCES[name] };
 });
 
 const MANUAL: PluginCapabilities = {
@@ -151,15 +149,11 @@ function checkProtocol(context: CommandContext, source: string, serverProtocol: 
 function recognizes(
 	{
 		hash,
-		olderHash,
-		oldestHash,
-		previousHash,
+		legacyHashes,
 		source: original,
 	}: {
 		hash: string;
-		olderHash: string;
-		oldestHash: string;
-		previousHash: string;
+		legacyHashes: Readonly<Partial<Record<number, string>>>;
 		source: string;
 	},
 	source: string,
@@ -171,12 +165,7 @@ function recognizes(
 
 	const body = source.slice(mark[0].length);
 	const version = Number(mark[1]);
-	const legacyHashes = new Map([
-		[VERSION - 1, previousHash],
-		[VERSION - 2, olderHash],
-		[VERSION - 3, oldestHash],
-	]);
-	const legacyHash = legacyHashes.get(version) ?? hash;
+	const legacyHash = legacyHashes[version] ?? hash;
 	const isKnownBody =
 		version === VERSION
 			? body === original
