@@ -209,8 +209,8 @@ catalogs:
       specifier: 1.92.0
       version: 1.92.0
     oxlint-tsgolint:
-      specifier: 7.0.2003
-      version: 7.0.2003
+      specifier: 7.0.2007
+      version: 7.0.2007
     publint:
       specifier: 0.3.25
       version: 0.3.25
@@ -350,7 +350,7 @@ importers:
         version: 21.2.3
       '@isentinel/eslint-config':
         specifier: catalog:lint
-        version: 6.3.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.14.0)(oxc-parser@0.156.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.92.0)(supports-color@10.2.2)(typescript@6.0.3)
+        version: 6.3.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.14.0)(oxc-parser@0.156.0)(oxlint-tsgolint@7.0.2007)(oxlint@1.92.0)(supports-color@10.2.2)(typescript@6.0.3)
       '@isentinel/machine-budget':
         specifier: catalog:mutation
         version: 0.2.0
@@ -422,10 +422,10 @@ importers:
         version: 4.80.1
       oxlint:
         specifier: catalog:lint
-        version: 1.92.0(oxlint-tsgolint@7.0.2003)
+        version: 1.92.0(oxlint-tsgolint@7.0.2007)
       oxlint-tsgolint:
         specifier: catalog:lint
-        version: 7.0.2003
+        version: 7.0.2007
       publint:
         specifier: catalog:lint
         version: 0.3.25
@@ -2663,33 +2663,33 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@oxlint-tsgolint/darwin-arm64@7.0.2003':
-    resolution: {integrity: sha512-TgV33rXr6ueXBwvc+0nssUkTBSXHJxv77I8p4RCjDjCnvexHtmoPiudVRDfj3S3puMDdeQdHW6jdUgUPy3nr/w==}
+  '@oxlint-tsgolint/darwin-arm64@7.0.2007':
+    resolution: {integrity: sha512-bjNxPFyu1wNK74epHzXrtVLrj7oEuB8jQvJZDSia2d5EZ/0YgnyhI37E9U530IUZlNCqlTWjko1iT3CKAYF9+A==}
     cpu: [arm64]
     os: [darwin]
 
-  '@oxlint-tsgolint/darwin-x64@7.0.2003':
-    resolution: {integrity: sha512-hY3FMAjIaPDdK3FNxyRXRfHPOFeoBn6dmnLyKZgQ2IbTTD1adXhl6PfCIqHhCPvurigv7nf7mYuWZZ19MmJzmg==}
+  '@oxlint-tsgolint/darwin-x64@7.0.2007':
+    resolution: {integrity: sha512-dCd7mzk2FeTaU46LLeXy5mQyEFICaPqlew/LpehNzEuL86D0jTYlwZHbibRqdRrvkSNgq1szz/7014FIHgyV1g==}
     cpu: [x64]
     os: [darwin]
 
-  '@oxlint-tsgolint/linux-arm64@7.0.2003':
-    resolution: {integrity: sha512-eAET4JpyfBbg8SO0K74o4R55tEjVC292pIyxGOw2XGf8x/HrPNyxwQ478jMYOM54FIVOHc8sJ6VRHxluy6lucw==}
+  '@oxlint-tsgolint/linux-arm64@7.0.2007':
+    resolution: {integrity: sha512-qb0XUQXuTmQ8H++zsx/tQitG0/fU3BE16KGp1qXExeDgRzEc7WIlCuN1i+rmA40lty9gQs+x3a73BFODVhTZqA==}
     cpu: [arm64]
     os: [linux]
 
-  '@oxlint-tsgolint/linux-x64@7.0.2003':
-    resolution: {integrity: sha512-GXdyO/XyqDJ3s/llR/oOktLsYNjZtWSQBy0JMc+/0gsNPvTcseKPhn9c6KcFyWmnr6H4vljYALbujonqSzzEGw==}
+  '@oxlint-tsgolint/linux-x64@7.0.2007':
+    resolution: {integrity: sha512-75vx0067HSgxq/HEZzlHwqhcujn3bshg43fVLTx604jZdZZMQfPVCcxTh2RTEShP7ACT1PRty6vboZlWh5RtEA==}
     cpu: [x64]
     os: [linux]
 
-  '@oxlint-tsgolint/win32-arm64@7.0.2003':
-    resolution: {integrity: sha512-TWauXnPfet0VgpmrstoAK58eJ4gbuwPUuUTQmYQAzE/RG1CpnxXtrKUJULf6lyerPE4KN3gM+DflIA1hOH+38Q==}
+  '@oxlint-tsgolint/win32-arm64@7.0.2007':
+    resolution: {integrity: sha512-6zl7I+BvScfOPtnPtSEP5JA+z8NkDPGd47YnQChL5lLF/Dzs7Rasr1G+q0zGlQcP8OEgW43hW4QlUTXxPfD13Q==}
     cpu: [arm64]
     os: [win32]
 
-  '@oxlint-tsgolint/win32-x64@7.0.2003':
-    resolution: {integrity: sha512-DoRmfe7j8VqNlukp8liRVW45GQDhzRccNenjD/pdzelgtffW47pCMd1xbJLkPaPbKnTwID3onn3VZlL7JbebEA==}
+  '@oxlint-tsgolint/win32-x64@7.0.2007':
+    resolution: {integrity: sha512-VptFHYhBm0SIWCUkx89hmTrKVOQsDg0iB1YE3EBlvRRtCHGUd3pU1kMxPBg1wOd83ZMmIn7zB6maBROtpmrP5g==}
     cpu: [x64]
     os: [win32]
 
@@ -5224,8 +5224,8 @@ packages:
     peerDependencies:
       typescript: '>=5 <8'
 
-  oxlint-tsgolint@7.0.2003:
-    resolution: {integrity: sha512-VnK4zlqgmgq/7ZcjzCk/WpN8kKFsYGcB85Io9qT3wL4K8Un3RKmJkp793crNETieMusPMKOA4a+Mw2wbteI6TQ==}
+  oxlint-tsgolint@7.0.2007:
+    resolution: {integrity: sha512-i8X2qf6VVqFzoNVP34joMKuZpO6T2uXMOgKJaSPFc6p+E3FTnbIGPRbI8K4ZApmtDTMu2CIeGfpzeK1zzGwfnA==}
     hasBin: true
 
   oxlint@1.92.0:
@@ -6736,7 +6736,7 @@ snapshots:
       semver: 7.8.5
     optionalDependencies:
       eslint: 10.14.0(jiti@2.7.0)(supports-color@10.2.2)
-      oxlint: 1.92.0(oxlint-tsgolint@7.0.2003)
+      oxlint: 1.92.0(oxlint-tsgolint@7.0.2007)
 
   '@emnapi/core@1.11.2':
     dependencies:
@@ -7059,7 +7059,7 @@ snapshots:
 
   '@isentinel/dict-roblox@1.0.24': {}
 
-  '@isentinel/eslint-config@6.3.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.14.0)(oxc-parser@0.156.0)(oxlint-tsgolint@7.0.2003)(oxlint@1.92.0)(supports-color@10.2.2)(typescript@6.0.3)':
+  '@isentinel/eslint-config@6.3.0(@vitest/eslint-plugin@1.6.28)(eslint-plugin-jest-extended@3.0.1)(eslint-plugin-jest@29.17.0)(eslint-plugin-n@18.5.0)(eslint@10.14.0)(oxc-parser@0.156.0)(oxlint-tsgolint@7.0.2007)(oxlint@1.92.0)(supports-color@10.2.2)(typescript@6.0.3)':
     dependencies:
       '@antfu/install-pkg': 2.0.1
       '@clack/prompts': 1.7.0
@@ -7110,7 +7110,7 @@ snapshots:
       local-pkg: 1.2.1
       oxfmt: 0.72.0
       oxlint-plugin-eslint: 1.78.0
-      oxlint-plugin-oxlint-comments: 0.1.0(oxlint-tsgolint@7.0.2003)
+      oxlint-plugin-oxlint-comments: 0.1.0(oxlint-tsgolint@7.0.2007)
       prettier: 3.9.6
       semver: 7.8.5
       toml-eslint-parser: 1.0.3
@@ -7122,8 +7122,8 @@ snapshots:
       eslint-plugin-jest: 29.17.0(@typescript-eslint/eslint-plugin@8.72.2)(eslint@10.14.0)(supports-color@10.2.2)(typescript@6.0.3)
       eslint-plugin-jest-extended: 3.0.1(eslint@10.14.0)(supports-color@10.2.2)(typescript@6.0.3)
       eslint-plugin-n: 18.5.0(eslint@10.14.0)(typescript@6.0.3)
-      oxlint: 1.92.0(oxlint-tsgolint@7.0.2003)
-      oxlint-tsgolint: 7.0.2003
+      oxlint: 1.92.0(oxlint-tsgolint@7.0.2007)
+      oxlint-tsgolint: 7.0.2007
     transitivePeerDependencies:
       - '@eslint/json'
       - oxc-parser
@@ -7984,22 +7984,22 @@ snapshots:
   '@oxfmt/binding-win32-x64-msvc@0.72.0':
     optional: true
 
-  '@oxlint-tsgolint/darwin-arm64@7.0.2003':
+  '@oxlint-tsgolint/darwin-arm64@7.0.2007':
     optional: true
 
-  '@oxlint-tsgolint/darwin-x64@7.0.2003':
+  '@oxlint-tsgolint/darwin-x64@7.0.2007':
     optional: true
 
-  '@oxlint-tsgolint/linux-arm64@7.0.2003':
+  '@oxlint-tsgolint/linux-arm64@7.0.2007':
     optional: true
 
-  '@oxlint-tsgolint/linux-x64@7.0.2003':
+  '@oxlint-tsgolint/linux-x64@7.0.2007':
     optional: true
 
-  '@oxlint-tsgolint/win32-arm64@7.0.2003':
+  '@oxlint-tsgolint/win32-arm64@7.0.2007':
     optional: true
 
-  '@oxlint-tsgolint/win32-x64@7.0.2003':
+  '@oxlint-tsgolint/win32-x64@7.0.2007':
     optional: true
 
   '@oxlint/binding-android-arm-eabi@1.92.0':
@@ -9487,7 +9487,7 @@ snapshots:
     optionalDependencies:
       oxc-parser: 0.156.0
       oxfmt: 0.72.0
-      oxlint: 1.92.0(oxlint-tsgolint@7.0.2003)
+      oxlint: 1.92.0(oxlint-tsgolint@7.0.2007)
     transitivePeerDependencies:
       - supports-color
 
@@ -10836,11 +10836,11 @@ snapshots:
 
   oxlint-plugin-eslint@1.78.0: {}
 
-  oxlint-plugin-oxlint-comments@0.1.0(oxlint-tsgolint@7.0.2003):
+  oxlint-plugin-oxlint-comments@0.1.0(oxlint-tsgolint@7.0.2007):
     dependencies:
       escape-string-regexp: 4.0.0
       ignore: 7.0.10
-      oxlint: 1.92.0(oxlint-tsgolint@7.0.2003)
+      oxlint: 1.92.0(oxlint-tsgolint@7.0.2007)
     transitivePeerDependencies:
       - oxlint-tsgolint
       - vite-plus
@@ -10851,16 +10851,16 @@ snapshots:
       type-fest: 5.7.0
       typescript: 6.0.3
 
-  oxlint-tsgolint@7.0.2003:
+  oxlint-tsgolint@7.0.2007:
     optionalDependencies:
-      '@oxlint-tsgolint/darwin-arm64': 7.0.2003
-      '@oxlint-tsgolint/darwin-x64': 7.0.2003
-      '@oxlint-tsgolint/linux-arm64': 7.0.2003
-      '@oxlint-tsgolint/linux-x64': 7.0.2003
-      '@oxlint-tsgolint/win32-arm64': 7.0.2003
-      '@oxlint-tsgolint/win32-x64': 7.0.2003
+      '@oxlint-tsgolint/darwin-arm64': 7.0.2007
+      '@oxlint-tsgolint/darwin-x64': 7.0.2007
+      '@oxlint-tsgolint/linux-arm64': 7.0.2007
+      '@oxlint-tsgolint/linux-x64': 7.0.2007
+      '@oxlint-tsgolint/win32-arm64': 7.0.2007
+      '@oxlint-tsgolint/win32-x64': 7.0.2007
 
-  oxlint@1.92.0(oxlint-tsgolint@7.0.2003):
+  oxlint@1.92.0(oxlint-tsgolint@7.0.2007):
     optionalDependencies:
       '@oxlint/binding-android-arm-eabi': 1.92.0
       '@oxlint/binding-android-arm64': 1.92.0
@@ -10881,7 +10881,7 @@ snapshots:
       '@oxlint/binding-win32-arm64-msvc': 1.92.0
       '@oxlint/binding-win32-ia32-msvc': 1.92.0
       '@oxlint/binding-win32-x64-msvc': 1.92.0
-      oxlint-tsgolint: 7.0.2003
+      oxlint-tsgolint: 7.0.2007
 
   p-event@6.0.1:
     dependencies:
