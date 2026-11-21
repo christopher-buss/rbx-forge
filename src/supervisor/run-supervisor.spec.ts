@@ -5877,8 +5877,8 @@ describe("idle timeout", () => {
 				};
 			},
 		});
-		run.native.addon.assemblePlace = (...args) => {
-			run.memory.fileSystem.writeFileSync(args[4], "captured place");
+		run.native.addon.assemblePlace = (...[_base, _model, _services, _declared, output]) => {
+			run.memory.fileSystem.writeFileSync(output, "captured place");
 		};
 
 		await flushAsync();

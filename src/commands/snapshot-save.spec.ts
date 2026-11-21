@@ -38,8 +38,8 @@ function snapshotSave() {
 			onSaveRequest: "throw",
 		},
 	});
-	native.addon.assemblePlace = (...args) => {
-		memory.fileSystem.writeFileSync(args[4], "captured snapshot");
+	native.addon.assemblePlace = (...[_base, _model, _services, _declared, output]) => {
+		memory.fileSystem.writeFileSync(output, "captured snapshot");
 	};
 
 	const listener = createFakeCapture({ model: new Uint8Array([1]), services: [] });

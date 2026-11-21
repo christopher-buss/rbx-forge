@@ -67,8 +67,12 @@ describe(saveSessionStudioAsync, () => {
 				fileSystem: memory.fileSystem,
 				native: () => {
 					return fromPartial({
-						assemblePlace: (...args: Parameters<NativeAddon["assemblePlace"]>) => {
-							memory.fileSystem.writeFileSync(args[4], "captured place");
+						assemblePlace: (
+							...[_base, _model, _services, _declared, output]: Parameters<
+								NativeAddon["assemblePlace"]
+							>
+						) => {
+							memory.fileSystem.writeFileSync(output, "captured place");
 						},
 					});
 				},
