@@ -275,7 +275,8 @@ pub fn assemble_place(
         for index in &service.roots {
             capture.transfer(roots[*index], &mut dom, parent);
         }
-        let node = declared.0.get(&service.name).unwrap_or(&empty);
+        let base_name = &dom.get_by_ref(parent).expect("the service exists").name;
+        let node = declared.0.get(base_name).unwrap_or(&empty);
         for child in base_children {
             restore_declared(&mut dom, child, parent, node, &mut replacements);
         }
@@ -824,6 +825,44 @@ mod tests {
         let kept = child(&assembled, service, "Kept");
         assert_eq!(assembled.get_by_ref(kept).unwrap().class, "Configuration");
         assert_eq!(names(kept), ["Nested"]);
+    }
+
+    #[test]
+    fn looks_up_declared_nodes_by_the_base_service_name() {
+        let directory = tempfile::tempdir().unwrap();
+        let base_path = directory.path().join("base.rbxl");
+        let output_path = directory.path().join("place.rbxl");
+        write_model(
+            &base_path,
+            &WeakDom::new(
+                InstanceBuilder::new("DataModel").with_child(
+                    InstanceBuilder::new("Lighting")
+                        .with_name("Environment")
+                        .with_child(InstanceBuilder::new("Sky").with_name("Sky"))
+                        .with_child(InstanceBuilder::new("Folder").with_name("FromFile")),
+                ),
+            ),
+        );
+
+        assemble_place(
+            &base_path,
+            &model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel"))),
+            r#"[{"name":"Lighting","roots":[]}]"#,
+            r#"{"Environment":{"Sky":{}}}"#,
+            &output_path,
+        )
+        .unwrap();
+
+        let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
+        let lighting = child(&assembled, assembled.root_ref(), "Environment");
+        let children: Vec<_> = assembled
+            .get_by_ref(lighting)
+            .unwrap()
+            .children()
+            .iter()
+            .map(|referent| assembled.get_by_ref(*referent).unwrap().name.clone())
+            .collect();
+        assert_eq!(children, ["Sky"]);
     }
 
     #[test]
