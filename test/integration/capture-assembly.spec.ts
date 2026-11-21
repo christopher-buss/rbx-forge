@@ -245,4 +245,35 @@ describe("native capture assembly", () => {
 			expect(existsSync(path.join(directory, bench))).toBe(false);
 		},
 	);
+
+	it("should keep a declared node and drop its file-derived child missing from the capture", ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const bench = path.join("Map", "Bench.model.json");
+		const { base, capture, declared, directory, output } = makeAssembly(
+			{ Workspace: { $className: "Workspace", Map: { $path: "Map" } } },
+			{ [bench]: '{"className":"Model"}' },
+		);
+		native.assemblePlace(
+			base,
+			capture,
+			JSON.stringify([
+				{ name: "ServerScriptService", roots: [0] },
+				{ name: "Workspace", roots: [] },
+			]),
+			declared,
+			output,
+		);
+		const syncback = spawnSync(
+			"rojo",
+			["syncback", "base.project.json", "--input", output, "--non-interactive"],
+			{ cwd: directory, encoding: "utf8", timeout: 10_000, windowsHide: true },
+		);
+		assert(syncback.status === 0, syncback.stderr);
+
+		expect(existsSync(path.join(directory, "Map"))).toBe(true);
+		expect(existsSync(path.join(directory, bench))).toBe(false);
+	});
 });
