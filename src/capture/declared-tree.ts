@@ -22,13 +22,21 @@ export function readDeclaredTree(fileSystem: FileSystem, projectPath: string): D
 	return projectTree(fileSystem, projectPath, new Set());
 }
 
+/**
+ * A null prototype lets any node name, even `__proto__`, be an own key.
+ * @returns An empty tree without a prototype.
+ */
+function emptyTree(): DeclaredTree {
+	return Object.create(null);
+}
+
 function projectTree(
 	fileSystem: FileSystem,
 	projectPath: string,
 	visiting: Set<string>,
 ): DeclaredTree {
 	if (visiting.has(projectPath)) {
-		return {};
+		return emptyTree();
 	}
 
 	const content = stripJsonComments(fileSystem.readFileSync(projectPath, "utf8"), {
@@ -42,16 +50,21 @@ function projectTree(
 	return tree;
 }
 
+function isOptionalPath(target: unknown): target is { optional: unknown } {
+	return typeof target === "object" && target !== null && "optional" in target;
+}
+
 function nestedProject(
 	fileSystem: FileSystem,
 	target: unknown,
 	directory: string,
 ): string | undefined {
-	if (typeof target !== "string") {
+	const file = isOptionalPath(target) ? target.optional : target;
+	if (typeof file !== "string") {
 		return undefined;
 	}
 
-	const resolved = path.resolve(directory, target);
+	const resolved = path.resolve(directory, file);
 	if (PROJECT_FILE.test(resolved)) {
 		return resolved;
 	}
@@ -62,9 +75,9 @@ function nestedProject(
 }
 
 function mergeTrees(left: DeclaredTree, right: DeclaredTree): DeclaredTree {
-	const merged = { ...left };
+	const merged = Object.assign(emptyTree(), left);
 	for (const [name, child] of Object.entries(right)) {
-		merged[name] = mergeTrees(merged[name] ?? {}, child);
+		merged[name] = mergeTrees(merged[name] ?? emptyTree(), child);
 	}
 
 	return merged;
@@ -77,7 +90,7 @@ function nodeTree(
 	visiting: Set<string>,
 ): DeclaredTree {
 	const nested = nestedProject(fileSystem, node["$path"], directory);
-	const tree = nested === undefined ? {} : projectTree(fileSystem, nested, visiting);
+	const tree = nested === undefined ? emptyTree() : projectTree(fileSystem, nested, visiting);
 	for (const [name, child] of Object.entries(node)) {
 		if (name.startsWith("$")) {
 			continue;
@@ -90,7 +103,7 @@ function nodeTree(
 			directory,
 			visiting,
 		);
-		tree[name] = mergeTrees(tree[name] ?? {}, declared);
+		tree[name] = mergeTrees(tree[name] ?? emptyTree(), declared);
 	}
 
 	return tree;

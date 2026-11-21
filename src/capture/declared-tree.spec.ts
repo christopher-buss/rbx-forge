@@ -12,7 +12,8 @@ function declaredTree(files: Record<string, object | string>) {
 			}),
 		),
 	);
-	return readDeclaredTree(fileSystem, path.join(PROJECT, "default.project.json"));
+	// The native assembler receives the tree as JSON.
+	return JSON.stringify(readDeclaredTree(fileSystem, path.join(PROJECT, "default.project.json")));
 }
 
 describe(readDeclaredTree, () => {
@@ -30,7 +31,7 @@ describe(readDeclaredTree, () => {
 				},
 				"Workspace/Bench.model.json": '{"className":"Model"}',
 			}),
-		).toStrictEqual({ ServerStorage: { Saved: {} }, Workspace: {} });
+		).toBe(JSON.stringify({ ServerStorage: { Saved: {} }, Workspace: {} }));
 	});
 
 	it("declares the tree of a nested project file relative to its own directory", ({ expect }) => {
@@ -51,7 +52,9 @@ describe(readDeclaredTree, () => {
 					},
 				},
 			}),
-		).toStrictEqual({ Workspace: { Map: { Deep: {} }, Own: { Nested: {} }, Spawn: {} } });
+		).toBe(
+			JSON.stringify({ Workspace: { Map: { Deep: {} }, Own: { Nested: {} }, Spawn: {} } }),
+		);
 	});
 
 	it("stops at a project that includes itself", ({ expect }) => {
@@ -61,6 +64,31 @@ describe(readDeclaredTree, () => {
 			declaredTree({
 				"default.project.json": { tree: { Loop: { $path: "." }, Workspace: {} } },
 			}),
-		).toStrictEqual({ Loop: {}, Workspace: {} });
+		).toBe(JSON.stringify({ Loop: {}, Workspace: {} }));
+	});
+
+	it("declares the nested project of an optional $path", ({ expect }) => {
+		expect.assertions(1);
+
+		expect(
+			declaredTree({
+				"default.project.json": {
+					tree: { Workspace: { $path: { optional: "world.project.json" } } },
+				},
+				"world.project.json": { tree: { Map: {} } },
+			}),
+		).toBe(JSON.stringify({ Workspace: { Map: {} } }));
+	});
+
+	it("keeps node names that match Object.prototype keys", ({ expect }) => {
+		expect.assertions(1);
+
+		expect(
+			declaredTree({
+				"default.project.json": `{
+					"tree": { "Workspace": { "__proto__": { "Inner": {} }, "constructor": {} } }
+				}`,
+			}),
+		).toBe('{"Workspace":{"__proto__":{"Inner":{}},"constructor":{}}}');
 	});
 });
