@@ -47,18 +47,20 @@ pub fn native_version() -> String {
 ///
 /// # Errors
 ///
-/// When either model is unreadable, roots are invalid, or the output cannot be replaced.
+/// When either model is unreadable, roots or declared names are invalid, or the output cannot be replaced.
 #[napi]
 pub fn assemble_place(
     base_path: String,
     model: Uint8Array,
     services_json: String,
+    declared_json: String,
     output_path: String,
 ) -> Result<()> {
     capture::assemble_place(
         Path::new(&base_path),
         model.as_ref(),
         &services_json,
+        &declared_json,
         Path::new(&output_path),
     )
     .map_err(|err| to_napi(&format!("assemble place in {output_path}"), &err))

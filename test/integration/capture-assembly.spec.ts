@@ -1,8 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, readdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { assert, describe, it } from "vitest";
 
+import { readDeclaredTree } from "../../src/capture/declared-tree.ts";
+import { nodeFileSystem } from "../../src/seams/file-system.ts";
 import { loadRealNative } from "../helpers/real-native.ts";
 import { makeTemporaryDirectory } from "../helpers/temporary-directory.ts";
 
@@ -10,13 +12,18 @@ const native = loadRealNative();
 const FIXTURE = path.join(import.meta.dirname, "../fixtures/models/scripts.rbxm");
 const SERVICES = JSON.stringify([{ name: "ServerScriptService", roots: [0] }]);
 
-function makeAssembly(extraTree: Record<string, unknown> = {}): {
+function makeAssembly(
+	extraTree: Record<string, unknown> = {},
+	files: Record<string, string> = {},
+): {
 	base: string;
 	capture: Uint8Array;
+	declared: string;
 	directory: string;
 	output: string;
 } {
 	const directory = makeTemporaryDirectory({
+		...files,
 		"base.project.json": JSON.stringify({
 			name: "CaptureAssembly",
 			tree: {
@@ -48,7 +55,10 @@ function makeAssembly(extraTree: Record<string, unknown> = {}): {
 		windowsHide: true,
 	});
 	assert(build.status === 0, build.error?.message ?? build.stderr);
-	return { base, capture: readFileSync(FIXTURE), directory, output };
+	const declared = JSON.stringify(
+		readDeclaredTree(nodeFileSystem, path.join(directory, "base.project.json")),
+	);
+	return { base, capture: readFileSync(FIXTURE), declared, directory, output };
 }
 
 describe("native capture assembly", () => {
@@ -66,7 +76,7 @@ describe("native capture assembly", () => {
 		({ property }, { expect }) => {
 			expect.assertions(5);
 
-			const { base, capture, directory, output } = makeAssembly({
+			const { base, capture, declared, directory, output } = makeAssembly({
 				Lighting: {
 					$attributes: { Removed: true },
 					$className: "Lighting",
@@ -87,6 +97,7 @@ describe("native capture assembly", () => {
 						unreadableProperties: ["Technology"],
 					},
 				]),
+				declared,
 				output,
 			);
 			const projectPath = path.join(directory, "base.project.json");
@@ -115,9 +126,9 @@ describe("native capture assembly", () => {
 	it("should save captured script edits and restore a missing declared script", ({ expect }) => {
 		expect.assertions(2);
 
-		const { base, capture, output } = makeAssembly();
+		const { base, capture, declared, output } = makeAssembly();
 
-		native.assemblePlace(base, capture, SERVICES, output);
+		native.assemblePlace(base, capture, SERVICES, declared, output);
 
 		expect(
 			native.readModelScriptSources(output, [
@@ -135,7 +146,7 @@ describe("native capture assembly", () => {
 	it("should reject invalid roots and keep the existing place unchanged", ({ expect }) => {
 		expect.assertions(3);
 
-		const { base, capture, directory, output } = makeAssembly();
+		const { base, capture, declared, directory, output } = makeAssembly();
 		copyFileSync(base, output);
 		const original = readFileSync(output);
 
@@ -144,6 +155,7 @@ describe("native capture assembly", () => {
 				base,
 				capture,
 				JSON.stringify([{ name: "ServerScriptService", roots: [1] }]),
+				declared,
 				output,
 			);
 		}).toThrow(/assemble place.*capture root index is out of range/u);
@@ -158,11 +170,11 @@ describe("native capture assembly", () => {
 	it("should report an unreadable capture without replacing the place", ({ expect }) => {
 		expect.assertions(2);
 
-		const { base } = makeAssembly();
+		const { base, declared } = makeAssembly();
 		const original = readFileSync(base);
 
 		expect(() => {
-			native.assemblePlace(base, new Uint8Array([1, 2, 3]), SERVICES, base);
+			native.assemblePlace(base, new Uint8Array([1, 2, 3]), SERVICES, declared, base);
 		}).toThrow(/assemble place/u);
 		expect(readFileSync(base)).toStrictEqual(original);
 	});
@@ -172,7 +184,7 @@ describe("native capture assembly", () => {
 	}) => {
 		expect.assertions(2);
 
-		const { base, output } = makeAssembly();
+		const { base, declared, output } = makeAssembly();
 		copyFileSync(base, output);
 		const original = readFileSync(output);
 		const model = readFileSync(
@@ -184,9 +196,84 @@ describe("native capture assembly", () => {
 				base,
 				model,
 				JSON.stringify([{ name: "Workspace", roots: [0, 1] }]),
+				declared,
 				output,
 			);
 		}).toThrow(/ForgeReferenceAttributeFixture\.Attributes/u);
 		expect(readFileSync(output)).toStrictEqual(original);
+	});
+
+	it.for([
+		{ name: "a directory", files: {}, workspace: { $path: "Workspace" } },
+		{
+			name: "a nested project",
+			files: {
+				"workspace.project.json": JSON.stringify({
+					name: "World",
+					tree: { $path: "Workspace" },
+				}),
+			},
+			workspace: { $path: "workspace.project.json" },
+		},
+	])(
+		"should drop a file-derived model deleted in Studio when Workspace comes from $name",
+		({ files, workspace }, { expect }) => {
+			expect.assertions(1);
+
+			const bench = path.join("Workspace", "Bench.model.json");
+			const { base, capture, declared, directory, output } = makeAssembly(
+				{ Workspace: workspace },
+				{ ...files, [bench]: '{"className":"Model"}' },
+			);
+			native.assemblePlace(
+				base,
+				capture,
+				JSON.stringify([
+					{ name: "ServerScriptService", roots: [0] },
+					{ name: "Workspace", roots: [] },
+				]),
+				declared,
+				output,
+			);
+			const syncback = spawnSync(
+				"rojo",
+				["syncback", "base.project.json", "--input", output, "--non-interactive"],
+				{ cwd: directory, encoding: "utf8", timeout: 10_000, windowsHide: true },
+			);
+			assert(syncback.status === 0, syncback.stderr);
+
+			expect(existsSync(path.join(directory, bench))).toBe(false);
+		},
+	);
+
+	it("should keep a declared node and drop its file-derived child missing from the capture", ({
+		expect,
+	}) => {
+		expect.assertions(2);
+
+		const bench = path.join("Map", "Bench.model.json");
+		const { base, capture, declared, directory, output } = makeAssembly(
+			{ Workspace: { $className: "Workspace", Map: { $path: "Map" } } },
+			{ [bench]: '{"className":"Model"}' },
+		);
+		native.assemblePlace(
+			base,
+			capture,
+			JSON.stringify([
+				{ name: "ServerScriptService", roots: [0] },
+				{ name: "Workspace", roots: [] },
+			]),
+			declared,
+			output,
+		);
+		const syncback = spawnSync(
+			"rojo",
+			["syncback", "base.project.json", "--input", output, "--non-interactive"],
+			{ cwd: directory, encoding: "utf8", timeout: 10_000, windowsHide: true },
+		);
+		assert(syncback.status === 0, syncback.stderr);
+
+		expect(existsSync(path.join(directory, "Map"))).toBe(true);
+		expect(existsSync(path.join(directory, bench))).toBe(false);
 	});
 });

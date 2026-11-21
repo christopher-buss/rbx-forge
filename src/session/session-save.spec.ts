@@ -14,6 +14,7 @@ import {
 } from "../../test/helpers/seams.ts";
 import type { Capture } from "../capture/protocol.ts";
 import { resolveConfig } from "../config/resolve.ts";
+import type { NativeAddon } from "../native/addon.ts";
 import { nodeClock } from "../seams/clock.ts";
 import { createIdleTracker } from "./idle.ts";
 import { saveSessionStudioAsync } from "./session-save.ts";
@@ -50,7 +51,11 @@ describe(saveSessionStudioAsync, () => {
 	}) => {
 		expect.assertions(3);
 
-		const memory = createMemoryFileSystem({ "game.rbxl": "old place", "tools/rojo": "" });
+		const memory = createMemoryFileSystem({
+			"default.project.json": JSON.stringify({ tree: {} }),
+			"game.rbxl": "old place",
+			"tools/rojo": "",
+		});
 		const place = path.join(PROJECT, "game.rbxl");
 		const manual = createManualClock(5000);
 		const status = makeStatus();
@@ -63,10 +68,9 @@ describe(saveSessionStudioAsync, () => {
 				native: () => {
 					return fromPartial({
 						assemblePlace: (
-							_base: string,
-							_model: Uint8Array,
-							_services: string,
-							output: string,
+							...[_base, _model, _services, _declared, output]: Parameters<
+								NativeAddon["assemblePlace"]
+							>
 						) => {
 							memory.fileSystem.writeFileSync(output, "captured place");
 						},

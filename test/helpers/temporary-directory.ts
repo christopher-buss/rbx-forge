@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -24,7 +24,9 @@ export function makeTemporaryDirectory(files: Record<string, string> = {}): stri
 	});
 
 	for (const [name, content] of Object.entries(files)) {
-		writeFileSync(path.join(directory, name), content);
+		const file = path.join(directory, name);
+		mkdirSync(path.dirname(file), { recursive: true });
+		writeFileSync(file, content);
 	}
 
 	return directory;
