@@ -19,6 +19,7 @@ const SECRET = "a".repeat(64);
 
 function snapshotSave() {
 	const memory = createMemoryFileSystem({
+		"default.project.json": JSON.stringify({ tree: {} }),
 		"snapshot.rbxl": "original",
 		"snapshot.rbxl.capture.json": JSON.stringify({
 			port: 49152,
@@ -37,8 +38,8 @@ function snapshotSave() {
 			onSaveRequest: "throw",
 		},
 	});
-	native.addon.assemblePlace = (_base, _model, _services, output) => {
-		memory.fileSystem.writeFileSync(output, "captured snapshot");
+	native.addon.assemblePlace = (...args) => {
+		memory.fileSystem.writeFileSync(args[4], "captured snapshot");
 	};
 
 	const listener = createFakeCapture({ model: new Uint8Array([1]), services: [] });

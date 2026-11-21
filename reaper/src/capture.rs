@@ -171,13 +171,20 @@ fn validate_services(services: &[CaptureService], root_count: usize) -> io::Resu
     Ok(())
 }
 
+/// Project-tree node names below one instance; file-derived content is never declared.
+#[derive(Default, Deserialize)]
+#[serde(transparent)]
+struct Declared(HashMap<String, Declared>);
+
 fn restore_declared(
     dom: &mut WeakDom,
-    declared: Ref,
+    base: Ref,
     parent: Ref,
+    declared: &Declared,
     replacements: &mut HashMap<Ref, Ref>,
 ) {
-    let original = dom.get_by_ref(declared).expect("the base node exists");
+    let original = dom.get_by_ref(base).expect("the base node exists");
+    let node = declared.0.get(&original.name);
     let matched = dom
         .get_by_ref(parent)
         .expect("the captured parent exists")
@@ -185,6 +192,7 @@ fn restore_declared(
         .iter()
         .copied()
         .find(|child| dom.get_by_ref(*child).expect("the child exists").name == original.name);
+    let empty = Declared::default();
     if let Some(matched) = matched {
         let children = original.children().to_vec();
         let class = original.class;
@@ -192,17 +200,35 @@ fn restore_declared(
         let captured = dom
             .get_by_ref_mut(matched)
             .expect("the captured node exists");
-        if captured.class != class {
+        if node.is_some() && captured.class != class {
             captured.class = class;
             captured.properties = properties;
         }
-        replacements.insert(declared, matched);
+        replacements.insert(base, matched);
         for child in children {
-            restore_declared(dom, child, matched, replacements);
+            restore_declared(dom, child, matched, node.unwrap_or(&empty), replacements);
         }
-        dom.destroy(declared);
+        dom.destroy(base);
+    } else if let Some(node) = node {
+        dom.transfer_within(base, parent);
+        prune_undeclared(dom, base, node);
     } else {
-        dom.transfer_within(declared, parent);
+        dom.destroy(base);
+    }
+}
+
+fn prune_undeclared(dom: &mut WeakDom, parent: Ref, declared: &Declared) {
+    let children = dom
+        .get_by_ref(parent)
+        .expect("the node exists")
+        .children()
+        .to_vec();
+    for child in children {
+        let name = &dom.get_by_ref(child).expect("the child exists").name;
+        match declared.0.get(name) {
+            Some(node) => prune_undeclared(dom, child, node),
+            None => dom.destroy(child),
+        }
     }
 }
 
@@ -210,6 +236,7 @@ pub fn assemble_place(
     base_path: &Path,
     model: &[u8],
     services_json: &str,
+    declared_json: &str,
     output_path: &Path,
 ) -> io::Result<()> {
     let mut dom =
@@ -219,6 +246,8 @@ pub fn assemble_place(
     let services: Vec<CaptureService> =
         serde_json::from_str(services_json).map_err(invalid_data)?;
     validate_services(&services, roots.len())?;
+    let declared: Declared = serde_json::from_str(declared_json).map_err(invalid_data)?;
+    let empty = Declared::default();
     let mut replacements = HashMap::new();
     let mut parents = Vec::new();
     for service in &services {
@@ -235,19 +264,20 @@ pub fn assemble_place(
                     == service.name
             })
             .unwrap_or_else(|| dom.insert(dom.root_ref(), InstanceBuilder::new(&service.name)));
-        let declared = dom
+        let base_children = dom
             .get_by_ref(parent)
             .expect("the service exists")
             .children()
             .to_vec();
-        for child in &declared {
+        for child in &base_children {
             dom.transfer_within(*child, Ref::none());
         }
         for index in &service.roots {
             capture.transfer(roots[*index], &mut dom, parent);
         }
-        for child in declared {
-            restore_declared(&mut dom, child, parent, &mut replacements);
+        let node = declared.0.get(&service.name).unwrap_or(&empty);
+        for child in base_children {
+            restore_declared(&mut dom, child, parent, node, &mut replacements);
         }
         parents.push(parent);
     }
@@ -392,6 +422,7 @@ mod tests {
             &base_path,
             include_bytes!("../../test/fixtures/models/reference-attribute.rbxm"),
             r#"[{"name":"Workspace","roots":[0,1]}]"#,
+            "{}",
             &output_path,
         )
         .unwrap_err();
@@ -415,7 +446,7 @@ mod tests {
         write_model(&base_path, &base);
         let capture = model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel")));
         assemble_place(&base_path, &capture,
-            r#"[{"name":"SoundService","roots":[],"properties":[{"name":"ListenerCFrame","value":{"CFrame":{"position":[1,2,3],"orientation":[[1,0,0],[0,1,0],[0,0,1]]}}}],"attributes":[{"name":"Wind","value":{"Vector3":[1,-2,3]}},{"name":"Frame","value":{"CFrame":{"position":[1,2,3],"orientation":[[1,0,0],[0,1,0],[0,0,1]]}}}]}]"#,
+            r#"[{"name":"SoundService","roots":[],"properties":[{"name":"ListenerCFrame","value":{"CFrame":{"position":[1,2,3],"orientation":[[1,0,0],[0,1,0],[0,0,1]]}}}],"attributes":[{"name":"Wind","value":{"Vector3":[1,-2,3]}},{"name":"Frame","value":{"CFrame":{"position":[1,2,3],"orientation":[[1,0,0],[0,1,0],[0,0,1]]}}}]}]"#, "{}",
             &output_path).unwrap();
         let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
         let sound = assembled
@@ -471,7 +502,7 @@ mod tests {
             &base_path,
             &capture,
             r#"[{"name":"Lighting","roots":[],"properties":[{"name":"ClockTime","value":{"Float32":13.5}},{"name":"Ambient","value":{"Color3":[0.25,0.5,0.75]}}],"attributes":[{"name":"Edited","value":{"String":"from Studio"}}],"tags":["new"],"unreadableProperties":["Technology"]},{"name":"Workspace","roots":[],"properties":[],"unreadableProperties":["StreamingTargetRadius"]}]"#,
-            &output_path,
+            "{}", &output_path,
         ).unwrap();
 
         let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
@@ -541,7 +572,7 @@ mod tests {
             &base_path,
             &capture,
             r#"[{"name":"Workspace","roots":[0]},{"name":"SoundService","roots":[],"properties":[{"name":"ListenerObject","value":{"InstanceRef":1}}],"attributes":[],"tags":[]}]"#,
-            &output_path,
+            "{}", &output_path,
         ).unwrap();
 
         let assembled = rbx_binary::from_reader(File::open(&output_path).unwrap()).unwrap();
@@ -569,7 +600,7 @@ mod tests {
             &output_path,
             &model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel"))),
             r#"[{"name":"SoundService","roots":[],"properties":[{"name":"ListenerObject","value":{"Ref":"00000000000000000000000000000000"}}]}]"#,
-            &output_path,
+            "{}", &output_path,
         ).unwrap();
         let cleared = rbx_binary::from_reader(File::open(&output_path).unwrap()).unwrap();
         let sound = cleared
@@ -601,7 +632,7 @@ mod tests {
             &base_path,
             &model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel"))),
             r#"[{"name":"Lighting","roots":[],"properties":[{"name":"Name","value":{"String":"Environment"}},{"name":"Brightness","value":{"Float32":3.5}}]}]"#,
-            &output_path,
+            "{}", &output_path,
         ).unwrap();
 
         let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
@@ -633,7 +664,7 @@ mod tests {
             r#"[{"name":"Lighting","roots":[],"attributes":[{"name":"Invalid","value":{"ServiceRef":"Lighting"}}]}]"#,
             r#"[{"name":"Lighting","roots":[],"tags":"invalid"}]"#,
         ] {
-            assert!(assemble_place(&base_path, &capture, metadata, &output_path).is_err());
+            assert!(assemble_place(&base_path, &capture, metadata, "{}", &output_path).is_err());
             assert_eq!(std::fs::read(&output_path).unwrap(), b"original output");
         }
     }
@@ -656,7 +687,7 @@ mod tests {
             &base_path,
             &model_bytes(&WeakDom::new(InstanceBuilder::new("DataModel"))),
             r#"[{"name":"Lighting","roots":[],"properties":[{"name":"TimeOfDay","value":{"String":"13:30:00"}}]}]"#,
-            &output_path,
+            "{}", &output_path,
         ).unwrap();
 
         let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
@@ -685,7 +716,7 @@ mod tests {
             &base_path,
             &capture,
             r#"[{"name":"SoundService","roots":[],"properties":[{"name":"ListenerObject","value":{"ServiceRef":"Lighting"}}]},{"name":"Lighting","roots":[],"properties":[{"name":"Name","value":{"String":"Lighting"}},{"name":"SourceAssetId","value":{"Int64":9007199254740991}},{"name":"Capabilities","value":{"CapabilityBits":[0,31,63]}},{"name":"GlobalShadows","value":{"Bool":false}}]}]"#,
-            &output_path,
+            "{}", &output_path,
         ).unwrap();
 
         let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
@@ -715,26 +746,34 @@ mod tests {
     }
 
     #[test]
-    fn replaces_children_with_the_capture_and_keeps_declared_descendants() {
+    fn replaces_children_with_the_capture_and_keeps_only_declared_base_nodes() {
         let directory = tempfile::tempdir().unwrap();
         let base_path = directory.path().join("base.rbxl");
         let output_path = directory.path().join("place.rbxl");
         let base = WeakDom::new(
             InstanceBuilder::new("DataModel").with_child(
-                InstanceBuilder::new("ServerScriptService").with_child(
-                    InstanceBuilder::new("Folder")
-                        .with_name("Declared")
-                        .with_child(
-                            InstanceBuilder::new("ModuleScript")
-                                .with_name("Removed")
-                                .with_property("Source", "return 'base'"),
-                        )
-                        .with_child(
-                            InstanceBuilder::new("ModuleScript")
-                                .with_name("Changed")
-                                .with_property("Source", "return 'old'"),
-                        ),
-                ),
+                InstanceBuilder::new("ServerScriptService")
+                    .with_child(
+                        InstanceBuilder::new("Folder")
+                            .with_name("Declared")
+                            .with_child(
+                                InstanceBuilder::new("ModuleScript")
+                                    .with_name("Removed")
+                                    .with_property("Source", "return 'base'"),
+                            )
+                            .with_child(
+                                InstanceBuilder::new("ModuleScript")
+                                    .with_name("Changed")
+                                    .with_property("Source", "return 'old'"),
+                            ),
+                    )
+                    .with_child(InstanceBuilder::new("Model").with_name("Bench"))
+                    .with_child(
+                        InstanceBuilder::new("Configuration")
+                            .with_name("Kept")
+                            .with_child(InstanceBuilder::new("Folder").with_name("Nested"))
+                            .with_child(InstanceBuilder::new("Model").with_name("FromFile")),
+                    ),
             ),
         );
         write_model(&base_path, &base);
@@ -743,7 +782,7 @@ mod tests {
                 InstanceBuilder::new("Folder")
                     .with_name("Declared")
                     .with_child(
-                        InstanceBuilder::new("ModuleScript")
+                        InstanceBuilder::new("Script")
                             .with_name("Changed")
                             .with_property("Source", "return 'Studio'"),
                     )
@@ -755,28 +794,36 @@ mod tests {
             &base_path,
             &model_bytes(&capture),
             r#"[{"name":"ServerScriptService","roots":[0]}]"#,
+            r#"{"ServerScriptService":{"Declared":{},"Kept":{"Nested":{}}}}"#,
             &output_path,
         )
         .unwrap();
 
         let assembled = rbx_binary::from_reader(File::open(output_path).unwrap()).unwrap();
         let service = child(&assembled, assembled.root_ref(), "ServerScriptService");
+        let names = |parent: Ref| -> Vec<String> {
+            assembled
+                .get_by_ref(parent)
+                .unwrap()
+                .children()
+                .iter()
+                .map(|referent| assembled.get_by_ref(*referent).unwrap().name.clone())
+                .collect()
+        };
+        assert_eq!(names(service), ["Declared", "Kept"]);
         let declared = child(&assembled, service, "Declared");
-        let removed = child(&assembled, declared, "Removed");
-        let changed = child(&assembled, declared, "Changed");
-        assert_eq!(assembled.get_by_ref(declared).unwrap().children().len(), 3);
-        assert_eq!(assembled.get_by_ref(removed).unwrap().class, "ModuleScript");
+        assert_eq!(names(declared), ["Changed", "Added"]);
+        let changed = assembled
+            .get_by_ref(child(&assembled, declared, "Changed"))
+            .unwrap();
+        assert_eq!(changed.class, "Script");
         assert_eq!(
-            assembled.get_by_ref(changed).unwrap().properties[&"Source".into()],
+            changed.properties[&"Source".into()],
             "return 'Studio'".into()
         );
-        assert_eq!(
-            assembled
-                .get_by_ref(child(&assembled, declared, "Added"))
-                .unwrap()
-                .class,
-            "Folder"
-        );
+        let kept = child(&assembled, service, "Kept");
+        assert_eq!(assembled.get_by_ref(kept).unwrap().class, "Configuration");
+        assert_eq!(names(kept), ["Nested"]);
     }
 
     #[test]
@@ -817,6 +864,7 @@ mod tests {
             &base_path,
             &model_bytes(&capture),
             r#"[{"name":"Workspace","roots":[0]}]"#,
+            r#"{"Workspace":{"Declared":{"Target":{},"KeptReference":{}}}}"#,
             &output_path,
         )
         .unwrap();
@@ -876,6 +924,7 @@ mod tests {
             &base_path,
             &model_bytes(&capture),
             r#"[{"name":"Workspace","roots":[0,2]},{"name":"ServerStorage","roots":[1,3]}]"#,
+            "{}",
             &output_path,
         )
         .unwrap();
@@ -917,7 +966,7 @@ mod tests {
             r#"[{"name":"Workspace","roots":[0]},{"name":"Workspace","roots":[]}]"#,
             r#"[{"name":"","roots":[0]}]"#,
         ] {
-            assert!(assemble_place(&base_path, &capture, services, &output_path).is_err());
+            assert!(assemble_place(&base_path, &capture, services, "{}", &output_path).is_err());
             assert_eq!(std::fs::read(&output_path).unwrap(), b"original output");
         }
     }
@@ -938,14 +987,19 @@ mod tests {
         let services = r#"[{"name":"Workspace","roots":[0]}]"#;
         std::fs::write(&output_path, b"original output").unwrap();
 
-        assert!(assemble_place(&missing_path, &capture, services, &output_path).is_err());
-        assert!(assemble_place(&base_path, b"not a model", services, &output_path).is_err());
-        assert!(assemble_place(&base_path, &capture, "invalid json", &output_path).is_err());
+        assert!(assemble_place(&missing_path, &capture, services, "{}", &output_path).is_err());
+        assert!(assemble_place(&base_path, b"not a model", services, "{}", &output_path).is_err());
+        assert!(assemble_place(&base_path, &capture, "invalid json", "{}", &output_path).is_err());
+        for declared in ["invalid json", "[]", r#"{"Workspace":1}"#] {
+            assert!(
+                assemble_place(&base_path, &capture, services, declared, &output_path).is_err()
+            );
+        }
         assert_eq!(std::fs::read(&output_path).unwrap(), b"original output");
         std::fs::remove_file(&output_path).unwrap();
         std::fs::create_dir(&output_path).unwrap();
 
-        assert!(assemble_place(&base_path, &capture, services, &output_path).is_err());
+        assert!(assemble_place(&base_path, &capture, services, "{}", &output_path).is_err());
         assert!(output_path.is_dir());
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
     }
@@ -970,6 +1024,7 @@ mod tests {
             &path,
             &capture,
             r#"[{"name":"ServerScriptService","roots":[]}]"#,
+            r#"{"ServerScriptService":{"Declared":{}}}"#,
             &path,
         )
         .unwrap();

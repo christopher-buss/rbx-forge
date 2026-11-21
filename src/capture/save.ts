@@ -5,6 +5,7 @@ import type { ResolvedConfig } from "../config/resolve.ts";
 import { ForgeError, toForgeError } from "../errors.ts";
 import { rojoBuildArgs, runRojoAsync } from "../rojo/rojo.ts";
 import type { StudioSave } from "../studio/save-studio.ts";
+import { readDeclaredTree } from "./declared-tree.ts";
 import type { Capture, CaptureListener, CaptureWarning } from "./protocol.ts";
 import { withCaptureWarnings } from "./warnings.ts";
 
@@ -32,22 +33,20 @@ export async function saveCaptureAsync(
 	const started = context.seams.clock.now();
 	const output = path.resolve(context.cwd, config.syncback.inputPath ?? studio.place);
 	const base = path.join(path.dirname(output), `.forge-capture-${context.seams.randomId()}.rbxl`);
+	const projectPath = config.syncback.projectPath ?? config.rojoProjectPath;
 	let warnings: Array<CaptureWarning> = [];
 	try {
 		signal.throwIfAborted();
 		await runRojoAsync(
 			boundedContext(context, deadline),
 			config,
-			rojoBuildArgs(config.syncback.projectPath ?? config.rojoProjectPath, {
-				output: base,
-				type: "output",
-			}),
+			rojoBuildArgs(projectPath, { output: base, type: "output" }),
 		);
 		signal.throwIfAborted();
 		const capture = await listener.captureAsync(signal);
 		warnings = capture.warnings ?? [];
 		signal.throwIfAborted();
-		assembleCapture(context, { base, capture, output });
+		assembleCapture(context, { base, capture, output, projectPath });
 		return {
 			...captureResult(context, studio, output, started),
 			warnings,
@@ -60,11 +59,25 @@ export async function saveCaptureAsync(
 }
 
 function assembleCapture(
-	{ seams }: CommandContext,
-	{ base, capture, output }: { base: string; capture: Capture; output: string },
+	{ cwd, seams }: CommandContext,
+	{
+		base,
+		capture,
+		output,
+		projectPath,
+	}: { base: string; capture: Capture; output: string; projectPath: string },
 ): void {
+	const declared = readDeclaredTree(seams.fileSystem, path.resolve(cwd, projectPath));
 	try {
-		seams.native().assemblePlace(base, capture.model, JSON.stringify(capture.services), output);
+		seams
+			.native()
+			.assemblePlace(
+				base,
+				capture.model,
+				JSON.stringify(capture.services),
+				JSON.stringify(declared),
+				output,
+			);
 	} catch (err) {
 		throw new ForgeError(
 			"capture_assembly_failed",

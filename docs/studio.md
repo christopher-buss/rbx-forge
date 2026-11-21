@@ -311,7 +311,10 @@ one kept open across sessions after its Rojo connection returns.
 A capture carries persisted service children, readable serialized service
 properties, service attributes, and service tags. It builds the current
 syncback project as a base, retains every declared node with its declared
-class, and atomically replaces the syncback input with the assembled place.
+class, and atomically replaces the syncback input with the assembled place. A
+declared node is a key in the project tree, including the tree of a nested
+project; content under a `$path` is not declared, so an instance deleted in
+Studio leaves the assembled place.
 References across services remain intact. Capturing does not show Studio or
 move focus; serialization blocks Studio for the duration of that operation.
 

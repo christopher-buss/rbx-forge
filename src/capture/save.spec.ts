@@ -12,13 +12,14 @@ import {
 } from "../../test/helpers/seams.ts";
 import { resolveConfig } from "../config/resolve.ts";
 import { ForgeError } from "../errors.ts";
+import type { NativeAddon } from "../native/addon.ts";
 import type { CaptureListener, CaptureWarning } from "./protocol.ts";
 import { saveCaptureAsync } from "./save.ts";
 import type { CaptureSaveOptions } from "./save.ts";
 
 function captureSave(
 	overrides: {
-		assemble?: () => void;
+		assemble?: (declared: string) => void;
 		build?: (timeoutMs: number | undefined) => void;
 		capture?: CaptureListener;
 		controller?: AbortController;
@@ -27,7 +28,11 @@ function captureSave(
 	} = {},
 ) {
 	const memory = createMemoryFileSystem({
+		"default.project.json": JSON.stringify({ tree: { Workspace: { $path: "Workspace" } } }),
 		"game.rbxl": "original",
+		"sync.project.json": JSON.stringify({
+			tree: { ServerStorage: { Saved: { $className: "Folder" } } },
+		}),
 		"sync.rbxl": "previous syncback",
 		"tools/rojo": "",
 	});
@@ -39,12 +44,11 @@ function captureSave(
 			native: () => {
 				return fromPartial({
 					assemblePlace: (
-						base: string,
-						_model: Uint8Array,
-						_services: string,
-						output: string,
+						...[base, _model, _services, declared, output]: Parameters<
+							NativeAddon["assemblePlace"]
+						>
 					) => {
-						overrides.assemble?.();
+						overrides.assemble?.(declared);
 						memory.fileSystem.writeFileSync(
 							output,
 							`${memory.fileSystem.readFileSync(base, "utf8")} | Studio capture`,
@@ -114,9 +118,10 @@ describe(saveCaptureAsync, () => {
 	it("builds the current syncback project and writes its configured input", async ({
 		expect,
 	}) => {
-		expect.assertions(3);
+		expect.assertions(4);
 
-		const save = captureSave();
+		const assemble = vi.fn<(declared: string) => void>();
+		const save = captureSave({ assemble });
 
 		await expect(save.run(true)).resolves.toMatchObject({
 			desktop: "hidden",
@@ -124,6 +129,7 @@ describe(saveCaptureAsync, () => {
 			place: path.join(PROJECT, "sync.rbxl"),
 		});
 		expect(save.memory.files()["sync.rbxl"]).toBe("base: sync.project.json | Studio capture");
+		expect(assemble).toHaveBeenCalledExactlyOnceWith('{"ServerStorage":{"Saved":{}}}');
 		expect(save.memory.files()["game.rbxl"]).toBe("original");
 	});
 

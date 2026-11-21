@@ -7,16 +7,25 @@ import { parseResult } from "../helpers/output.ts";
 import { runBinAsync } from "./run-bin.ts";
 import { makeFixtureAsync, START_STUDIO, startReadyAsync } from "./session-fixture.ts";
 
-async function captureSessionAsync() {
+const SOURCE_WORKSPACE = { $className: "Workspace", $path: "src" };
+
+async function captureSessionAsync(
+	workspace: Record<string, unknown> = SOURCE_WORKSPACE,
+	files: Record<string, string> = {},
+) {
 	const fixture = await makeFixtureAsync({ studio: { saveMethod: "capture" } }, { studio: true });
 	mkdirSync(path.join(fixture.project, "src"));
+	for (const [name, content] of Object.entries(files)) {
+		writeFileSync(path.join(fixture.project, name), content);
+	}
+
 	writeFileSync(
 		path.join(fixture.project, "default.project.json"),
 		JSON.stringify({
 			name: "fixture",
 			tree: {
 				$className: "DataModel",
-				Workspace: { $className: "Workspace", $path: "src" },
+				Workspace: workspace,
 			},
 		}),
 	);
@@ -112,4 +121,38 @@ describe("forge sync through the capture plugin", () => {
 			"NewPart.rbxm",
 		]);
 	});
+
+	it.for([
+		{ name: "a directory", files: {}, workspace: SOURCE_WORKSPACE },
+		{
+			name: "a nested project",
+			files: {
+				"workspace.project.json": JSON.stringify({
+					name: "World",
+					tree: { $className: "Workspace", $path: "src" },
+				}),
+			},
+			workspace: { $path: "workspace.project.json" },
+		},
+	])(
+		"removes a model deleted in Studio when Workspace comes from $name",
+		async ({ files, workspace }, { expect }) => {
+			expect.assertions(2);
+
+			const { fixture, variables } = await captureSessionAsync(workspace, {
+				...files,
+				"src/Bench.model.json": '{"className":"Model"}',
+			});
+			const synced = await runBinAsync(
+				["sync", "--json"],
+				fixture.project,
+				fixture.environment(variables),
+			);
+
+			expect(parseResult(synced.stdout)).toMatchObject({ command: "sync", ok: true });
+			expect(readdirSync(path.join(fixture.project, "src")).toSorted()).toStrictEqual([
+				"Edited",
+			]);
+		},
+	);
 });

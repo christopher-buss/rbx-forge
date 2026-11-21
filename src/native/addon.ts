@@ -259,13 +259,14 @@ export interface ModelScriptSource {
 /** The addon's exports. */
 export interface NativeAddon {
 	/**
-	 * Replace captured service children and keep project-declared nodes,
-	 * atomically.
+	 * Replace captured service children and keep the project-tree nodes that
+	 * `declaredJson` names, atomically.
 	 */
 	assemblePlace: (
 		basePath: string,
 		model: Uint8Array,
 		servicesJson: string,
+		declaredJson: string,
 		outputPath: string,
 	) => void;
 	/**
