@@ -58,7 +58,7 @@ catalogs:
     eslint_d: 15.1.0
     knip: 6.45.1
     oxlint: 1.92.0
-    oxlint-tsgolint: 7.0.2003
+    oxlint-tsgolint: 7.0.2007
     publint: 0.3.25
   mutation:
     "@isentinel/machine-budget": 0.2.0
