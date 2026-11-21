@@ -23,6 +23,7 @@ function captureSave(
 		build?: (timeoutMs: number | undefined) => void;
 		capture?: CaptureListener;
 		controller?: AbortController;
+		project?: string;
 		studio?: CaptureSaveOptions["studio"];
 		timeout?: boolean;
 	} = {},
@@ -30,9 +31,11 @@ function captureSave(
 	const memory = createMemoryFileSystem({
 		"default.project.json": JSON.stringify({ tree: { Workspace: { $path: "Workspace" } } }),
 		"game.rbxl": "original",
-		"sync.project.json": JSON.stringify({
-			tree: { ServerStorage: { Saved: { $className: "Folder" } } },
-		}),
+		"sync.project.json":
+			overrides.project ??
+			JSON.stringify({
+				tree: { ServerStorage: { Saved: { $className: "Folder" } } },
+			}),
 		"sync.rbxl": "previous syncback",
 		"tools/rojo": "",
 	});
@@ -163,6 +166,19 @@ describe(saveCaptureAsync, () => {
 		});
 		expect(save.memory.files()["game.rbxl"]).toBe("original");
 		expect(Object.keys(save.memory.files())).not.toContain(".forge-capture-capture.rbxl");
+	});
+
+	it("reports an unreadable syncback project as an assembly failure", async ({ expect }) => {
+		expect.assertions(2);
+
+		const assemble = vi.fn<(declared: string) => void>();
+		const save = captureSave({ assemble, project: "{" });
+
+		await expect(save.run(true)).rejects.toMatchObject({
+			code: "capture_assembly_failed",
+			message: `Could not assemble the captured place ${path.join(PROJECT, "sync.rbxl")}.`,
+		});
+		expect(assemble).not.toHaveBeenCalled();
 	});
 
 	it("preserves Studio's capture rejection and leaves the place untouched", async ({

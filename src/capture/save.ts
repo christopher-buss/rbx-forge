@@ -67,8 +67,8 @@ function assembleCapture(
 		projectPath,
 	}: { base: string; capture: Capture; output: string; projectPath: string },
 ): void {
-	const declared = readDeclaredTree(seams.fileSystem, path.resolve(cwd, projectPath));
 	try {
+		const declared = readDeclaredTree(seams.fileSystem, path.resolve(cwd, projectPath));
 		seams
 			.native()
 			.assemblePlace(
