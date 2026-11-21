@@ -67,6 +67,24 @@ describe(readDeclaredTree, () => {
 		).toBe(JSON.stringify({ Loop: {}, Workspace: {} }));
 	});
 
+	it("declares a nested project once for each node that includes it", ({ expect }) => {
+		expect.assertions(1);
+
+		expect(
+			declaredTree({
+				"default.project.json": {
+					tree: {
+						ReplicatedStorage: { $path: "shared.project.json" },
+						ServerStorage: { $path: "shared.project.json" },
+					},
+				},
+				"shared.project.json": { tree: { Shared: {} } },
+			}),
+		).toBe(
+			JSON.stringify({ ReplicatedStorage: { Shared: {} }, ServerStorage: { Shared: {} } }),
+		);
+	});
+
 	it("declares the nested project of an optional $path", ({ expect }) => {
 		expect.assertions(1);
 
